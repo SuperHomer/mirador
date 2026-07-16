@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   TabSnapshot,
   newTab,
@@ -82,6 +83,39 @@ function TabRow({
           <span className="tab-notif">{tab.lastNotification}</span>
         ) : (
           tab.cwd && <span className="tab-cwd">{tab.cwd}</span>
+        )}
+        {(tab.branch || tab.pr || tab.ports.length > 0) && (
+          <span className="tab-intel">
+            {tab.branch && <span className="tab-branch">⎇ {tab.branch}</span>}
+            {tab.pr && (
+              <button
+                className={`tab-pr ${tab.pr.checks} ${tab.pr.state.toLowerCase()}`}
+                title={`PR #${tab.pr.number} — ${tab.pr.state}, checks: ${tab.pr.checks}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (tab.pr) void openUrl(tab.pr.url);
+                }}
+              >
+                #{tab.pr.number}
+                {tab.pr.checks === "pass" && " ✓"}
+                {tab.pr.checks === "fail" && " ✗"}
+                {tab.pr.checks === "pending" && " ●"}
+              </button>
+            )}
+            {tab.ports.map((port) => (
+              <button
+                key={port}
+                className="tab-port"
+                title={`open http://localhost:${port}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void openUrl(`http://localhost:${port}`);
+                }}
+              >
+                :{port}
+              </button>
+            ))}
+          </span>
         )}
       </div>
       {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}

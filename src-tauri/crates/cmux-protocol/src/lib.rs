@@ -53,6 +53,26 @@ pub struct TabSnapshot {
     /// Body of the tab's most recent notification.
     #[serde(default)]
     pub last_notification: Option<String>,
+    /// Git branch of the focused pane's repository.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Pull request linked to that branch (needs `gh`).
+    #[serde(default)]
+    pub pr: Option<PrStatus>,
+    /// TCP ports the tab's processes are listening on.
+    #[serde(default)]
+    pub ports: Vec<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrStatus {
+    pub number: u64,
+    /// OPEN | MERGED | CLOSED
+    pub state: String,
+    pub url: String,
+    /// "pass" | "fail" | "pending" | "none"
+    pub checks: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

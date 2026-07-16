@@ -9,6 +9,13 @@ export type Node =
   | { type: "leaf"; paneId: string }
   | { type: "split"; dir: SplitDir; ratios: number[]; children: Node[] };
 
+export interface PrStatus {
+  number: number;
+  state: "OPEN" | "MERGED" | "CLOSED" | string;
+  url: string;
+  checks: "pass" | "fail" | "pending" | "none" | string;
+}
+
 export interface TabSnapshot {
   id: string;
   title: string;
@@ -17,6 +24,9 @@ export interface TabSnapshot {
   focusedPane: string;
   unread: number;
   lastNotification: string | null;
+  branch: string | null;
+  pr: PrStatus | null;
+  ports: number[];
 }
 
 export interface AgentPane {

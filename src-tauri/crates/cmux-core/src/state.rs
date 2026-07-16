@@ -16,6 +16,11 @@ pub struct PaneMeta {
     /// Command pane: the PTY runs this command directly instead of an
     /// interactive shell. Persists across respawns (keypress = rerun).
     pub command: Option<String>,
+    /// Git branch + repo root of `cwd` (intel poller).
+    pub branch: Option<String>,
+    pub repo_root: Option<String>,
+    /// Listening TCP ports of the pane's process tree (intel poller).
+    pub ports: Vec<u16>,
 }
 
 #[derive(Debug)]
@@ -238,6 +243,18 @@ impl Workspace {
                         focused_pane: t.focused.clone(),
                         unread: 0,
                         last_notification: None,
+                        branch: meta.get(&t.focused).and_then(|m| m.branch.clone()),
+                        pr: None,
+                        ports: {
+                            let mut ports: Vec<u16> = layout::pane_ids(&t.root)
+                                .iter()
+                                .filter_map(|p| meta.get(p))
+                                .flat_map(|m| m.ports.iter().copied())
+                                .collect();
+                            ports.sort_unstable();
+                            ports.dedup();
+                            ports
+                        },
                     }
                 })
                 .collect(),

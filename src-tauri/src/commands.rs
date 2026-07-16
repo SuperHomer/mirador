@@ -40,6 +40,19 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    // PR status per tab, from the focused pane's (repo, branch).
+    {
+        let meta = state.meta.lock().unwrap();
+        let pr_cache = state.pr_cache.lock().unwrap();
+        for tab in &mut snapshot.tabs {
+            let key = meta.get(&tab.focused_pane).and_then(|m| {
+                Some((m.repo_root.clone()?, m.branch.clone()?))
+            });
+            if let Some(key) = key {
+                tab.pr = pr_cache.get(&key).cloned().flatten();
+            }
+        }
+    }
     snapshot
 }
 

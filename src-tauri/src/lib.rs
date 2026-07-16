@@ -1,5 +1,6 @@
 mod commands;
 mod config_watch;
+mod intel;
 mod notify;
 mod runs;
 #[cfg(unix)]
@@ -8,7 +9,6 @@ mod server;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
-use std::time::Duration;
 
 use cmux_core::pty::PtyManager;
 use cmux_core::state::{PaneMeta, Workspace};
@@ -31,6 +31,8 @@ pub struct AppState {
     pub run_captures: Mutex<HashMap<String, Vec<u8>>>,
     /// `run --wait` blockers, resolved on command exit.
     pub run_waiters: Mutex<HashMap<String, Vec<std::sync::mpsc::Sender<Option<i32>>>>>,
+    /// (repo_root, branch) → PR status; None = checked, no PR.
+    pub pr_cache: Mutex<HashMap<(String, String), Option<cmux_protocol::PrStatus>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -56,6 +58,7 @@ pub fn run() {
             run_history: Mutex::new(Vec::new()),
             run_captures: Mutex::new(HashMap::new()),
             run_waiters: Mutex::new(HashMap::new()),
+            pr_cache: Mutex::new(HashMap::new()),
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Focused(focused) = event {
@@ -68,7 +71,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             setup_menu(app.handle())?;
-            spawn_cwd_poller(app.handle().clone());
+            intel::spawn(app.handle().clone());
             config_watch::spawn(app.handle().clone());
             #[cfg(unix)]
             server::spawn(app.handle().clone());
@@ -151,28 +154,3 @@ fn setup_menu(handle: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Polls each pane's shell cwd (proc-based fallback until OSC 7 lands in
-/// M4) and pushes a fresh snapshot when anything changed.
-fn spawn_cwd_poller(handle: tauri::AppHandle) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(2));
-        let state = handle.state::<AppState>();
-        let mut changed = false;
-        {
-            let pids = state.pty.pids();
-            let mut meta = state.meta.lock().unwrap();
-            for (pane, pid) in pids {
-                if let Some(cwd) = cmux_core::cwd::process_cwd(pid) {
-                    let entry = meta.entry(pane).or_default();
-                    if entry.cwd.as_deref() != Some(cwd.as_str()) {
-                        entry.cwd = Some(cwd);
-                        changed = true;
-                    }
-                }
-            }
-        }
-        if changed {
-            commands::emit_workspace(&handle);
-        }
-    });
-}

@@ -1,7 +1,9 @@
 pub mod config;
 pub mod cwd;
+pub mod git;
 pub mod ipc;
 pub mod layout;
+pub mod ports;
 pub mod osc;
 pub mod pty;
 pub mod state;

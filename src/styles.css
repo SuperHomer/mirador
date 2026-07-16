@@ -107,6 +107,65 @@ body,
   color: var(--accent);
 }
 
+.tab-intel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.tab-branch {
+  font-size: 10px;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.tab-pr,
+.tab-port {
+  border: none;
+  font-size: 9.5px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 1px 5px;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--subtext);
+  line-height: 1.5;
+}
+
+.tab-pr.pass {
+  background: color-mix(in srgb, #a6e3a1 25%, var(--surface));
+  color: #a6e3a1;
+}
+
+.tab-pr.fail {
+  background: color-mix(in srgb, #f38ba8 25%, var(--surface));
+  color: #f38ba8;
+}
+
+.tab-pr.pending {
+  background: color-mix(in srgb, #f9e2af 25%, var(--surface));
+  color: #f9e2af;
+}
+
+.tab-pr.merged {
+  background: color-mix(in srgb, #cba6f7 25%, var(--surface));
+  color: #cba6f7;
+}
+
+.tab-port {
+  color: var(--accent);
+}
+
+.tab-port:hover,
+.tab-pr:hover {
+  filter: brightness(1.25);
+}
+
 .tab-notif {
   font-size: 10.5px;
   color: var(--accent);
