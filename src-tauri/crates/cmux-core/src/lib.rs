@@ -1,3 +1,4 @@
+pub mod config;
 pub mod cwd;
 pub mod layout;
 pub mod osc;

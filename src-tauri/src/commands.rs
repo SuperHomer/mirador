@@ -30,8 +30,21 @@ pub fn workspace_snapshot(state: State<'_, AppState>) -> WorkspaceSnapshot {
 }
 
 #[tauri::command]
-pub fn new_tab(app: AppHandle, state: State<'_, AppState>) -> String {
-    let (tab_id, _pane) = state.workspace.lock().unwrap().new_tab();
+pub fn get_config(state: State<'_, AppState>) -> cmux_protocol::ResolvedConfig {
+    state.config.lock().unwrap().clone()
+}
+
+/// `command`, when set, is typed into the new pane's shell once it spawns.
+#[tauri::command]
+pub fn new_tab(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    command: Option<String>,
+) -> String {
+    let (tab_id, pane) = state.workspace.lock().unwrap().new_tab();
+    if let Some(cmd) = command {
+        state.pending_commands.lock().unwrap().insert(pane, cmd);
+    }
     emit_workspace(&app);
     tab_id
 }
@@ -69,6 +82,7 @@ pub fn split_pane(
     state: State<'_, AppState>,
     pane_id: String,
     dir: SplitDir,
+    command: Option<String>,
 ) -> Result<String, String> {
     let new_pane = state
         .workspace
@@ -82,6 +96,13 @@ pub fn split_pane(
         if let Some(m) = meta.get(&pane_id).cloned() {
             meta.insert(new_pane.clone(), m);
         }
+    }
+    if let Some(cmd) = command {
+        state
+            .pending_commands
+            .lock()
+            .unwrap()
+            .insert(new_pane.clone(), cmd);
     }
     emit_workspace(&app);
     Ok(new_pane)
@@ -178,6 +199,13 @@ pub fn attach_pane(
             );
         },
     )?;
+
+    // Custom command queued for this pane: type it into the fresh shell.
+    // The tty input queue buffers it until the shell reads stdin.
+    let pending = state.pending_commands.lock().unwrap().remove(&pane_id);
+    if let Some(cmd) = pending {
+        let _ = state.pty.write(&pane_id, format!("{cmd}\n").as_bytes());
+    }
     Ok(true)
 }
 

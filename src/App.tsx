@@ -1,14 +1,23 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { workspaceSnapshot, WorkspaceSnapshot } from "./bindings";
+import {
+  workspaceSnapshot,
+  getConfig,
+  WorkspaceSnapshot,
+  ResolvedConfig,
+} from "./bindings";
 import { useWorkspaceStore } from "./state/workspaceStore";
+import { useConfigStore } from "./state/configStore";
 import { useKeymap } from "./keymap/useKeymap";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
+import { CommandPalette } from "./palette/CommandPalette";
 
 export default function App() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const setSnapshot = useWorkspaceStore((s) => s.setSnapshot);
+  const config = useConfigStore((s) => s.config);
+  const setConfig = useConfigStore((s) => s.setConfig);
   useKeymap();
 
   useEffect(() => {
@@ -16,16 +25,23 @@ export default function App() {
     void workspaceSnapshot().then((s) => {
       if (!disposed) setSnapshot(s);
     });
-    const unlisten = listen<WorkspaceSnapshot>("workspace-changed", (e) =>
+    void getConfig().then((c) => {
+      if (!disposed) setConfig(c);
+    });
+    const unlistenWs = listen<WorkspaceSnapshot>("workspace-changed", (e) =>
       setSnapshot(e.payload),
+    );
+    const unlistenCfg = listen<ResolvedConfig>("config-changed", (e) =>
+      setConfig(e.payload),
     );
     return () => {
       disposed = true;
-      void unlisten.then((fn) => fn());
+      void unlistenWs.then((fn) => fn());
+      void unlistenCfg.then((fn) => fn());
     };
-  }, [setSnapshot]);
+  }, [setSnapshot, setConfig]);
 
-  if (!snapshot) return <div className="app" />;
+  if (!snapshot || !config) return <div className="app" />;
 
   return (
     <div className="app">
@@ -43,6 +59,7 @@ export default function App() {
           </div>
         ))}
       </div>
+      <CommandPalette />
     </div>
   );
 }

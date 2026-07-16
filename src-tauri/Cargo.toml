@@ -25,6 +25,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+notify = "8"
 serde.workspace = true
 serde_json.workspace = true
 cmux-core = { path = "crates/cmux-core" }

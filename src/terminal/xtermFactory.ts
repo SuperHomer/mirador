@@ -3,22 +3,20 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { ResolvedConfig } from "../bindings";
+import { toXtermTheme, checkFontAvailable } from "../state/configStore";
 import "@xterm/xterm/css/xterm.css";
 
-export function createTerminal(): Terminal {
+export function createTerminal(config: ResolvedConfig): Terminal {
+  checkFontAvailable(config.fontFamily);
   const term = new Terminal({
     cursorBlink: true,
     allowProposedApi: true,
-    scrollback: 10_000,
-    fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-    fontSize: 13,
+    scrollback: config.scrollback,
+    fontFamily: config.fontFamily,
+    fontSize: config.fontSize,
     macOptionIsMeta: true,
-    theme: {
-      background: "#1e1e2e",
-      foreground: "#cdd6f4",
-      cursor: "#f5e0dc",
-      selectionBackground: "#585b70",
-    },
+    theme: toXtermTheme(config),
   });
 
   // OSC 52: let programs in the terminal read/write the system clipboard.
@@ -32,6 +30,15 @@ export function createTerminal(): Terminal {
   );
 
   return term;
+}
+
+/** Applies a hot-reloaded config to a live terminal. */
+export function applyConfig(term: Terminal, config: ResolvedConfig): void {
+  checkFontAvailable(config.fontFamily);
+  term.options.theme = toXtermTheme(config);
+  term.options.fontFamily = config.fontFamily;
+  term.options.fontSize = config.fontSize;
+  term.options.scrollback = config.scrollback;
 }
 
 /**

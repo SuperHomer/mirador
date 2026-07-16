@@ -7,6 +7,9 @@ description = "cmux core logic: PTY management, layout, OSC scanning. No Tauri d
 [dependencies]
 cmux-protocol = { path = "../cmux-protocol" }
 portable-pty = "0.9"
+serde.workspace = true
+serde_json.workspace = true
+toml = "0.8"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]

@@ -55,3 +55,43 @@ pub struct WorkspaceSnapshot {
     pub tabs: Vec<TabSnapshot>,
     pub active_tab: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomCommand {
+    pub name: String,
+    pub command: String,
+    /// Where the command runs: a new "tab", or a "split" of the focused pane.
+    #[serde(default = "default_command_target")]
+    pub target: String,
+}
+
+fn default_command_target() -> String {
+    "split".to_string()
+}
+
+/// Terminal colors after theme resolution. All values are `#rrggbb`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedColors {
+    pub background: String,
+    pub foreground: String,
+    pub cursor: String,
+    pub selection_background: String,
+    /// 16 ANSI colors (normal 0-7, bright 8-15).
+    pub palette: Vec<String>,
+}
+
+/// Fully-resolved runtime configuration pushed to the frontend on load and
+/// on every hot-reload (`config-changed` event).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedConfig {
+    pub font_family: String,
+    pub font_size: f32,
+    pub scrollback: u32,
+    pub colors: ResolvedColors,
+    /// accelerator ("mod+shift+d") → action id ("split_down")
+    pub keybindings: std::collections::HashMap<String, String>,
+    pub custom_commands: Vec<CustomCommand>,
+}

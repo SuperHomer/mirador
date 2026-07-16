@@ -1,4 +1,5 @@
 mod commands;
+mod config_watch;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -6,31 +7,46 @@ use std::time::Duration;
 
 use cmux_core::pty::PtyManager;
 use cmux_core::state::{PaneMeta, Workspace};
+use cmux_protocol::ResolvedConfig;
 use tauri::Manager;
 
 pub struct AppState {
     pub pty: PtyManager,
     pub workspace: Mutex<Workspace>,
     pub meta: Mutex<HashMap<String, PaneMeta>>,
+    pub config: Mutex<ResolvedConfig>,
+    /// Command to type into a pane's shell right after it spawns
+    /// (custom commands from the palette).
+    pub pending_commands: Mutex<HashMap<String, String>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    cmux_core::config::write_default_if_missing();
+    let (cfg, cfg_err) = cmux_core::config::load();
+    if let Some(err) = &cfg_err {
+        eprintln!("cmux: config error, using defaults: {err}");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             pty: PtyManager::new(),
             workspace: Mutex::new(Workspace::default()),
             meta: Mutex::new(HashMap::new()),
+            config: Mutex::new(cmux_core::config::resolve(&cfg)),
+            pending_commands: Mutex::new(HashMap::new()),
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
             setup_menu(app.handle())?;
             spawn_cwd_poller(app.handle().clone());
+            config_watch::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::workspace_snapshot,
+            commands::get_config,
             commands::new_tab,
             commands::close_tab,
             commands::set_active_tab,

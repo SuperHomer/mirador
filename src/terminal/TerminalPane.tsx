@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
-import { createTerminal, attachRenderer } from "./xtermFactory";
+import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
+import { useConfigStore } from "../state/configStore";
 import {
   attachPane,
   writePty,
@@ -23,18 +24,33 @@ interface Props {
 export function TerminalPane({ paneId, focused }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<ReturnType<typeof createTerminal> | null>(null);
+  const config = useConfigStore((s) => s.config);
+  const fitRef = useRef<FitAddon | null>(null);
+
+  // Hot-reloaded config applies to the live terminal without recreating it.
+  useEffect(() => {
+    const term = termRef.current;
+    if (term && config) {
+      applyConfig(term, config);
+      fitRef.current?.fit();
+    }
+  }, [config]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    // App gates rendering on config being loaded.
+    const cfg = useConfigStore.getState().config;
+    if (!cfg) return;
 
     let disposed = false;
     let exited = false;
     let pendingAck = 0;
 
-    const term = createTerminal();
+    const term = createTerminal(cfg);
     termRef.current = term;
     const fit = new FitAddon();
+    fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
     attachRenderer(term);
