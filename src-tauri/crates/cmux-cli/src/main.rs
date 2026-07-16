@@ -68,6 +68,10 @@ enum Command {
         /// exits with the command's exit code.
         #[arg(long)]
         wait: bool,
+        /// With --wait: don't reprint the output (you're watching the
+        /// pane); still adopts the exit code.
+        #[arg(short, long)]
+        quiet: bool,
         /// Seconds to wait before giving up (default 600).
         #[arg(long)]
         timeout: Option<u64>,
@@ -102,6 +106,7 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
+    let mut quiet_output = false;
     let req = match cli.command {
         Command::ListTabs => Request::ListTabs,
         Command::NewTab { command } => Request::NewTab { command },
@@ -123,14 +128,18 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Run {
             tab,
             wait,
+            quiet,
             timeout,
             command,
-        } => Request::Run {
-            command: command.join(" "),
-            target: tab.then(|| "tab".to_string()),
-            wait,
-            timeout_secs: timeout,
-        },
+        } => {
+            quiet_output = quiet;
+            Request::Run {
+                command: command.join(" "),
+                target: tab.then(|| "tab".to_string()),
+                wait,
+                timeout_secs: timeout,
+            }
+        }
         Command::Runs => Request::ListRuns,
         Command::Notify {
             title,
@@ -151,7 +160,7 @@ fn run(cli: Cli) -> Result<(), String> {
     };
 
     let response = send_request(req)?;
-    render(response, cli.json)
+    render(response, cli.json, quiet_output)
 }
 
 fn parse_dir(s: &str) -> Result<SplitDir, String> {
@@ -189,7 +198,7 @@ fn send_request(_req: Request) -> Result<ResponseEnvelope, String> {
     Err("the automation socket is not supported on this platform yet".into())
 }
 
-fn render(resp: ResponseEnvelope, raw_json: bool) -> Result<(), String> {
+fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), String> {
     if !resp.ok {
         return Err(resp.error.unwrap_or_else(|| "unknown error".into()));
     }
@@ -203,8 +212,10 @@ fn render(resp: ResponseEnvelope, raw_json: bool) -> Result<(), String> {
         serde_json::Value::Object(map) => {
             if map.contains_key("output") {
                 // run --wait: print the command's output, adopt its exit code.
-                if let Some(out) = map.get("output").and_then(|v| v.as_str()) {
-                    println!("{out}");
+                if !quiet {
+                    if let Some(out) = map.get("output").and_then(|v| v.as_str()) {
+                        println!("{out}");
+                    }
                 }
                 let code = map.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(0);
                 std::process::exit(code as i32);
