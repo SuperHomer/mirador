@@ -45,6 +45,14 @@ pub fn mark_all_notifications_read(app: AppHandle, state: State<'_, AppState>) {
     }
 }
 
+/// Frontend answers a `read-screen-request` round-trip from the socket.
+#[tauri::command]
+pub fn resolve_screen_read(state: State<'_, AppState>, request_id: u64, text: String) {
+    if let Some(tx) = state.screen_requests.lock().unwrap().remove(&request_id) {
+        let _ = tx.send(text);
+    }
+}
+
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> cmux_protocol::ResolvedConfig {
     state.config.lock().unwrap().clone()
@@ -184,8 +192,31 @@ pub fn attach_pane(
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
 ) -> Result<bool, String> {
-    let sink = move |bytes: &[u8]| {
-        let _ = on_data.send(InvokeResponseBody::Raw(bytes.to_vec()));
+    // A queued command (custom command / `cmux run`) can't be typed right
+    // at spawn: shell init (zsh + conda etc.) resets the tty and flushes
+    // queued input. It stays in AppState.pending_commands until the shell's
+    // first output proves init is done — the command survives sink swaps
+    // from remounts (React StrictMode mounts panes twice in dev).
+    let sink = {
+        let sink_app = app.clone();
+        let pty = state.pty.clone();
+        let pane = pane_id.clone();
+        move |bytes: &[u8]| {
+            let _ = on_data.send(InvokeResponseBody::Raw(bytes.to_vec()));
+            let pending = {
+                let state = sink_app.state::<AppState>();
+                let mut map = state.pending_commands.lock().unwrap();
+                map.remove(&pane)
+            };
+            if let Some(cmd) = pending {
+                let pty = pty.clone();
+                let pane = pane.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    let _ = pty.write(&pane, format!("{cmd}\n").as_bytes());
+                });
+            }
+        }
     };
 
     if state.pty.is_running(&pane_id) {
@@ -268,12 +299,6 @@ pub fn attach_pane(
         },
     )?;
 
-    // Custom command queued for this pane: type it into the fresh shell.
-    // The tty input queue buffers it until the shell reads stdin.
-    let pending = state.pending_commands.lock().unwrap().remove(&pane_id);
-    if let Some(cmd) = pending {
-        let _ = state.pty.write(&pane_id, format!("{cmd}\n").as_bytes());
-    }
     Ok(true)
 }
 

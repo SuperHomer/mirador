@@ -1,9 +1,11 @@
 mod commands;
 mod config_watch;
 mod notify;
+#[cfg(unix)]
+mod server;
 
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -22,6 +24,9 @@ pub struct AppState {
     pub pending_commands: Mutex<HashMap<String, String>>,
     pub notifications: Mutex<Vec<NotificationDto>>,
     pub window_focused: AtomicBool,
+    /// Pending read-screen round-trips to the webview.
+    pub screen_requests: Mutex<HashMap<u64, std::sync::mpsc::Sender<String>>>,
+    pub next_screen_request: AtomicU64,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,6 +48,8 @@ pub fn run() {
             pending_commands: Mutex::new(HashMap::new()),
             notifications: Mutex::new(Vec::new()),
             window_focused: AtomicBool::new(true),
+            screen_requests: Mutex::new(HashMap::new()),
+            next_screen_request: AtomicU64::new(1),
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Focused(focused) = event {
@@ -57,6 +64,8 @@ pub fn run() {
             setup_menu(app.handle())?;
             spawn_cwd_poller(app.handle().clone());
             config_watch::spawn(app.handle().clone());
+            #[cfg(unix)]
+            server::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -75,12 +84,26 @@ pub fn run() {
             commands::attach_pane,
             commands::list_notifications,
             commands::mark_all_notifications_read,
+            commands::resolve_screen_read,
             commands::write_pty,
             commands::resize_pty,
             commands::ack_pty,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running cmux");
+        .build(tauri::generate_context!())
+        .expect("error while running cmux")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                #[cfg(unix)]
+                {
+                    if let Some(disc) = cmux_core::ipc::read_discovery() {
+                        if disc.pid == std::process::id() {
+                            let _ = std::fs::remove_file(&disc.socket);
+                            cmux_core::ipc::remove_discovery();
+                        }
+                    }
+                }
+            }
+        });
 }
 
 /// Minimal app menu: keeps Edit roles (so Cmd+C/V reach the webview's

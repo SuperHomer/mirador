@@ -3,6 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
+import { registerTerminal, unregisterTerminal } from "./registry";
 import { useConfigStore } from "../state/configStore";
 import {
   attachPane,
@@ -50,6 +51,7 @@ export function TerminalPane({ paneId, focused, unread }: Props) {
 
     const term = createTerminal(cfg);
     termRef.current = term;
+    registerTerminal(paneId, term);
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
@@ -140,6 +142,7 @@ export function TerminalPane({ paneId, focused, unread }: Props) {
       observer.disconnect();
       unlisten?.();
       termRef.current = null;
+      unregisterTerminal(paneId, term);
       // The PTY itself belongs to the Rust tree; unmount only drops the view.
       term.dispose();
     };

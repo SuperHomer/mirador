@@ -9,5 +9,7 @@ name = "cmux"
 path = "src/main.rs"
 
 [dependencies]
+cmux-core = { path = "../cmux-core" }
 cmux-protocol = { path = "../cmux-protocol" }
+clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true

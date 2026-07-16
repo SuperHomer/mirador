@@ -1,5 +1,6 @@
 pub mod config;
 pub mod cwd;
+pub mod ipc;
 pub mod layout;
 pub mod osc;
 pub mod pty;

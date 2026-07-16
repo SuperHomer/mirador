@@ -65,6 +65,77 @@ pub struct WorkspaceSnapshot {
     pub unread_panes: Vec<String>,
 }
 
+/// Automation socket request. One JSON object per line; `pane_id: None`
+/// targets the focused pane of the active tab.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+pub enum Request {
+    ListTabs,
+    NewTab {
+        #[serde(default)]
+        command: Option<String>,
+    },
+    SplitPane {
+        #[serde(default)]
+        pane_id: Option<String>,
+        dir: SplitDir,
+        #[serde(default)]
+        command: Option<String>,
+    },
+    ClosePane {
+        pane_id: String,
+    },
+    FocusPane {
+        pane_id: String,
+    },
+    SendInput {
+        #[serde(default)]
+        pane_id: Option<String>,
+        data: String,
+    },
+    ReadScreen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        /// Trailing buffer lines to return (default: the visible screen).
+        #[serde(default)]
+        lines: Option<u32>,
+    },
+    Notify {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        body: String,
+    },
+    /// Agent-visible command execution: opens a pane (split of the focused
+    /// pane, or a new tab) and types the command into its shell.
+    Run {
+        command: String,
+        /// "split" (default) or "tab"
+        #[serde(default)]
+        target: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestEnvelope {
+    #[serde(default)]
+    pub id: Option<u64>,
+    #[serde(flatten)]
+    pub req: Request,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseEnvelope {
+    #[serde(default)]
+    pub id: Option<u64>,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationDto {

@@ -15,6 +15,11 @@ import { SplitLayer } from "./layout/SplitLayer";
 import { CommandPalette } from "./palette/CommandPalette";
 import { NotificationPanel } from "./notifications/NotificationPanel";
 import { NotificationDto, listNotifications } from "./bindings";
+import { readScreenText } from "./terminal/registry";
+import { invoke } from "@tauri-apps/api/core";
+
+const resolveScreenRead = (requestId: number, text: string) =>
+  invoke<void>("resolve_screen_read", { requestId, text });
 
 export default function App() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
@@ -43,7 +48,19 @@ export default function App() {
     const unlistenNotif = listen<NotificationDto>("notification", (e) =>
       useNotificationStore.getState().append(e.payload),
     );
+    // Automation socket read-screen round-trip.
+    const unlistenRead = listen<{
+      requestId: number;
+      paneId: string;
+      lines: number | null;
+    }>("read-screen-request", (e) => {
+      void resolveScreenRead(
+        e.payload.requestId,
+        readScreenText(e.payload.paneId, e.payload.lines),
+      );
+    });
     return () => {
+      void unlistenRead.then((fn) => fn());
       disposed = true;
       void unlistenWs.then((fn) => fn());
       void unlistenCfg.then((fn) => fn());
