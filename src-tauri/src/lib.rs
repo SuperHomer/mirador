@@ -1,6 +1,7 @@
 mod commands;
 mod config_watch;
 mod notify;
+mod runs;
 #[cfg(unix)]
 mod server;
 
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 use cmux_core::pty::PtyManager;
 use cmux_core::state::{PaneMeta, Workspace};
-use cmux_protocol::{NotificationDto, ResolvedConfig};
+use cmux_protocol::{NotificationDto, ResolvedConfig, RunRecord};
 use tauri::Manager;
 
 pub struct AppState {
@@ -19,14 +20,17 @@ pub struct AppState {
     pub workspace: Mutex<Workspace>,
     pub meta: Mutex<HashMap<String, PaneMeta>>,
     pub config: Mutex<ResolvedConfig>,
-    /// Command to type into a pane's shell right after it spawns
-    /// (custom commands from the palette).
-    pub pending_commands: Mutex<HashMap<String, String>>,
     pub notifications: Mutex<Vec<NotificationDto>>,
     pub window_focused: AtomicBool,
     /// Pending read-screen round-trips to the webview.
     pub screen_requests: Mutex<HashMap<u64, std::sync::mpsc::Sender<String>>>,
     pub next_screen_request: AtomicU64,
+    /// Command-pane run history (agent audit log).
+    pub run_history: Mutex<Vec<RunRecord>>,
+    /// Raw output captured per live command pane.
+    pub run_captures: Mutex<HashMap<String, Vec<u8>>>,
+    /// `run --wait` blockers, resolved on command exit.
+    pub run_waiters: Mutex<HashMap<String, Vec<std::sync::mpsc::Sender<Option<i32>>>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -45,11 +49,13 @@ pub fn run() {
             workspace: Mutex::new(Workspace::default()),
             meta: Mutex::new(HashMap::new()),
             config: Mutex::new(cmux_core::config::resolve(&cfg)),
-            pending_commands: Mutex::new(HashMap::new()),
             notifications: Mutex::new(Vec::new()),
             window_focused: AtomicBool::new(true),
             screen_requests: Mutex::new(HashMap::new()),
             next_screen_request: AtomicU64::new(1),
+            run_history: Mutex::new(Vec::new()),
+            run_captures: Mutex::new(HashMap::new()),
+            run_waiters: Mutex::new(HashMap::new()),
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Focused(focused) = event {

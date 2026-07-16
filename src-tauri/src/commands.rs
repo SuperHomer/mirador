@@ -5,11 +5,21 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use cmux_core::osc::{OscEvent, OscScanner};
 use cmux_protocol::{Direction, NotificationDto, SplitDir, WorkspaceSnapshot};
 
-use crate::{notify, AppState};
+use crate::{notify, runs, AppState};
 
 #[derive(Clone, Serialize)]
 struct PaneExitPayload {
     pane_id: String,
+    exit_code: Option<i32>,
+    /// True for command panes: a keypress reruns instead of opening a shell.
+    is_command: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTabResult {
+    pub tab_id: String,
+    pub pane_id: String,
 }
 
 fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
@@ -19,6 +29,17 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
         ws.snapshot(&meta)
     };
     notify::decorate_snapshot(state, &mut snapshot);
+    snapshot.agent_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                m.command.as_ref().map(|c| cmux_protocol::AgentPane {
+                    pane_id: pane.clone(),
+                    command: c.clone(),
+                })
+            })
+            .collect()
+    };
     snapshot
 }
 
@@ -58,19 +79,20 @@ pub fn get_config(state: State<'_, AppState>) -> cmux_protocol::ResolvedConfig {
     state.config.lock().unwrap().clone()
 }
 
-/// `command`, when set, is typed into the new pane's shell once it spawns.
+/// `command`, when set, makes the new pane a command pane (its PTY runs
+/// the command directly; exit is detected, output captured).
 #[tauri::command]
 pub fn new_tab(
     app: AppHandle,
     state: State<'_, AppState>,
     command: Option<String>,
-) -> String {
-    let (tab_id, pane) = state.workspace.lock().unwrap().new_tab();
+) -> NewTabResult {
+    let (tab_id, pane_id) = state.workspace.lock().unwrap().new_tab();
     if let Some(cmd) = command {
-        state.pending_commands.lock().unwrap().insert(pane, cmd);
+        state.meta.lock().unwrap().entry(pane_id.clone()).or_default().command = Some(cmd);
     }
     emit_workspace(&app);
-    tab_id
+    NewTabResult { tab_id, pane_id }
 }
 
 #[tauri::command]
@@ -119,19 +141,13 @@ pub fn split_pane(
         .unwrap()
         .split_pane(&pane_id, dir)
         .ok_or_else(|| format!("no pane {pane_id}"))?;
-    // Inherit the source pane's cwd so the new shell opens there.
+    // Inherit the source pane's cwd so the new pane opens there.
     {
         let mut meta = state.meta.lock().unwrap();
-        if let Some(m) = meta.get(&pane_id).cloned() {
-            meta.insert(new_pane.clone(), m);
-        }
-    }
-    if let Some(cmd) = command {
-        state
-            .pending_commands
-            .lock()
-            .unwrap()
-            .insert(new_pane.clone(), cmd);
+        let inherited_cwd = meta.get(&pane_id).and_then(|m| m.cwd.clone());
+        let entry = meta.entry(new_pane.clone()).or_default();
+        entry.cwd = inherited_cwd;
+        entry.command = command;
     }
     emit_workspace(&app);
     Ok(new_pane)
@@ -192,29 +208,26 @@ pub fn attach_pane(
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
 ) -> Result<bool, String> {
-    // A queued command (custom command / `cmux run`) can't be typed right
-    // at spawn: shell init (zsh + conda etc.) resets the tty and flushes
-    // queued input. It stays in AppState.pending_commands until the shell's
-    // first output proves init is done — the command survives sink swaps
-    // from remounts (React StrictMode mounts panes twice in dev).
+    // Command panes run their command directly in the PTY (exit detection,
+    // output capture); shell panes get an interactive login shell.
+    let (cwd, pane_command) = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(&pane_id);
+        (
+            m.and_then(|m| m.cwd.clone()),
+            m.and_then(|m| m.command.clone()),
+        )
+    };
+
     let sink = {
         let sink_app = app.clone();
-        let pty = state.pty.clone();
         let pane = pane_id.clone();
+        let capture = pane_command.is_some();
         move |bytes: &[u8]| {
             let _ = on_data.send(InvokeResponseBody::Raw(bytes.to_vec()));
-            let pending = {
+            if capture {
                 let state = sink_app.state::<AppState>();
-                let mut map = state.pending_commands.lock().unwrap();
-                map.remove(&pane)
-            };
-            if let Some(cmd) = pending {
-                let pty = pty.clone();
-                let pane = pane.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(300));
-                    let _ = pty.write(&pane, format!("{cmd}\n").as_bytes());
-                });
+                crate::runs::capture_output(&state, &pane, bytes);
             }
         }
     };
@@ -224,13 +237,6 @@ pub fn attach_pane(
         let _ = state.pty.resize(&pane_id, cols, rows);
         return Ok(false);
     }
-
-    let cwd = state
-        .meta
-        .lock()
-        .unwrap()
-        .get(&pane_id)
-        .and_then(|m| m.cwd.clone());
 
     // Scanner events run on the pane's forwarder thread.
     let scanner = {
@@ -280,20 +286,46 @@ pub fn attach_pane(
         })
     };
 
+    let command_builder = pane_command.as_deref().map(|cmd| {
+        let mut builder = portable_pty::CommandBuilder::new(
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+        );
+        builder.arg("-lc");
+        builder.arg(cmd);
+        builder.env("TERM", "xterm-256color");
+        builder.env("COLORTERM", "truecolor");
+        match &cwd {
+            Some(dir) if std::path::Path::new(dir).is_dir() => builder.cwd(dir),
+            _ => {
+                if let Ok(home) = std::env::var("HOME") {
+                    builder.cwd(home);
+                }
+            }
+        }
+        builder
+    });
+
+    if let Some(cmd) = &pane_command {
+        crate::runs::record_start(&state, &pane_id, cmd);
+    }
+
     let exit_app = app.clone();
     state.pty.spawn(
         &pane_id,
         cols,
         rows,
         cwd.as_deref(),
-        None,
+        command_builder,
         Box::new(scanner),
         sink,
-        move |exited_id| {
+        move |exited_id, exit_code| {
+            let is_command = crate::runs::finish_run(&exit_app, exited_id, exit_code);
             let _ = exit_app.emit(
                 "pane-exit",
                 PaneExitPayload {
                     pane_id: exited_id.to_string(),
+                    exit_code,
+                    is_command,
                 },
             );
         },
@@ -332,4 +364,7 @@ fn kill_panes(state: &State<'_, AppState>, panes: &[String]) {
     }
     drop(meta);
     notify::forget_panes(state, panes);
+    for pane in panes {
+        runs::forget_pane(state, pane);
+    }
 }

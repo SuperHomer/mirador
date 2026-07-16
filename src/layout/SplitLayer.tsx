@@ -36,9 +36,11 @@ interface DividerBox {
 export function SplitLayer({
   tab,
   unreadPanes,
+  agentPanes,
 }: {
   tab: TabSnapshot;
   unreadPanes: string[];
+  agentPanes: { paneId: string; command: string }[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -105,6 +107,9 @@ export function SplitLayer({
             paneId={p.paneId}
             focused={p.paneId === tab.focusedPane}
             unread={unreadPanes.includes(p.paneId)}
+            agentCommand={
+              agentPanes.find((a) => a.paneId === p.paneId)?.command
+            }
           />
         </div>
       ))}

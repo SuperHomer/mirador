@@ -15,7 +15,6 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope};
 
-use crate::commands::emit_workspace;
 use crate::{notify, AppState};
 
 pub fn spawn(app: AppHandle) {
@@ -111,8 +110,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             serde_json::to_value(snapshot).map_err(|e| e.to_string())
         }
         Request::NewTab { command } => {
-            let tab_id = crate::commands::new_tab(app.clone(), app.state(), command);
-            Ok(json!({ "tabId": tab_id }))
+            let result = crate::commands::new_tab(app.clone(), app.state(), command);
+            serde_json::to_value(result).map_err(|e| e.to_string())
         }
         Request::SplitPane {
             pane_id,
@@ -151,21 +150,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             notify::handle_notification(app, &pane, title, body);
             Ok(Value::Null)
         }
-        Request::Run { command, target } => {
+        Request::Run {
+            command,
+            target,
+            wait,
+            timeout_secs,
+        } => {
             let pane_id = match target.as_deref() {
                 Some("tab") => {
-                    let state = app.state::<AppState>();
-                    let (_, pane) = {
-                        let mut ws = state.workspace.lock().unwrap();
-                        ws.new_tab()
-                    };
-                    state
-                        .pending_commands
-                        .lock()
-                        .unwrap()
-                        .insert(pane.clone(), command);
-                    emit_workspace(app);
-                    pane
+                    crate::commands::new_tab(app.clone(), app.state(), Some(command)).pane_id
                 }
                 _ => {
                     let pane = focused_pane(&state);
@@ -178,7 +171,19 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                     )?
                 }
             };
-            Ok(json!({ "paneId": pane_id }))
+            if !wait {
+                return Ok(json!({ "paneId": pane_id }));
+            }
+            // Register before the frontend can possibly attach + finish.
+            let rx = crate::runs::register_waiter(&state, &pane_id);
+            let exit_code =
+                crate::runs::wait_for_exit(&state, rx, &pane_id, timeout_secs.unwrap_or(600))?;
+            let output = crate::runs::take_capture(&state, &pane_id);
+            Ok(json!({ "paneId": pane_id, "exitCode": exit_code, "output": output }))
+        }
+        Request::ListRuns => {
+            let runs = crate::runs::list(&state);
+            Ok(json!({ "runs": runs }))
         }
     }
 }

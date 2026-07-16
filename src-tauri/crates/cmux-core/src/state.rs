@@ -13,6 +13,9 @@ pub struct PaneMeta {
     pub cwd: Option<String>,
     /// Set by OSC 0/2 title sequences.
     pub title: Option<String>,
+    /// Command pane: the PTY runs this command directly instead of an
+    /// interactive shell. Persists across respawns (keypress = rerun).
+    pub command: Option<String>,
 }
 
 #[derive(Debug)]
@@ -240,6 +243,7 @@ impl Workspace {
                 .collect(),
             active_tab: self.tabs[self.active].id.clone(),
             unread_panes: Vec::new(),
+            agent_panes: Vec::new(),
         }
     }
 }
@@ -330,7 +334,7 @@ mod tests {
             pane,
             PaneMeta {
                 cwd: Some("/tmp/project".to_string()),
-                title: None,
+                ..Default::default()
             },
         );
         let snap = ws.snapshot(&meta);

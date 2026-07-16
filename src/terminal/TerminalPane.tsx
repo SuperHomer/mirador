@@ -21,9 +21,11 @@ interface Props {
   paneId: string;
   focused: boolean;
   unread: boolean;
+  /** Set when this is a command pane (🤖): the command it runs. */
+  agentCommand?: string;
 }
 
-export function TerminalPane({ paneId, focused, unread }: Props) {
+export function TerminalPane({ paneId, focused, unread, agentCommand }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<ReturnType<typeof createTerminal> | null>(null);
   const config = useConfigStore((s) => s.config);
@@ -84,9 +86,15 @@ export function TerminalPane({ paneId, focused, unread }: Props) {
         const spawned = await attachPane(paneId, term.cols, term.rows, channel);
         if (disposed) return;
         const buf = term.buffer.active;
-        if (!spawned && buf.cursorX === 0 && buf.cursorY === 0) {
+        if (
+          !spawned &&
+          !agentCommand &&
+          buf.cursorX === 0 &&
+          buf.cursorY === 0
+        ) {
           // Re-attached to a live shell with an empty screen (remount):
-          // Ctrl-L makes it repaint the prompt.
+          // Ctrl-L makes it repaint the prompt. Never nudge command panes —
+          // it would inject a byte into the running command's stdin.
           void writePty(paneId, "\x0c");
         }
       } catch (err) {
@@ -120,14 +128,23 @@ export function TerminalPane({ paneId, focused, unread }: Props) {
     });
 
     let unlisten: UnlistenFn | undefined;
-    void listen<{ pane_id: string }>("pane-exit", (event) => {
-      if (event.payload.pane_id === paneId) {
+    void listen<{ pane_id: string; exit_code: number | null; is_command: boolean }>(
+      "pane-exit",
+      (event) => {
+        if (event.payload.pane_id !== paneId) return;
         exited = true;
+        const code = event.payload.exit_code;
+        const status =
+          code === null ? "exited" : code === 0 ? "done ✓" : `exit ${code}`;
+        const color = code === 0 ? "\x1b[32m" : code ? "\x1b[31m" : "\x1b[2m";
+        const hint = event.payload.is_command
+          ? "press any key to rerun"
+          : "press any key to start a new shell";
         term.writeln(
-          "\r\n\x1b[2m[process exited — press any key to start a new shell]\x1b[0m",
+          `\r\n${color}[${status}]\x1b[0m \x1b[2m— ${hint}\x1b[0m`,
         );
-      }
-    }).then((fn) => {
+      },
+    ).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
     });
@@ -156,7 +173,13 @@ export function TerminalPane({ paneId, focused, unread }: Props) {
     <div
       className={`pane${focused ? " focused" : ""}${unread ? " unread" : ""}`}
       onMouseDown={() => void focusPane(paneId)}
-      ref={containerRef}
-    />
+    >
+      <div className="pane-term" ref={containerRef} />
+      {agentCommand && (
+        <div className="agent-chip" title={agentCommand}>
+          🤖 {agentCommand}
+        </div>
+      )}
+    </div>
   );
 }

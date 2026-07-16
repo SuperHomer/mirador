@@ -63,6 +63,9 @@ pub struct WorkspaceSnapshot {
     /// Panes with unread notifications (frontend draws the attention ring).
     #[serde(default)]
     pub unread_panes: Vec<String>,
+    /// Command panes (frontend draws the 🤖 chip).
+    #[serde(default)]
+    pub agent_panes: Vec<AgentPane>,
 }
 
 /// Automation socket request. One JSON object per line; `pane_id: None`
@@ -107,14 +110,42 @@ pub enum Request {
         title: Option<String>,
         body: String,
     },
-    /// Agent-visible command execution: opens a pane (split of the focused
-    /// pane, or a new tab) and types the command into its shell.
+    /// Agent-visible command execution: opens a command pane (split of the
+    /// focused pane, or a new tab) whose PTY runs the command directly —
+    /// exit detection, output capture, and human interruption all work.
     Run {
         command: String,
         /// "split" (default) or "tab"
         #[serde(default)]
         target: Option<String>,
+        /// Block until the command exits; returns exit code + clean output.
+        #[serde(default)]
+        wait: bool,
+        /// Wait timeout in seconds (default 600).
+        #[serde(default)]
+        timeout_secs: Option<u64>,
     },
+    /// Command-pane run history (the agent activity audit log).
+    ListRuns,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRecord {
+    pub id: String,
+    pub pane_id: String,
+    pub command: String,
+    /// Unix millis.
+    pub started_ms: u64,
+    pub finished_ms: Option<u64>,
+    pub exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPane {
+    pub pane_id: String,
+    pub command: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

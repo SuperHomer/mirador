@@ -19,10 +19,16 @@ export interface TabSnapshot {
   lastNotification: string | null;
 }
 
+export interface AgentPane {
+  paneId: string;
+  command: string;
+}
+
 export interface WorkspaceSnapshot {
   tabs: TabSnapshot[];
   activeTab: string;
   unreadPanes: string[];
+  agentPanes: AgentPane[];
 }
 
 export interface NotificationDto {
@@ -63,7 +69,9 @@ export const workspaceSnapshot = () =>
   invoke<WorkspaceSnapshot>("workspace_snapshot");
 export const getConfig = () => invoke<ResolvedConfig>("get_config");
 export const newTab = (command?: string) =>
-  invoke<string>("new_tab", { command: command ?? null });
+  invoke<{ tabId: string; paneId: string }>("new_tab", {
+    command: command ?? null,
+  });
 export const closeTab = (tabId: string) => invoke<void>("close_tab", { tabId });
 export const setActiveTab = (tabId: string) =>
   invoke<void>("set_active_tab", { tabId });

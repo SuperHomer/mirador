@@ -96,7 +96,7 @@ impl PtyManager {
         command: Option<CommandBuilder>,
         mut scanner: Box<dyn StreamScanner>,
         on_data: impl FnMut(&[u8]) + Send + 'static,
-        on_exit: impl FnOnce(&str) + Send + 'static,
+        on_exit: impl FnOnce(&str, Option<i32>) + Send + 'static,
     ) -> Result<(), String> {
         if self.inner.panes.lock().unwrap().contains_key(id) {
             return Err(format!("pane {id} already running"));
@@ -188,10 +188,10 @@ impl PtyManager {
                     // Single cleanup path: remove the pane and reap the child
                     // whether the process exited on its own or close() killed it.
                     let pane = inner.panes.lock().unwrap().remove(&id);
-                    if let Some(mut pane) = pane {
-                        let _ = pane.child.wait();
-                    }
-                    on_exit(&id);
+                    let exit_code = pane.and_then(|mut pane| {
+                        pane.child.wait().ok().map(|s| s.exit_code() as i32)
+                    });
+                    on_exit(&id, exit_code);
                 })
                 .map_err(|e| e.to_string())?;
         }
@@ -383,7 +383,7 @@ mod tests {
                 move |bytes| {
                     let _ = tx.send(bytes.to_vec());
                 },
-                move |_| {
+                move |_, _| {
                     let _ = exit_tx.send(());
                 },
             )
@@ -425,7 +425,7 @@ mod tests {
                 move |bytes| {
                     recv.fetch_add(bytes.len() as u64, Ordering::SeqCst);
                 },
-                move |_| {
+                move |_, _| {
                     let _ = exit_tx.send(());
                 },
             )
@@ -486,7 +486,7 @@ mod tests {
                 Some(shell_cmd("yes")),
                 Box::new(PassthroughScanner),
                 |_| {},
-                move |_| {
+                move |_, _| {
                     let _ = exit_tx.send(());
                 },
             )

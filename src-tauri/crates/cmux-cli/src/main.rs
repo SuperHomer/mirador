@@ -57,16 +57,25 @@ enum Command {
         #[arg(long)]
         lines: Option<u32>,
     },
-    /// Run a command in a visible pane (split of the focused pane, or a
-    /// new tab with --tab). Returns the pane id — read it later with
-    /// read-screen. This is how agents run observable commands.
+    /// Run a command in a visible command pane (split of the focused pane,
+    /// or a new tab with --tab). Humans watch the same execution the agent
+    /// reads; Ctrl-C in the pane interrupts it for both.
     Run {
         /// Open the command in a new tab instead of a split.
         #[arg(long)]
         tab: bool,
+        /// Block until the command exits: prints its clean output and
+        /// exits with the command's exit code.
+        #[arg(long)]
+        wait: bool,
+        /// Seconds to wait before giving up (default 600).
+        #[arg(long)]
+        timeout: Option<u64>,
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
     },
+    /// Command-pane run history (what ran, when, exit codes).
+    Runs,
     /// Send a notification (prints OSC 777; works from inside any pane,
     /// even over SSH). Use --socket to target the app directly instead.
     Notify {
@@ -111,10 +120,18 @@ fn run(cli: Cli) -> Result<(), String> {
             pane_id: pane,
             lines,
         },
-        Command::Run { tab, command } => Request::Run {
+        Command::Run {
+            tab,
+            wait,
+            timeout,
+            command,
+        } => Request::Run {
             command: command.join(" "),
             target: tab.then(|| "tab".to_string()),
+            wait,
+            timeout_secs: timeout,
         },
+        Command::Runs => Request::ListRuns,
         Command::Notify {
             title,
             socket,
@@ -184,8 +201,17 @@ fn render(resp: ResponseEnvelope, raw_json: bool) -> Result<(), String> {
     match &data {
         serde_json::Value::Null => {}
         serde_json::Value::Object(map) => {
-            if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
+            if map.contains_key("output") {
+                // run --wait: print the command's output, adopt its exit code.
+                if let Some(out) = map.get("output").and_then(|v| v.as_str()) {
+                    println!("{out}");
+                }
+                let code = map.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(0);
+                std::process::exit(code as i32);
+            } else if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
                 println!("{text}");
+            } else if map.contains_key("runs") {
+                render_runs(&data);
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
@@ -201,6 +227,28 @@ fn render(resp: ResponseEnvelope, raw_json: bool) -> Result<(), String> {
         other => println!("{}", serde_json::to_string_pretty(other).unwrap()),
     }
     Ok(())
+}
+
+fn render_runs(data: &serde_json::Value) {
+    for run in data["runs"].as_array().unwrap_or(&Vec::new()) {
+        let status = match (run["finishedMs"].as_u64(), run["exitCode"].as_i64()) {
+            (None, _) => "running".to_string(),
+            (Some(_), Some(0)) => "ok".to_string(),
+            (Some(_), Some(code)) => format!("exit {code}"),
+            (Some(_), None) => "finished".to_string(),
+        };
+        let duration = match (run["startedMs"].as_u64(), run["finishedMs"].as_u64()) {
+            (Some(s), Some(f)) => format!("{:.1}s", (f.saturating_sub(s)) as f64 / 1000.0),
+            _ => "…".to_string(),
+        };
+        println!(
+            "{:<10} {:>8}  {}  [{}]",
+            status,
+            duration,
+            run["command"].as_str().unwrap_or(""),
+            run["paneId"].as_str().unwrap_or(""),
+        );
+    }
 }
 
 fn render_tabs(data: &serde_json::Value) {

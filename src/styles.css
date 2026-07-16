@@ -218,8 +218,37 @@ body,
   box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(137, 180, 250, 0.35);
 }
 
+.pane {
+  position: relative;
+}
+
+.pane-term {
+  width: 100%;
+  height: 100%;
+}
+
 .pane .xterm {
   height: 100%;
+}
+
+/* Command pane chip: this pane runs an agent-launched command. */
+.agent-chip {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-alt));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text);
+  font-size: 10.5px;
+  border-radius: 6px;
+  padding: 2px 8px;
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0.9;
 }
 
 .divider {

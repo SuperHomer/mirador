@@ -82,7 +82,11 @@ export default function App() {
               visibility: tab.id === snapshot.activeTab ? "visible" : "hidden",
             }}
           >
-            <SplitLayer tab={tab} unreadPanes={snapshot.unreadPanes} />
+            <SplitLayer
+              tab={tab}
+              unreadPanes={snapshot.unreadPanes}
+              agentPanes={snapshot.agentPanes}
+            />
           </div>
         ))}
       </div>

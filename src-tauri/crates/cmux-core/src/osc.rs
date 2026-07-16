@@ -241,6 +241,78 @@ impl<F: FnMut(OscEvent) + Send> StreamScanner for OscScanner<F> {
     }
 }
 
+/// Reduces raw terminal output to agent-readable plain text: drops escape
+/// sequences (CSI/OSC/simple), resolves carriage-return overwrites
+/// (progress bars keep only their final state), normalizes CRLF.
+pub fn strip_ansi(bytes: &[u8]) -> String {
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    let mut line: Vec<u8> = Vec::new();
+    let mut cr = false; // pending carriage return (overwrite line unless \n follows)
+    let mut i = 0;
+    let flush_cr = |line: &mut Vec<u8>, cr: &mut bool| {
+        if *cr {
+            line.clear();
+            *cr = false;
+        }
+    };
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            0x1b => {
+                i += 1;
+                match bytes.get(i) {
+                    Some(b'[') => {
+                        // CSI: parameters then a final byte in 0x40..=0x7e
+                        i += 1;
+                        while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    Some(b']') => {
+                        // OSC: until BEL or ESC \
+                        i += 1;
+                        while i < bytes.len() {
+                            if bytes[i] == 0x07 {
+                                i += 1;
+                                break;
+                            }
+                            if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'\\') {
+                                i += 2;
+                                break;
+                            }
+                            i += 1;
+                        }
+                    }
+                    _ => i += 1, // simple escape: skip one byte
+                }
+                continue;
+            }
+            b'\r' => cr = true,
+            b'\n' => {
+                cr = false;
+                out.push(std::mem::take(&mut line));
+            }
+            0x08 => {
+                flush_cr(&mut line, &mut cr);
+                line.pop();
+            }
+            _ => {
+                flush_cr(&mut line, &mut cr);
+                if b >= 0x20 || b == b'\t' {
+                    line.push(b);
+                }
+            }
+        }
+        i += 1;
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    let joined = out.join(&b'\n');
+    String::from_utf8_lossy(&joined).into_owned()
+}
+
 /// `file://host/path` → percent-decoded path.
 fn parse_file_url(url: &str) -> Option<String> {
     let rest = url.strip_prefix("file://")?;
@@ -426,6 +498,20 @@ mod tests {
         let out = scan_all(&mut s, b"\x1b]9;ok\x07");
         assert_eq!(out, b"");
         assert_eq!(events.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn strip_ansi_cleans_terminal_output() {
+        // colors + cursor moves dropped
+        assert_eq!(strip_ansi(b"\x1b[31mred\x1b[0m ok\x1b[2K"), "red ok");
+        // CRLF and plain LF normalize
+        assert_eq!(strip_ansi(b"line1\r\nline2\nline3"), "line1\nline2\nline3");
+        // progress-bar overwrites keep the final state
+        assert_eq!(strip_ansi(b"10%\r20%\r100%"), "100%");
+        // OSC stripped
+        assert_eq!(strip_ansi(b"\x1b]2;title\x07text"), "text");
+        // utf-8 survives
+        assert_eq!(strip_ansi("héllo ✓".as_bytes()), "héllo ✓");
     }
 
     #[test]

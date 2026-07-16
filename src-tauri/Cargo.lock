@@ -568,6 +568,7 @@ dependencies = [
  "cmux-core",
  "cmux-protocol",
  "notify",
+ "portable-pty",
  "serde",
  "serde_json",
  "tauri",
