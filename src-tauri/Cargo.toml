@@ -1,0 +1,31 @@
+[workspace]
+members = ["crates/cmux-core", "crates/cmux-protocol", "crates/cmux-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[package]
+name = "cmux-app"
+version.workspace = true
+edition.workspace = true
+description = "Cross-platform cmux: a terminal for AI coding agent workflows"
+
+[lib]
+name = "cmux_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde.workspace = true
+serde_json.workspace = true
+cmux-core = { path = "crates/cmux-core" }
+cmux-protocol = { path = "crates/cmux-protocol" }

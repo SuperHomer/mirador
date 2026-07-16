@@ -1,0 +1,9 @@
+[package]
+name = "cmux-protocol"
+version.workspace = true
+edition.workspace = true
+description = "Shared DTOs and automation-socket protocol types for cmux."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

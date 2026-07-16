@@ -1,0 +1,13 @@
+[package]
+name = "cmux-cli"
+version.workspace = true
+edition.workspace = true
+description = "cmux command-line client (automation over the cmux socket)."
+
+[[bin]]
+name = "cmux"
+path = "src/main.rs"
+
+[dependencies]
+cmux-protocol = { path = "../cmux-protocol" }
+serde_json.workspace = true

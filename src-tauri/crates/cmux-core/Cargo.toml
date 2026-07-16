@@ -1,0 +1,13 @@
+[package]
+name = "cmux-core"
+version.workspace = true
+edition.workspace = true
+description = "cmux core logic: PTY management, layout, OSC scanning. No Tauri dependency."
+
+[dependencies]
+cmux-protocol = { path = "../cmux-protocol" }
+portable-pty = "0.9"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
