@@ -40,13 +40,19 @@ pub enum Node {
 #[serde(rename_all = "camelCase")]
 pub struct TabSnapshot {
     pub id: String,
-    /// Resolved title: explicit rename, else basename of the focused pane's
-    /// cwd, else "shell".
+    /// Resolved title: explicit rename, else OSC title, else basename of
+    /// the focused pane's cwd, else "shell".
     pub title: String,
     /// Focused pane's working directory, if known.
     pub cwd: Option<String>,
     pub root: Node,
     pub focused_pane: String,
+    /// Unread notifications across the tab's panes.
+    #[serde(default)]
+    pub unread: u32,
+    /// Body of the tab's most recent notification.
+    #[serde(default)]
+    pub last_notification: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +60,21 @@ pub struct TabSnapshot {
 pub struct WorkspaceSnapshot {
     pub tabs: Vec<TabSnapshot>,
     pub active_tab: String,
+    /// Panes with unread notifications (frontend draws the attention ring).
+    #[serde(default)]
+    pub unread_panes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDto {
+    pub id: String,
+    pub pane_id: String,
+    pub title: Option<String>,
+    pub body: String,
+    /// Unix millis.
+    pub at_ms: u64,
+    pub read: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

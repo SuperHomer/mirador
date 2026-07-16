@@ -2,31 +2,47 @@ use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use cmux_core::osc::PassthroughScanner;
-use cmux_protocol::{Direction, SplitDir, WorkspaceSnapshot};
+use cmux_core::osc::{OscEvent, OscScanner};
+use cmux_protocol::{Direction, NotificationDto, SplitDir, WorkspaceSnapshot};
 
-use crate::AppState;
+use crate::{notify, AppState};
 
 #[derive(Clone, Serialize)]
 struct PaneExitPayload {
     pane_id: String,
 }
 
-pub fn emit_workspace(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let snapshot = {
+fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
+    let mut snapshot = {
         let ws = state.workspace.lock().unwrap();
         let meta = state.meta.lock().unwrap();
         ws.snapshot(&meta)
     };
+    notify::decorate_snapshot(state, &mut snapshot);
+    snapshot
+}
+
+pub fn emit_workspace(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let snapshot = build_snapshot(&state);
     let _ = app.emit("workspace-changed", snapshot);
 }
 
 #[tauri::command]
 pub fn workspace_snapshot(state: State<'_, AppState>) -> WorkspaceSnapshot {
-    let ws = state.workspace.lock().unwrap();
-    let meta = state.meta.lock().unwrap();
-    ws.snapshot(&meta)
+    build_snapshot(&state)
+}
+
+#[tauri::command]
+pub fn list_notifications(state: State<'_, AppState>) -> Vec<NotificationDto> {
+    state.notifications.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn mark_all_notifications_read(app: AppHandle, state: State<'_, AppState>) {
+    if notify::mark_all_read(&state) {
+        emit_workspace(&app);
+    }
 }
 
 #[tauri::command]
@@ -58,7 +74,12 @@ pub fn close_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String) {
 
 #[tauri::command]
 pub fn set_active_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String) {
-    state.workspace.lock().unwrap().set_active_tab(&tab_id);
+    let focused = {
+        let mut ws = state.workspace.lock().unwrap();
+        ws.set_active_tab(&tab_id);
+        ws.focused_pane()
+    };
+    notify::mark_pane_read(&state, &focused);
     emit_workspace(&app);
 }
 
@@ -117,20 +138,18 @@ pub fn close_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
 
 #[tauri::command]
 pub fn focus_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
-    if state.workspace.lock().unwrap().focus_pane(&pane_id) {
+    let focused = state.workspace.lock().unwrap().focus_pane(&pane_id);
+    let read_changed = notify::mark_pane_read(&state, &pane_id);
+    if focused || read_changed {
         emit_workspace(&app);
     }
 }
 
 #[tauri::command]
 pub fn focus_direction(app: AppHandle, state: State<'_, AppState>, direction: Direction) {
-    if state
-        .workspace
-        .lock()
-        .unwrap()
-        .focus_direction(direction)
-        .is_some()
-    {
+    let next = state.workspace.lock().unwrap().focus_direction(direction);
+    if let Some(pane) = next {
+        notify::mark_pane_read(&state, &pane);
         emit_workspace(&app);
     }
 }
@@ -182,16 +201,65 @@ pub fn attach_pane(
         .get(&pane_id)
         .and_then(|m| m.cwd.clone());
 
+    // Scanner events run on the pane's forwarder thread.
+    let scanner = {
+        let app = app.clone();
+        let pane_id = pane_id.clone();
+        OscScanner::new(move |event| match event {
+            OscEvent::Notification { title, body } => {
+                notify::handle_notification(&app, &pane_id, title, body);
+            }
+            OscEvent::Cwd(path) => {
+                let state = app.state::<AppState>();
+                let changed = {
+                    let mut meta = state.meta.lock().unwrap();
+                    let entry = meta.entry(pane_id.clone()).or_default();
+                    if entry.cwd.as_deref() != Some(path.as_str()) {
+                        entry.cwd = Some(path);
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if changed {
+                    emit_workspace(&app);
+                }
+            }
+            OscEvent::Title(title) => {
+                let state = app.state::<AppState>();
+                let changed = {
+                    let mut meta = state.meta.lock().unwrap();
+                    let entry = meta.entry(pane_id.clone()).or_default();
+                    let title = if title.trim().is_empty() {
+                        None
+                    } else {
+                        Some(title)
+                    };
+                    if entry.title != title {
+                        entry.title = title;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if changed {
+                    emit_workspace(&app);
+                }
+            }
+        })
+    };
+
+    let exit_app = app.clone();
     state.pty.spawn(
         &pane_id,
         cols,
         rows,
         cwd.as_deref(),
         None,
-        Box::new(PassthroughScanner),
+        Box::new(scanner),
         sink,
         move |exited_id| {
-            let _ = app.emit(
+            let _ = exit_app.emit(
                 "pane-exit",
                 PaneExitPayload {
                     pane_id: exited_id.to_string(),
@@ -237,4 +305,6 @@ fn kill_panes(state: &State<'_, AppState>, panes: &[String]) {
         let _ = state.pty.close(pane);
         meta.remove(pane);
     }
+    drop(meta);
+    notify::forget_panes(state, panes);
 }

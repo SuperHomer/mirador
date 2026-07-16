@@ -33,7 +33,13 @@ interface DividerBox {
  * pane id — a tree-shape change never remounts an existing terminal, so
  * xterm buffers survive splits.
  */
-export function SplitLayer({ tab }: { tab: TabSnapshot }) {
+export function SplitLayer({
+  tab,
+  unreadPanes,
+}: {
+  tab: TabSnapshot;
+  unreadPanes: string[];
+}) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
   const layerRef = useRef<HTMLDivElement>(null);
@@ -98,6 +104,7 @@ export function SplitLayer({ tab }: { tab: TabSnapshot }) {
           <TerminalPane
             paneId={p.paneId}
             focused={p.paneId === tab.focusedPane}
+            unread={unreadPanes.includes(p.paneId)}
           />
         </div>
       ))}

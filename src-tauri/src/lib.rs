@@ -1,13 +1,15 @@
 mod commands;
 mod config_watch;
+mod notify;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use cmux_core::pty::PtyManager;
 use cmux_core::state::{PaneMeta, Workspace};
-use cmux_protocol::ResolvedConfig;
+use cmux_protocol::{NotificationDto, ResolvedConfig};
 use tauri::Manager;
 
 pub struct AppState {
@@ -18,6 +20,8 @@ pub struct AppState {
     /// Command to type into a pane's shell right after it spawns
     /// (custom commands from the palette).
     pub pending_commands: Mutex<HashMap<String, String>>,
+    pub notifications: Mutex<Vec<NotificationDto>>,
+    pub window_focused: AtomicBool,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -30,12 +34,23 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             pty: PtyManager::new(),
             workspace: Mutex::new(Workspace::default()),
             meta: Mutex::new(HashMap::new()),
             config: Mutex::new(cmux_core::config::resolve(&cfg)),
             pending_commands: Mutex::new(HashMap::new()),
+            notifications: Mutex::new(Vec::new()),
+            window_focused: AtomicBool::new(true),
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                let state = window.state::<AppState>();
+                state
+                    .window_focused
+                    .store(*focused, std::sync::atomic::Ordering::Relaxed);
+            }
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -58,6 +73,8 @@ pub fn run() {
             commands::focus_direction,
             commands::set_split_ratios,
             commands::attach_pane,
+            commands::list_notifications,
+            commands::mark_all_notifications_read,
             commands::write_pty,
             commands::resize_pty,
             commands::ack_pty,

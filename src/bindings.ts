@@ -15,11 +15,23 @@ export interface TabSnapshot {
   cwd: string | null;
   root: Node;
   focusedPane: string;
+  unread: number;
+  lastNotification: string | null;
 }
 
 export interface WorkspaceSnapshot {
   tabs: TabSnapshot[];
   activeTab: string;
+  unreadPanes: string[];
+}
+
+export interface NotificationDto {
+  id: string;
+  paneId: string;
+  title: string | null;
+  body: string;
+  atMs: number;
+  read: boolean;
 }
 
 export type PtyData = ArrayBuffer | Uint8Array | string;
@@ -85,3 +97,7 @@ export const resizePty = (paneId: string, cols: number, rows: number) =>
   invoke<void>("resize_pty", { paneId, cols, rows });
 export const ackPty = (paneId: string, bytes: number) =>
   invoke<void>("ack_pty", { paneId, bytes });
+export const listNotifications = () =>
+  invoke<NotificationDto[]>("list_notifications");
+export const markAllNotificationsRead = () =>
+  invoke<void>("mark_all_notifications_read");

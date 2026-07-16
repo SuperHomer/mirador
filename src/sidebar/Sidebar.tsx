@@ -74,10 +74,17 @@ function TabRow({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="tab-title">{tab.title}</span>
+          <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
+            {tab.title}
+          </span>
         )}
-        {tab.cwd && <span className="tab-cwd">{tab.cwd}</span>}
+        {tab.unread > 0 && tab.lastNotification ? (
+          <span className="tab-notif">{tab.lastNotification}</span>
+        ) : (
+          tab.cwd && <span className="tab-cwd">{tab.cwd}</span>
+        )}
       </div>
+      {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
       <button
         className="tab-close"
         title="Close tab"

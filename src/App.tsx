@@ -8,10 +8,13 @@ import {
 } from "./bindings";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useConfigStore } from "./state/configStore";
+import { useNotificationStore } from "./state/notificationStore";
 import { useKeymap } from "./keymap/useKeymap";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
 import { CommandPalette } from "./palette/CommandPalette";
+import { NotificationPanel } from "./notifications/NotificationPanel";
+import { NotificationDto, listNotifications } from "./bindings";
 
 export default function App() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
@@ -34,10 +37,17 @@ export default function App() {
     const unlistenCfg = listen<ResolvedConfig>("config-changed", (e) =>
       setConfig(e.payload),
     );
+    void listNotifications().then((list) => {
+      if (!disposed) useNotificationStore.getState().setAll(list);
+    });
+    const unlistenNotif = listen<NotificationDto>("notification", (e) =>
+      useNotificationStore.getState().append(e.payload),
+    );
     return () => {
       disposed = true;
       void unlistenWs.then((fn) => fn());
       void unlistenCfg.then((fn) => fn());
+      void unlistenNotif.then((fn) => fn());
     };
   }, [setSnapshot, setConfig]);
 
@@ -55,11 +65,12 @@ export default function App() {
               visibility: tab.id === snapshot.activeTab ? "visible" : "hidden",
             }}
           >
-            <SplitLayer tab={tab} />
+            <SplitLayer tab={tab} unreadPanes={snapshot.unreadPanes} />
           </div>
         ))}
       </div>
       <CommandPalette />
+      <NotificationPanel />
     </div>
   );
 }

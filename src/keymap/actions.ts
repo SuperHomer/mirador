@@ -97,6 +97,11 @@ export const actions: ActionDef[] = [
     title: "Command Palette",
     run: () => useUiStore.getState().togglePalette(),
   },
+  {
+    id: "notifications",
+    title: "Notifications Panel",
+    run: () => useUiStore.getState().toggleNotifications(),
+  },
 ];
 
 export function runAction(id: string): boolean {

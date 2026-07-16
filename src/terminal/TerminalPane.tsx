@@ -19,9 +19,10 @@ const ACK_THRESHOLD = 256 * 1024;
 interface Props {
   paneId: string;
   focused: boolean;
+  unread: boolean;
 }
 
-export function TerminalPane({ paneId, focused }: Props) {
+export function TerminalPane({ paneId, focused, unread }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<ReturnType<typeof createTerminal> | null>(null);
   const config = useConfigStore((s) => s.config);
@@ -150,7 +151,7 @@ export function TerminalPane({ paneId, focused }: Props) {
 
   return (
     <div
-      className={`pane${focused ? " focused" : ""}`}
+      className={`pane${focused ? " focused" : ""}${unread ? " unread" : ""}`}
       onMouseDown={() => void focusPane(paneId)}
       ref={containerRef}
     />

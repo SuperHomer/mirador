@@ -111,6 +111,7 @@ pub fn default_keybindings() -> HashMap<String, String> {
         ("mod+alt+down", "focus_down"),
         ("mod+b", "toggle_sidebar"),
         ("mod+k", "command_palette"),
+        ("mod+i", "notifications"),
         ("mod+shift+]", "next_tab"),
         ("mod+shift+[", "prev_tab"),
         ("mod+1", "tab_1"),

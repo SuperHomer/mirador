@@ -11,6 +11,8 @@ use crate::layout;
 #[derive(Debug, Default, Clone)]
 pub struct PaneMeta {
     pub cwd: Option<String>,
+    /// Set by OSC 0/2 title sequences.
+    pub title: Option<String>,
 }
 
 #[derive(Debug)]
@@ -213,22 +215,31 @@ impl Workspace {
                 .tabs
                 .iter()
                 .map(|t| {
-                    let cwd = meta.get(&t.focused).and_then(|m| m.cwd.clone());
-                    let title = t.title.clone().unwrap_or_else(|| {
-                        cwd.as_deref()
-                            .map(display_dir)
-                            .unwrap_or_else(|| "shell".to_string())
-                    });
+                    let pane_meta = meta.get(&t.focused);
+                    let cwd = pane_meta.and_then(|m| m.cwd.clone());
+                    let osc_title = pane_meta.and_then(|m| m.title.clone());
+                    let title = t
+                        .title
+                        .clone()
+                        .or(osc_title)
+                        .unwrap_or_else(|| {
+                            cwd.as_deref()
+                                .map(display_dir)
+                                .unwrap_or_else(|| "shell".to_string())
+                        });
                     TabSnapshot {
                         id: t.id.clone(),
                         title,
                         cwd: cwd.clone().map(|c| abbreviate_home(&c)),
                         root: t.root.clone(),
                         focused_pane: t.focused.clone(),
+                        unread: 0,
+                        last_notification: None,
                     }
                 })
                 .collect(),
             active_tab: self.tabs[self.active].id.clone(),
+            unread_panes: Vec::new(),
         }
     }
 }
@@ -319,6 +330,7 @@ mod tests {
             pane,
             PaneMeta {
                 cwd: Some("/tmp/project".to_string()),
+                title: None,
             },
         );
         let snap = ws.snapshot(&meta);
