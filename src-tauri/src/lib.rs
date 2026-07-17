@@ -6,8 +6,8 @@ mod runs;
 #[cfg(unix)]
 mod server;
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use cmux_core::pty::PtyManager;
@@ -33,6 +33,22 @@ pub struct AppState {
     pub run_waiters: Mutex<HashMap<String, Vec<std::sync::mpsc::Sender<Option<i32>>>>>,
     /// (repo_root, branch) → PR status; None = checked, no PR.
     pub pr_cache: Mutex<HashMap<(String, String), Option<cmux_protocol::PrStatus>>>,
+    /// Command panes restored from a previous session: they attach idle
+    /// (a keypress reruns) instead of auto-running their command.
+    pub restored_panes: Mutex<HashSet<String>>,
+    /// Set on every workspace change; the saver thread persists and clears.
+    pub session_dirty: AtomicBool,
+}
+
+pub fn save_session(state: &AppState) {
+    let file = {
+        let ws = state.workspace.lock().unwrap();
+        let meta = state.meta.lock().unwrap();
+        cmux_core::session::capture(&ws, &meta)
+    };
+    if let Err(e) = cmux_core::session::save(&file) {
+        eprintln!("cmux: session save failed: {e}");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,13 +59,25 @@ pub fn run() {
         eprintln!("cmux: config error, using defaults: {err}");
     }
 
+    // Restore the previous session; command panes come back idle.
+    let (workspace, meta) = cmux_core::session::load()
+        .and_then(cmux_core::session::restore)
+        .unwrap_or_else(|| (Workspace::default(), HashMap::new()));
+    let restored_panes: HashSet<String> = meta
+        .iter()
+        .filter(|(_, m)| m.command.is_some())
+        .map(|(id, _)| id.clone())
+        .collect();
+    cmux_core::session::gc_scrollback(&workspace.all_pane_ids());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState {
             pty: PtyManager::new(),
-            workspace: Mutex::new(Workspace::default()),
-            meta: Mutex::new(HashMap::new()),
+            workspace: Mutex::new(workspace),
+            meta: Mutex::new(meta),
             config: Mutex::new(cmux_core::config::resolve(&cfg)),
             notifications: Mutex::new(Vec::new()),
             window_focused: AtomicBool::new(true),
@@ -59,6 +87,8 @@ pub fn run() {
             run_captures: Mutex::new(HashMap::new()),
             run_waiters: Mutex::new(HashMap::new()),
             pr_cache: Mutex::new(HashMap::new()),
+            restored_panes: Mutex::new(restored_panes),
+            session_dirty: AtomicBool::new(false),
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Focused(focused) = event {
@@ -73,6 +103,7 @@ pub fn run() {
             setup_menu(app.handle())?;
             intel::spawn(app.handle().clone());
             config_watch::spawn(app.handle().clone());
+            spawn_session_saver(app.handle().clone());
             #[cfg(unix)]
             server::spawn(app.handle().clone());
             Ok(())
@@ -94,14 +125,17 @@ pub fn run() {
             commands::list_notifications,
             commands::mark_all_notifications_read,
             commands::resolve_screen_read,
+            commands::store_scrollback,
+            commands::load_scrollback,
             commands::write_pty,
             commands::resize_pty,
             commands::ack_pty,
         ])
         .build(tauri::generate_context!())
         .expect("error while running cmux")
-        .run(|_app, event| {
+        .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                save_session(&app.state::<AppState>());
                 #[cfg(unix)]
                 {
                     if let Some(disc) = cmux_core::ipc::read_discovery() {
@@ -113,6 +147,28 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Debounced session writer: persists at most once a second, only when
+/// the workspace actually changed. Also asks the webview to serialize
+/// scrollback every 30s — driven from Rust because WKWebView suspends JS
+/// timers in occluded windows.
+fn spawn_session_saver(handle: tauri::AppHandle) {
+    use tauri::Emitter;
+    std::thread::spawn(move || {
+        let mut tick: u64 = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            tick += 1;
+            let state = handle.state::<AppState>();
+            if state.session_dirty.swap(false, Ordering::Relaxed) {
+                save_session(&state);
+            }
+            if tick.is_multiple_of(30) {
+                let _ = handle.emit("scrollback-save-request", ());
+            }
+        }
+    });
 }
 
 /// Minimal app menu: keeps Edit roles (so Cmd+C/V reach the webview's

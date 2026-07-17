@@ -15,7 +15,7 @@ import { SplitLayer } from "./layout/SplitLayer";
 import { CommandPalette } from "./palette/CommandPalette";
 import { NotificationPanel } from "./notifications/NotificationPanel";
 import { NotificationDto, listNotifications } from "./bindings";
-import { readScreenText } from "./terminal/registry";
+import { readScreenText, saveAllScrollbacks } from "./terminal/registry";
 import { invoke } from "@tauri-apps/api/core";
 
 const resolveScreenRead = (requestId: number, text: string) =>
@@ -59,7 +59,16 @@ export default function App() {
         readScreenText(e.payload.paneId, e.payload.lines),
       );
     });
+    // Scrollback persistence: cadence comes from Rust (webview timers are
+    // suspended in occluded windows); blur catches "about to quit".
+    const unlistenScrollback = listen("scrollback-save-request", () =>
+      saveAllScrollbacks(),
+    );
+    const onBlur = () => saveAllScrollbacks();
+    window.addEventListener("blur", onBlur);
     return () => {
+      void unlistenScrollback.then((fn) => fn());
+      window.removeEventListener("blur", onBlur);
       void unlistenRead.then((fn) => fn());
       disposed = true;
       void unlistenWs.then((fn) => fn());

@@ -102,13 +102,23 @@ export const setSplitRatios = (
   path: number[],
   ratios: number[],
 ) => invoke<void>("set_split_ratios", { tabId, path, ratios });
-/** Returns true when a fresh shell was spawned (vs re-attached). */
+/** "spawned" | "reattached" | "restored" (session command pane, idle). */
 export const attachPane = (
   paneId: string,
   cols: number,
   rows: number,
   onData: Channel<PtyData>,
-) => invoke<boolean>("attach_pane", { paneId, cols, rows, onData });
+) =>
+  invoke<"spawned" | "reattached" | "restored">("attach_pane", {
+    paneId,
+    cols,
+    rows,
+    onData,
+  });
+export const storeScrollback = (paneId: string, data: string) =>
+  invoke<void>("store_scrollback", { paneId, data });
+export const loadScrollback = (paneId: string) =>
+  invoke<string | null>("load_scrollback", { paneId });
 export const writePty = (paneId: string, data: string) =>
   invoke<void>("write_pty", { paneId, data });
 export const resizePty = (paneId: string, cols: number, rows: number) =>

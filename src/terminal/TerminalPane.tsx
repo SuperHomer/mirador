@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
 import { registerTerminal, unregisterTerminal } from "./registry";
 import { useConfigStore } from "../state/configStore";
@@ -11,8 +12,12 @@ import {
   resizePty,
   ackPty,
   focusPane,
+  loadScrollback,
   PtyData,
 } from "../bindings";
+
+/** Panes whose scrollback was already restored this app session. */
+const restoredScrollback = new Set<string>();
 
 /** Ack processed output back to Rust every 256KB to release backpressure. */
 const ACK_THRESHOLD = 256 * 1024;
@@ -53,7 +58,9 @@ export function TerminalPane({ paneId, focused, unread, agentCommand }: Props) {
 
     const term = createTerminal(cfg);
     termRef.current = term;
-    registerTerminal(paneId, term);
+    const serialize = new SerializeAddon();
+    term.loadAddon(serialize);
+    registerTerminal(paneId, term, serialize);
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
@@ -83,11 +90,33 @@ export function TerminalPane({ paneId, focused, unread, agentCommand }: Props) {
       exited = false;
       pendingAck = 0;
       try {
-        const spawned = await attachPane(paneId, term.cols, term.rows, channel);
+        // Previous session's scrollback, once per pane per app run.
+        if (!restoredScrollback.has(paneId)) {
+          const saved = await loadScrollback(paneId);
+          // A disposed mount must go no further: attaching would re-sink
+          // the PTY to a dead terminal (StrictMode remount race). It also
+          // must not mark the pane restored — the live mount does that.
+          if (disposed) return;
+          restoredScrollback.add(paneId);
+          if (saved) {
+            term.write(saved);
+            term.writeln("\r\n\x1b[2m──── session restored ────\x1b[0m");
+          }
+        }
         if (disposed) return;
+        const status = await attachPane(paneId, term.cols, term.rows, channel);
+        if (disposed) return;
+        if (status === "restored") {
+          // Command pane from the previous session: idle until a keypress.
+          exited = true;
+          term.writeln(
+            `\x1b[2m[press any key to rerun: ${agentCommand ?? "command"}]\x1b[0m`,
+          );
+          return;
+        }
         const buf = term.buffer.active;
         if (
-          !spawned &&
+          status === "reattached" &&
           !agentCommand &&
           buf.cursorX === 0 &&
           buf.cursorY === 0

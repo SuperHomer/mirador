@@ -59,6 +59,9 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
 pub fn emit_workspace(app: &AppHandle) {
     let state = app.state::<AppState>();
     let snapshot = build_snapshot(&state);
+    state
+        .session_dirty
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = app.emit("workspace-changed", snapshot);
 }
 
@@ -209,9 +212,10 @@ pub fn set_split_ratios(
     }
 }
 
-/// Connects a mounted frontend pane to its PTY: spawns the shell on first
-/// attach (or after exit), or just swaps the output channel on remount.
-/// Returns true when a fresh shell was spawned.
+/// Connects a mounted frontend pane to its PTY: spawns on first attach
+/// (or after exit), swaps the output channel on remount. Returns
+/// "spawned", "reattached", or "restored" (command pane from a previous
+/// session: left idle, keypress reruns).
 #[tauri::command]
 pub fn attach_pane(
     app: AppHandle,
@@ -220,7 +224,7 @@ pub fn attach_pane(
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
-) -> Result<bool, String> {
+) -> Result<String, String> {
     // Command panes run their command directly in the PTY (exit detection,
     // output capture); shell panes get an interactive login shell.
     let (cwd, pane_command) = {
@@ -248,7 +252,13 @@ pub fn attach_pane(
     if state.pty.is_running(&pane_id) {
         state.pty.set_sink(&pane_id, sink);
         let _ = state.pty.resize(&pane_id, cols, rows);
-        return Ok(false);
+        return Ok("reattached".into());
+    }
+
+    // Session-restored command panes attach idle: never auto-rerun
+    // `npm test` just because the app relaunched.
+    if state.restored_panes.lock().unwrap().remove(&pane_id) && pane_command.is_some() {
+        return Ok("restored".into());
     }
 
     // Scanner events run on the pane's forwarder thread.
@@ -344,7 +354,21 @@ pub fn attach_pane(
         },
     )?;
 
-    Ok(true)
+    Ok("spawned".into())
+}
+
+/// Frontend persists a pane's serialized scrollback (30s tick / blur).
+#[tauri::command]
+pub fn store_scrollback(pane_id: String, data: String) {
+    if let Err(e) = cmux_core::session::save_scrollback(&pane_id, &data) {
+        eprintln!("cmux: scrollback save failed for {pane_id}: {e}");
+    }
+}
+
+/// Scrollback from the previous session, if any.
+#[tauri::command]
+pub fn load_scrollback(pane_id: String) -> Option<String> {
+    cmux_core::session::load_scrollback(&pane_id)
 }
 
 #[tauri::command]
@@ -379,5 +403,6 @@ fn kill_panes(state: &State<'_, AppState>, panes: &[String]) {
     notify::forget_panes(state, panes);
     for pane in panes {
         runs::forget_pane(state, pane);
+        cmux_core::session::delete_scrollback(pane);
     }
 }
