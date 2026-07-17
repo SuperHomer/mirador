@@ -63,9 +63,21 @@ pub fn run() {
     }
 
     // Restore the previous session; command panes come back idle.
-    let (workspace, meta) = cmux_core::session::load()
+    let (workspace, mut meta) = cmux_core::session::load()
         .and_then(cmux_core::session::restore)
         .unwrap_or_else(|| (Workspace::default(), HashMap::new()));
+    // Panes that ran a known agent offer to resume its session: they
+    // become command panes running `<agent> --resume <id>` (idle until a
+    // keypress, like every restored command pane).
+    for m in meta.values_mut() {
+        if let Some(session) = &m.agent_session {
+            if let Some((agent, id)) = session.split_once(':') {
+                if agent == "claude" {
+                    m.command = Some(format!("claude --resume {id}"));
+                }
+            }
+        }
+    }
     let restored_panes: HashSet<String> = meta
         .iter()
         .filter(|(_, m)| m.command.is_some())

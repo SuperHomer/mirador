@@ -95,6 +95,15 @@ enum Command {
         #[arg(trailing_var_arg = true, required = true)]
         body: Vec<String>,
     },
+    /// Claude Code hook handler (wired up by `cmux hooks setup`); reads
+    /// the hook payload from stdin.
+    #[command(hide = true)]
+    ClaudeHook { event: String },
+    /// Install or remove the Claude Code hooks that light up cmux tabs.
+    Hooks {
+        /// "setup" or "remove"
+        action: String,
+    },
     /// Symlink this binary into ~/.local/bin for PATH access.
     Install,
 }
@@ -246,10 +255,13 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             Request::Notify {
                 pane_id: None,
+                tty: own_tty(),
                 title,
                 body,
             }
         }
+        Command::ClaudeHook { event } => return claude_hook(&event),
+        Command::Hooks { action } => return hooks(&action),
         Command::Install => return install(),
     };
 
@@ -432,6 +444,155 @@ fn print_osc_notify(title: Option<&str>, body: &str) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     out.flush().map_err(|e| e.to_string())
+}
+
+/// The tty of our parent process (the shell/agent inside a cmux pane) —
+/// our own stdio may be pipes when invoked as a hook.
+#[cfg(unix)]
+fn own_tty() -> Option<String> {
+    let ppid = std::os::unix::process::parent_id();
+    let output = std::process::Command::new("ps")
+        .args(["-o", "tty=", "-p", &ppid.to_string()])
+        .output()
+        .ok()?;
+    let tty = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if tty.is_empty() || tty.contains('?') {
+        None
+    } else {
+        Some(tty)
+    }
+}
+
+#[cfg(not(unix))]
+fn own_tty() -> Option<String> {
+    None
+}
+
+/// Handles a Claude Code hook event: payload arrives as JSON on stdin.
+/// Never fails loudly — a broken hook must not break Claude Code.
+fn claude_hook(event: &str) -> Result<(), String> {
+    let mut input = String::new();
+    use std::io::Read;
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or(serde_json::json!({}));
+    let tty = own_tty();
+
+    if let Some(session_id) = payload["session_id"].as_str() {
+        let _ = send_request(Request::AgentSession {
+            pane_id: None,
+            tty: tty.clone(),
+            agent: "claude".into(),
+            session_id: session_id.to_string(),
+        });
+    }
+
+    let notify = match event {
+        "notification" => Some(
+            payload["message"]
+                .as_str()
+                .unwrap_or("needs your attention")
+                .to_string(),
+        ),
+        "stop" => Some("finished responding".to_string()),
+        _ => None, // session-start etc: session capture only
+    };
+    if let Some(body) = notify {
+        let _ = send_request(Request::Notify {
+            pane_id: None,
+            tty,
+            title: Some("Claude Code".into()),
+            body,
+        });
+    }
+    Ok(())
+}
+
+const HOOK_EVENTS: &[(&str, &str)] = &[
+    ("Notification", "notification"),
+    ("Stop", "stop"),
+    ("SessionStart", "session-start"),
+];
+
+/// Idempotently installs (or removes) cmux hooks in ~/.claude/settings.json.
+fn hooks(action: &str) -> Result<(), String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let path = std::path::PathBuf::from(home).join(".claude/settings.json");
+    let mut settings: serde_json::Value = match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+        Err(_) => serde_json::json!({}),
+    };
+    let hooks_obj = settings
+        .as_object_mut()
+        .ok_or("settings.json is not an object")?
+        .entry("hooks")
+        .or_insert(serde_json::json!({}));
+
+    match action {
+        "setup" => {
+            for (hook_event, cli_event) in HOOK_EVENTS {
+                let command = format!("cmux claude-hook {cli_event}");
+                let entries = hooks_obj
+                    .as_object_mut()
+                    .ok_or("hooks is not an object")?
+                    .entry(*hook_event)
+                    .or_insert(serde_json::json!([]));
+                let list = entries.as_array_mut().ok_or("hook entry is not an array")?;
+                let already = list.iter().any(|matcher| {
+                    matcher["hooks"]
+                        .as_array()
+                        .map(|hs| {
+                            hs.iter().any(|h| {
+                                h["command"].as_str().unwrap_or("").contains("cmux claude-hook")
+                            })
+                        })
+                        .unwrap_or(false)
+                });
+                if !already {
+                    list.push(serde_json::json!({
+                        "hooks": [{ "type": "command", "command": command }]
+                    }));
+                    println!("installed {hook_event} hook");
+                } else {
+                    println!("{hook_event} hook already installed");
+                }
+            }
+        }
+        "remove" => {
+            if let Some(obj) = hooks_obj.as_object_mut() {
+                for (hook_event, _) in HOOK_EVENTS {
+                    if let Some(list) = obj.get_mut(*hook_event).and_then(|v| v.as_array_mut()) {
+                        list.retain(|matcher| {
+                            !matcher["hooks"]
+                                .as_array()
+                                .map(|hs| {
+                                    hs.iter().any(|h| {
+                                        h["command"]
+                                            .as_str()
+                                            .unwrap_or("")
+                                            .contains("cmux claude-hook")
+                                    })
+                                })
+                                .unwrap_or(false)
+                        });
+                    }
+                }
+                println!("removed cmux hooks");
+            }
+        }
+        other => return Err(format!("unknown hooks action `{other}` (setup|remove)")),
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    println!("updated {}", path.display());
+    println!("note: make sure `cmux` is on PATH for Claude Code (cmux install)");
+    Ok(())
 }
 
 fn install() -> Result<(), String> {

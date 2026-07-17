@@ -23,6 +23,9 @@ pub struct PaneMeta {
     pub ports: Vec<u16>,
     /// Browser pane: current URL of its child webview.
     pub browser_url: Option<String>,
+    /// "agent:session_id" of the AI agent running in this pane
+    /// (e.g. "claude:abc-123"), captured via hooks for resume-on-restore.
+    pub agent_session: Option<String>,
 }
 
 #[derive(Debug)]

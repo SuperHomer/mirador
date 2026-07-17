@@ -143,12 +143,34 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::Notify {
             pane_id,
+            tty,
             title,
             body,
         } => {
-            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            let pane = pane_id
+                .or_else(|| tty.as_deref().and_then(|t| pane_by_tty(&state, t)))
+                .unwrap_or_else(|| focused_pane(&state));
             notify::handle_notification(app, &pane, title, body);
-            Ok(Value::Null)
+            Ok(json!({ "paneId": pane }))
+        }
+        Request::AgentSession {
+            pane_id,
+            tty,
+            agent,
+            session_id,
+        } => {
+            let pane = pane_id
+                .or_else(|| tty.as_deref().and_then(|t| pane_by_tty(&state, t)))
+                .ok_or("could not resolve the pane for this agent session")?;
+            {
+                let mut meta = state.meta.lock().unwrap();
+                meta.entry(pane.clone()).or_default().agent_session =
+                    Some(format!("{agent}:{session_id}"));
+            }
+            state
+                .session_dirty
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(json!({ "paneId": pane }))
         }
         Request::Run {
             command,
@@ -235,6 +257,23 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(Value::Null)
         }
     }
+}
+
+/// Finds the pane whose shell owns the given tty (e.g. "ttys004") — how a
+/// process running inside a pane identifies its own pane.
+fn pane_by_tty(state: &AppState, tty: &str) -> Option<String> {
+    let wanted = tty.trim_start_matches("/dev/");
+    for (pane, pid) in state.pty.pids() {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "tty=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        let pane_tty = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if pane_tty == wanted {
+            return Some(pane);
+        }
+    }
+    None
 }
 
 /// Default browser pane: the given one, or the first browser pane of the

@@ -136,9 +136,22 @@ pub enum Request {
     Notify {
         #[serde(default)]
         pane_id: Option<String>,
+        /// Target the pane whose shell owns this tty (e.g. "ttys004") —
+        /// how hooks running inside a pane address their own pane.
+        #[serde(default)]
+        tty: Option<String>,
         #[serde(default)]
         title: Option<String>,
         body: String,
+    },
+    /// Records the agent session running in a pane (for resume-on-restore).
+    AgentSession {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        tty: Option<String>,
+        agent: String,
+        session_id: String,
     },
     /// Agent-visible command execution: opens a command pane (split of the
     /// focused pane, or a new tab) whose PTY runs the command directly —
