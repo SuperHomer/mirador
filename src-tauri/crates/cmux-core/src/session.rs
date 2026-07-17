@@ -25,6 +25,8 @@ pub struct SessionTab {
 pub struct SessionPane {
     pub cwd: Option<String>,
     pub command: Option<String>,
+    #[serde(default)]
+    pub browser_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +110,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                     SessionPane {
                         cwd: m.and_then(|m| m.cwd.clone()),
                         command: m.and_then(|m| m.command.clone()),
+                        browser_url: m.and_then(|m| m.browser_url.clone()),
                     },
                 )
             })
@@ -169,6 +172,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                 PaneMeta {
                     cwd: p.cwd,
                     command: p.command,
+                    browser_url: p.browser_url,
                     ..Default::default()
                 },
             )

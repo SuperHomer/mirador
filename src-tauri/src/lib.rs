@@ -1,3 +1,4 @@
+mod browser;
 mod commands;
 mod config_watch;
 mod intel;
@@ -36,6 +37,8 @@ pub struct AppState {
     /// Command panes restored from a previous session: they attach idle
     /// (a keypress reruns) instead of auto-running their command.
     pub restored_panes: Mutex<HashSet<String>>,
+    /// Pending browser automation round-trips.
+    pub browser_bridge: browser::BrowserBridge,
     /// Set on every workspace change; the saver thread persists and clears.
     pub session_dirty: AtomicBool,
 }
@@ -88,6 +91,7 @@ pub fn run() {
             run_waiters: Mutex::new(HashMap::new()),
             pr_cache: Mutex::new(HashMap::new()),
             restored_panes: Mutex::new(restored_panes),
+            browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
         })
         .on_window_event(|window, event| {
@@ -127,6 +131,11 @@ pub fn run() {
             commands::resolve_screen_read,
             commands::store_scrollback,
             commands::load_scrollback,
+            commands::open_browser,
+            commands::set_browser_bounds,
+            commands::set_browser_visible,
+            commands::browser_navigate,
+            commands::browser_history,
             commands::write_pty,
             commands::resize_pty,
             commands::ack_pty,

@@ -80,6 +80,11 @@ enum Command {
     },
     /// Command-pane run history (what ran, when, exit codes).
     Runs,
+    /// Drive the built-in browser pane (agents verify web changes here).
+    Browser {
+        #[command(subcommand)]
+        action: BrowserAction,
+    },
     /// Send a notification (prints OSC 777; works from inside any pane,
     /// even over SSH). Use --socket to target the app directly instead.
     Notify {
@@ -92,6 +97,58 @@ enum Command {
     },
     /// Symlink this binary into ~/.local/bin for PATH access.
     Install,
+}
+
+#[derive(Subcommand)]
+enum BrowserAction {
+    /// Open a browser pane (split of the focused pane, or --tab).
+    Open {
+        url: String,
+        #[arg(long)]
+        tab: bool,
+    },
+    /// Navigate the browser pane to a URL.
+    Navigate {
+        url: String,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Accessibility-style snapshot of the page (elements with stable ids).
+    Snapshot {
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Click an element by snapshot id or CSS selector.
+    Click {
+        target: String,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Fill an input (snapshot id or CSS selector) with a value.
+    Fill {
+        target: String,
+        value: String,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Evaluate JavaScript in the page; prints the JSON result.
+    Eval {
+        js: String,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    Back {
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    Forward {
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    Reload {
+        #[arg(long)]
+        pane: Option<String>,
+    },
 }
 
 fn main() {
@@ -141,6 +198,43 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Runs => Request::ListRuns,
+        Command::Browser { action } => match action {
+            BrowserAction::Open { url, tab } => Request::BrowserOpen {
+                url,
+                target: tab.then(|| "tab".to_string()),
+            },
+            BrowserAction::Navigate { url, pane } => Request::BrowserNavigate {
+                pane_id: pane,
+                url,
+            },
+            BrowserAction::Snapshot { pane } => Request::BrowserSnapshot { pane_id: pane },
+            BrowserAction::Click { target, pane } => Request::BrowserClick {
+                pane_id: pane,
+                target,
+            },
+            BrowserAction::Fill {
+                target,
+                value,
+                pane,
+            } => Request::BrowserFill {
+                pane_id: pane,
+                target,
+                value,
+            },
+            BrowserAction::Eval { js, pane } => Request::BrowserEval { pane_id: pane, js },
+            BrowserAction::Back { pane } => Request::BrowserHistory {
+                pane_id: pane,
+                action: "back".into(),
+            },
+            BrowserAction::Forward { pane } => Request::BrowserHistory {
+                pane_id: pane,
+                action: "forward".into(),
+            },
+            BrowserAction::Reload { pane } => Request::BrowserHistory {
+                pane_id: pane,
+                action: "reload".into(),
+            },
+        },
         Command::Notify {
             title,
             socket,
@@ -221,6 +315,10 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 std::process::exit(code as i32);
             } else if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
                 println!("{text}");
+            } else if map.contains_key("nodes") {
+                render_page_snapshot(&data);
+            } else if map.contains_key("value") {
+                println!("{}", serde_json::to_string_pretty(&map["value"]).unwrap());
             } else if map.contains_key("runs") {
                 render_runs(&data);
             } else if let Some(id) = map
@@ -238,6 +336,40 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
         other => println!("{}", serde_json::to_string_pretty(other).unwrap()),
     }
     Ok(())
+}
+
+fn render_page_snapshot(data: &serde_json::Value) {
+    println!(
+        "{} — {}",
+        data["title"].as_str().unwrap_or(""),
+        data["url"].as_str().unwrap_or("")
+    );
+    for node in data["nodes"].as_array().unwrap_or(&Vec::new()) {
+        let mut extras = Vec::new();
+        if let Some(t) = node["type"].as_str() {
+            extras.push(format!("type={t}"));
+        }
+        if let Some(v) = node["value"].as_str() {
+            extras.push(format!("value=\"{v}\""));
+        }
+        if let Some(h) = node["href"].as_str() {
+            extras.push(format!("href={h}"));
+        }
+        if node["checked"].as_bool() == Some(true) {
+            extras.push("checked".into());
+        }
+        if node["disabled"].as_bool() == Some(true) {
+            extras.push("disabled".into());
+        }
+        println!(
+            "[{}] <{}> \"{}\"{}{}",
+            node["id"],
+            node["tag"].as_str().unwrap_or(""),
+            node["text"].as_str().unwrap_or(""),
+            if extras.is_empty() { "" } else { " " },
+            extras.join(" ")
+        );
+    }
 }
 
 fn render_runs(data: &serde_json::Value) {

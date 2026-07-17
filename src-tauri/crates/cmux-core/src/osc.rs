@@ -338,7 +338,7 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn decode_base64(s: &str) -> Option<String> {
+pub fn decode_base64(s: &str) -> Option<String> {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut lookup = [255u8; 256];
     for (i, &c) in TABLE.iter().enumerate() {

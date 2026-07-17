@@ -53,6 +53,17 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             }
         }
     }
+    snapshot.browser_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                m.browser_url.as_ref().map(|u| cmux_protocol::BrowserPane {
+                    pane_id: pane.clone(),
+                    url: u.clone(),
+                })
+            })
+            .collect()
+    };
     snapshot
 }
 
@@ -114,7 +125,7 @@ pub fn new_tab(
 #[tauri::command]
 pub fn close_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String) {
     let killed = state.workspace.lock().unwrap().close_tab(&tab_id);
-    kill_panes(&state, &killed);
+    kill_panes(&app, &state, &killed);
     emit_workspace(&app);
 }
 
@@ -172,7 +183,7 @@ pub fn split_pane(
 #[tauri::command]
 pub fn close_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
     let killed = state.workspace.lock().unwrap().close_pane(&pane_id);
-    kill_panes(&state, &killed);
+    kill_panes(&app, &state, &killed);
     emit_workspace(&app);
 }
 
@@ -357,6 +368,68 @@ pub fn attach_pane(
     Ok("spawned".into())
 }
 
+/// Opens a browser pane: split of `pane_id` (or a new tab when `tab` is
+/// true). The child webview is created when the frontend reports bounds.
+#[tauri::command]
+pub fn open_browser(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+    url: String,
+) -> Result<String, String> {
+    let new_pane = if tab {
+        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        pane
+    } else {
+        let target = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&target, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {target}"))?
+    };
+    state
+        .meta
+        .lock()
+        .unwrap()
+        .entry(new_pane.clone())
+        .or_default()
+        .browser_url = Some(url);
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// Frontend reports a browser pane's rect; creates or repositions the
+/// native child webview.
+#[tauri::command]
+pub fn set_browser_bounds(
+    app: AppHandle,
+    pane_id: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    crate::browser::ensure_webview(&app, &pane_id, x, y, w, h)
+}
+
+#[tauri::command]
+pub fn set_browser_visible(app: AppHandle, pane_id: String, visible: bool) {
+    crate::browser::set_visible(&app, &pane_id, visible);
+}
+
+#[tauri::command]
+pub fn browser_navigate(app: AppHandle, pane_id: String, url: String) -> Result<(), String> {
+    crate::browser::navigate(&app, &pane_id, &url)
+}
+
+#[tauri::command]
+pub fn browser_history(app: AppHandle, pane_id: String, action: String) -> Result<(), String> {
+    crate::browser::history(&app, &pane_id, &action)
+}
+
 /// Frontend persists a pane's serialized scrollback (30s tick / blur).
 #[tauri::command]
 pub fn store_scrollback(pane_id: String, data: String) {
@@ -393,7 +466,7 @@ pub fn ack_pty(state: State<'_, AppState>, pane_id: String, bytes: u64) {
     state.pty.ack(&pane_id, bytes);
 }
 
-fn kill_panes(state: &State<'_, AppState>, panes: &[String]) {
+fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
     let mut meta = state.meta.lock().unwrap();
     for pane in panes {
         let _ = state.pty.close(pane);
@@ -402,6 +475,7 @@ fn kill_panes(state: &State<'_, AppState>, panes: &[String]) {
     drop(meta);
     notify::forget_panes(state, panes);
     for pane in panes {
+        crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);
         cmux_core::session::delete_scrollback(pane);
     }

@@ -34,11 +34,17 @@ export interface AgentPane {
   command: string;
 }
 
+export interface BrowserPaneInfo {
+  paneId: string;
+  url: string;
+}
+
 export interface WorkspaceSnapshot {
   tabs: TabSnapshot[];
   activeTab: string;
   unreadPanes: string[];
   agentPanes: AgentPane[];
+  browserPanes: BrowserPaneInfo[];
 }
 
 export interface NotificationDto {
@@ -115,6 +121,23 @@ export const attachPane = (
     rows,
     onData,
   });
+export const openBrowser = (paneId: string | null, tab: boolean, url: string) =>
+  invoke<string>("open_browser", { paneId, tab, url });
+export const setBrowserBounds = (
+  paneId: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) => invoke<void>("set_browser_bounds", { paneId, x, y, w, h });
+export const setBrowserVisible = (paneId: string, visible: boolean) =>
+  invoke<void>("set_browser_visible", { paneId, visible });
+export const browserNavigate = (paneId: string, url: string) =>
+  invoke<void>("browser_navigate", { paneId, url });
+export const browserHistory = (
+  paneId: string,
+  action: "back" | "forward" | "reload",
+) => invoke<void>("browser_history", { paneId, action });
 export const storeScrollback = (paneId: string, data: string) =>
   invoke<void>("store_scrollback", { paneId, data });
 export const loadScrollback = (paneId: string) =>

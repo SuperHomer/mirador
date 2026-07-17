@@ -14,9 +14,20 @@ import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
 import { CommandPalette } from "./palette/CommandPalette";
 import { NotificationPanel } from "./notifications/NotificationPanel";
-import { NotificationDto, listNotifications } from "./bindings";
+import {
+  NotificationDto,
+  Node,
+  listNotifications,
+  setBrowserVisible,
+} from "./bindings";
+import { useUiStore } from "./state/uiStore";
 import { readScreenText, saveAllScrollbacks } from "./terminal/registry";
 import { invoke } from "@tauri-apps/api/core";
+
+function collectPaneIds(node: Node): string[] {
+  if (node.type === "leaf") return [node.paneId];
+  return node.children.flatMap(collectPaneIds);
+}
 
 const resolveScreenRead = (requestId: number, text: string) =>
   invoke<void>("resolve_screen_read", { requestId, text });
@@ -26,7 +37,22 @@ export default function App() {
   const setSnapshot = useWorkspaceStore((s) => s.setSnapshot);
   const config = useConfigStore((s) => s.config);
   const setConfig = useConfigStore((s) => s.setConfig);
+  const paletteOpen = useUiStore((s) => s.paletteOpen);
+  const notificationsOpen = useUiStore((s) => s.notificationsOpen);
   useKeymap();
+
+  // Native child webviews float above the host webview: hide the ones on
+  // inactive tabs, and all of them while an overlay is open.
+  useEffect(() => {
+    if (!snapshot) return;
+    const activeTab = snapshot.tabs.find((t) => t.id === snapshot.activeTab);
+    const activePanes = activeTab ? collectPaneIds(activeTab.root) : [];
+    const overlaysOpen = paletteOpen || notificationsOpen;
+    for (const b of snapshot.browserPanes) {
+      const visible = !overlaysOpen && activePanes.includes(b.paneId);
+      void setBrowserVisible(b.paneId, visible);
+    }
+  }, [snapshot, paletteOpen, notificationsOpen]);
 
   useEffect(() => {
     let disposed = false;
@@ -95,6 +121,7 @@ export default function App() {
               tab={tab}
               unreadPanes={snapshot.unreadPanes}
               agentPanes={snapshot.agentPanes}
+              browserPanes={snapshot.browserPanes}
             />
           </div>
         ))}

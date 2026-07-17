@@ -21,6 +21,8 @@ pub struct PaneMeta {
     pub repo_root: Option<String>,
     /// Listening TCP ports of the pane's process tree (intel poller).
     pub ports: Vec<u16>,
+    /// Browser pane: current URL of its child webview.
+    pub browser_url: Option<String>,
 }
 
 #[derive(Debug)]
@@ -261,6 +263,7 @@ impl Workspace {
             active_tab: self.tabs[self.active].id.clone(),
             unread_panes: Vec::new(),
             agent_panes: Vec::new(),
+            browser_panes: Vec::new(),
         }
     }
 }

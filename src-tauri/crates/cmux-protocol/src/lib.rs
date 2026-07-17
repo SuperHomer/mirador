@@ -86,6 +86,16 @@ pub struct WorkspaceSnapshot {
     /// Command panes (frontend draws the 🤖 chip).
     #[serde(default)]
     pub agent_panes: Vec<AgentPane>,
+    /// Browser panes and their current URLs.
+    #[serde(default)]
+    pub browser_panes: Vec<BrowserPane>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserPane {
+    pub pane_id: String,
+    pub url: String,
 }
 
 /// Automation socket request. One JSON object per line; `pane_id: None`
@@ -147,6 +157,45 @@ pub enum Request {
     },
     /// Command-pane run history (the agent activity audit log).
     ListRuns,
+    /// Opens a browser pane (split of the focused pane, or a new tab).
+    BrowserOpen {
+        url: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// The Browser* verbs below default to the active tab's browser pane.
+    BrowserNavigate {
+        #[serde(default)]
+        pane_id: Option<String>,
+        url: String,
+    },
+    BrowserSnapshot {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    BrowserClick {
+        #[serde(default)]
+        pane_id: Option<String>,
+        /// Numeric id from a snapshot, or a CSS selector.
+        target: String,
+    },
+    BrowserFill {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+        value: String,
+    },
+    BrowserEval {
+        #[serde(default)]
+        pane_id: Option<String>,
+        js: String,
+    },
+    BrowserHistory {
+        #[serde(default)]
+        pane_id: Option<String>,
+        /// "back" | "forward" | "reload"
+        action: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

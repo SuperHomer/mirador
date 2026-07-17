@@ -7,6 +7,7 @@ import {
   splitPane,
   focusDirection,
   setActiveTab,
+  openBrowser,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
@@ -101,6 +102,14 @@ export const actions: ActionDef[] = [
     id: "notifications",
     title: "Notifications Panel",
     run: () => useUiStore.getState().toggleNotifications(),
+  },
+  {
+    id: "new_browser_pane",
+    title: "New Browser Pane",
+    run: () => {
+      const pane = focusedPane();
+      if (pane) void openBrowser(pane, false, "about:blank");
+    },
   },
 ];
 

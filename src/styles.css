@@ -290,6 +290,62 @@ body,
   height: 100%;
 }
 
+/* ---------- Browser pane ---------- */
+
+.browser-pane {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.browser-chrome {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--surface);
+  flex-shrink: 0;
+}
+
+.browser-chrome button {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 14px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.browser-chrome button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.browser-url {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 3px 10px;
+  outline: none;
+  user-select: text;
+}
+
+.browser-url:focus {
+  border-color: var(--accent);
+}
+
+.browser-placeholder {
+  flex: 1;
+  background: #ffffff10;
+}
+
 /* Command pane chip: this pane runs an agent-launched command. */
 .agent-chip {
   position: absolute;

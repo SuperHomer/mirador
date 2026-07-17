@@ -1,6 +1,13 @@
 import { useMemo, useRef, useState } from "react";
-import { Node, SplitDir, TabSnapshot, setSplitRatios } from "../bindings";
+import {
+  BrowserPaneInfo,
+  Node,
+  SplitDir,
+  TabSnapshot,
+  setSplitRatios,
+} from "../bindings";
 import { TerminalPane } from "../terminal/TerminalPane";
+import { BrowserPane } from "../browser/BrowserPane";
 
 interface Frac {
   x: number;
@@ -37,10 +44,12 @@ export function SplitLayer({
   tab,
   unreadPanes,
   agentPanes,
+  browserPanes,
 }: {
   tab: TabSnapshot;
   unreadPanes: string[];
   agentPanes: { paneId: string; command: string }[];
+  browserPanes: BrowserPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -101,18 +110,29 @@ export function SplitLayer({
 
   return (
     <div className="split-layer" ref={layerRef}>
-      {panes.map((p) => (
-        <div key={p.paneId} className="pane-slot" style={frac(p.rect)}>
-          <TerminalPane
-            paneId={p.paneId}
-            focused={p.paneId === tab.focusedPane}
-            unread={unreadPanes.includes(p.paneId)}
-            agentCommand={
-              agentPanes.find((a) => a.paneId === p.paneId)?.command
-            }
-          />
-        </div>
-      ))}
+      {panes.map((p) => {
+        const browser = browserPanes.find((b) => b.paneId === p.paneId);
+        return (
+          <div key={p.paneId} className="pane-slot" style={frac(p.rect)}>
+            {browser ? (
+              <BrowserPane
+                paneId={p.paneId}
+                url={browser.url}
+                focused={p.paneId === tab.focusedPane}
+              />
+            ) : (
+              <TerminalPane
+                paneId={p.paneId}
+                focused={p.paneId === tab.focusedPane}
+                unread={unreadPanes.includes(p.paneId)}
+                agentCommand={
+                  agentPanes.find((a) => a.paneId === p.paneId)?.command
+                }
+              />
+            )}
+          </div>
+        );
+      })}
       {dividers.map((d) => (
         <div
           key={`${d.path.join(".")}:${d.index}`}

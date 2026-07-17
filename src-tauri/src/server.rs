@@ -185,7 +185,94 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let runs = crate::runs::list(&state);
             Ok(json!({ "runs": runs }))
         }
+        Request::BrowserOpen { url, target } => {
+            let pane_id = crate::commands::open_browser(
+                app.clone(),
+                app.state(),
+                None,
+                target.as_deref() == Some("tab"),
+                url,
+            )?;
+            Ok(json!({ "paneId": pane_id }))
+        }
+        Request::BrowserNavigate { pane_id, url } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            crate::browser::navigate(app, &pane, &url)?;
+            Ok(json!({ "paneId": pane }))
+        }
+        Request::BrowserSnapshot { pane_id } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result = crate::browser::execute(app, &pane, json!({ "op": "snapshot" }))?;
+            parse_bridge_result(&pane, &result)
+        }
+        Request::BrowserClick { pane_id, target } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result =
+                crate::browser::execute(app, &pane, json!({ "op": "click", "target": target }))?;
+            parse_bridge_result(&pane, &result)
+        }
+        Request::BrowserFill {
+            pane_id,
+            target,
+            value,
+        } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result = crate::browser::execute(
+                app,
+                &pane,
+                json!({ "op": "fill", "target": target, "value": value }),
+            )?;
+            parse_bridge_result(&pane, &result)
+        }
+        Request::BrowserEval { pane_id, js } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result = crate::browser::execute(app, &pane, json!({ "op": "eval", "js": js }))?;
+            parse_bridge_result(&pane, &result)
+        }
+        Request::BrowserHistory { pane_id, action } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            crate::browser::history(app, &pane, &action)?;
+            Ok(Value::Null)
+        }
     }
+}
+
+/// Default browser pane: the given one, or the first browser pane of the
+/// active tab, or any browser pane.
+fn resolve_browser_pane(state: &AppState, pane_id: Option<String>) -> Result<String, String> {
+    if let Some(id) = pane_id {
+        return Ok(id);
+    }
+    let meta = state.meta.lock().unwrap();
+    let browser_panes: Vec<String> = meta
+        .iter()
+        .filter(|(_, m)| m.browser_url.is_some())
+        .map(|(id, _)| id.clone())
+        .collect();
+    drop(meta);
+    if browser_panes.is_empty() {
+        return Err("no browser pane (open one with `cmux browser open <url>`)".into());
+    }
+    let ws = state.workspace.lock().unwrap();
+    let active_panes = cmux_core::layout::pane_ids(&ws.active_tab().root);
+    Ok(browser_panes
+        .iter()
+        .find(|p| active_panes.contains(p))
+        .unwrap_or(&browser_panes[0])
+        .clone())
+}
+
+/// Bridge results are JSON; error payloads become protocol errors.
+fn parse_bridge_result(pane: &str, raw: &str) -> Result<Value, String> {
+    let mut value: Value =
+        serde_json::from_str(raw).map_err(|e| format!("bad bridge payload: {e}"))?;
+    if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
+        return Err(err.to_string());
+    }
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("paneId".into(), json!(pane));
+    }
+    Ok(value)
 }
 
 /// Round-trips to the webview: the frontend serializes the pane's buffer
