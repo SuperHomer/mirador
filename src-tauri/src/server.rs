@@ -22,10 +22,10 @@ pub fn spawn(app: AppHandle) {
         let path = cmux_core::ipc::default_socket_path();
 
         // A stale socket from a crashed instance blocks bind; a live one
-        // means another cmux owns automation — leave it alone.
+        // means another Mirador owns automation — leave it alone.
         if path.exists() {
             if UnixStream::connect(&path).is_ok() {
-                eprintln!("cmux: automation socket already served by another instance");
+                eprintln!("mirador: automation socket already served by another instance");
                 return;
             }
             let _ = std::fs::remove_file(&path);
@@ -34,13 +34,13 @@ pub fn spawn(app: AppHandle) {
         let listener = match UnixListener::bind(&path) {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("cmux: automation socket unavailable: {e}");
+                eprintln!("mirador: automation socket unavailable: {e}");
                 return;
             }
         };
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         if let Err(e) = cmux_core::ipc::write_discovery(&path) {
-            eprintln!("cmux: could not write socket discovery file: {e}");
+            eprintln!("mirador: could not write socket discovery file: {e}");
         }
 
         for conn in listener.incoming() {
@@ -290,7 +290,7 @@ fn resolve_browser_pane(state: &AppState, pane_id: Option<String>) -> Result<Str
         .collect();
     drop(meta);
     if browser_panes.is_empty() {
-        return Err("no browser pane (open one with `cmux browser open <url>`)".into());
+        return Err("no browser pane (open one with `mira browser open <url>`)".into());
     }
     let ws = state.workspace.lock().unwrap();
     let active_panes = cmux_core::layout::pane_ids(&ws.active_tab().root);

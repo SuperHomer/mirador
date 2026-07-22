@@ -434,7 +434,7 @@ pub fn browser_history(app: AppHandle, pane_id: String, action: String) -> Resul
 #[tauri::command]
 pub fn store_scrollback(pane_id: String, data: String) {
     if let Err(e) = cmux_core::session::save_scrollback(&pane_id, &data) {
-        eprintln!("cmux: scrollback save failed for {pane_id}: {e}");
+        eprintln!("mirador: scrollback save failed for {pane_id}: {e}");
     }
 }
 

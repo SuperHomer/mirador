@@ -43,7 +43,7 @@ pub fn data_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
-            .join("Library/Application Support/cmux")
+            .join("Library/Application Support/Mirador")
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -53,11 +53,11 @@ pub fn data_dir() -> PathBuf {
                 PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
                     .join(".local/share")
             })
-            .join("cmux")
+            .join("mirador")
     }
     #[cfg(windows)]
     {
-        PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("cmux")
+        PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("mirador")
     }
 }
 

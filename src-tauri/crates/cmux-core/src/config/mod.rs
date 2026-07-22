@@ -1,7 +1,7 @@
-//! cmux configuration: `~/.config/cmux/cmux.json` is the primary config;
+//! Mirador configuration: `~/.config/mirador/mirador.json` is the primary config;
 //! themes can additionally be imported from Ghostty configs or wezterm
 //! color-scheme TOML files. Resolution order (later wins):
-//! builtin defaults → imported theme source → explicit cmux.json values.
+//! builtin defaults → imported theme source → explicit mirador.json values.
 
 pub mod ghostty;
 pub mod wezterm;
@@ -24,7 +24,7 @@ pub struct ImportedTheme {
     pub font_size: Option<f32>,
 }
 
-/// On-disk cmux.json shape. Everything optional; defaults fill the gaps.
+/// On-disk mirador.json shape. Everything optional; defaults fill the gaps.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
@@ -53,7 +53,7 @@ pub struct ColorOverrides {
 pub fn config_dir() -> PathBuf {
     #[cfg(windows)]
     {
-        PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("cmux")
+        PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into())).join("mirador")
     }
     #[cfg(not(windows))]
     {
@@ -63,21 +63,21 @@ pub fn config_dir() -> PathBuf {
                 PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
                     .join(".config")
             })
-            .join("cmux")
+            .join("mirador")
     }
 }
 
 pub fn config_path() -> PathBuf {
-    config_dir().join("cmux.json")
+    config_dir().join("mirador.json")
 }
 
-/// Loads cmux.json (missing file → defaults; parse errors are reported but
+/// Loads mirador.json (missing file → defaults; parse errors are reported but
 /// fall back to defaults so a typo can't brick the terminal).
 pub fn load() -> (Config, Option<String>) {
     match std::fs::read_to_string(config_path()) {
         Ok(text) => match serde_json::from_str::<Config>(&text) {
             Ok(cfg) => (cfg, None),
-            Err(e) => (Config::default(), Some(format!("cmux.json: {e}"))),
+            Err(e) => (Config::default(), Some(format!("mirador.json: {e}"))),
         },
         Err(_) => (Config::default(), None),
     }
@@ -186,7 +186,7 @@ fn import_theme(cfg: &Config) -> Option<ImportedTheme> {
         "ghostty" => ghostty::import(),
         "wezterm" => wezterm::import(cfg.wezterm_scheme.as_deref()?),
         "builtin" | "none" => None,
-        // auto: use Ghostty's config when the user has one (cmux behavior)
+        // auto: use Ghostty's config when the user has one (cmux-parity behavior)
         _ => {
             if ghostty::user_config_path().exists() {
                 ghostty::import()

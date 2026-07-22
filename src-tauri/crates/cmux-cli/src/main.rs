@@ -1,6 +1,6 @@
-//! `cmux` CLI — drives the running app over its automation socket.
+//! `mira` CLI — drives the running app over its automation socket.
 //! `notify` also works without the socket (prints an OSC 777 escape, so it
-//! reaches cmux through any nesting, including SSH).
+//! reaches Mirador through any nesting, including SSH).
 
 use std::io::{BufRead, BufReader, Write};
 
@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope, SplitDir};
 
 #[derive(Parser)]
-#[command(name = "cmux", about = "Automation client for the cmux terminal")]
+#[command(name = "mira", about = "Automation client for the Mirador terminal")]
 struct Cli {
     /// Print raw JSON responses.
     #[arg(long, global = true)]
@@ -95,11 +95,11 @@ enum Command {
         #[arg(trailing_var_arg = true, required = true)]
         body: Vec<String>,
     },
-    /// Claude Code hook handler (wired up by `cmux hooks setup`); reads
+    /// Claude Code hook handler (wired up by `mira hooks setup`); reads
     /// the hook payload from stdin.
     #[command(hide = true)]
     ClaudeHook { event: String },
-    /// Install or remove the Claude Code hooks that light up cmux tabs.
+    /// Install or remove the Claude Code hooks that light up Mirador tabs.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -165,7 +165,7 @@ fn main() {
     match run(cli) {
         Ok(()) => {}
         Err(e) => {
-            eprintln!("cmux: {e}");
+            eprintln!("mira: {e}");
             std::process::exit(1);
         }
     }
@@ -282,9 +282,9 @@ fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     use std::os::unix::net::UnixStream;
 
     let disc = cmux_core::ipc::read_discovery()
-        .ok_or("cmux is not running (no socket discovery file)")?;
+        .ok_or("Mirador is not running (no socket discovery file)")?;
     let mut stream = UnixStream::connect(&disc.socket)
-        .map_err(|e| format!("cmux is not running ({e})"))?;
+        .map_err(|e| format!("Mirador is not running ({e})"))?;
 
     let envelope = RequestEnvelope { id: Some(1), req };
     let mut line = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
@@ -446,7 +446,7 @@ fn print_osc_notify(title: Option<&str>, body: &str) -> Result<(), String> {
     out.flush().map_err(|e| e.to_string())
 }
 
-/// The tty of our parent process (the shell/agent inside a cmux pane) —
+/// The tty of our parent process (the shell/agent inside a Mirador pane) —
 /// our own stdio may be pipes when invoked as a hook.
 #[cfg(unix)]
 fn own_tty() -> Option<String> {
@@ -513,7 +513,20 @@ const HOOK_EVENTS: &[(&str, &str)] = &[
     ("SessionStart", "session-start"),
 ];
 
-/// Idempotently installs (or removes) cmux hooks in ~/.claude/settings.json.
+/// True if a hook matcher entry is one we installed. Matches both the
+/// current `mira claude-hook` and the legacy `cmux claude-hook` command so
+/// setup can migrate and remove can clean up either.
+fn is_our_hook(matcher: &serde_json::Value) -> bool {
+    matcher["hooks"]
+        .as_array()
+        .map(|hs| {
+            hs.iter()
+                .any(|h| h["command"].as_str().unwrap_or("").contains("claude-hook"))
+        })
+        .unwrap_or(false)
+}
+
+/// Idempotently installs (or removes) Mirador hooks in ~/.claude/settings.json.
 fn hooks(action: &str) -> Result<(), String> {
     let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
     let path = std::path::PathBuf::from(home).join(".claude/settings.json");
@@ -530,53 +543,31 @@ fn hooks(action: &str) -> Result<(), String> {
     match action {
         "setup" => {
             for (hook_event, cli_event) in HOOK_EVENTS {
-                let command = format!("cmux claude-hook {cli_event}");
+                let command = format!("mira claude-hook {cli_event}");
                 let entries = hooks_obj
                     .as_object_mut()
                     .ok_or("hooks is not an object")?
                     .entry(*hook_event)
                     .or_insert(serde_json::json!([]));
                 let list = entries.as_array_mut().ok_or("hook entry is not an array")?;
-                let already = list.iter().any(|matcher| {
-                    matcher["hooks"]
-                        .as_array()
-                        .map(|hs| {
-                            hs.iter().any(|h| {
-                                h["command"].as_str().unwrap_or("").contains("cmux claude-hook")
-                            })
-                        })
-                        .unwrap_or(false)
-                });
-                if !already {
-                    list.push(serde_json::json!({
-                        "hooks": [{ "type": "command", "command": command }]
-                    }));
-                    println!("installed {hook_event} hook");
-                } else {
-                    println!("{hook_event} hook already installed");
-                }
+                // Drop any prior hook of ours (matches the old `cmux
+                // claude-hook` too), then add the fresh one: idempotent and
+                // migrates an earlier install to the new command name.
+                list.retain(|matcher| !is_our_hook(matcher));
+                list.push(serde_json::json!({
+                    "hooks": [{ "type": "command", "command": command }]
+                }));
+                println!("installed {hook_event} hook");
             }
         }
         "remove" => {
             if let Some(obj) = hooks_obj.as_object_mut() {
                 for (hook_event, _) in HOOK_EVENTS {
                     if let Some(list) = obj.get_mut(*hook_event).and_then(|v| v.as_array_mut()) {
-                        list.retain(|matcher| {
-                            !matcher["hooks"]
-                                .as_array()
-                                .map(|hs| {
-                                    hs.iter().any(|h| {
-                                        h["command"]
-                                            .as_str()
-                                            .unwrap_or("")
-                                            .contains("cmux claude-hook")
-                                    })
-                                })
-                                .unwrap_or(false)
-                        });
+                        list.retain(|matcher| !is_our_hook(matcher));
                     }
                 }
-                println!("removed cmux hooks");
+                println!("removed Mirador hooks");
             }
         }
         other => return Err(format!("unknown hooks action `{other}` (setup|remove)")),
@@ -591,7 +582,7 @@ fn hooks(action: &str) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     println!("updated {}", path.display());
-    println!("note: make sure `cmux` is on PATH for Claude Code (cmux install)");
+    println!("note: make sure `mira` is on PATH for Claude Code (mira install)");
     Ok(())
 }
 
@@ -600,7 +591,7 @@ fn install() -> Result<(), String> {
     let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
     let bin_dir = std::path::PathBuf::from(home).join(".local/bin");
     std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
-    let target = bin_dir.join("cmux");
+    let target = bin_dir.join("mira");
     let _ = std::fs::remove_file(&target);
     #[cfg(unix)]
     std::os::unix::fs::symlink(&exe, &target).map_err(|e| e.to_string())?;

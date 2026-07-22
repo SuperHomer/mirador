@@ -1,4 +1,4 @@
-//! Hot-reload: watches cmux.json and the Ghostty config; on change,
+//! Hot-reload: watches mirador.json and the Ghostty config; on change,
 //! re-resolves and pushes a `config-changed` event to the frontend.
 
 use std::sync::mpsc;
@@ -21,15 +21,15 @@ pub fn spawn(handle: tauri::AppHandle) {
         ) {
             Ok(w) => w,
             Err(e) => {
-                eprintln!("cmux: config watcher unavailable: {e}");
+                eprintln!("mirador: config watcher unavailable: {e}");
                 return;
             }
         };
 
         // Watch directories (atomic saves replace files; watching the file
         // itself loses the handle after the first rename).
-        let cmux_dir = cmux_core::config::config_dir();
-        let _ = watcher.watch(&cmux_dir, RecursiveMode::NonRecursive);
+        let cfg_dir = cmux_core::config::config_dir();
+        let _ = watcher.watch(&cfg_dir, RecursiveMode::NonRecursive);
         if let Some(ghostty_dir) = cmux_core::config::ghostty::user_config_path().parent() {
             if ghostty_dir.exists() {
                 let _ = watcher.watch(ghostty_dir, RecursiveMode::NonRecursive);
@@ -42,7 +42,7 @@ pub fn spawn(handle: tauri::AppHandle) {
 
             let (cfg, err) = cmux_core::config::load();
             if let Some(err) = err {
-                eprintln!("cmux: config error, keeping previous config: {err}");
+                eprintln!("mirador: config error, keeping previous config: {err}");
                 continue;
             }
             let resolved = cmux_core::config::resolve(&cfg);

@@ -50,7 +50,7 @@ pub fn save_session(state: &AppState) {
         cmux_core::session::capture(&ws, &meta)
     };
     if let Err(e) = cmux_core::session::save(&file) {
-        eprintln!("cmux: session save failed: {e}");
+        eprintln!("mirador: session save failed: {e}");
     }
 }
 
@@ -59,7 +59,7 @@ pub fn run() {
     cmux_core::config::write_default_if_missing();
     let (cfg, cfg_err) = cmux_core::config::load();
     if let Some(err) = &cfg_err {
-        eprintln!("cmux: config error, using defaults: {err}");
+        eprintln!("mirador: config error, using defaults: {err}");
     }
 
     // Restore the previous session; command panes come back idle.
@@ -153,7 +153,7 @@ pub fn run() {
             commands::ack_pty,
         ])
         .build(tauri::generate_context!())
-        .expect("error while running cmux")
+        .expect("error while running Mirador")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 save_session(&app.state::<AppState>());
@@ -201,7 +201,7 @@ fn setup_menu(handle: &tauri::AppHandle) -> tauri::Result<()> {
 
     let app_menu = Submenu::with_items(
         handle,
-        "cmux",
+        "Mirador",
         true,
         &[
             &PredefinedMenuItem::about(handle, None, Some(AboutMetadata::default()))?,

@@ -59,7 +59,7 @@ pub fn handle_notification(
     emit_workspace(app);
 
     if !window_focused {
-        let title = dto.title.as_deref().unwrap_or("cmux");
+        let title = dto.title.as_deref().unwrap_or("Mirador");
         let _ = app
             .notification()
             .builder()

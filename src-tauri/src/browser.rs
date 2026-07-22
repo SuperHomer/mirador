@@ -1,7 +1,7 @@
 //! Browser panes: native child webviews (Tauri multiwebview, `unstable`)
 //! positioned over pane rects. Automation (snapshot/click/fill/eval) runs
 //! through an injected script; results come back by navigating to a
-//! `cmux-result://` URL we intercept and cancel — remote pages get no IPC
+//! `mira-result://` URL we intercept and cancel — remote pages get no IPC
 //! access to the app.
 
 use std::collections::HashMap;
@@ -71,7 +71,7 @@ pub fn ensure_webview(
     let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parse_url(&url)?))
         .initialization_script(BRIDGE_JS)
         .on_navigation(move |url| {
-            if url.scheme() == "cmux-result" {
+            if url.scheme() == "mira-result" {
                 handle_result(&nav_app, url);
                 return false;
             }
@@ -107,7 +107,7 @@ fn track_navigation(app: &AppHandle, pane_id: &str, url: &Url) {
     }
 }
 
-/// `cmux-result://r/<request_id>/<base64url-json>`
+/// `mira-result://r/<request_id>/<base64url-json>`
 fn handle_result(app: &AppHandle, url: &Url) {
     let path = url.path().trim_start_matches('/');
     let mut parts = path.splitn(2, '/');
@@ -155,7 +155,7 @@ pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<
 
     let op_json = serde_json::to_string(&op).map_err(|e| e.to_string())?;
     webview
-        .eval(format!("window.__cmuxRun({request_id}, {op_json})"))
+        .eval(format!("window.__miraRun({request_id}, {op_json})"))
         .map_err(|e| e.to_string())?;
 
     let result = rx

@@ -1,10 +1,10 @@
-// Injected into every browser-pane webview. Exposes window.__cmuxRun for
+// Injected into every browser-pane webview. Exposes window.__miraRun for
 // the automation bridge. Results leave the page by navigating to a
-// cmux-result:// URL that the Rust side intercepts and cancels — the page
+// mira-result:// URL that the Rust side intercepts and cancels — the page
 // never gets IPC access to the app.
 (function () {
-  if (window.__cmuxInit) return;
-  window.__cmuxInit = true;
+  if (window.__miraInit) return;
+  window.__miraInit = true;
   let nextId = 0;
 
   function visible(el) {
@@ -47,9 +47,9 @@
     const nodes = [];
     for (const el of document.querySelectorAll(selector)) {
       if (!visible(el)) continue;
-      if (!el.dataset.cmuxId) el.dataset.cmuxId = String(++nextId);
+      if (!el.dataset.miraId) el.dataset.miraId = String(++nextId);
       const entry = {
-        id: Number(el.dataset.cmuxId),
+        id: Number(el.dataset.miraId),
         tag: el.tagName.toLowerCase(),
         text: textOf(el),
       };
@@ -67,7 +67,7 @@
 
   function locate(ref) {
     if (/^\d+$/.test(String(ref)))
-      return document.querySelector(`[data-cmux-id="${ref}"]`);
+      return document.querySelector(`[data-mira-id="${ref}"]`);
     try {
       return document.querySelector(ref);
     } catch {
@@ -86,7 +86,7 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  window.__cmuxRun = function (reqId, op) {
+  window.__miraRun = function (reqId, op) {
     let result;
     try {
       if (op.op === "snapshot") {
@@ -136,6 +136,6 @@
       b64.length > 400000
         ? btoa(unescape(encodeURIComponent(JSON.stringify({ error: "result too large" }))))
         : b64;
-    location.href = "cmux-result://r/" + reqId + "/" + capped;
+    location.href = "mira-result://r/" + reqId + "/" + capped;
   };
 })();

@@ -53,7 +53,7 @@ export function NotificationPanel() {
         {items.length === 0 && (
           <div className="notif-empty">
             No notifications yet. Agents can ping you with
-            <code> cmux notify "done"</code> or OSC 9/99/777 sequences.
+            <code> mira notify "done"</code> or OSC 9/99/777 sequences.
           </div>
         )}
         {items.map((n) => (

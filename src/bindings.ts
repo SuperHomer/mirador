@@ -1,4 +1,4 @@
-// Hand-written mirror of cmux-protocol types and command wrappers.
+// Hand-written mirror of the Rust protocol crate types and command wrappers.
 // (Replaced by tauri-specta generation in a later milestone.)
 import { invoke, Channel } from "@tauri-apps/api/core";
 

@@ -125,7 +125,7 @@ pub fn wait_for_exit(
         Err(_) => {
             state.run_waiters.lock().unwrap().remove(pane_id);
             Err(format!(
-                "run still going after {timeout_secs}s — watch it with `cmux read-screen --pane {pane_id}` or interrupt it in the pane"
+                "run still going after {timeout_secs}s — watch it with `mira read-screen --pane {pane_id}` or interrupt it in the pane"
             ))
         }
     }

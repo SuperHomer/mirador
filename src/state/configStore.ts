@@ -53,7 +53,7 @@ export function checkFontAvailable(family: string) {
   try {
     if (!document.fonts.check(`12px "${first}"`)) {
       console.warn(
-        `cmux: font "${first}" not found — falling back through the font stack`,
+        `mirador: font "${first}" not found — falling back through the font stack`,
       );
     }
   } catch {

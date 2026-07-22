@@ -2,10 +2,10 @@
 name = "cmux-cli"
 version.workspace = true
 edition.workspace = true
-description = "cmux command-line client (automation over the cmux socket)."
+description = "mira: Mirador command-line client (automation over the Mirador socket)."
 
 [[bin]]
-name = "cmux"
+name = "mira"
 path = "src/main.rs"
 
 [dependencies]

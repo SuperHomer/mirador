@@ -1,6 +1,6 @@
 //! Automation socket location + discovery. The app writes a discovery file
 //! so the CLI finds the live socket (and can fail fast with a clear error
-//! when cmux isn't running). Unix-only for now; Windows named pipes land
+//! when Mirador isn't running). Unix-only for now; Windows named pipes land
 //! with the M11 platform pass.
 
 use std::path::PathBuf;
@@ -20,15 +20,15 @@ pub fn discovery_path() -> PathBuf {
 #[cfg(unix)]
 pub fn default_socket_path() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-        return PathBuf::from(dir).join("cmux.sock");
+        return PathBuf::from(dir).join("mira.sock");
     }
     let uid = unsafe { libc::getuid() };
-    std::env::temp_dir().join(format!("cmux-{uid}.sock"))
+    std::env::temp_dir().join(format!("mira-{uid}.sock"))
 }
 
 #[cfg(not(unix))]
 pub fn default_socket_path() -> PathBuf {
-    PathBuf::from(r"\\.\pipe\cmux")
+    PathBuf::from(r"\\.\pipe\mira")
 }
 
 pub fn write_discovery(socket: &std::path::Path) -> std::io::Result<()> {
