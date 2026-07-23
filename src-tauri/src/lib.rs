@@ -78,9 +78,11 @@ pub fn run() {
             }
         }
     }
+    // Command panes AND remote (SSH) panes come back idle: relaunching the
+    // app must never re-run a command or silently re-open an SSH session.
     let restored_panes: HashSet<String> = meta
         .iter()
-        .filter(|(_, m)| m.command.is_some())
+        .filter(|(_, m)| m.command.is_some() || m.remote_host.is_some())
         .map(|(id, _)| id.clone())
         .collect();
     cmux_core::session::gc_scrollback(&workspace.all_pane_ids());
@@ -144,6 +146,8 @@ pub fn run() {
             commands::store_scrollback,
             commands::load_scrollback,
             commands::open_browser,
+            commands::open_ssh,
+            commands::ssh_hosts,
             commands::set_browser_bounds,
             commands::set_browser_visible,
             commands::browser_navigate,

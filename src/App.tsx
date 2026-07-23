@@ -122,6 +122,7 @@ export default function App() {
               unreadPanes={snapshot.unreadPanes}
               agentPanes={snapshot.agentPanes}
               browserPanes={snapshot.browserPanes}
+              remotePanes={snapshot.remotePanes}
             />
           </div>
         ))}

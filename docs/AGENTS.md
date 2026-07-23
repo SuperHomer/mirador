@@ -87,7 +87,30 @@ mira focus <pane>
 mira close-pane <pane>
 ```
 
-## 6. Raw socket protocol
+## 6. Remote workspaces (SSH)
+
+```bash
+mira ssh hosts                     # aliases from ~/.ssh/config
+mira ssh open prod                 # remote pane running `ssh -tt prod`
+mira ssh open "-p 2222 user@box"   # or a full destination with options
+mira ssh open prod --tab
+mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
+mira ssh unforward 3000
+```
+
+The pane runs the *system* ssh, so agent auth, 2FA prompts, and ProxyJump
+behave exactly as in any terminal. A shared ControlMaster connection backs
+the forwards, so they need no second login.
+
+Forwarding is what makes a remote dev server reviewable: `mira ssh forward
+3000` then `mira browser open http://localhost:3000` and the browser pane
+renders the remote app.
+
+Disconnects leave the pane idle with `[press any key to reconnect]`;
+restarting Mirador restores remote panes idle too — it never re-opens an
+SSH session behind your back.
+
+## 7. Raw socket protocol
 
 Newline-delimited JSON on the Unix socket from
 `~/.config/mirador/socket.json`:
@@ -100,8 +123,8 @@ Newline-delimited JSON on the Unix socket from
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session browser_open
 browser_navigate browser_snapshot browser_click browser_fill browser_eval
-browser_history`. Requests are snake_case-tagged (`"cmd"`); responses are
-`{id, ok, data|error}`.
+browser_history ssh_open ssh_hosts ssh_forward`. Requests are
+snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)
 

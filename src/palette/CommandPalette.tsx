@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { newTab, splitPane } from "../bindings";
+import { newTab, splitPane, openSsh, sshHosts } from "../bindings";
 import { actions } from "../keymap/actions";
 import { useConfigStore } from "../state/configStore";
 import { useUiStore } from "../state/uiStore";
@@ -40,6 +40,7 @@ export function CommandPalette() {
   );
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
+  const [hosts, setHosts] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const entries = useMemo<Entry[]>(() => {
@@ -60,8 +61,15 @@ export function CommandPalette() {
         }
       },
     }));
-    return [...custom, ...base];
-  }, [customCommands]);
+    // ~/.ssh/config aliases become "SSH: <host>" entries.
+    const ssh: Entry[] = hosts.map((host) => ({
+      id: `ssh:${host}`,
+      title: `SSH: ${host}`,
+      hint: "open remote pane",
+      run: () => void openSsh(null, false, host),
+    }));
+    return [...custom, ...ssh, ...base];
+  }, [customCommands, hosts]);
 
   const filtered = useMemo(() => {
     return entries
@@ -73,6 +81,7 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (open) {
+      void sshHosts().then(setHosts);
       setQuery("");
       setSelected(0);
       // Focus after the overlay renders.

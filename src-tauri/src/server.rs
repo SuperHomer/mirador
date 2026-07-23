@@ -256,7 +256,58 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::browser::history(app, &pane, &action)?;
             Ok(Value::Null)
         }
+        Request::SshOpen { host, target } => {
+            let pane_id = crate::commands::open_ssh(
+                app.clone(),
+                app.state(),
+                None,
+                target.as_deref() == Some("tab"),
+                host,
+            )?;
+            Ok(json!({ "paneId": pane_id }))
+        }
+        Request::SshHosts => Ok(json!({ "hosts": cmux_core::ssh::config_hosts() })),
+        Request::SshForward {
+            pane_id,
+            port,
+            cancel,
+        } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            cmux_core::ssh::forward(&host, port, cancel)?;
+            Ok(json!({ "paneId": pane, "port": port, "cancelled": cancel }))
+        }
     }
+}
+
+/// Default remote pane: the given one, or the active tab's remote pane, or
+/// any remote pane. Returns (pane_id, host spec).
+fn resolve_remote_pane(
+    state: &AppState,
+    pane_id: Option<String>,
+) -> Result<(String, String), String> {
+    let meta = state.meta.lock().unwrap();
+    if let Some(id) = pane_id {
+        let host = meta
+            .get(&id)
+            .and_then(|m| m.remote_host.clone())
+            .ok_or_else(|| format!("pane {id} is not an SSH pane"))?;
+        return Ok((id, host));
+    }
+    let remotes: Vec<(String, String)> = meta
+        .iter()
+        .filter_map(|(id, m)| Some((id.clone(), m.remote_host.clone()?)))
+        .collect();
+    drop(meta);
+    if remotes.is_empty() {
+        return Err("no SSH pane (open one with `mira ssh open <host>`)".into());
+    }
+    let ws = state.workspace.lock().unwrap();
+    let active_panes = cmux_core::layout::pane_ids(&ws.active_tab().root);
+    Ok(remotes
+        .iter()
+        .find(|(id, _)| active_panes.contains(id))
+        .unwrap_or(&remotes[0])
+        .clone())
 }
 
 /// Finds the pane whose shell owns the given tty (e.g. "ttys004") — how a
@@ -318,8 +369,17 @@ fn parse_bridge_result(pane: &str, raw: &str) -> Result<Value, String> {
 /// and resolves the pending request. 5s timeout.
 fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>) -> Result<String, String> {
     let state = app.state::<AppState>();
-    if !state.pty.is_running(pane_id) {
-        return Err(format!("no running pane {pane_id}"));
+    // The webview's terminal buffer outlives the PTY, so exited command
+    // panes and idle restored panes are still readable — that's exactly
+    // when an agent wants the final output.
+    let known = {
+        let ws = state.workspace.lock().unwrap();
+        ws.tabs
+            .iter()
+            .any(|t| cmux_core::layout::contains(&t.root, pane_id))
+    };
+    if !known {
+        return Err(format!("no pane {pane_id}"));
     }
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     let request_id = state.next_screen_request.fetch_add(1, Ordering::Relaxed);

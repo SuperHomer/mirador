@@ -28,9 +28,17 @@ interface Props {
   unread: boolean;
   /** Set when this is a command pane (🤖): the command it runs. */
   agentCommand?: string;
+  /** Set when this is a remote (SSH) pane: the destination host. */
+  remoteHost?: string;
 }
 
-export function TerminalPane({ paneId, focused, unread, agentCommand }: Props) {
+export function TerminalPane({
+  paneId,
+  focused,
+  unread,
+  agentCommand,
+  remoteHost,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<ReturnType<typeof createTerminal> | null>(null);
   const config = useConfigStore((s) => s.config);
@@ -107,10 +115,13 @@ export function TerminalPane({ paneId, focused, unread, agentCommand }: Props) {
         const status = await attachPane(paneId, term.cols, term.rows, channel);
         if (disposed) return;
         if (status === "restored") {
-          // Command pane from the previous session: idle until a keypress.
+          // Command/remote pane from the previous session: idle until a
+          // keypress — never auto-rerun or auto-reconnect on launch.
           exited = true;
           term.writeln(
-            `\x1b[2m[press any key to rerun: ${agentCommand ?? "command"}]\x1b[0m`,
+            remoteHost
+              ? `\x1b[2m[press any key to reconnect: ssh ${remoteHost}]\x1b[0m`
+              : `\x1b[2m[press any key to rerun: ${agentCommand ?? "command"}]\x1b[0m`,
           );
           return;
         }
@@ -157,18 +168,36 @@ export function TerminalPane({ paneId, focused, unread, agentCommand }: Props) {
     });
 
     let unlisten: UnlistenFn | undefined;
-    void listen<{ pane_id: string; exit_code: number | null; is_command: boolean }>(
+    void listen<{
+      pane_id: string;
+      exit_code: number | null;
+      is_command: boolean;
+      is_remote: boolean;
+    }>(
       "pane-exit",
       (event) => {
         if (event.payload.pane_id !== paneId) return;
         exited = true;
         const code = event.payload.exit_code;
         const status =
-          code === null ? "exited" : code === 0 ? "done ✓" : `exit ${code}`;
-        const color = code === 0 ? "\x1b[32m" : code ? "\x1b[31m" : "\x1b[2m";
-        const hint = event.payload.is_command
-          ? "press any key to rerun"
-          : "press any key to start a new shell";
+          code === null
+            ? "exited"
+            : event.payload.is_remote
+              ? "disconnected"
+              : code === 0
+                ? "done ✓"
+                : `exit ${code}`;
+        const color =
+          event.payload.is_remote || code === null
+            ? "\x1b[2m"
+            : code === 0
+              ? "\x1b[32m"
+              : "\x1b[31m";
+        const hint = event.payload.is_remote
+          ? "press any key to reconnect"
+          : event.payload.is_command
+            ? "press any key to rerun"
+            : "press any key to start a new shell";
         term.writeln(
           `\r\n${color}[${status}]\x1b[0m \x1b[2m— ${hint}\x1b[0m`,
         );
@@ -204,10 +233,16 @@ export function TerminalPane({ paneId, focused, unread, agentCommand }: Props) {
       onMouseDown={() => void focusPane(paneId)}
     >
       <div className="pane-term" ref={containerRef} />
-      {agentCommand && (
-        <div className="agent-chip" title={agentCommand}>
-          🤖 {agentCommand}
+      {remoteHost ? (
+        <div className="agent-chip remote-chip" title={`ssh ${remoteHost}`}>
+          ⇅ {remoteHost}
         </div>
+      ) : (
+        agentCommand && (
+          <div className="agent-chip" title={agentCommand}>
+            🤖 {agentCommand}
+          </div>
+        )
       )}
     </div>
   );

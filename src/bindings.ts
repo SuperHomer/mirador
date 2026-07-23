@@ -39,12 +39,18 @@ export interface BrowserPaneInfo {
   url: string;
 }
 
+export interface RemotePaneInfo {
+  paneId: string;
+  host: string;
+}
+
 export interface WorkspaceSnapshot {
   tabs: TabSnapshot[];
   activeTab: string;
   unreadPanes: string[];
   agentPanes: AgentPane[];
   browserPanes: BrowserPaneInfo[];
+  remotePanes: RemotePaneInfo[];
 }
 
 export interface NotificationDto {
@@ -123,6 +129,9 @@ export const attachPane = (
   });
 export const openBrowser = (paneId: string | null, tab: boolean, url: string) =>
   invoke<string>("open_browser", { paneId, tab, url });
+export const openSsh = (paneId: string | null, tab: boolean, host: string) =>
+  invoke<string>("open_ssh", { paneId, tab, host });
+export const sshHosts = () => invoke<string[]>("ssh_hosts");
 export const setBrowserBounds = (
   paneId: string,
   x: number,

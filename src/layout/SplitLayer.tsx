@@ -45,11 +45,13 @@ export function SplitLayer({
   unreadPanes,
   agentPanes,
   browserPanes,
+  remotePanes,
 }: {
   tab: TabSnapshot;
   unreadPanes: string[];
   agentPanes: { paneId: string; command: string }[];
   browserPanes: BrowserPaneInfo[];
+  remotePanes: { paneId: string; host: string }[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -127,6 +129,9 @@ export function SplitLayer({
                 unread={unreadPanes.includes(p.paneId)}
                 agentCommand={
                   agentPanes.find((a) => a.paneId === p.paneId)?.command
+                }
+                remoteHost={
+                  remotePanes.find((r) => r.paneId === p.paneId)?.host
                 }
               />
             )}

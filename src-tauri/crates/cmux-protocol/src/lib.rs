@@ -89,6 +89,9 @@ pub struct WorkspaceSnapshot {
     /// Browser panes and their current URLs.
     #[serde(default)]
     pub browser_panes: Vec<BrowserPane>,
+    /// Remote (SSH) panes and their display host.
+    #[serde(default)]
+    pub remote_panes: Vec<RemotePane>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,6 +99,14 @@ pub struct WorkspaceSnapshot {
 pub struct BrowserPane {
     pub pane_id: String,
     pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePane {
+    pub pane_id: String,
+    /// Display label (destination), e.g. "user@box".
+    pub host: String,
 }
 
 /// Automation socket request. One JSON object per line; `pane_id: None`
@@ -208,6 +219,24 @@ pub enum Request {
         pane_id: Option<String>,
         /// "back" | "forward" | "reload"
         action: String,
+    },
+    /// Opens a remote (SSH) pane running `ssh -tt <host>`.
+    SshOpen {
+        /// ssh host spec (alias, or full destination with options).
+        host: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// Host aliases from ~/.ssh/config.
+    SshHosts,
+    /// Forward (or cancel) `localhost:<port>` → remote's `localhost:<port>`
+    /// over a remote pane's ControlMaster.
+    SshForward {
+        #[serde(default)]
+        pane_id: Option<String>,
+        port: u16,
+        #[serde(default)]
+        cancel: bool,
     },
 }
 

@@ -85,6 +85,11 @@ enum Command {
         #[command(subcommand)]
         action: BrowserAction,
     },
+    /// Remote workspaces over SSH.
+    Ssh {
+        #[command(subcommand)]
+        action: SshAction,
+    },
     /// Send a notification (prints OSC 777; works from inside any pane,
     /// even over SSH). Use --socket to target the app directly instead.
     Notify {
@@ -106,6 +111,36 @@ enum Command {
     },
     /// Symlink this binary into ~/.local/bin for PATH access.
     Install,
+}
+
+#[derive(Subcommand)]
+enum SshAction {
+    /// Open a remote pane running `ssh -tt <host>`. HOST is an ssh alias
+    /// (from ~/.ssh/config) or a full destination, optionally with ssh
+    /// options: "-p 2222 user@box".
+    Open {
+        /// Hyphens allowed so a full spec like "-p 2222 user@box" works.
+        #[arg(allow_hyphen_values = true)]
+        host: String,
+        /// Open in a new tab instead of a split.
+        #[arg(long)]
+        tab: bool,
+    },
+    /// List host aliases from ~/.ssh/config.
+    Hosts,
+    /// Forward localhost:PORT to the remote's localhost:PORT (so the
+    /// browser pane can reach a remote dev server).
+    Forward {
+        port: u16,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Cancel a forward established with `ssh forward`.
+    Unforward {
+        port: u16,
+        #[arg(long)]
+        pane: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -207,6 +242,23 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Runs => Request::ListRuns,
+        Command::Ssh { action } => match action {
+            SshAction::Open { host, tab } => Request::SshOpen {
+                host,
+                target: tab.then(|| "tab".to_string()),
+            },
+            SshAction::Hosts => Request::SshHosts,
+            SshAction::Forward { port, pane } => Request::SshForward {
+                pane_id: pane,
+                port,
+                cancel: false,
+            },
+            SshAction::Unforward { port, pane } => Request::SshForward {
+                pane_id: pane,
+                port,
+                cancel: true,
+            },
+        },
         Command::Browser { action } => match action {
             BrowserAction::Open { url, tab } => Request::BrowserOpen {
                 url,
@@ -331,6 +383,13 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 render_page_snapshot(&data);
             } else if map.contains_key("value") {
                 println!("{}", serde_json::to_string_pretty(&map["value"]).unwrap());
+            } else if let Some(hosts) = map.get("hosts").and_then(|v| v.as_array()) {
+                if hosts.is_empty() {
+                    println!("(no Host entries in ~/.ssh/config)");
+                }
+                for h in hosts {
+                    println!("{}", h.as_str().unwrap_or(""));
+                }
             } else if map.contains_key("runs") {
                 render_runs(&data);
             } else if let Some(id) = map

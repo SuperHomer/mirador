@@ -26,6 +26,8 @@ pub struct PaneMeta {
     /// "agent:session_id" of the AI agent running in this pane
     /// (e.g. "claude:abc-123"), captured via hooks for resume-on-restore.
     pub agent_session: Option<String>,
+    /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
+    pub remote_host: Option<String>,
 }
 
 #[derive(Debug)]
@@ -267,6 +269,7 @@ impl Workspace {
             unread_panes: Vec::new(),
             agent_panes: Vec::new(),
             browser_panes: Vec::new(),
+            remote_panes: Vec::new(),
         }
     }
 }

@@ -20,6 +20,9 @@ The CLI command is **`mira`** ("look!").
   interruptible pane; `--wait` returns clean output + exit code to the caller
 - **Scriptable browser pane**: agents open pages, snapshot the DOM, click,
   fill, and eval — while you watch (`mira browser …`)
+- **Remote workspaces**: `mira ssh open <host>` panes run the system ssh
+  (agent auth, 2FA, ProxyJump all work); ControlMaster-backed port
+  forwarding brings remote dev servers to your browser pane
 - **Automation socket**: every action drivable via the `mira` CLI / Unix socket
 - **Session persistence**: layout, cwds, scrollback, and browser URLs
   survive restarts and crashes

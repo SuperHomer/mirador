@@ -13,6 +13,8 @@ struct PaneExitPayload {
     exit_code: Option<i32>,
     /// True for command panes: a keypress reruns instead of opening a shell.
     is_command: bool,
+    /// True for SSH panes: a keypress reconnects.
+    is_remote: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -60,6 +62,17 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
                 m.browser_url.as_ref().map(|u| cmux_protocol::BrowserPane {
                     pane_id: pane.clone(),
                     url: u.clone(),
+                })
+            })
+            .collect()
+    };
+    snapshot.remote_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                m.remote_host.as_ref().map(|h| cmux_protocol::RemotePane {
+                    pane_id: pane.clone(),
+                    host: cmux_core::ssh::display_host(h),
                 })
             })
             .collect()
@@ -236,21 +249,24 @@ pub fn attach_pane(
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
 ) -> Result<String, String> {
-    // Command panes run their command directly in the PTY (exit detection,
-    // output capture); shell panes get an interactive login shell.
-    let (cwd, pane_command) = {
+    // Remote panes run `ssh -tt <host>`; command panes run their command
+    // directly in the PTY (exit detection, output capture); shell panes get
+    // an interactive login shell.
+    let (cwd, pane_command, remote_host) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(&pane_id);
         (
             m.and_then(|m| m.cwd.clone()),
             m.and_then(|m| m.command.clone()),
+            m.and_then(|m| m.remote_host.clone()),
         )
     };
 
     let sink = {
         let sink_app = app.clone();
         let pane = pane_id.clone();
-        let capture = pane_command.is_some();
+        // An SSH session isn't a "run": no output capture, no history.
+        let capture = pane_command.is_some() && remote_host.is_none();
         move |bytes: &[u8]| {
             let _ = on_data.send(InvokeResponseBody::Raw(bytes.to_vec()));
             if capture {
@@ -266,9 +282,12 @@ pub fn attach_pane(
         return Ok("reattached".into());
     }
 
-    // Session-restored command panes attach idle: never auto-rerun
-    // `npm test` just because the app relaunched.
-    if state.restored_panes.lock().unwrap().remove(&pane_id) && pane_command.is_some() {
+    // Session-restored command/remote panes attach idle: never auto-rerun
+    // `npm test` (or auto-reconnect an SSH session) just because the app
+    // relaunched — a keypress does it.
+    if state.restored_panes.lock().unwrap().remove(&pane_id)
+        && (pane_command.is_some() || remote_host.is_some())
+    {
         return Ok("restored".into());
     }
 
@@ -320,27 +339,33 @@ pub fn attach_pane(
         })
     };
 
-    let command_builder = pane_command.as_deref().map(|cmd| {
-        let mut builder = portable_pty::CommandBuilder::new(
-            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
-        );
-        builder.arg("-lc");
-        builder.arg(cmd);
-        builder.env("TERM", "xterm-256color");
-        builder.env("COLORTERM", "truecolor");
-        match &cwd {
-            Some(dir) if std::path::Path::new(dir).is_dir() => builder.cwd(dir),
-            _ => {
-                if let Ok(home) = std::env::var("HOME") {
-                    builder.cwd(home);
+    let command_builder = match remote_host.as_deref() {
+        // Remote pane: the system ssh handles auth/agent/2FA/ProxyJump.
+        Some(host) => Some(cmux_core::ssh::interactive_command(host)),
+        None => pane_command.as_deref().map(|cmd| {
+            let mut builder = portable_pty::CommandBuilder::new(
+                std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
+            );
+            builder.arg("-lc");
+            builder.arg(cmd);
+            builder.env("TERM", "xterm-256color");
+            builder.env("COLORTERM", "truecolor");
+            match &cwd {
+                Some(dir) if std::path::Path::new(dir).is_dir() => builder.cwd(dir),
+                _ => {
+                    if let Ok(home) = std::env::var("HOME") {
+                        builder.cwd(home);
+                    }
                 }
             }
-        }
-        builder
-    });
+            builder
+        }),
+    };
 
-    if let Some(cmd) = &pane_command {
-        crate::runs::record_start(&state, &pane_id, cmd);
+    if remote_host.is_none() {
+        if let Some(cmd) = &pane_command {
+            crate::runs::record_start(&state, &pane_id, cmd);
+        }
     }
 
     let exit_app = app.clone();
@@ -354,12 +379,18 @@ pub fn attach_pane(
         sink,
         move |exited_id, exit_code| {
             let is_command = crate::runs::finish_run(&exit_app, exited_id, exit_code);
+            let is_remote = {
+                let state = exit_app.state::<AppState>();
+                let meta = state.meta.lock().unwrap();
+                meta.get(exited_id).is_some_and(|m| m.remote_host.is_some())
+            };
             let _ = exit_app.emit(
                 "pane-exit",
                 PaneExitPayload {
                     pane_id: exited_id.to_string(),
                     exit_code,
                     is_command,
+                    is_remote,
                 },
             );
         },
@@ -399,6 +430,49 @@ pub fn open_browser(
         .browser_url = Some(url);
     emit_workspace(&app);
     Ok(new_pane)
+}
+
+/// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY
+/// runs `ssh -tt <host>`, so auth/agent/2FA behave exactly as in any
+/// terminal; disconnect leaves the pane idle and a keypress reconnects.
+#[tauri::command]
+pub fn open_ssh(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+    host: String,
+) -> Result<String, String> {
+    if host.trim().is_empty() {
+        return Err("ssh host required".into());
+    }
+    let new_pane = if tab {
+        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        pane
+    } else {
+        let target = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&target, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {target}"))?
+    };
+    state
+        .meta
+        .lock()
+        .unwrap()
+        .entry(new_pane.clone())
+        .or_default()
+        .remote_host = Some(host.trim().to_string());
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// Host aliases from ~/.ssh/config, for the palette's SSH entries.
+#[tauri::command]
+pub fn ssh_hosts() -> Vec<String> {
+    cmux_core::ssh::config_hosts()
 }
 
 /// Frontend reports a browser pane's rect; creates or repositions the

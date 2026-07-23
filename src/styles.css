@@ -346,6 +346,12 @@ body,
   background: #ffffff10;
 }
 
+/* Remote (SSH) pane chip. */
+.agent-chip.remote-chip {
+  background: color-mix(in srgb, #cba6f7 22%, var(--bg-alt));
+  border-color: color-mix(in srgb, #cba6f7 45%, transparent);
+}
+
 /* Command pane chip: this pane runs an agent-launched command. */
 .agent-chip {
   position: absolute;

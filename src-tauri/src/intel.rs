@@ -23,6 +23,20 @@ pub fn spawn(handle: tauri::AppHandle) {
 
             let pids = state.pty.pids();
 
+            // Remote panes hold an ssh client locally: its cwd/branch/ports
+            // describe this machine, not the remote — skip them entirely.
+            let remote_panes: Vec<String> = {
+                let meta = state.meta.lock().unwrap();
+                meta.iter()
+                    .filter(|(_, m)| m.remote_host.is_some())
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            };
+            let pids: Vec<(String, u32)> = pids
+                .into_iter()
+                .filter(|(pane, _)| !remote_panes.contains(pane))
+                .collect();
+
             // cwd + branch every tick.
             for (pane, pid) in &pids {
                 let cwd = cmux_core::cwd::process_cwd(*pid);
