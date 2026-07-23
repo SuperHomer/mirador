@@ -2,7 +2,8 @@
 name = "cmux-core"
 version.workspace = true
 edition.workspace = true
-description = "cmux core logic: PTY management, layout, OSC scanning. No Tauri dependency."
+license.workspace = true
+description = "Mirador core: PTY management, layout, OSC scanning, config, SSH. No Tauri dependency."
 
 [dependencies]
 cmux-protocol = { path = "../cmux-protocol" }

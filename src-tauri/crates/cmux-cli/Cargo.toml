@@ -2,6 +2,7 @@
 name = "cmux-cli"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "mira: Mirador command-line client (automation over the Mirador socket)."
 
 [[bin]]

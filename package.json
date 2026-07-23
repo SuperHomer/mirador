@@ -2,6 +2,8 @@
   "name": "cmux-tauri",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
+  "description": "A cross-platform terminal built for AI coding agent workflows",
   "type": "module",
   "scripts": {
     "dev": "vite",

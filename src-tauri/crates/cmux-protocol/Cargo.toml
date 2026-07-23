@@ -2,7 +2,8 @@
 name = "cmux-protocol"
 version.workspace = true
 edition.workspace = true
-description = "Shared DTOs and automation-socket protocol types for cmux."
+license.workspace = true
+description = "Shared DTOs and automation-socket protocol types for Mirador."
 
 [dependencies]
 serde.workspace = true

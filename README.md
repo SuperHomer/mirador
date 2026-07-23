@@ -57,6 +57,13 @@ npm run tauri dev            # hot-reloading dev build
 npm run build:cli            # release CLI only → src-tauri/target/release/mira
 ```
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Mirador is an independent implementation inspired by
+[cmux](https://github.com/manaflow-ai/cmux); no cmux code is used.
+
 ## Platform status
 
 macOS is built and verified end to end. The Rust core and CLI type-check
