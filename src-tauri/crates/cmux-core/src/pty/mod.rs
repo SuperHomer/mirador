@@ -295,6 +295,8 @@ impl PtyManager {
     }
 }
 
+/// `Kill` is only used by the unix escalation path.
+#[cfg_attr(not(unix), allow(dead_code))]
 enum Signal {
     Hangup,
     Kill,

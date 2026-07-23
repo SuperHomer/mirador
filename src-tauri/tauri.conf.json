@@ -1,12 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Mirador",
+  "mainBinaryName": "mirador",
   "version": "0.1.0",
   "identifier": "com.yoanmarti.mirador",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && npm run build:cli",
     "frontendDist": "../dist"
   },
   "app": {
@@ -26,12 +27,20 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "DeveloperTool",
+    "copyright": "© 2026 Yoan Marti",
+    "shortDescription": "A terminal built for watching over AI coding agents",
+    "longDescription": "Mirador is a cross-platform terminal for AI coding agent workflows: vertical tab sidebar with git/PR/port context, agent attention notifications, visible interruptible command panes, a scriptable browser pane, SSH remote workspaces, and full CLI automation via `mira`.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/mira"],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
   }
 }

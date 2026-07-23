@@ -31,16 +31,39 @@ The CLI command is **`mira`** ("look!").
 - **Claude Code integration**: `mira hooks setup` lights up tabs when your
   agent needs you and enables per-pane session resume
 
-## Getting started
+## Install (macOS)
 
 ```bash
 npm install
-npm run tauri dev        # development
-npm run tauri build      # release bundle (.app/.dmg)
-
-# put the CLI on PATH (from src-tauri/):
-cargo build -p cmux-cli && ./target/debug/mira install
+npm run tauri build          # builds Mirador.app + .dmg (and the mira CLI)
 ```
+
+The bundle lands in `src-tauri/target/release/bundle/`. Drag
+**Mirador.app** to `/Applications`, then put the CLI on your PATH — it
+ships inside the app:
+
+```bash
+/Applications/Mirador.app/Contents/MacOS/mira install   # → ~/.local/bin/mira
+mira hooks setup                                        # Claude Code integration
+```
+
+The build is unsigned (no Developer ID), so the first launch needs
+right-click → **Open** to get past Gatekeeper. macOS remembers the choice.
+
+## Development
+
+```bash
+npm run tauri dev            # hot-reloading dev build
+npm run build:cli            # release CLI only → src-tauri/target/release/mira
+```
+
+## Platform status
+
+macOS is built and verified end to end. The Rust core and CLI type-check
+for Windows, but the app has not been built or tested there yet: the
+automation socket is Unix-only (Windows needs a named-pipe listener) and
+ConPTY needs a pass. Linux should build, but WebKitGTK rendering and the
+browser pane's child-webview positioning are unverified.
 
 ## Agents
 

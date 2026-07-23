@@ -2,10 +2,10 @@
 //! `notify` also works without the socket (prints an OSC 777 escape, so it
 //! reaches Mirador through any nesting, including SSH).
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 
 use clap::{Parser, Subcommand};
-use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope, SplitDir};
+use cmux_protocol::{Request, ResponseEnvelope, SplitDir};
 
 #[derive(Parser)]
 #[command(name = "mira", about = "Automation client for the Mirador terminal")]
@@ -331,6 +331,8 @@ fn parse_dir(s: &str) -> Result<SplitDir, String> {
 
 #[cfg(unix)]
 fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
+    use cmux_protocol::RequestEnvelope;
+    use std::io::{BufRead, BufReader};
     use std::os::unix::net::UnixStream;
 
     let disc = cmux_core::ipc::read_discovery()

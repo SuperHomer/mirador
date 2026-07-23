@@ -19,6 +19,12 @@ description = "Cross-platform cmux: a terminal for AI coding agent workflows"
 name = "cmux_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# The crate keeps its internal name; the shipped executable is `mirador`
+# so the process and code-signing identity match the product.
+[[bin]]
+name = "mirador"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
