@@ -8,15 +8,21 @@ export default function Nav() {
         position: "sticky",
         top: 0,
         zIndex: 10,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "18px 34px",
         borderBottom: "1px solid var(--surface)",
         background: "rgba(24,24,37,.72)",
         backdropFilter: "blur(10px)",
       }}
     >
+      <div
+        style={{
+          maxWidth: 1280,
+          margin: "0 auto",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "18px 34px",
+        }}
+      >
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
         <Logo size={30} />
         <span style={{ fontSize: 19, fontWeight: 750, letterSpacing: "-.02em" }}>Mirador</span>
@@ -42,6 +48,7 @@ export default function Nav() {
           Download
           <span className="mono" style={{ fontSize: 11, fontWeight: 600, opacity: 0.7 }}>{DOWNLOAD_VERSION}</span>
         </a>
+      </div>
       </div>
     </nav>
   );
