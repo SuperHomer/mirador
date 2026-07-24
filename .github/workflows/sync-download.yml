@@ -1,0 +1,36 @@
+name: Sync landing page to release
+
+# When a release is published, point the download button at it and redeploy.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rewrite download link to released version
+        run: node web/scripts/sync-download.mjs "${{ github.event.release.tag_name }}"
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- web/src/config.ts; then
+            echo "config.ts already up to date; nothing to commit."
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore(web): point download at ${{ github.event.release.tag_name }}"
+            git push
+          fi
+
+  # Token-authored commits don't re-trigger deploy-web.yml, so deploy explicitly.
+  deploy:
+    needs: sync
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: main
