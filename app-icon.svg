@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGlow" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#1e1e2e"/>
+      <stop offset="100%" stop-color="#11111b"/>
+    </radialGradient>
+
+    <!-- Beacon Soft Glow Filter -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="intenseGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="20" result="blur1" />
+      <feGaussianBlur stdDeviation="8" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur1" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Beams Gradients -->
+    <linearGradient id="leftBeam" x1="100%" y1="50%" x2="0%" y2="50%">
+      <stop offset="0%" stop-color="#89b4fa" stop-opacity="0.45"/>
+      <stop offset="30%" stop-color="#74c7ec" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#89b4fa" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <linearGradient id="rightBeam" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#89b4fa" stop-opacity="0.45"/>
+      <stop offset="30%" stop-color="#74c7ec" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#89b4fa" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- Terminal Screen Glow -->
+    <radialGradient id="screenGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#89dceb" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#89b4fa" stop-opacity="0.0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- App Icon Base Outer Frame -->
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#bgGlow)" stroke="#45475a" stroke-width="4" />
+  <rect x="20" y="20" width="472" height="472" rx="100" fill="none" stroke="#a6adc8" stroke-width="2" stroke-opacity="0.3" />
+
+  <!-- Light Beams extending from beacon -->
+  <polygon points="206,140 24,80 24,220" fill="url(#leftBeam)" />
+  <polygon points="306,140 488,80 488,220" fill="url(#rightBeam)" />
+
+  <!-- Ambient Light Halo behind Terminal Beacon -->
+  <circle cx="256" cy="140" r="90" fill="#89b4fa" opacity="0.15" filter="url(#intenseGlow)" />
+
+  <!-- Tower Base / Ground Line -->
+  <line x1="140" y1="428" x2="372" y2="428" stroke="#89b4fa" stroke-width="4" stroke-linecap="round" />
+
+  <!-- Central Support Spine (Subtle) -->
+  <line x1="256" y1="200" x2="256" y2="428" stroke="#45475a" stroke-width="3" />
+
+  <!-- Truss Tower Main Structure -->
+  <!-- Outer Legs -->
+  <line x1="206" y1="200" x2="172" y2="428" stroke="#89b4fa" stroke-width="3.5" stroke-linecap="round" />
+  <line x1="306" y1="200" x2="340" y2="428" stroke="#89b4fa" stroke-width="3.5" stroke-linecap="round" />
+
+  <!-- Horizontal Cross Beams -->
+  <line x1="201" y1="257" x2="311" y2="257" stroke="#89b4fa" stroke-width="2.5" />
+  <line x1="192" y1="314" x2="320" y2="314" stroke="#89b4fa" stroke-width="2.5" />
+  <line x1="182" y1="371" x2="330" y2="371" stroke="#89b4fa" stroke-width="2.5" />
+
+  <!-- Diagonal Lattice X-Bracing -->
+  <!-- Tier 1 (Top) -->
+  <line x1="206" y1="200" x2="311" y2="257" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+  <line x1="306" y1="200" x2="201" y2="257" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+
+  <!-- Tier 2 -->
+  <line x1="201" y1="257" x2="320" y2="314" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+  <line x1="311" y1="257" x2="192" y2="314" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+
+  <!-- Tier 3 -->
+  <line x1="192" y1="314" x2="330" y2="371" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+  <line x1="320" y1="314" x2="182" y2="371" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+
+  <!-- Tier 4 (Bottom) -->
+  <line x1="182" y1="371" x2="340" y2="428" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+  <line x1="330" y1="371" x2="172" y2="428" stroke="#74c7ec" stroke-width="2" stroke-opacity="0.85" />
+
+  <!-- Balcony / Observation Deck Platform -->
+  <rect x="188" y="184" width="136" height="18" rx="4" fill="#181825" stroke="#89b4fa" stroke-width="3" />
+  <line x1="256" y1="184" x2="256" y2="202" stroke="#89b4fa" stroke-width="2" />
+  <line x1="222" y1="184" x2="222" y2="202" stroke="#89b4fa" stroke-width="1.5" stroke-opacity="0.7" />
+  <line x1="290" y1="184" x2="290" y2="202" stroke="#89b4fa" stroke-width="1.5" stroke-opacity="0.7" />
+
+  <!-- Terminal Beacon Block (Watchtower Head) -->
+  <rect x="198" y="82" width="116" height="102" rx="12" fill="#1e1e2e" stroke="#89b4fa" stroke-width="3.5" filter="url(#glow)" />
+  <rect x="202" y="86" width="108" height="94" rx="9" fill="url(#screenGlow)" />
+
+  <!-- Terminal Screen Inner Frame -->
+  <rect x="206" y="90" width="100" height="86" rx="7" fill="none" stroke="#74c7ec" stroke-width="1.5" stroke-opacity="0.5" />
+
+  <!-- Terminal Prompt Symbol '> _' -->
+  <g filter="url(#glow)">
+    <!-- Chevron '>' -->
+    <path d="M 226 118 L 244 133 L 226 148" fill="none" stroke="#89dceb" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+    <!-- Underscore Cursor '_' -->
+    <line x1="252" y1="148" x2="278" y2="148" stroke="#89dceb" stroke-width="5" stroke-linecap="round" />
+  </g>
+</svg>
