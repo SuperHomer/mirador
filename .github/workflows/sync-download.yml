@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A release event checks out the tag (detached HEAD); check out the
+          # branch so the sync commit can be pushed back to main.
+          ref: main
       - name: Rewrite download link to released version
         run: node web/scripts/sync-download.mjs "${{ github.event.release.tag_name }}"
       - name: Commit if changed
