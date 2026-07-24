@@ -119,6 +119,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             setup_menu(app.handle())?;
+            notify::ensure_permission(app.handle());
             intel::spawn(app.handle().clone());
             config_watch::spawn(app.handle().clone());
             spawn_session_saver(app.handle().clone());

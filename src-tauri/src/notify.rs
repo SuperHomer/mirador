@@ -6,12 +6,37 @@ use std::sync::atomic::Ordering;
 
 use cmux_protocol::NotificationDto;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::commands::emit_workspace;
 use crate::AppState;
 
 const MAX_NOTIFICATIONS: usize = 200;
+
+/// Requests OS notification permission on launch so that unfocused
+/// notifications can actually be delivered. macOS in particular stays
+/// silent until the app has been explicitly authorized.
+pub fn ensure_permission(app: &AppHandle) {
+    let notifier = app.notification();
+    let state = match notifier.permission_state() {
+        Ok(state) => state,
+        Err(e) => {
+            eprintln!("mirador: could not read notification permission: {e}");
+            return;
+        }
+    };
+    if matches!(state, PermissionState::Granted) {
+        return;
+    }
+    match notifier.request_permission() {
+        Ok(PermissionState::Granted) => {}
+        Ok(other) => eprintln!(
+            "mirador: notifications not permitted ({other:?}); enable them in \
+             System Settings › Notifications › Mirador"
+        ),
+        Err(e) => eprintln!("mirador: notification permission request failed: {e}"),
+    }
+}
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -60,12 +85,18 @@ pub fn handle_notification(
 
     if !window_focused {
         let title = dto.title.as_deref().unwrap_or("Mirador");
-        let _ = app
+        if let Err(e) = app
             .notification()
             .builder()
             .title(title)
             .body(&dto.body)
-            .show();
+            .show()
+        {
+            eprintln!(
+                "mirador: failed to show notification: {e}; check System Settings › \
+                 Notifications › Mirador"
+            );
+        }
     }
 }
 
