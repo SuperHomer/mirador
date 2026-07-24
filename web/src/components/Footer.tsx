@@ -3,7 +3,8 @@ import { GITHUB_URL } from "../config";
 
 export default function Footer() {
   return (
-    <footer style={{ padding: "44px 48px", borderTop: "1px solid var(--surface)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
+    <footer style={{ padding: "44px 48px", borderTop: "1px solid var(--surface)" }}>
+      <div style={{ maxWidth: 1280, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
         <Logo size={26} />
         <div>
@@ -15,6 +16,7 @@ export default function Footer() {
         <a href={GITHUB_URL} style={{ color: "var(--subtext)" }}>GitHub</a>
         <a href={GITHUB_URL} style={{ color: "var(--subtext)" }}>Docs</a>
         <a href={GITHUB_URL} style={{ color: "var(--subtext)" }}>mira CLI</a>
+      </div>
       </div>
     </footer>
   );
