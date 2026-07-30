@@ -48,6 +48,15 @@ jobs:
 
       - run: npm ci
 
+      # The app crate's build script wants both of these on disk, so they
+      # have to exist before *any* cargo command touches it — not just
+      # before `tauri build`, which is what produces them normally.
+      - name: Typecheck + build frontend
+        run: npm run build
+
+      - name: Stage the mira CLI sidecar
+        run: npm run build:cli
+
       - name: Lint (Rust)
         working-directory: src-tauri
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -55,9 +64,6 @@ jobs:
       - name: Test (Rust)
         working-directory: src-tauri
         run: cargo test --workspace
-
-      - name: Typecheck + build frontend
-        run: npm run build
 
       - name: Build app + installers
         run: npm run tauri build
