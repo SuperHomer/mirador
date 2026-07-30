@@ -313,11 +313,18 @@ pub fn strip_ansi(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&joined).into_owned()
 }
 
-/// `file://host/path` → percent-decoded path.
+/// `file://host/path` → percent-decoded path. A Windows drive path arrives
+/// as `/C:/Users/…`: the URL's leading slash is dropped and separators come
+/// back as backslashes, so the result is a path Windows APIs accept.
 fn parse_file_url(url: &str) -> Option<String> {
     let rest = url.strip_prefix("file://")?;
     let path_start = rest.find('/')?;
-    Some(percent_decode(&rest[path_start..]))
+    let path = percent_decode(&rest[path_start..]);
+    let drive = path.as_bytes();
+    if drive.len() >= 3 && drive[0] == b'/' && drive[1].is_ascii_alphabetic() && drive[2] == b':' {
+        return Some(path[1..].replace('/', "\\"));
+    }
+    Some(path)
 }
 
 fn percent_decode(s: &str) -> String {

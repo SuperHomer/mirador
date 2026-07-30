@@ -3,7 +3,6 @@
 //! (60s) or when a new (repo, branch) appears. Emits a fresh snapshot only
 //! when something actually changed.
 
-use std::process::Command;
 use std::time::Duration;
 
 use cmux_protocol::PrStatus;
@@ -115,7 +114,7 @@ pub fn spawn(handle: tauri::AppHandle) {
 }
 
 fn which_gh() -> bool {
-    Command::new("gh")
+    cmux_core::proc::command("gh")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -124,7 +123,7 @@ fn which_gh() -> bool {
 
 /// `gh pr view <branch>` in the repo root. None = no PR / error — both fine.
 fn fetch_pr(repo_root: &str, branch: &str) -> Option<PrStatus> {
-    let output = Command::new("gh")
+    let output = cmux_core::proc::command("gh")
         .args([
             "pr",
             "view",

@@ -4,7 +4,6 @@ mod config_watch;
 mod intel;
 mod notify;
 mod runs;
-#[cfg(unix)]
 mod server;
 
 use std::collections::{HashMap, HashSet};
@@ -123,7 +122,6 @@ pub fn run() {
             intel::spawn(app.handle().clone());
             config_watch::spawn(app.handle().clone());
             spawn_session_saver(app.handle().clone());
-            #[cfg(unix)]
             server::spawn(app.handle().clone());
             Ok(())
         })
@@ -162,13 +160,11 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 save_session(&app.state::<AppState>());
-                #[cfg(unix)]
-                {
-                    if let Some(disc) = cmux_core::ipc::read_discovery() {
-                        if disc.pid == std::process::id() {
-                            let _ = std::fs::remove_file(&disc.socket);
-                            cmux_core::ipc::remove_discovery();
-                        }
+                // Only the instance that owns the endpoint clears it.
+                if let Some(disc) = cmux_core::ipc::read_discovery() {
+                    if disc.pid == std::process::id() {
+                        cmux_core::transport::cleanup(&disc.socket);
+                        cmux_core::ipc::remove_discovery();
                     }
                 }
             }

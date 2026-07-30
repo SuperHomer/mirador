@@ -36,6 +36,13 @@ pub struct Config {
     pub font_size: Option<f32>,
     pub scrollback: Option<u32>,
     pub colors: Option<ColorOverrides>,
+    /// Program panes run. Defaults to `$SHELL` on macOS/Linux and
+    /// PowerShell 7 → Windows PowerShell → cmd.exe on Windows. Point it at
+    /// e.g. `C:\Program Files\Git\bin\bash.exe` for a POSIX shell.
+    pub shell: Option<String>,
+    /// Arguments for a custom `shell`. When set, Mirador adds none of its
+    /// own (no `-l`, no PowerShell prompt hook).
+    pub shell_args: Option<Vec<String>>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
 }
@@ -71,6 +78,18 @@ pub fn config_path() -> PathBuf {
     config_dir().join("mirador.json")
 }
 
+/// The user's home directory (`%USERPROFILE%` on Windows).
+pub fn home_dir() -> Option<String> {
+    #[cfg(windows)]
+    {
+        std::env::var("USERPROFILE").ok()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("HOME").ok()
+    }
+}
+
 /// Loads mirador.json (missing file → defaults; parse errors are reported but
 /// fall back to defaults so a typo can't brick the terminal).
 pub fn load() -> (Config, Option<String>) {
@@ -98,36 +117,90 @@ pub fn write_default_if_missing() {
     let _ = std::fs::write(path, serde_json::to_string_pretty(&starter).unwrap());
 }
 
+/// macOS: Cmd is free, so single-modifier bindings are safe.
+#[cfg(target_os = "macos")]
+const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
+    ("mod+t", "new_tab"),
+    ("mod+w", "close_pane"),
+    ("mod+shift+w", "close_tab"),
+    ("mod+d", "split_right"),
+    ("mod+shift+d", "split_down"),
+    ("mod+alt+left", "focus_left"),
+    ("mod+alt+right", "focus_right"),
+    ("mod+alt+up", "focus_up"),
+    ("mod+alt+down", "focus_down"),
+    ("mod+b", "toggle_sidebar"),
+    ("mod+k", "command_palette"),
+    ("mod+i", "notifications"),
+    ("mod+shift+]", "next_tab"),
+    ("mod+shift+[", "prev_tab"),
+    ("mod+1", "tab_1"),
+    ("mod+2", "tab_2"),
+    ("mod+3", "tab_3"),
+    ("mod+4", "tab_4"),
+    ("mod+5", "tab_5"),
+    ("mod+6", "tab_6"),
+    ("mod+7", "tab_7"),
+    ("mod+8", "tab_8"),
+    ("mod+9", "tab_9"),
+];
+
+/// Windows/Linux: plain Ctrl belongs to the program in the pane — Ctrl+C
+/// interrupts, Ctrl+D is EOF, Ctrl+W kills a word. So the app's own
+/// bindings live on Ctrl+Shift / Ctrl+Alt, as in every other terminal on
+/// these platforms, and copy/paste get the usual Ctrl+Shift+C/V (there is
+/// no app menu to provide them, unlike macOS).
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
+    ("ctrl+shift+t", "new_tab"),
+    ("ctrl+shift+w", "close_pane"),
+    ("ctrl+alt+w", "close_tab"),
+    ("ctrl+shift+d", "split_right"),
+    ("ctrl+alt+d", "split_down"),
+    ("ctrl+alt+left", "focus_left"),
+    ("ctrl+alt+right", "focus_right"),
+    ("ctrl+alt+up", "focus_up"),
+    ("ctrl+alt+down", "focus_down"),
+    ("ctrl+shift+b", "toggle_sidebar"),
+    ("ctrl+shift+k", "command_palette"),
+    ("ctrl+shift+i", "notifications"),
+    ("ctrl+shift+c", "copy"),
+    ("ctrl+shift+v", "paste"),
+    ("ctrl+tab", "next_tab"),
+    ("ctrl+shift+tab", "prev_tab"),
+    ("alt+1", "tab_1"),
+    ("alt+2", "tab_2"),
+    ("alt+3", "tab_3"),
+    ("alt+4", "tab_4"),
+    ("alt+5", "tab_5"),
+    ("alt+6", "tab_6"),
+    ("alt+7", "tab_7"),
+    ("alt+8", "tab_8"),
+    ("alt+9", "tab_9"),
+];
+
 pub fn default_keybindings() -> HashMap<String, String> {
-    let pairs = [
-        ("mod+t", "new_tab"),
-        ("mod+w", "close_pane"),
-        ("mod+shift+w", "close_tab"),
-        ("mod+d", "split_right"),
-        ("mod+shift+d", "split_down"),
-        ("mod+alt+left", "focus_left"),
-        ("mod+alt+right", "focus_right"),
-        ("mod+alt+up", "focus_up"),
-        ("mod+alt+down", "focus_down"),
-        ("mod+b", "toggle_sidebar"),
-        ("mod+k", "command_palette"),
-        ("mod+i", "notifications"),
-        ("mod+shift+]", "next_tab"),
-        ("mod+shift+[", "prev_tab"),
-        ("mod+1", "tab_1"),
-        ("mod+2", "tab_2"),
-        ("mod+3", "tab_3"),
-        ("mod+4", "tab_4"),
-        ("mod+5", "tab_5"),
-        ("mod+6", "tab_6"),
-        ("mod+7", "tab_7"),
-        ("mod+8", "tab_8"),
-        ("mod+9", "tab_9"),
-    ];
-    pairs
-        .into_iter()
+    DEFAULT_KEYBINDINGS
+        .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
+}
+
+/// A monospace stack that exists on the platform without asking the user to
+/// install anything.
+fn default_font_family() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Menlo, Monaco, 'Courier New', monospace"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "'Cascadia Mono', Consolas, 'Courier New', monospace"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "'DejaVu Sans Mono', 'Liberation Mono', monospace"
+    }
 }
 
 /// Catppuccin Mocha — the builtin fallback theme.
@@ -172,7 +245,7 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             .font_family
             .clone()
             .or(imported.font_family)
-            .unwrap_or_else(|| "Menlo, Monaco, 'Courier New', monospace".into()),
+            .unwrap_or_else(|| default_font_family().into()),
         font_size: cfg.font_size.or(imported.font_size).unwrap_or(13.0),
         scrollback: cfg.scrollback.unwrap_or(10_000),
         colors,
@@ -260,7 +333,9 @@ mod tests {
         assert_eq!(resolved.colors.background, "#1e1e2e");
         assert_eq!(resolved.colors.palette.len(), 16);
         assert_eq!(resolved.font_size, 13.0);
-        assert_eq!(resolved.keybindings["mod+t"], "new_tab");
+        // The accelerator differs per platform (Cmd vs Ctrl+Shift); the
+        // action set does not.
+        assert!(resolved.keybindings.values().any(|a| a == "new_tab"));
     }
 
     #[test]

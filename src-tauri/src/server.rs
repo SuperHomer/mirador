@@ -1,18 +1,16 @@
 //! Automation socket server: newline-delimited JSON over a Unix domain
-//! socket. Every verb goes through the same code paths as the UI commands,
-//! so the CLI and the UI can never diverge in behavior.
-
-#![cfg(unix)]
+//! socket (macOS/Linux) or a named pipe (Windows). Every verb goes through
+//! the same code paths as the UI commands, so the CLI and the UI can never
+//! diverge in behavior.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use cmux_core::transport::{self, Stream};
 use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope};
 
 use crate::{notify, AppState};
@@ -21,45 +19,50 @@ pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let path = cmux_core::ipc::default_socket_path();
 
-        // A stale socket from a crashed instance blocks bind; a live one
-        // means another Mirador owns automation — leave it alone.
-        if path.exists() {
-            if UnixStream::connect(&path).is_ok() {
-                eprintln!("mirador: automation socket already served by another instance");
-                return;
-            }
-            let _ = std::fs::remove_file(&path);
+        // Another Mirador owning automation is an ordinary situation (a
+        // second window, a dev build beside the installed app), not a
+        // failure — say so plainly instead of leaking an errno. Binding
+        // still refuses to steal the endpoint if one appears in between.
+        if transport::is_live(&path) {
+            eprintln!("mirador: automation socket already served by another instance");
+            return;
         }
 
-        let listener = match UnixListener::bind(&path) {
+        let listener = match transport::bind(&path) {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("mirador: automation socket unavailable: {e}");
                 return;
             }
         };
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         if let Err(e) = cmux_core::ipc::write_discovery(&path) {
             eprintln!("mirador: could not write socket discovery file: {e}");
         }
 
-        for conn in listener.incoming() {
-            let Ok(stream) = conn else { continue };
+        loop {
+            let Ok(stream) = listener.accept() else {
+                // A listener that can no longer produce connections would
+                // otherwise spin this thread at 100% CPU.
+                std::thread::sleep(Duration::from_millis(200));
+                continue;
+            };
             let app = app.clone();
             std::thread::spawn(move || serve_connection(app, stream));
         }
     });
 }
 
-fn serve_connection(app: AppHandle, stream: UnixStream) {
-    let reader = BufReader::new(match stream.try_clone() {
-        Ok(s) => s,
-        Err(_) => return,
-    });
-    let mut writer = stream;
+/// One client, one request stream. The reader owns the connection and
+/// lends it back for each response — a duplex stream can't be split.
+fn serve_connection(app: AppHandle, stream: Box<dyn Stream>) {
+    let mut reader = BufReader::new(stream);
 
-    for line in reader.lines() {
-        let Ok(line) = line else { break };
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
         if line.trim().is_empty() {
             continue;
         }
@@ -92,7 +95,8 @@ fn serve_connection(app: AppHandle, stream: UnixStream) {
             break;
         };
         bytes.push(b'\n');
-        if writer.write_all(&bytes).is_err() {
+        let stream = reader.get_mut();
+        if stream.write_all(&bytes).is_err() || stream.flush().is_err() {
             break;
         }
     }
@@ -147,9 +151,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             title,
             body,
         } => {
-            let pane = pane_id
-                .or_else(|| tty.as_deref().and_then(|t| pane_by_tty(&state, t)))
-                .unwrap_or_else(|| focused_pane(&state));
+            let pane = resolve_pane(&state, pane_id, tty).unwrap_or_else(|| focused_pane(&state));
             notify::handle_notification(app, &pane, title, body);
             Ok(json!({ "paneId": pane }))
         }
@@ -159,8 +161,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             agent,
             session_id,
         } => {
-            let pane = pane_id
-                .or_else(|| tty.as_deref().and_then(|t| pane_by_tty(&state, t)))
+            let pane = resolve_pane(&state, pane_id, tty)
                 .ok_or("could not resolve the pane for this agent session")?;
             {
                 let mut meta = state.meta.lock().unwrap();
@@ -310,8 +311,24 @@ fn resolve_remote_pane(
         .clone())
 }
 
-/// Finds the pane whose shell owns the given tty (e.g. "ttys004") — how a
-/// process running inside a pane identifies its own pane.
+/// Which pane a request came from: the `MIRA_PANE` the caller inherited
+/// (checked against live panes, since a stale environment outlives its
+/// pane), else its tty.
+fn resolve_pane(state: &AppState, pane_id: Option<String>, tty: Option<String>) -> Option<String> {
+    let claimed = pane_id.filter(|id| {
+        let ws = state.workspace.lock().unwrap();
+        ws.tabs
+            .iter()
+            .any(|t| cmux_core::layout::contains(&t.root, id))
+    });
+    claimed.or_else(|| tty.as_deref().and_then(|t| pane_by_tty(state, t)))
+}
+
+/// Finds the pane whose shell owns the given tty (e.g. "ttys004"). The
+/// primary way a process identifies its pane is the `MIRA_PANE` environment
+/// variable it inherited; this is the fallback for processes that lost the
+/// environment, and Windows (no ttys) has only the former.
+#[cfg(unix)]
 fn pane_by_tty(state: &AppState, tty: &str) -> Option<String> {
     let wanted = tty.trim_start_matches("/dev/");
     for (pane, pid) in state.pty.pids() {
@@ -324,6 +341,11 @@ fn pane_by_tty(state: &AppState, tty: &str) -> Option<String> {
             return Some(pane);
         }
     }
+    None
+}
+
+#[cfg(not(unix))]
+fn pane_by_tty(_state: &AppState, _tty: &str) -> Option<String> {
     None
 }
 

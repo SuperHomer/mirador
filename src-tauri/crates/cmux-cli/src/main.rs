@@ -306,7 +306,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 return print_osc_notify(title.as_deref(), &body);
             }
             Request::Notify {
-                pane_id: None,
+                pane_id: own_pane(),
                 tty: own_tty(),
                 title,
                 body,
@@ -329,33 +329,28 @@ fn parse_dir(s: &str) -> Result<SplitDir, String> {
     }
 }
 
-#[cfg(unix)]
 fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     use cmux_protocol::RequestEnvelope;
     use std::io::{BufRead, BufReader};
-    use std::os::unix::net::UnixStream;
 
     let disc = cmux_core::ipc::read_discovery()
         .ok_or("Mirador is not running (no socket discovery file)")?;
-    let mut stream = UnixStream::connect(&disc.socket)
+    let stream = cmux_core::transport::connect(&disc.socket)
         .map_err(|e| format!("Mirador is not running ({e})"))?;
 
     let envelope = RequestEnvelope { id: Some(1), req };
     let mut line = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
     line.push(b'\n');
-    stream.write_all(&line).map_err(|e| e.to_string())?;
 
     let mut reader = BufReader::new(stream);
+    reader.get_mut().write_all(&line).map_err(|e| e.to_string())?;
+    reader.get_mut().flush().map_err(|e| e.to_string())?;
+
     let mut response = String::new();
     reader
         .read_line(&mut response)
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&response).map_err(|e| format!("bad response: {e}"))
-}
-
-#[cfg(not(unix))]
-fn send_request(_req: Request) -> Result<ResponseEnvelope, String> {
-    Err("the automation socket is not supported on this platform yet".into())
 }
 
 fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), String> {
@@ -507,6 +502,17 @@ fn print_osc_notify(title: Option<&str>, body: &str) -> Result<(), String> {
     out.flush().map_err(|e| e.to_string())
 }
 
+/// The pane we are running inside, from the environment every pane's
+/// processes inherit. Works on every platform and through nesting (tmux,
+/// subshells, agent hooks). When the environment is lost — `sudo`, a
+/// detached screen — unix falls back to the tty lookup below; from a remote
+/// host neither applies and the OSC form of `mira notify` is the answer.
+fn own_pane() -> Option<String> {
+    std::env::var(cmux_core::pty::PANE_ENV)
+        .ok()
+        .filter(|id| !id.is_empty())
+}
+
 /// The tty of our parent process (the shell/agent inside a Mirador pane) —
 /// our own stdio may be pipes when invoked as a hook.
 #[cfg(unix)]
@@ -537,10 +543,11 @@ fn claude_hook(event: &str) -> Result<(), String> {
     let _ = std::io::stdin().read_to_string(&mut input);
     let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or(serde_json::json!({}));
     let tty = own_tty();
+    let pane = own_pane();
 
     if let Some(session_id) = payload["session_id"].as_str() {
         let _ = send_request(Request::AgentSession {
-            pane_id: None,
+            pane_id: pane.clone(),
             tty: tty.clone(),
             agent: "claude".into(),
             session_id: session_id.to_string(),
@@ -559,7 +566,7 @@ fn claude_hook(event: &str) -> Result<(), String> {
     };
     if let Some(body) = notify {
         let _ = send_request(Request::Notify {
-            pane_id: None,
+            pane_id: pane,
             tty,
             title: Some("Claude Code".into()),
             body,
@@ -589,7 +596,7 @@ fn is_our_hook(matcher: &serde_json::Value) -> bool {
 
 /// Idempotently installs (or removes) Mirador hooks in ~/.claude/settings.json.
 fn hooks(action: &str) -> Result<(), String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let home = cmux_core::config::home_dir().ok_or("could not find your home directory")?;
     let path = std::path::PathBuf::from(home).join(".claude/settings.json");
     let mut settings: serde_json::Value = match std::fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
@@ -647,18 +654,66 @@ fn hooks(action: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Puts `mira` on PATH: a symlink in ~/.local/bin on unix, and on Windows
+/// the install directory itself joins the user's PATH — so `mira` keeps
+/// pointing at the installed app after an upgrade, and no copy goes stale.
+#[cfg(unix)]
 fn install() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let home = cmux_core::config::home_dir().ok_or("could not find your home directory")?;
     let bin_dir = std::path::PathBuf::from(home).join(".local/bin");
     std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
     let target = bin_dir.join("mira");
     let _ = std::fs::remove_file(&target);
-    #[cfg(unix)]
     std::os::unix::fs::symlink(&exe, &target).map_err(|e| e.to_string())?;
-    #[cfg(not(unix))]
-    std::fs::copy(&exe, &target).map(|_| ()).map_err(|e| e.to_string())?;
     println!("installed: {} -> {}", target.display(), exe.display());
     println!("make sure ~/.local/bin is on your PATH");
+    Ok(())
+}
+
+#[cfg(windows)]
+fn install() -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe
+        .parent()
+        .ok_or("could not determine the install directory")?
+        .to_string_lossy()
+        .into_owned();
+
+    // Read/modify/write the *user* PATH through PowerShell: `setx` truncates
+    // at 1024 characters, which would quietly destroy a long PATH.
+    let script = format!(
+        "$dir = '{}'; \
+         $path = [Environment]::GetEnvironmentVariable('Path', 'User'); \
+         if ($null -eq $path) {{ $path = '' }} \
+         if (($path -split ';') -contains $dir) {{ 'already' }} \
+         else {{ \
+           $new = if ($path.TrimEnd(';')) {{ $path.TrimEnd(';') + ';' + $dir }} else {{ $dir }}; \
+           [Environment]::SetEnvironmentVariable('Path', $new, 'User'); 'added' \
+         }}",
+        dir.replace('\'', "''")
+    );
+    let output = std::process::Command::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("could not update PATH: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not update PATH: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    if String::from_utf8_lossy(&output.stdout).trim() == "already" {
+        println!("{dir} is already on your PATH");
+    } else {
+        println!("added to your user PATH: {dir}");
+        println!("open a new terminal (or sign out and back in) to pick it up");
+    }
+    println!("mira: {}", exe.display());
     Ok(())
 }

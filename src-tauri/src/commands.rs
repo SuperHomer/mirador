@@ -342,24 +342,9 @@ pub fn attach_pane(
     let command_builder = match remote_host.as_deref() {
         // Remote pane: the system ssh handles auth/agent/2FA/ProxyJump.
         Some(host) => Some(cmux_core::ssh::interactive_command(host)),
-        None => pane_command.as_deref().map(|cmd| {
-            let mut builder = portable_pty::CommandBuilder::new(
-                std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()),
-            );
-            builder.arg("-lc");
-            builder.arg(cmd);
-            builder.env("TERM", "xterm-256color");
-            builder.env("COLORTERM", "truecolor");
-            match &cwd {
-                Some(dir) if std::path::Path::new(dir).is_dir() => builder.cwd(dir),
-                _ => {
-                    if let Ok(home) = std::env::var("HOME") {
-                        builder.cwd(home);
-                    }
-                }
-            }
-            builder
-        }),
+        None => pane_command
+            .as_deref()
+            .map(|cmd| cmux_core::pty::shell::run_command(cmd, cwd.as_deref())),
     };
 
     if remote_host.is_none() {

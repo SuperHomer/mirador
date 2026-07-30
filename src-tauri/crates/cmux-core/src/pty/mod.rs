@@ -6,7 +6,15 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 
 use crate::osc::StreamScanner;
 
+pub mod shell;
+
 pub type PaneId = String;
+
+/// Every pane's processes inherit this: it is how `mira` (and therefore an
+/// agent's hooks) knows which pane it is running in, on every platform.
+/// The tty-based lookup remains as a fallback for processes that lose the
+/// environment.
+pub const PANE_ENV: &str = "MIRA_PANE";
 
 /// Pause reading the PTY when this many bytes are in flight to the UI…
 const HIGH_WATERMARK: u64 = 2 * 1024 * 1024;
@@ -111,9 +119,11 @@ impl PtyManager {
             })
             .map_err(|e| e.to_string())?;
 
+        let mut command = command.unwrap_or_else(|| shell::interactive(cwd));
+        command.env(PANE_ENV, id);
         let child = pair
             .slave
-            .spawn_command(command.unwrap_or_else(|| default_shell_command(cwd)))
+            .spawn_command(command)
             .map_err(|e| e.to_string())?;
         // Close our copy of the slave end so reads hit EOF when the child exits.
         drop(pair.slave);
@@ -273,8 +283,13 @@ impl PtyManager {
             pane.flow.close();
             let pid = pane.child.process_id();
             signal_group(pid, Signal::Hangup);
-            #[cfg(not(unix))]
-            let _ = pane.child.kill();
+            #[cfg(windows)]
+            {
+                // No process groups: taskkill /T walks the tree so a shell's
+                // children (the dev server, the test runner) go with it.
+                kill_tree(pid);
+                let _ = pane.child.kill();
+            }
 
             // Escalate to SIGKILL if the process ignores SIGHUP. The pane
             // still being in the map guarantees the pid hasn't been reaped,
@@ -320,40 +335,20 @@ fn signal_group(pid: Option<u32>, signal: Signal) {
 #[cfg(not(unix))]
 fn signal_group(_pid: Option<u32>, _signal: Signal) {}
 
-pub fn default_shell_command(cwd: Option<&str>) -> CommandBuilder {
-    #[cfg(windows)]
-    let mut cmd = CommandBuilder::new("powershell.exe");
-
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-        let mut cmd = CommandBuilder::new(shell);
-        // Login shell so the user's profile (PATH, prompt) loads.
-        cmd.arg("-l");
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd
-    };
-
-    match cwd {
-        Some(dir) if std::path::Path::new(dir).is_dir() => cmd.cwd(dir),
-        _ => {
-            if let Some(home) = home_dir() {
-                cmd.cwd(home);
-            }
-        }
+/// Kills a process and everything it spawned. `taskkill` is the supported
+/// way to do this without holding a job object per pane.
+#[cfg(windows)]
+fn kill_tree(pid: Option<u32>) {
+    if let Some(pid) = pid {
+        let _ = crate::proc::command("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
     }
-    cmd
 }
 
-fn home_dir() -> Option<String> {
-    #[cfg(windows)]
-    return std::env::var("USERPROFILE").ok();
-    #[cfg(not(windows))]
-    return std::env::var("HOME").ok();
-}
-
-#[cfg(test)]
+/// PTY behavior is exercised with POSIX one-liners (`yes`, `dd`); the
+/// ConPTY path is covered by running the app on Windows.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::osc::PassthroughScanner;

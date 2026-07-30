@@ -7,5 +7,7 @@ pub mod ports;
 pub mod session;
 pub mod ssh;
 pub mod osc;
+pub mod proc;
 pub mod pty;
 pub mod state;
+pub mod transport;

@@ -275,7 +275,7 @@ impl Workspace {
 }
 
 fn display_dir(path: &str) -> String {
-    let home = std::env::var("HOME").ok();
+    let home = crate::config::home_dir();
     if home.as_deref() == Some(path) {
         return "~".to_string();
     }
@@ -286,7 +286,7 @@ fn display_dir(path: &str) -> String {
 }
 
 fn abbreviate_home(path: &str) -> String {
-    if let Ok(home) = std::env::var("HOME") {
+    if let Some(home) = crate::config::home_dir() {
         if let Some(rest) = path.strip_prefix(&home) {
             return format!("~{rest}");
         }
