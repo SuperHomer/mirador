@@ -66,8 +66,8 @@ mod backend {
 
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, NO_ERROR};
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
-        TCP_TABLE_OWNER_PID_LISTENER,
+        GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID,
+        MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
     };
     use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -126,13 +126,25 @@ mod backend {
         }
     }
 
+    /// How many rows the buffer can actually hold. `dwNumEntries` is taken
+    /// on faith otherwise, and a count larger than the allocation would walk
+    /// off the end of it.
+    fn row_capacity<Row>(buf: &[u8], table_offset: usize) -> usize {
+        buf.len()
+            .saturating_sub(table_offset)
+            .checked_div(std::mem::size_of::<Row>())
+            .unwrap_or(0)
+    }
+
     pub fn listening_ports_by_pid() -> HashMap<u32, Vec<u16>> {
         let mut map: HashMap<u32, Vec<u16>> = HashMap::new();
 
         let v4 = tcp_table(AF_INET as u32);
-        if v4.len() >= std::mem::size_of::<u32>() {
+        if v4.len() >= std::mem::size_of::<MIB_TCPTABLE_OWNER_PID>() {
+            let offset = std::mem::offset_of!(MIB_TCPTABLE_OWNER_PID, table);
             let table = v4.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
-            let count = unsafe { (*table).dwNumEntries } as usize;
+            let count = (unsafe { (*table).dwNumEntries } as usize)
+                .min(row_capacity::<MIB_TCPROW_OWNER_PID>(&v4, offset));
             for i in 0..count {
                 let row = unsafe { &*(*table).table.as_ptr().add(i) };
                 add(&mut map, row.dwOwningPid, port_of(row.dwLocalPort));
@@ -140,9 +152,11 @@ mod backend {
         }
 
         let v6 = tcp_table(AF_INET6 as u32);
-        if v6.len() >= std::mem::size_of::<u32>() {
+        if v6.len() >= std::mem::size_of::<MIB_TCP6TABLE_OWNER_PID>() {
+            let offset = std::mem::offset_of!(MIB_TCP6TABLE_OWNER_PID, table);
             let table = v6.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID;
-            let count = unsafe { (*table).dwNumEntries } as usize;
+            let count = (unsafe { (*table).dwNumEntries } as usize)
+                .min(row_capacity::<MIB_TCP6ROW_OWNER_PID>(&v6, offset));
             for i in 0..count {
                 let row = unsafe { &*(*table).table.as_ptr().add(i) };
                 add(&mut map, row.dwOwningPid, port_of(row.dwLocalPort));

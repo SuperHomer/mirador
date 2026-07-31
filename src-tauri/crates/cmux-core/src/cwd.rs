@@ -110,13 +110,20 @@ mod windows {
             return None;
         }
 
-        let mut utf16 = vec![0u16; length as usize / 2];
+        // `length` is a byte count read out of the target process, so treat
+        // it as untrusted: an odd value would make the u16 buffer one byte
+        // short of the read below. Round down — UTF-16 has no odd length.
+        let bytes = length as usize & !1;
+        if bytes == 0 {
+            return None;
+        }
+        let mut utf16 = vec![0u16; bytes / 2];
         let ok = unsafe {
             ReadProcessMemory(
                 process.0 as _,
                 buffer as *const c_void,
                 utf16.as_mut_ptr() as *mut c_void,
-                length as usize,
+                bytes,
                 std::ptr::null_mut(),
             )
         };
