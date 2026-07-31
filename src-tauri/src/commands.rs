@@ -323,7 +323,9 @@ pub fn attach_pane(
                 let changed = {
                     let mut meta = state.meta.lock().unwrap();
                     let entry = meta.entry(pane_id.clone()).or_default();
-                    let title = if title.trim().is_empty() {
+                    let title = if title.trim().is_empty()
+                        || !cmux_core::state::is_meaningful_title(&title)
+                    {
                         None
                     } else {
                         Some(title)

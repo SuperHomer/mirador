@@ -147,16 +147,22 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
 
 /// Windows/Linux: plain Ctrl belongs to the program in the pane — Ctrl+C
 /// interrupts, Ctrl+D is EOF, Ctrl+W kills a word. So the app's own
-/// bindings live on Ctrl+Shift / Ctrl+Alt, as in every other terminal on
-/// these platforms, and copy/paste get the usual Ctrl+Shift+C/V (there is
-/// no app menu to provide them, unlike macOS).
+/// bindings live on Ctrl+Shift, as in every other terminal on these
+/// platforms, and copy/paste get the usual Ctrl+Shift+C/V (there is no app
+/// menu to provide them, unlike macOS).
+///
+/// Ctrl+Alt is avoided for letters: it *is* AltGr on international
+/// keyboards, so those combos both fail to arrive as the expected letter
+/// and would steal character input from anyone typing @ or [ with it. The
+/// pairs macOS spells with Shift therefore take a second letter here
+/// (split down is Ctrl+Shift+E) rather than a second modifier.
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+shift+t", "new_tab"),
     ("ctrl+shift+w", "close_pane"),
-    ("ctrl+alt+w", "close_tab"),
+    ("ctrl+shift+q", "close_tab"),
     ("ctrl+shift+d", "split_right"),
-    ("ctrl+alt+d", "split_down"),
+    ("ctrl+shift+e", "split_down"),
     ("ctrl+alt+left", "focus_left"),
     ("ctrl+alt+right", "focus_right"),
     ("ctrl+alt+up", "focus_up"),

@@ -135,12 +135,15 @@ protocol.
 ## Default keys
 
 Plain Ctrl belongs to the program in your pane (Ctrl+C interrupts, Ctrl+D
-is EOF), so outside macOS the app's own keys live on Ctrl+Shift / Ctrl+Alt.
+is EOF), so outside macOS the app's own keys live on Ctrl+Shift. Ctrl+Alt
+is avoided for letters — it *is* AltGr on international keyboards — so the
+pairs macOS spells with Shift take a second letter instead.
 
 | macOS | Windows / Linux | Action |
 |---|---|---|
 | ⌘T / ⌘W | Ctrl+Shift+T / Ctrl+Shift+W | new tab / close pane |
-| ⌘D / ⌘⇧D | Ctrl+Shift+D / Ctrl+Alt+D | split right / down |
+| ⌘⇧W | Ctrl+Shift+Q | close tab |
+| ⌘D / ⌘⇧D | Ctrl+Shift+D / Ctrl+Shift+E | split right / down |
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |
