@@ -67,7 +67,9 @@ type Sink = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send>>>;
 
 struct PtyPane {
     writer: Box<dyn Write + Send>,
-    master: Box<dyn MasterPty + Send>,
+    /// Taken to close the PTY. On Windows that is what finally unblocks a
+    /// reader parked on a dead child — see `spawn_exit_watcher`.
+    master: Option<Box<dyn MasterPty + Send>>,
     child: Box<dyn Child + Send + Sync>,
     flow: Arc<FlowControl>,
     /// Replaceable output callback: a remounted frontend pane re-attaches
@@ -207,16 +209,18 @@ impl PtyManager {
         }
 
         self.inner.panes.lock().unwrap().insert(
-            id,
+            id.clone(),
             PtyPane {
                 writer,
-                master: pair.master,
+                master: Some(pair.master),
                 child,
                 flow,
                 sink,
                 pid,
             },
         );
+        #[cfg(windows)]
+        spawn_exit_watcher(Arc::clone(&self.inner), id);
         Ok(())
     }
 
@@ -255,7 +259,11 @@ impl PtyManager {
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
         let panes = self.inner.panes.lock().unwrap();
         let pane = panes.get(id).ok_or_else(|| format!("no pane {id}"))?;
-        pane.master
+        let master = pane
+            .master
+            .as_ref()
+            .ok_or_else(|| format!("pane {id} is closing"))?;
+        master
             .resize(PtySize {
                 rows,
                 cols,
@@ -335,6 +343,46 @@ fn signal_group(pid: Option<u32>, signal: Signal) {
 #[cfg(not(unix))]
 fn signal_group(_pid: Option<u32>, _signal: Signal) {}
 
+/// Watches for the child's exit and closes the PTY once it is gone.
+///
+/// A unix pty reports EOF to the reader when the last writer closes, which
+/// is what tells the forwarder thread to clean up and report the exit code.
+/// ConPTY does not: its output pipe stays open until the *pseudoconsole* is
+/// closed, so the reader parks forever on a dead child and the pane never
+/// reports an exit — `mira run --wait` hangs and no `[exit N]` banner is
+/// drawn. Closing the master here is what produces the EOF that path needs.
+///
+/// portable-pty exposes no waitable process handle, so this polls; the cost
+/// is one wakeup per pane per 100ms.
+#[cfg(windows)]
+fn spawn_exit_watcher(inner: Arc<Inner>, id: String) {
+    let _ = std::thread::Builder::new()
+        .name(format!("pty-exit-{id}"))
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            {
+                let mut panes = inner.panes.lock().unwrap();
+                let Some(pane) = panes.get_mut(&id) else {
+                    return; // pane already gone: closed, or the reader won
+                };
+                if !matches!(pane.child.try_wait(), Ok(Some(_))) {
+                    continue;
+                }
+            }
+            // The child is gone but its last writes may still be in the
+            // console buffer; give the reader a moment to drain them, or
+            // the final line of output is lost with the pty.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if let Some(pane) = inner.panes.lock().unwrap().get_mut(&id) {
+                // Dropping the master closes the pseudoconsole. The pane
+                // itself stays in the map so the forwarder's cleanup still
+                // finds the child and reads its exit status from it.
+                pane.master.take();
+            }
+            return;
+        });
+}
+
 /// Kills a process and everything it spawned. `taskkill` is the supported
 /// way to do this without holding a job object per pane.
 #[cfg(windows)]
@@ -346,8 +394,60 @@ fn kill_tree(pid: Option<u32>) {
     }
 }
 
-/// PTY behavior is exercised with POSIX one-liners (`yes`, `dd`); the
-/// ConPTY path is covered by running the app on Windows.
+/// Runs everywhere, through whichever shell the platform uses. Exit
+/// detection is the thing worth covering on both: ConPTY shipped broken
+/// precisely because the PTY tests below were unix-only, so nothing here
+/// noticed that a finished command never reported its exit code.
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+    use crate::osc::PassthroughScanner;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn a_finished_command_reports_its_output_and_exit_code() {
+        let mgr = PtyManager::new();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        let (exit_tx, exit_rx) = mpsc::channel::<Option<i32>>();
+
+        let id = "pane-exit-code".to_string();
+        mgr.spawn(
+            &id,
+            80,
+            24,
+            None,
+            Some(shell::run_command("echo hello-mirador; exit 7", None)),
+            Box::new(PassthroughScanner),
+            move |bytes| {
+                let _ = out_tx.send(bytes.to_vec());
+            },
+            move |_, code| {
+                let _ = exit_tx.send(code);
+            },
+        )
+        .unwrap();
+
+        // Generous: a cold PowerShell start on a CI runner is not fast.
+        let code = exit_rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("a command that exits must be detected as exited");
+        assert_eq!(code, Some(7), "the command's exit code must survive");
+
+        let mut all = Vec::new();
+        while let Ok(chunk) = out_rx.try_recv() {
+            all.extend(chunk);
+        }
+        let text = String::from_utf8_lossy(&all);
+        assert!(
+            text.contains("hello-mirador"),
+            "output written before exit must not be lost: {text:?}"
+        );
+    }
+}
+
+/// Flow control and signal handling, exercised with POSIX one-liners
+/// (`yes`, `dd`) that have no portable equivalent.
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
