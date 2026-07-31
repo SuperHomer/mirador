@@ -427,6 +427,8 @@ mod exit_tests {
         let (exit_tx, exit_rx) = mpsc::channel::<Option<i32>>();
 
         let id = "pane-exit-code".to_string();
+        let terminal = mgr.clone();
+        let terminal_pane = id.clone();
         mgr.spawn(
             &id,
             80,
@@ -435,6 +437,20 @@ mod exit_tests {
             Some(shell::run_command("echo hello-mirador; exit 7", None)),
             Box::new(PassthroughScanner),
             move |bytes| {
+                // ConPTY opens by asking the terminal where the cursor is
+                // (DSR, `ESC [ 6 n`) and the child does not proceed until
+                // something answers. xterm.js does this in the app, so the
+                // harness has to as well or nothing ever runs.
+                if bytes.windows(4).any(|w| w == b"\x1b[6n") {
+                    for _ in 0..20 {
+                        if terminal.write(&terminal_pane, b"\x1b[1;1R").is_ok() {
+                            break;
+                        }
+                        // The pane lands in the map just after the reader
+                        // starts; a query that beats it is retried.
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
                 let _ = out_tx.send(bytes.to_vec());
             },
             move |_, code| {
