@@ -3,7 +3,6 @@
 //! (60s) or when a new (repo, branch) appears. Emits a fresh snapshot only
 //! when something actually changed.
 
-use std::process::Command;
 use std::time::Duration;
 
 use cmux_protocol::PrStatus;
@@ -39,7 +38,25 @@ pub fn spawn(handle: tauri::AppHandle) {
 
             // cwd + branch every tick.
             for (pane, pid) in &pids {
-                let cwd = cmux_core::cwd::process_cwd(*pid);
+                // A shell that reports OSC 7 is authoritative. Polling the
+                // OS would fight it — on Windows the process working
+                // directory never follows PowerShell's `cd`, so the poll
+                // would drag the sidebar back to the launch directory
+                // between every prompt.
+                let (from_shell, known_cwd) = {
+                    let meta = state.meta.lock().unwrap();
+                    match meta.get(pane) {
+                        Some(m) => (m.cwd_from_shell, m.cwd.clone()),
+                        None => (false, None),
+                    }
+                };
+                // Syscalls stay outside the lock: this runs every 2s and
+                // the UI takes the same mutex.
+                let cwd = if from_shell {
+                    known_cwd
+                } else {
+                    cmux_core::cwd::process_cwd(*pid).or(known_cwd)
+                };
                 let git = cwd.as_deref().and_then(cmux_core::git::branch_for_cwd);
                 let mut meta = state.meta.lock().unwrap();
                 let entry = meta.entry(pane.clone()).or_default();
@@ -115,7 +132,7 @@ pub fn spawn(handle: tauri::AppHandle) {
 }
 
 fn which_gh() -> bool {
-    Command::new("gh")
+    cmux_core::proc::command("gh")
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -124,7 +141,7 @@ fn which_gh() -> bool {
 
 /// `gh pr view <branch>` in the repo root. None = no PR / error — both fine.
 fn fetch_pr(repo_root: &str, branch: &str) -> Option<PrStatus> {
-    let output = Command::new("gh")
+    let output = cmux_core::proc::command("gh")
         .args([
             "pr",
             "view",

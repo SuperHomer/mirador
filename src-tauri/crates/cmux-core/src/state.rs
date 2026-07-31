@@ -11,6 +11,12 @@ use crate::layout;
 #[derive(Debug, Default, Clone)]
 pub struct PaneMeta {
     pub cwd: Option<String>,
+    /// True once the shell has reported its directory with OSC 7. That
+    /// beats anything the intel poller can read from the OS and must not
+    /// be overwritten by it: PowerShell's `cd` moves its own location but
+    /// never the *process* working directory the poller sees, so on
+    /// Windows the two disagree permanently.
+    pub cwd_from_shell: bool,
     /// Set by OSC 0/2 title sequences.
     pub title: Option<String>,
     /// Command pane: the PTY runs this command directly instead of an
@@ -274,8 +280,17 @@ impl Workspace {
     }
 }
 
+/// ConPTY seeds a console's title with the shell's own image path
+/// (`C:\Program Files\PowerShell\7\pwsh.exe`) and PowerShell never replaces
+/// it, so honoring it pins every Windows tab to the same useless string for
+/// the session. Fall back to the directory name in that case; a program
+/// that sets a real title (`vim: main.rs`, `user@host:~/src`) still wins.
+pub fn is_meaningful_title(title: &str) -> bool {
+    !title.trim().to_ascii_lowercase().ends_with(".exe")
+}
+
 fn display_dir(path: &str) -> String {
-    let home = std::env::var("HOME").ok();
+    let home = crate::config::home_dir();
     if home.as_deref() == Some(path) {
         return "~".to_string();
     }
@@ -286,7 +301,7 @@ fn display_dir(path: &str) -> String {
 }
 
 fn abbreviate_home(path: &str) -> String {
-    if let Ok(home) = std::env::var("HOME") {
+    if let Some(home) = crate::config::home_dir() {
         if let Some(rest) = path.strip_prefix(&home) {
             return format!("~{rest}");
         }
@@ -349,6 +364,16 @@ mod tests {
         assert!(ws.focus_pane(&a));
         assert_eq!(ws.focused_pane(), a);
         assert_eq!(ws.active, 0);
+    }
+
+    #[test]
+    fn conpty_image_path_titles_are_rejected() {
+        // What ConPTY seeds every Windows console with.
+        assert!(!is_meaningful_title(r"C:\Program Files\PowerShell\7\pwsh.exe"));
+        assert!(!is_meaningful_title("C:\\Windows\\System32\\cmd.exe "));
+        // What a program actually setting a title looks like.
+        assert!(is_meaningful_title("vim: main.rs"));
+        assert!(is_meaningful_title("yoan@box:~/src"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
-//! Automation socket location + discovery. The app writes a discovery file
-//! so the CLI finds the live socket (and can fail fast with a clear error
-//! when Mirador isn't running). Unix-only for now; Windows named pipes land
-//! with the M11 platform pass.
+//! Automation endpoint location + discovery. The app writes a discovery
+//! file so the CLI finds the live endpoint (and can fail fast with a clear
+//! error when Mirador isn't running). The endpoint is a Unix domain socket
+//! on macOS/Linux and a named pipe on Windows — see [`crate::transport`].
 
 use std::path::PathBuf;
 
@@ -26,9 +26,20 @@ pub fn default_socket_path() -> PathBuf {
     std::env::temp_dir().join(format!("mira-{uid}.sock"))
 }
 
-#[cfg(not(unix))]
+/// Named pipes live in a machine-global namespace, so the pipe name carries
+/// the user name — two users on one box each get their own Mirador.
+#[cfg(windows)]
 pub fn default_socket_path() -> PathBuf {
-    PathBuf::from(r"\\.\pipe\mira")
+    let user: String = std::env::var("USERNAME")
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if user.is_empty() {
+        PathBuf::from(r"\\.\pipe\mira")
+    } else {
+        PathBuf::from(format!(r"\\.\pipe\mira-{user}"))
+    }
 }
 
 pub fn write_discovery(socket: &std::path::Path) -> std::io::Result<()> {

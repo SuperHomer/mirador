@@ -8,9 +8,11 @@ import {
   focusDirection,
   setActiveTab,
   openBrowser,
+  writePty,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
+import { getTerminal } from "../terminal/registry";
 
 export interface ActionDef {
   id: string;
@@ -102,6 +104,29 @@ export const actions: ActionDef[] = [
     id: "notifications",
     title: "Notifications Panel",
     run: () => useUiStore.getState().toggleNotifications(),
+  },
+  // Windows/Linux have no app menu supplying Edit roles, so the terminal
+  // conventions (Ctrl+Shift+C/V) are wired here. Plain Ctrl+C must stay
+  // with the program in the pane.
+  {
+    id: "copy",
+    title: "Copy Selection",
+    run: () => {
+      const pane = focusedPane();
+      const selection = pane ? getTerminal(pane)?.getSelection() : undefined;
+      if (selection) void navigator.clipboard.writeText(selection);
+    },
+  },
+  {
+    id: "paste",
+    title: "Paste",
+    run: () => {
+      const pane = focusedPane();
+      if (!pane) return;
+      void navigator.clipboard.readText().then((text) => {
+        if (text) void writePty(pane, text);
+      });
+    },
   },
   {
     id: "new_browser_pane",

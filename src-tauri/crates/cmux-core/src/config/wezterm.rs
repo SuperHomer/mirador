@@ -57,7 +57,7 @@ pub fn import_from(path: &Path) -> Option<ImportedTheme> {
 }
 
 fn colors_dir() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
+    let home = super::home_dir()?;
     Some(PathBuf::from(home).join(".config/wezterm/colors"))
 }
 

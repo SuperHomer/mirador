@@ -1,9 +1,11 @@
 # Agent cookbook
 
 How AI coding agents (Claude Code, Codex, OpenCode, Gemini CLI, …) plug
-into Mirador. Everything below works over the `mira` CLI, which talks to the
-running app through a Unix socket (`~/.config/mirador/socket.json` points to
-it). `mira --json …` gives machine-readable output everywhere.
+into Mirador. Everything below works over the `mira` CLI, which talks to
+the running app through a local socket — a Unix socket on macOS/Linux, a
+named pipe on Windows. The discovery file points at it:
+`~/.config/mirador/socket.json` (`%APPDATA%\mirador\socket.json`).
+`mira --json …` gives machine-readable output everywhere.
 
 ## 1. Light up the tab when you need the human
 
@@ -35,8 +37,10 @@ This wires three hooks, all calling `mira claude-hook`:
 - **Stop** → "finished responding" notification when a turn completes
 - **SessionStart** → records the Claude session id on the pane
 
-The hook resolves *which pane* its Claude session runs in via its parent
-process tty, so five parallel agents notify five different tabs correctly.
+The hook resolves *which pane* its Claude session runs in from `MIRA_PANE`,
+which every process inside a pane inherits, so five parallel agents notify
+five different tabs correctly. (On unix it falls back to the parent
+process's tty when the environment was lost — over `sudo`, say.)
 
 **Session resume**: because session ids are recorded per pane, restarting
 Mirador restores each agent pane idle with `[press any key to rerun:
@@ -99,8 +103,10 @@ mira ssh unforward 3000
 ```
 
 The pane runs the *system* ssh, so agent auth, 2FA prompts, and ProxyJump
-behave exactly as in any terminal. A shared ControlMaster connection backs
-the forwards, so they need no second login.
+behave exactly as in any terminal. On macOS/Linux a shared ControlMaster
+connection backs the forwards, so they need no second login; Windows'
+OpenSSH has no ControlMaster, so each forward is its own `ssh -N -L`
+process and authenticates again.
 
 Forwarding is what makes a remote dev server reviewable: `mira ssh forward
 3000` then `mira browser open http://localhost:3000` and the browser pane
@@ -112,8 +118,7 @@ SSH session behind your back.
 
 ## 7. Raw socket protocol
 
-Newline-delimited JSON on the Unix socket from
-`~/.config/mirador/socket.json`:
+Newline-delimited JSON on the socket named in the discovery file:
 
 ```
 {"id":1,"cmd":"run","command":"npm test","wait":true}
