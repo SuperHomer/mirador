@@ -1,5 +1,5 @@
 import Logo from "./Logo";
-import { GITHUB_URL, DOWNLOAD_URL, DOWNLOAD_VERSION } from "../config";
+import { GITHUB_URL, RELEASES_URL } from "../config";
 
 export default function Nav() {
   return (
@@ -33,7 +33,7 @@ export default function Nav() {
         <a href="#install" style={{ color: "var(--subtext)" }}>Install</a>
         <a href={GITHUB_URL} style={{ color: "var(--subtext)" }}>GitHub</a>
         <a
-          href={DOWNLOAD_URL}
+          href={RELEASES_URL}
           style={{
             display: "flex",
             alignItems: "center",
@@ -46,7 +46,7 @@ export default function Nav() {
           }}
         >
           Download
-          <span className="mono" style={{ fontSize: 11, fontWeight: 600, opacity: 0.7 }}>{DOWNLOAD_VERSION}</span>
+          <span className="mono" style={{ fontSize: 11, fontWeight: 600, opacity: 0.7 }}>latest</span>
         </a>
       </div>
       </div>

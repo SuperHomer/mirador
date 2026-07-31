@@ -1,7 +1,7 @@
 type Feature = { icon: string; title: string; body: string; code?: string };
 
 const FEATURES: Feature[] = [
-  { icon: "⧉", title: "Tabs & splits", body: "Horizontal and vertical splits, WebGL rendering with fallback, and flow-controlled PTY streaming — a runaway <cat> can\\u2019t freeze the UI." },
+  { icon: "⧉", title: "Tabs & splits", body: "Horizontal and vertical splits, WebGL rendering with fallback, and flow-controlled PTY streaming — a runaway <cat> can’t freeze the UI." },
   { icon: "◎", title: "Agent notifications", body: "Panes get an attention ring and tabs light up on OSC 9/99/777 or <mira notify>. Native alerts when the window is unfocused." },
   { icon: "▶", title: "Command panes", body: "Agent-launched commands run in a visible, interruptible pane. <--wait> returns clean output and an exit code to the caller." },
   { icon: "◱", title: "Scriptable browser", body: "Agents open pages, snapshot the DOM, click, fill, and eval — while you watch it happen in a real pane via <mira browser>." },
