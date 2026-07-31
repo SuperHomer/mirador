@@ -563,7 +563,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cmux-app"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cmux-core",
  "cmux-protocol",
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "cmux-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "clap",
  "cmux-core",
@@ -591,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "cmux-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cmux-protocol",
  "libc",
@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "cmux-protocol"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
