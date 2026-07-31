@@ -1,0 +1,33 @@
+version: 2
+
+# Nothing was watching the dependency graph before: a security audit found
+# an end-of-life Node in CI and a high-severity transitive advisory that had
+# been sitting in the lockfile. These keep both from happening quietly.
+updates:
+  # The app: React/Vite/xterm.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # The landing page (its own lockfile).
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Tauri and the Rust workspace.
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Workflow actions are currently mutable tags (@v4, @stable); this is what
+  # keeps them current if they are ever pinned to commit SHAs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
