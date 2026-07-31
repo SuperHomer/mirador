@@ -598,8 +598,13 @@ fn is_our_hook(matcher: &serde_json::Value) -> bool {
 /// Idempotently installs (or removes) Mirador hooks in ~/.claude/settings.json.
 fn hooks(action: &str) -> Result<(), String> {
     let home = cmux_core::config::home_dir().ok_or("could not find your home directory")?;
-    let path = std::path::PathBuf::from(home).join(".claude/settings.json");
-    let mut settings: serde_json::Value = match std::fs::read_to_string(&path) {
+    hooks_at(&std::path::PathBuf::from(home).join(".claude/settings.json"), action)
+}
+
+/// The same, against an explicit settings file — so the edit can be tested
+/// without a test writing into the developer's own Claude Code config.
+fn hooks_at(path: &std::path::Path, action: &str) -> Result<(), String> {
+    let mut settings: serde_json::Value = match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
         Err(_) => serde_json::json!({}),
     };
@@ -646,7 +651,7 @@ fn hooks(action: &str) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(
-        &path,
+        path,
         serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
@@ -717,4 +722,113 @@ fn install() -> Result<(), String> {
     }
     println!("mira: {}", exe.display());
     Ok(())
+}
+
+/// The Claude Code integration, minus the parts that need a running app.
+/// `hooks setup` edits a real user's settings.json, and pane targeting is
+/// what makes five parallel agents notify five different tabs — both worth
+/// asserting on Windows, where the paths and the environment differ.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_settings(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mira-hooks-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("settings.json")
+    }
+
+    fn read(path: &std::path::Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn setup_installs_one_hook_per_event() {
+        let path = temp_settings("setup");
+        hooks_at(&path, "setup").unwrap();
+
+        let settings = read(&path);
+        for (hook_event, cli_event) in HOOK_EVENTS {
+            let entries = settings["hooks"][hook_event].as_array().unwrap();
+            assert_eq!(entries.len(), 1, "{hook_event} should have exactly one hook");
+            assert_eq!(
+                entries[0]["hooks"][0]["command"],
+                serde_json::json!(format!("mira claude-hook {cli_event}"))
+            );
+        }
+    }
+
+    #[test]
+    fn setup_is_idempotent_and_leaves_other_hooks_alone() {
+        let path = temp_settings("idempotent");
+        std::fs::write(
+            &path,
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"someone-elses-tool"}]}]}}"#,
+        )
+        .unwrap();
+
+        hooks_at(&path, "setup").unwrap();
+        hooks_at(&path, "setup").unwrap();
+
+        let settings = read(&path);
+        let stop = settings["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop.len(), 2, "running setup twice must not duplicate ours");
+        assert!(
+            stop.iter().any(|m| m["hooks"][0]["command"] == "someone-elses-tool"),
+            "another tool's hook must survive"
+        );
+    }
+
+    #[test]
+    fn remove_takes_only_our_hooks_back_out() {
+        let path = temp_settings("remove");
+        std::fs::write(
+            &path,
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"someone-elses-tool"}]}]}}"#,
+        )
+        .unwrap();
+
+        hooks_at(&path, "setup").unwrap();
+        hooks_at(&path, "remove").unwrap();
+
+        let settings = read(&path);
+        let stop = settings["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop.len(), 1);
+        assert_eq!(stop[0]["hooks"][0]["command"], "someone-elses-tool");
+    }
+
+    #[test]
+    fn a_legacy_cmux_hook_is_migrated_not_duplicated() {
+        let path = temp_settings("legacy");
+        std::fs::write(
+            &path,
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"cmux claude-hook stop"}]}]}}"#,
+        )
+        .unwrap();
+
+        hooks_at(&path, "setup").unwrap();
+
+        let settings = read(&path);
+        let stop = settings["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop.len(), 1, "the old cmux hook should be replaced");
+        assert_eq!(stop[0]["hooks"][0]["command"], "mira claude-hook stop");
+    }
+
+    /// How a hook knows which pane its agent runs in. The tty fallback is
+    /// unix-only, so on Windows this environment variable is the only
+    /// mechanism — if it stopped being read, every notification would land
+    /// on whichever tab happened to be focused.
+    #[test]
+    fn own_pane_comes_from_the_pane_environment() {
+        std::env::set_var(cmux_core::pty::PANE_ENV, "pane-abc-123");
+        assert_eq!(own_pane(), Some("pane-abc-123".to_string()));
+
+        // An empty value is not a pane; it must not be sent as one.
+        std::env::set_var(cmux_core::pty::PANE_ENV, "");
+        assert_eq!(own_pane(), None);
+
+        std::env::remove_var(cmux_core::pty::PANE_ENV);
+        assert_eq!(own_pane(), None);
+    }
 }

@@ -480,6 +480,98 @@ mod exit_tests {
             "output written before exit must not be lost: {text:?}"
         );
     }
+
+    /// Is this pid still around? Reuses the sidebar's process snapshot, so
+    /// it works the same way on Toolhelp and on `ps`.
+    fn pid_alive(pid: u32) -> bool {
+        crate::ports::process_children()
+            .values()
+            .any(|children| children.contains(&pid))
+    }
+
+    /// Closing a pane must take the whole tree with it, not just the shell.
+    /// This is what frees the port when someone closes a pane running a dev
+    /// server — and the two platforms do it by completely different means
+    /// (SIGHUP to the process group vs `taskkill /T`), so it is worth
+    /// asserting on both.
+    #[test]
+    fn closing_a_pane_kills_the_whole_process_tree() {
+        // Start a long-lived grandchild, print its pid, then linger so the
+        // shell itself is alive when the pane is closed.
+        #[cfg(windows)]
+        let script = "$p = Start-Process -FilePath powershell.exe \
+             -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 300' \
+             -PassThru -WindowStyle Hidden; \
+             Write-Output \"CHILD:$($p.Id)\"; Start-Sleep -Seconds 300";
+        #[cfg(not(windows))]
+        let script = "sleep 300 & echo CHILD:$!; sleep 300";
+
+        let mgr = PtyManager::new();
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+
+        let id = "pane-kill-tree".to_string();
+        let terminal = mgr.clone();
+        let terminal_pane = id.clone();
+        mgr.spawn(
+            &id,
+            80,
+            24,
+            None,
+            Some(shell::run_command(script, None)),
+            Box::new(PassthroughScanner),
+            move |bytes| {
+                if bytes.windows(4).any(|w| w == b"\x1b[6n") {
+                    let _ = terminal.write(&terminal_pane, b"\x1b[1;1R");
+                }
+                let _ = out_tx.send(bytes.to_vec());
+            },
+            |_, _| {},
+        )
+        .unwrap();
+
+        // Collect output until the grandchild announces its pid.
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        let mut text = String::new();
+        let child_pid = loop {
+            if let Ok(chunk) = out_rx.recv_timeout(Duration::from_millis(500)) {
+                text.push_str(&String::from_utf8_lossy(&chunk));
+            }
+            if let Some(pid) = text
+                .split("CHILD:")
+                .nth(1)
+                .and_then(|rest| rest.split_whitespace().next())
+                .and_then(|digits| {
+                    let digits: String =
+                        digits.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    digits.parse::<u32>().ok()
+                })
+            {
+                break pid;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the shell never reported a child pid. Output: {text:?}"
+            );
+        };
+
+        assert!(
+            pid_alive(child_pid),
+            "the grandchild {child_pid} should be running before the pane closes"
+        );
+
+        mgr.close(&id).unwrap();
+
+        // Killing a tree is not instant on either platform.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while pid_alive(child_pid) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        assert!(
+            !pid_alive(child_pid),
+            "closing the pane left grandchild {child_pid} running — a dev \
+             server would keep holding its port"
+        );
+    }
 }
 
 /// Flow control and signal handling, exercised with POSIX one-liners
