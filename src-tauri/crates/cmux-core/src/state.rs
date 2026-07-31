@@ -11,6 +11,12 @@ use crate::layout;
 #[derive(Debug, Default, Clone)]
 pub struct PaneMeta {
     pub cwd: Option<String>,
+    /// True once the shell has reported its directory with OSC 7. That
+    /// beats anything the intel poller can read from the OS and must not
+    /// be overwritten by it: PowerShell's `cd` moves its own location but
+    /// never the *process* working directory the poller sees, so on
+    /// Windows the two disagree permanently.
+    pub cwd_from_shell: bool,
     /// Set by OSC 0/2 title sequences.
     pub title: Option<String>,
     /// Command pane: the PTY runs this command directly instead of an

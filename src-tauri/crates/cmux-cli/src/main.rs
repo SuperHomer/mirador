@@ -109,7 +109,8 @@ enum Command {
         /// "setup" or "remove"
         action: String,
     },
-    /// Symlink this binary into ~/.local/bin for PATH access.
+    /// Put `mira` on your PATH: a symlink in ~/.local/bin on macOS and
+    /// Linux; on Windows, the install directory joins your user PATH.
     Install,
 }
 

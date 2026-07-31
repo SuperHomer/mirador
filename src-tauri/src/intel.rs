@@ -38,7 +38,25 @@ pub fn spawn(handle: tauri::AppHandle) {
 
             // cwd + branch every tick.
             for (pane, pid) in &pids {
-                let cwd = cmux_core::cwd::process_cwd(*pid);
+                // A shell that reports OSC 7 is authoritative. Polling the
+                // OS would fight it — on Windows the process working
+                // directory never follows PowerShell's `cd`, so the poll
+                // would drag the sidebar back to the launch directory
+                // between every prompt.
+                let (from_shell, known_cwd) = {
+                    let meta = state.meta.lock().unwrap();
+                    match meta.get(pane) {
+                        Some(m) => (m.cwd_from_shell, m.cwd.clone()),
+                        None => (false, None),
+                    }
+                };
+                // Syscalls stay outside the lock: this runs every 2s and
+                // the UI takes the same mutex.
+                let cwd = if from_shell {
+                    known_cwd
+                } else {
+                    cmux_core::cwd::process_cwd(*pid).or(known_cwd)
+                };
                 let git = cwd.as_deref().and_then(cmux_core::git::branch_for_cwd);
                 let mut meta = state.meta.lock().unwrap();
                 let entry = meta.entry(pane.clone()).or_default();

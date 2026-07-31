@@ -304,6 +304,9 @@ pub fn attach_pane(
                 let changed = {
                     let mut meta = state.meta.lock().unwrap();
                     let entry = meta.entry(pane_id.clone()).or_default();
+                    // Latch: from here on the poller leaves this pane's
+                    // cwd alone, even between prompts.
+                    entry.cwd_from_shell = true;
                     if entry.cwd.as_deref() != Some(path.as_str()) {
                         entry.cwd = Some(path);
                         true

@@ -14,6 +14,40 @@
   --accent: #89b4fa;
 }
 
+/* Scrollbars. WebKit on macOS draws these as overlays that fade out, so
+   the default look was never visible there; WebView2 on Windows draws a
+   full-width light track that fights a dark theme. Styled globally rather
+   than per platform — the terminal viewport, sidebar and panels all get
+   the same treatment. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  /* Padded via a transparent border so the thumb reads as a slim pill
+     rather than a solid bar against the terminal background. */
+  background: var(--surface);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
+}
+
 html,
 body,
 #root {
