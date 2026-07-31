@@ -1,5 +1,5 @@
 import AppMockup from "./AppMockup";
-import { GITHUB_URL, RELEASES_URL, SHOW_APP_MOCKUP } from "../config";
+import { GITHUB_URL, DOWNLOAD_MACOS, DOWNLOAD_WINDOWS, SHOW_APP_MOCKUP } from "../config";
 
 export default function Hero() {
   return (
@@ -64,7 +64,7 @@ export default function Hero() {
       </p>
       <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 34, flexWrap: "wrap" }}>
         <a
-          href={RELEASES_URL}
+          href={DOWNLOAD_MACOS}
           style={{
             display: "flex",
             alignItems: "center",
@@ -81,7 +81,7 @@ export default function Hero() {
           <span className="mono" style={{ fontSize: 11, opacity: 0.7 }}>Apple silicon</span>
         </a>
         <a
-          href={RELEASES_URL}
+          href={DOWNLOAD_WINDOWS}
           style={{
             display: "flex",
             alignItems: "center",
