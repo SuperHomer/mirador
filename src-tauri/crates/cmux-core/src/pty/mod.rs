@@ -65,6 +65,10 @@ impl FlowControl {
 
 type Sink = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send>>>;
 
+/// The pane's exit callback, held so whichever thread observes the exit
+/// first can consume it. `FnOnce` behind a lock is the one-shot guard.
+type ExitHook = Arc<Mutex<Option<Box<dyn FnOnce(&str, Option<i32>) + Send>>>>;
+
 struct PtyPane {
     writer: Box<dyn Write + Send>,
     /// Taken to close the PTY. On Windows that is what finally unblocks a
@@ -137,11 +141,13 @@ impl PtyManager {
         let pid = child.process_id();
         let flow = Arc::new(FlowControl::default());
         let sink: Sink = Arc::new(Mutex::new(Box::new(on_data)));
+        let hook: ExitHook = Arc::new(Mutex::new(Some(Box::new(on_exit))));
 
         {
             let inner = Arc::clone(&self.inner);
             let flow = Arc::clone(&flow);
             let sink = Arc::clone(&sink);
+            let hook = Arc::clone(&hook);
             let id = id.clone();
 
             // Reader → forwarder handoff. Bounded so a paused forwarder
@@ -197,13 +203,9 @@ impl PtyManager {
                             forwarding = false;
                         }
                     }
-                    // Single cleanup path: remove the pane and reap the child
-                    // whether the process exited on its own or close() killed it.
-                    let pane = inner.panes.lock().unwrap().remove(&id);
-                    let exit_code = pane.and_then(|mut pane| {
-                        pane.child.wait().ok().map(|s| s.exit_code() as i32)
-                    });
-                    on_exit(&id, exit_code);
+                    // EOF: the child is gone and everything it wrote has been
+                    // forwarded. On unix this is the normal path.
+                    finish(&inner, &id, &hook, None);
                 })
                 .map_err(|e| e.to_string())?;
         }
@@ -220,7 +222,7 @@ impl PtyManager {
             },
         );
         #[cfg(windows)]
-        spawn_exit_watcher(Arc::clone(&self.inner), id);
+        spawn_exit_watcher(Arc::clone(&self.inner), id, hook);
         Ok(())
     }
 
@@ -343,42 +345,55 @@ fn signal_group(pid: Option<u32>, signal: Signal) {
 #[cfg(not(unix))]
 fn signal_group(_pid: Option<u32>, _signal: Signal) {}
 
-/// Watches for the child's exit and closes the PTY once it is gone.
+/// Reports a pane's exit exactly once, whichever thread notices first, and
+/// takes the pane out of the map on the way. `code` is what the caller
+/// already knows; otherwise the child is reaped here for it.
+fn finish(inner: &Arc<Inner>, id: &str, hook: &ExitHook, code: Option<i32>) {
+    // Claiming the hook is what makes this one-shot: the EOF path and the
+    // Windows watcher can both fire for the same pane.
+    let Some(on_exit) = hook.lock().unwrap().take() else {
+        return;
+    };
+    let pane = inner.panes.lock().unwrap().remove(id);
+    let code = code.or_else(|| {
+        pane.and_then(|mut pane| pane.child.wait().ok().map(|s| s.exit_code() as i32))
+    });
+    on_exit(id, code);
+}
+
+/// Watches for the child's exit, because on Windows nothing else will.
 ///
-/// A unix pty reports EOF to the reader when the last writer closes, which
-/// is what tells the forwarder thread to clean up and report the exit code.
-/// ConPTY does not: its output pipe stays open until the *pseudoconsole* is
-/// closed, so the reader parks forever on a dead child and the pane never
-/// reports an exit — `mira run --wait` hangs and no `[exit N]` banner is
-/// drawn. Closing the master here is what produces the EOF that path needs.
+/// A unix pty reports EOF to the reader once the last writer closes, and
+/// that EOF is what drives cleanup. ConPTY has no equivalent: the
+/// pseudoconsole's output pipe stays open until the pseudoconsole itself is
+/// closed, and — as Windows CI proved — closing it does not wake a read
+/// already blocked in `ReadFile`. So the reader cannot be part of exit
+/// detection here at all; this thread owns it instead, and reports the exit
+/// directly rather than trying to manufacture an EOF for someone else.
 ///
 /// portable-pty exposes no waitable process handle, so this polls; the cost
 /// is one wakeup per pane per 100ms.
 #[cfg(windows)]
-fn spawn_exit_watcher(inner: Arc<Inner>, id: String) {
+fn spawn_exit_watcher(inner: Arc<Inner>, id: String, hook: ExitHook) {
     let _ = std::thread::Builder::new()
         .name(format!("pty-exit-{id}"))
         .spawn(move || loop {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            {
+            let code = {
                 let mut panes = inner.panes.lock().unwrap();
                 let Some(pane) = panes.get_mut(&id) else {
-                    return; // pane already gone: closed, or the reader won
+                    return; // pane already gone: closed, or cleaned up
                 };
-                if !matches!(pane.child.try_wait(), Ok(Some(_))) {
-                    continue;
+                match pane.child.try_wait() {
+                    Ok(Some(status)) => status.exit_code() as i32,
+                    _ => continue,
                 }
-            }
-            // The child is gone but its last writes may still be in the
-            // console buffer; give the reader a moment to drain them, or
-            // the final line of output is lost with the pty.
+            };
+            // The child is gone but its last writes may still be in flight;
+            // let the forwarder drain them before the pane disappears, or
+            // the final line of output never reaches the screen.
             std::thread::sleep(std::time::Duration::from_millis(200));
-            if let Some(pane) = inner.panes.lock().unwrap().get_mut(&id) {
-                // Dropping the master closes the pseudoconsole. The pane
-                // itself stays in the map so the forwarder's cleanup still
-                // finds the child and reads its exit status from it.
-                pane.master.take();
-            }
+            finish(&inner, &id, &hook, Some(code));
             return;
         });
 }
@@ -429,16 +444,21 @@ mod exit_tests {
         .unwrap();
 
         // Generous: a cold PowerShell start on a CI runner is not fast.
-        let code = exit_rx
-            .recv_timeout(Duration::from_secs(60))
-            .expect("a command that exits must be detected as exited");
-        assert_eq!(code, Some(7), "the command's exit code must survive");
+        let outcome = exit_rx.recv_timeout(Duration::from_secs(60));
 
+        // Drain regardless of outcome — on failure, whether the output
+        // arrived is what distinguishes "the command never ran" from "it
+        // ran but its exit went unnoticed".
         let mut all = Vec::new();
         while let Ok(chunk) = out_rx.try_recv() {
             all.extend(chunk);
         }
-        let text = String::from_utf8_lossy(&all);
+        let text = String::from_utf8_lossy(&all).into_owned();
+
+        let code = outcome.unwrap_or_else(|_| {
+            panic!("exit was never reported. Output received meanwhile: {text:?}")
+        });
+        assert_eq!(code, Some(7), "the command's exit code must survive");
         assert!(
             text.contains("hello-mirador"),
             "output written before exit must not be lost: {text:?}"
