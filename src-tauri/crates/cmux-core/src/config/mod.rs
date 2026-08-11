@@ -35,6 +35,11 @@ pub struct Config {
     pub font_family: Option<String>,
     pub font_size: Option<f32>,
     pub scrollback: Option<u32>,
+    /// macOS only: send Option+key as Meta (ESC-prefixed) instead of letting
+    /// it type the character it produces. Off by default — on Swiss, German,
+    /// French and other non-US layouts Option is how you type `[ ] { } | \`,
+    /// and Meta mode eats them. Turn it on for readline's Alt+B / Alt+F.
+    pub mac_option_is_meta: Option<bool>,
     pub colors: Option<ColorOverrides>,
     /// Program panes run. Defaults to `$SHELL` on macOS/Linux and
     /// PowerShell 7 → Windows PowerShell → cmd.exe on Windows. Point it at
@@ -254,6 +259,7 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             .unwrap_or_else(|| default_font_family().into()),
         font_size: cfg.font_size.or(imported.font_size).unwrap_or(13.0),
         scrollback: cfg.scrollback.unwrap_or(10_000),
+        mac_option_is_meta: cfg.mac_option_is_meta.unwrap_or(false),
         colors,
         keybindings,
         custom_commands: cfg.custom_commands.clone(),
@@ -339,6 +345,8 @@ mod tests {
         assert_eq!(resolved.colors.background, "#1e1e2e");
         assert_eq!(resolved.colors.palette.len(), 16);
         assert_eq!(resolved.font_size, 13.0);
+        // Option must type [ ] { } | on non-US Mac layouts by default.
+        assert!(!resolved.mac_option_is_meta);
         // The accelerator differs per platform (Cmd vs Ctrl+Shift); the
         // action set does not.
         assert!(resolved.keybindings.values().any(|a| a == "new_tab"));
@@ -349,6 +357,7 @@ mod tests {
         let cfg = Config {
             theme_source: Some("builtin".into()),
             font_size: Some(15.0),
+            mac_option_is_meta: Some(true),
             colors: Some(ColorOverrides {
                 background: Some("#000000".into()),
                 ..Default::default()
@@ -362,6 +371,7 @@ mod tests {
         };
         let resolved = resolve(&cfg);
         assert_eq!(resolved.font_size, 15.0);
+        assert!(resolved.mac_option_is_meta);
         assert_eq!(resolved.colors.background, "#000000");
         assert_eq!(resolved.keybindings["mod+t"], "split_right");
         assert!(!resolved.keybindings.contains_key("mod+w"));

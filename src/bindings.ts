@@ -82,6 +82,7 @@ export interface ResolvedConfig {
   fontFamily: string;
   fontSize: number;
   scrollback: number;
+  macOptionIsMeta: boolean;
   colors: ResolvedColors;
   keybindings: Record<string, string>;
   customCommands: CustomCommand[];

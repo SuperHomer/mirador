@@ -324,6 +324,7 @@ pub struct ResolvedConfig {
     pub font_family: String,
     pub font_size: f32,
     pub scrollback: u32,
+    pub mac_option_is_meta: bool,
     pub colors: ResolvedColors,
     /// accelerator ("mod+shift+d") → action id ("split_down")
     pub keybindings: std::collections::HashMap<String, String>,
