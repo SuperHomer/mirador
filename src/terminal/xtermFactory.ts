@@ -15,7 +15,11 @@ export function createTerminal(config: ResolvedConfig): Terminal {
     scrollback: config.scrollback,
     fontFamily: config.fontFamily,
     fontSize: config.fontSize,
-    macOptionIsMeta: true,
+    // Off by default: on non-US Mac layouts Option is the third-level
+    // shift that types [ ] { } | \ @ #, and treating it as Meta swallows
+    // those characters (they arrive as ESC+digit). Users who want Alt-as-
+    // Meta for readline word motions opt in with `macOptionIsMeta`.
+    macOptionIsMeta: config.macOptionIsMeta,
     theme: toXtermTheme(config),
   });
 
@@ -39,6 +43,7 @@ export function applyConfig(term: Terminal, config: ResolvedConfig): void {
   term.options.fontFamily = config.fontFamily;
   term.options.fontSize = config.fontSize;
   term.options.scrollback = config.scrollback;
+  term.options.macOptionIsMeta = config.macOptionIsMeta;
 }
 
 /**

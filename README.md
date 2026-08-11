@@ -152,3 +152,13 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
 
 All rebindable in `mirador.json`.
+
+On macOS, Option types the character your layout puts there — `[ ] { } |`
+on Swiss, German, French and other non-US layouts — rather than acting as
+Meta. If you'd rather have readline's Alt+B / Alt+F word motions and don't
+need Option for characters:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "macOptionIsMeta": true }
+```
