@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   browserHistory,
   browserNavigate,
+  closePane,
   focusPane,
   setBrowserBounds,
 } from "../bindings";
@@ -89,6 +90,17 @@ export function BrowserPane({ paneId, url, focused }: Props) {
             e.stopPropagation();
           }}
         />
+        {/* The page is a native child webview, so keystrokes inside it
+            never reach the host keymap — mod+W cannot close this pane from
+            the page. This button lives in our own chrome, which does get
+            real clicks. */}
+        <button
+          className="browser-close"
+          title="Close browser pane"
+          onClick={() => void closePane(paneId)}
+        >
+          ×
+        </button>
       </div>
       <div className="browser-placeholder" ref={placeholderRef} />
     </div>
