@@ -4,6 +4,7 @@ import Features from "./components/Features";
 import CliShowcase from "./components/CliShowcase";
 import Install from "./components/Install";
 import Keybindings from "./components/Keybindings";
+import Contribute from "./components/Contribute";
 import Footer from "./components/Footer";
 import { SHOW_SHORTCUTS } from "./config";
 
@@ -16,6 +17,7 @@ export default function App() {
       <CliShowcase />
       <Install />
       {SHOW_SHORTCUTS && <Keybindings />}
+      <Contribute />
       <Footer />
     </div>
   );

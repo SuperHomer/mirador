@@ -31,6 +31,7 @@ export default function Nav() {
         <a href="#features" style={{ color: "var(--subtext)" }}>Features</a>
         <a href="#cli" style={{ color: "var(--subtext)" }}>CLI</a>
         <a href="#install" style={{ color: "var(--subtext)" }}>Install</a>
+        <a href="#contribute" style={{ color: "var(--subtext)" }}>Contribute</a>
         <a href={GITHUB_URL} style={{ color: "var(--subtext)" }}>GitHub</a>
         <a
           href={RELEASES_URL}

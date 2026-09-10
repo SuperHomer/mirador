@@ -116,25 +116,6 @@ export default function Hero() {
           View on GitHub
         </a>
       </div>
-      <div
-        className="mono"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 12,
-          marginTop: 24,
-          fontSize: 13,
-          color: "var(--subtext)",
-          background: "var(--crust)",
-          border: "1px solid var(--surface)",
-          borderRadius: 9,
-          padding: "10px 16px",
-        }}
-      >
-        <span style={{ color: "var(--muted)" }}>$</span> npm run tauri dev
-        <span className="cursor" style={{ width: 8, height: 16 }} />
-      </div>
-
       {SHOW_APP_MOCKUP && <AppMockup />}
     </header>
   );

@@ -37,6 +37,7 @@ src/
   index.css          reset, tokens, keyframes, link styles
   components/
     Nav.tsx  Hero.tsx  AppMockup.tsx  Features.tsx
-    CliShowcase.tsx  Install.tsx  Keybindings.tsx  Footer.tsx
+    CliShowcase.tsx  Install.tsx  Keybindings.tsx
+    Contribute.tsx  Footer.tsx
     Logo.tsx  CopyButton.tsx
 ```
