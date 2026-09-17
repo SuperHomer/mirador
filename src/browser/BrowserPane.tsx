@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   browserHistory,
   browserNavigate,
+  closePane,
   focusPane,
   setBrowserBounds,
 } from "../bindings";
@@ -32,11 +34,46 @@ export function BrowserPane({ paneId, url, focused }: Props) {
     const el = placeholderRef.current;
     if (!el) return;
 
+    // getBoundingClientRect is in viewport coordinates, but a child webview
+    // is positioned against the window frame — which on macOS includes the
+    // titlebar. Passing the rect straight through drew every browser page a
+    // titlebar-height too high, hiding the chrome row above it. Measure the
+    // gap instead of hardcoding it: it is 0 on undecorated windows and in
+    // fullscreen, and this keeps Windows and Linux correct for free.
+    const chromeOffset = async () => {
+      try {
+        const win = getCurrentWindow();
+        const [outer, scale] = await Promise.all([
+          win.outerPosition(),
+          win.scaleFactor(),
+        ]);
+        return Math.max(0, window.screenY - outer.y / scale);
+      } catch {
+        return 0;
+      }
+    };
+
+    let offset = 0;
     const report = () => {
       const rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
-      void setBrowserBounds(paneId, rect.x, rect.y, rect.width, rect.height);
+      void setBrowserBounds(paneId, rect.x, rect.y + offset, rect.width, rect.height);
     };
+
+    // Re-measured alongside the bounds poll: a window moved between screens
+    // or toggled fullscreen changes the gap.
+    void chromeOffset().then((v) => {
+      offset = v;
+      report();
+    });
+    const remeasure = setInterval(() => {
+      void chromeOffset().then((v) => {
+        if (v !== offset) {
+          offset = v;
+          report();
+        }
+      });
+    }, 1000);
 
     report();
     const observer = new ResizeObserver(report);
@@ -47,6 +84,7 @@ export function BrowserPane({ paneId, url, focused }: Props) {
     return () => {
       observer.disconnect();
       clearInterval(poll);
+      clearInterval(remeasure);
     };
   }, [paneId]);
 
@@ -89,6 +127,17 @@ export function BrowserPane({ paneId, url, focused }: Props) {
             e.stopPropagation();
           }}
         />
+        {/* The page is a native child webview, so keystrokes inside it
+            never reach the host keymap — mod+W cannot close this pane from
+            the page. This button lives in our own chrome, which does get
+            real clicks. */}
+        <button
+          className="browser-close"
+          title="Close browser pane"
+          onClick={() => void closePane(paneId)}
+        >
+          ×
+        </button>
       </div>
       <div className="browser-placeholder" ref={placeholderRef} />
     </div>
