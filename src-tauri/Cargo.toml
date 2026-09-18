@@ -43,3 +43,13 @@ serde.workspace = true
 serde_json.workspace = true
 cmux-core = { path = "crates/cmux-core" }
 cmux-protocol = { path = "crates/cmux-protocol" }
+
+# Windows UI-thread deadlock (AppHangB1) in tao 0.35.3: the keyboard handler holds the
+# global KEY_EVENT_BUILDERS / LAYOUT_CACHE locks across PeekMessageW, which can dispatch
+# a sent WM_KILLFOCUS and re-enter the same non-reentrant lock on the same thread.
+# Fixed upstream in tauri-apps/tao#1215 (released in tao 0.36.0), but the tauri 2.x
+# runtime (tauri-runtime-wry 2.11.x) still requires tao ^0.35, so pull the exact upstream
+# fix commit, which is still versioned 0.35.3 and therefore satisfies that requirement.
+# Remove this patch once tauri-runtime-wry depends on tao >= 0.36.
+[patch.crates-io]
+tao = { git = "https://github.com/tauri-apps/tao", rev = "c704261c519c58cfdd0bc2d58ba24e06a0b71c92" }
