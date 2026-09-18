@@ -240,6 +240,10 @@ pub fn set_split_ratios(
 /// (or after exit), swaps the output channel on remount. Returns
 /// "spawned", "reattached", or "restored" (command pane from a previous
 /// session: left idle, keypress reruns).
+///
+/// `rerun` is the frontend saying a keypress asked for it. Mounting, a
+/// remount, or any other attach leaves a session-restored pane idle — only
+/// the user starts last session's command.
 #[tauri::command]
 pub fn attach_pane(
     app: AppHandle,
@@ -248,6 +252,7 @@ pub fn attach_pane(
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
+    rerun: bool,
 ) -> Result<String, String> {
     // Remote panes run `ssh -tt <host>`; command panes run their command
     // directly in the PTY (exit detection, output capture); shell panes get
@@ -285,11 +290,12 @@ pub fn attach_pane(
     // Session-restored command/remote panes attach idle: never auto-rerun
     // `npm test` (or auto-reconnect an SSH session) just because the app
     // relaunched — a keypress does it.
-    if state.restored_panes.lock().unwrap().remove(&pane_id)
-        && (pane_command.is_some() || remote_host.is_some())
-    {
+    let was_restored = state.restored_panes.lock().unwrap().contains(&pane_id)
+        && (pane_command.is_some() || remote_host.is_some());
+    if was_restored && !rerun {
         return Ok("restored".into());
     }
+    state.restored_panes.lock().unwrap().remove(&pane_id);
 
     // Scanner events run on the pane's forwarder thread.
     let scanner = {

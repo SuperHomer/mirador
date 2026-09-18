@@ -22,6 +22,22 @@ const restoredScrollback = new Set<string>();
 /** Ack processed output back to Rust every 256KB to release backpressure. */
 const ACK_THRESHOLD = 256 * 1024;
 
+/**
+ * Input modes a serialized buffer replays onto a pane whose process is gone.
+ * Mouse tracking is the harmful one: xterm turns off selection and reports
+ * every mouse move as input, which an idle pane reads as "a key was pressed".
+ * Focus reporting and bracketed paste manufacture input the same way, and app
+ * cursor keys would misdirect the arrows. The screen buffer (?1049) is left
+ * alone on purpose — the restored screen is what the user wants to look at.
+ */
+const IDLE_MODE_RESET =
+  "\x1b[?9l\x1b[?1000l\x1b[?1001l\x1b[?1002l\x1b[?1003l" + // mouse tracking
+  "\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l" + // mouse encodings
+  "\x1b[?1004l" + // focus reporting
+  "\x1b[?2004l" + // bracketed paste
+  "\x1b[?1l" + // application cursor keys
+  "\x1b[?25h"; // cursor visible
+
 interface Props {
   paneId: string;
   focused: boolean;
@@ -61,7 +77,11 @@ export function TerminalPane({
     if (!cfg) return;
 
     let disposed = false;
-    let exited = false;
+    // True whenever no live PTY backs the pane: before the first attach,
+    // after an exit, and for a session-restored command pane. Input is
+    // dropped while it holds — there is nothing to write to.
+    let exited = true;
+    let attaching = false;
     let pendingAck = 0;
 
     const term = createTerminal(cfg);
@@ -76,27 +96,41 @@ export function TerminalPane({
     attachRenderer(term);
     fit.fit();
 
-    const channel = new Channel<PtyData>();
-    channel.onmessage = (data) => {
-      const size =
-        data instanceof ArrayBuffer
-          ? data.byteLength
-          : typeof data === "string"
-            ? data.length
-            : data.byteLength;
-      const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-      term.write(bytes, () => {
-        pendingAck += size;
-        if (pendingAck >= ACK_THRESHOLD && !exited) {
-          void ackPty(paneId, pendingAck);
-          pendingAck = 0;
-        }
-      });
+    /**
+     * One output channel per attach, never shared between them. Rust owns the
+     * `Channel` it was handed, so any attach that returns without parking it
+     * in the PTY's sink — a session-restored pane, an error — drops it, and a
+     * dropped channel tells the webview to unregister the callback for good.
+     * Reusing that object would send the next spawn's output into a void: the
+     * process runs, the pane stays frozen.
+     */
+    const newChannel = () => {
+      const channel = new Channel<PtyData>();
+      channel.onmessage = (data) => {
+        const size =
+          data instanceof ArrayBuffer
+            ? data.byteLength
+            : typeof data === "string"
+              ? data.length
+              : data.byteLength;
+        const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+        term.write(bytes, () => {
+          pendingAck += size;
+          if (pendingAck >= ACK_THRESHOLD && !exited) {
+            void ackPty(paneId, pendingAck);
+            pendingAck = 0;
+          }
+        });
+      };
+      return channel;
     };
 
-    const attach = async () => {
-      exited = false;
-      pendingAck = 0;
+    /** `rerun`: this attach came from a keypress, so it may start the command. */
+    const attach = async (rerun = false) => {
+      // One in-flight attach at a time: a second would race the spawn and
+      // lose to "pane already running".
+      if (attaching) return;
+      attaching = true;
       try {
         // Previous session's scrollback, once per pane per app run.
         if (!restoredScrollback.has(paneId)) {
@@ -108,16 +142,22 @@ export function TerminalPane({
           restoredScrollback.add(paneId);
           if (saved) {
             term.write(saved);
+            term.write(IDLE_MODE_RESET);
             term.writeln("\r\n\x1b[2m──── session restored ────\x1b[0m");
           }
         }
         if (disposed) return;
-        const status = await attachPane(paneId, term.cols, term.rows, channel);
+        const status = await attachPane(
+          paneId,
+          term.cols,
+          term.rows,
+          newChannel(),
+          rerun,
+        );
         if (disposed) return;
         if (status === "restored") {
           // Command/remote pane from the previous session: idle until a
           // keypress — never auto-rerun or auto-reconnect on launch.
-          exited = true;
           term.writeln(
             remoteHost
               ? `\x1b[2m[press any key to reconnect: ssh ${remoteHost}]\x1b[0m`
@@ -125,6 +165,10 @@ export function TerminalPane({
           );
           return;
         }
+        // Not before: until the PTY exists, every keystroke written to it is
+        // silently dropped.
+        exited = false;
+        pendingAck = 0;
         const buf = term.buffer.active;
         if (
           status === "reattached" &&
@@ -139,6 +183,8 @@ export function TerminalPane({
         }
       } catch (err) {
         term.writeln(`\x1b[31mfailed to attach shell: ${err}\x1b[0m`);
+      } finally {
+        attaching = false;
       }
     };
 
@@ -146,10 +192,10 @@ export function TerminalPane({
     let writeQueue = "";
     let flushScheduled = false;
     term.onData((d) => {
-      if (exited) {
-        void attach();
-        return;
-      }
+      // An idle pane has no PTY to take this. Re-running is onKey's job:
+      // onData also carries mouse and focus reports, so a stray mouse move
+      // over a restored pane must not count as "any key".
+      if (exited) return;
       writeQueue += d;
       if (!flushScheduled) {
         flushScheduled = true;
@@ -161,6 +207,11 @@ export function TerminalPane({
           }
         });
       }
+    });
+
+    // "Press any key to rerun/reconnect" — a real keypress only.
+    term.onKey(() => {
+      if (exited) void attach(true);
     });
 
     term.onResize(({ cols, rows }) => {
@@ -178,6 +229,9 @@ export function TerminalPane({
       (event) => {
         if (event.payload.pane_id !== paneId) return;
         exited = true;
+        // A process killed mid-run never got to reset its own modes; with
+        // mouse tracking left armed the dead pane can't even be selected.
+        term.write(IDLE_MODE_RESET);
         const code = event.payload.exit_code;
         const status =
           code === null
