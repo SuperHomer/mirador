@@ -85,6 +85,19 @@ enum Command {
         #[command(subcommand)]
         action: BrowserAction,
     },
+    /// Open a diff pane: a reviewable view of what changed, with a file
+    /// tree — the repository comes from the focused pane.
+    Diff {
+        /// A commit ("0e47a2c"), a range ("main...HEAD"), or nothing for
+        /// the uncommitted changes.
+        spec: Option<String>,
+        /// Diff the index against HEAD instead of the working tree.
+        #[arg(long)]
+        staged: bool,
+        /// Open in a new tab instead of a split.
+        #[arg(long)]
+        tab: bool,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -243,6 +256,19 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Runs => Request::ListRuns,
+        Command::Diff { spec, staged, tab } => {
+            if staged && spec.is_some() {
+                return Err("--staged takes no revision".into());
+            }
+            Request::DiffOpen {
+                spec: if staged {
+                    Some("staged".to_string())
+                } else {
+                    spec
+                },
+                target: tab.then(|| "tab".to_string()),
+            }
+        }
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab } => Request::SshOpen {
                 host,

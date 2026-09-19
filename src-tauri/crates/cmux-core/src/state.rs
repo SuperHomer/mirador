@@ -34,6 +34,11 @@ pub struct PaneMeta {
     pub agent_session: Option<String>,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
+    /// Diff pane: the repository root its diff is taken in. Paired with
+    /// `diff_spec` — both set, or neither.
+    pub diff_repo: Option<String>,
+    /// Diff pane: "worktree", "staged", or a revspec.
+    pub diff_spec: Option<String>,
 }
 
 #[derive(Debug)]
@@ -276,6 +281,7 @@ impl Workspace {
             agent_panes: Vec::new(),
             browser_panes: Vec::new(),
             remote_panes: Vec::new(),
+            diff_panes: Vec::new(),
         }
     }
 }

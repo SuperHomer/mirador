@@ -621,3 +621,341 @@ body,
 .notif-empty code {
   color: var(--subtext);
 }
+
+/* ---------- Diff pane ---------- */
+
+.diff-pane {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  /* Row height is duplicated in DiffPane.tsx (ROW_H): an unmounted file
+     body reserves rows × ROW_H, so the two must not drift. */
+  --diff-row-h: 18px;
+  font-size: 12px;
+}
+
+.diff-chrome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--surface);
+  flex-shrink: 0;
+  min-height: 30px;
+}
+
+.diff-label {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-totals {
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.diff-specs {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.diff-specs button,
+.diff-specs span {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.diff-specs button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.diff-specs button.active,
+.diff-specs span.active {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.diff-chrome > button,
+.diff-tree-toggle {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 14px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.diff-chrome > button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.diff-chrome > button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.diff-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.diff-tree {
+  /* Shrinkable: a diff pane is usually one half of a split, and a fixed
+     tree would leave no room for the diff itself. */
+  flex: 0 1 240px;
+  min-width: 120px;
+  overflow: auto;
+  border-right: 1px solid var(--surface);
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-tree-dir,
+.diff-tree-file {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11.5px;
+  font-family: inherit;
+  text-align: left;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.diff-tree-dir {
+  color: var(--muted);
+}
+
+.diff-tree-dir:hover,
+.diff-tree-file:hover {
+  background: var(--bg-alt);
+  color: var(--text);
+}
+
+.diff-tree-file.selected {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.diff-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-tree-stat {
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 10.5px;
+  flex-shrink: 0;
+}
+
+.diff-caret {
+  color: var(--muted);
+  flex-shrink: 0;
+  width: 9px;
+}
+
+/* Status letter, GitHub's A/M/D/R shorthand. */
+.diff-status {
+  flex-shrink: 0;
+  width: 13px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 3px;
+  color: var(--muted);
+}
+
+.diff-status.s-added,
+.diff-status.s-untracked {
+  color: var(--diff-add);
+}
+
+.diff-status.s-deleted {
+  color: var(--diff-del);
+}
+
+.diff-status.s-renamed,
+.diff-status.s-copied {
+  color: var(--accent);
+}
+
+.diff-add-text {
+  color: var(--diff-add);
+}
+
+.diff-del-text {
+  color: var(--diff-del);
+}
+
+.diff-files {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 6px;
+  outline: none;
+}
+
+.diff-file {
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: var(--bg-alt);
+}
+
+.diff-file.selected {
+  border-color: var(--accent);
+}
+
+.diff-file-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--bg-alt);
+  cursor: pointer;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--surface);
+  border-radius: 5px 5px 0 0;
+}
+
+.diff-file-head:hover {
+  background: var(--surface);
+}
+
+.diff-file-path {
+  color: var(--text);
+  font-family: var(--diff-font, ui-monospace, monospace);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-old-path {
+  color: var(--muted);
+}
+
+.diff-file-stat {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.diff-file-body {
+  background: var(--bg);
+  border-radius: 0 0 5px 5px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  user-select: text;
+}
+
+.diff-row {
+  display: flex;
+  height: var(--diff-row-h);
+  line-height: var(--diff-row-h);
+  white-space: pre;
+  font-size: 11.5px;
+}
+
+.diff-row.add {
+  background: var(--diff-add-bg);
+}
+
+.diff-row.del {
+  background: var(--diff-del-bg);
+}
+
+.diff-row.hunk {
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.diff-row.meta {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Deliberately not sticky. Pinning these while the code scrolls sideways
+   means sticky children inside a nested scroll container inside the
+   scrolling file list — which WebKit repaints on every frame of a
+   vertical scroll, and that reads as flicker. Long lines are rare; a
+   steady scroll is not. */
+.diff-num {
+  flex-shrink: 0;
+  width: 44px;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--muted);
+  background: var(--bg-alt);
+  user-select: none;
+}
+
+.diff-num + .diff-num {
+  border-right: 1px solid var(--surface);
+}
+
+.diff-row.add .diff-num {
+  background: var(--diff-add-num-bg);
+  color: var(--text);
+}
+
+.diff-row.del .diff-num {
+  background: var(--diff-del-num-bg);
+  color: var(--text);
+}
+
+.diff-code {
+  padding: 0 8px;
+  color: var(--text);
+  flex: 1;
+}
+
+.diff-note {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.diff-empty {
+  padding: 16px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.diff-error {
+  color: var(--diff-del, #f38ba8);
+  text-align: left;
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  user-select: text;
+}

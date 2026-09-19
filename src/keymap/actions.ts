@@ -8,6 +8,7 @@ import {
   focusDirection,
   setActiveTab,
   openBrowser,
+  openDiff,
   writePty,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
@@ -126,6 +127,14 @@ export const actions: ActionDef[] = [
       void navigator.clipboard.readText().then((text) => {
         if (text) void writePty(pane, text);
       });
+    },
+  },
+  {
+    id: "new_diff_pane",
+    title: "New Diff Pane (uncommitted changes)",
+    run: () => {
+      const pane = focusedPane();
+      if (pane) void openDiff(pane, false, null);
     },
   },
   {
