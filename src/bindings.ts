@@ -115,18 +115,24 @@ export const setSplitRatios = (
   path: number[],
   ratios: number[],
 ) => invoke<void>("set_split_ratios", { tabId, path, ratios });
-/** "spawned" | "reattached" | "restored" (session command pane, idle). */
+/**
+ * "spawned" | "reattached" | "restored" (session command pane, idle).
+ * `rerun` marks the attach as user-initiated: only then may a pane restored
+ * from the last session actually run its command.
+ */
 export const attachPane = (
   paneId: string,
   cols: number,
   rows: number,
   onData: Channel<PtyData>,
+  rerun = false,
 ) =>
   invoke<"spawned" | "reattached" | "restored">("attach_pane", {
     paneId,
     cols,
     rows,
     onData,
+    rerun,
   });
 export const openBrowser = (paneId: string | null, tab: boolean, url: string) =>
   invoke<string>("open_browser", { paneId, tab, url });
