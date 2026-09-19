@@ -10,6 +10,8 @@
 use std::path::Path;
 #[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::sync::OnceLock;
 
 use portable_pty::CommandBuilder;
 
@@ -144,11 +146,80 @@ pub fn interactive(cwd: Option<&str>) -> CommandBuilder {
     cmd
 }
 
-/// The same shell, running one command line non-interactively.
+/// PATH as the user's *interactive* shell sees it, or `None` if it cannot be
+/// had.
+///
+/// Launched from Finder, the app inherits launchd's PATH, not the user's. A
+/// pane escapes that by being an interactive shell — it reads `.zshrc`, which
+/// is where PATH usually grows (`~/.local/bin`, nvm, pyenv, conda). A command
+/// pane cannot: making it interactive would hand the command its own process
+/// group and break pane close. So ask the shell once, in a throwaway process,
+/// and reuse the answer for the rest of the run.
+///
+/// `env` rather than echoing `$PATH`: it is the one spelling every shell
+/// agrees on (fish's `$PATH` is a list, and prints space-separated).
+#[cfg(unix)]
+pub fn interactive_path() -> Option<&'static str> {
+    static PATH: OnceLock<Option<String>> = OnceLock::new();
+    PATH.get_or_init(resolve_interactive_path).as_deref()
+}
+
+#[cfg(unix)]
+fn resolve_interactive_path() -> Option<String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let (shell, _) = configured().unwrap_or_else(|| (platform_default(), Vec::new()));
+    if Kind::of(&shell) != Kind::Posix {
+        return None;
+    }
+    let mut child = Command::new(&shell)
+        .arg("-ilc")
+        .arg("env")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    // A slow rc file (nvm, conda) must not hold a pane open forever, and a
+    // hung one must not hold it forever at all.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                return None;
+            }
+            Err(_) => return None,
+        }
+    }
+    let out = child.wait_with_output().ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("PATH="))
+        .map(str::to_string)
+        .filter(|p| !p.is_empty())
+}
+
+/// The same shell, running one command line.
 pub fn run_command(command: &str, cwd: Option<&str>) -> CommandBuilder {
     let (mut cmd, kind, _) = base(cwd);
     match kind {
+        // Login but NOT interactive: `-i` would switch job control on, and a
+        // shell in monitor mode puts the command in its own process group —
+        // out of reach of the process-group signal that closing a pane sends,
+        // so a dev server would outlive its pane. `interactive_path` is what
+        // makes up for the .zshrc this therefore never reads.
         Kind::Posix => {
+            #[cfg(unix)]
+            if let Some(path) = interactive_path() {
+                cmd.env("PATH", path);
+            }
             cmd.arg("-lc");
             cmd.arg(command);
         }
@@ -203,5 +274,26 @@ mod tests {
     fn run_command_passes_the_command_through() {
         let dbg = format!("{:?}", run_command("npm test", None));
         assert!(dbg.contains("npm test"), "got: {dbg}");
+    }
+
+    /// Never interactive: job control would move the command into its own
+    /// process group, and closing a pane signals the group — a dev server
+    /// would survive its pane. The PATH that costs us is injected instead.
+    #[cfg(unix)]
+    #[test]
+    fn run_command_is_not_interactive() {
+        let dbg = format!("{:?}", run_command("claude --resume abc", None));
+        assert!(dbg.contains("-lc"), "got: {dbg}");
+        assert!(!dbg.contains("-ilc"), "job control breaks pane close: {dbg}");
+    }
+
+    /// The whole point: a tool on the interactive PATH must be reachable.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn interactive_path_finds_what_a_login_shell_misses() {
+        let Some(path) = interactive_path() else {
+            return; // no usable login shell on this machine
+        };
+        assert!(path.contains('/'), "got: {path:?}");
     }
 }
