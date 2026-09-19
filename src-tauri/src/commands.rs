@@ -66,6 +66,18 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    snapshot.diff_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                Some(cmux_protocol::DiffPane {
+                    pane_id: pane.clone(),
+                    repo: m.diff_repo.clone()?,
+                    spec: m.diff_spec.clone()?,
+                })
+            })
+            .collect()
+    };
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -426,6 +438,95 @@ pub fn open_browser(
         .browser_url = Some(url);
     emit_workspace(&app);
     Ok(new_pane)
+}
+
+/// Opens a diff pane: split of `pane_id` (or a new tab when `tab` is
+/// true). The repository comes from the source pane, so `mira diff` needs
+/// no path — it reviews whatever repo you (or your agent) are working in.
+#[tauri::command]
+pub fn open_diff(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+    spec: Option<String>,
+) -> Result<String, String> {
+    let source = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    // Resolve the repo before the layout changes: a new tab's pane has no
+    // cwd of its own yet, and a split's does not until its shell reports one.
+    let repo = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(&source);
+        m.and_then(|m| m.repo_root.clone())
+            .or_else(|| {
+                let cwd = m.and_then(|m| m.cwd.clone())?;
+                Some(cmux_core::git::find_repo_root(&cwd)?.to_string_lossy().to_string())
+            })
+            .ok_or_else(|| "not inside a git repository".to_string())?
+    };
+
+    let spec = spec.unwrap_or_else(|| cmux_core::diff::WORKTREE.to_string());
+    cmux_core::diff::verify_spec(std::path::Path::new(&repo), &spec)?;
+
+    let new_pane = if tab {
+        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        pane
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(new_pane.clone()).or_default();
+        entry.cwd = Some(repo.clone());
+        entry.diff_repo = Some(repo);
+        entry.diff_spec = Some(spec);
+    }
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// Runs the pane's diff. Async so a `git diff` over a large repository
+/// never blocks the UI thread — the pane shows a spinner meanwhile.
+#[tauri::command]
+pub async fn load_diff(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<cmux_protocol::DiffResult, String> {
+    let (repo, spec) = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(&pane_id).ok_or_else(|| format!("no pane {pane_id}"))?;
+        (
+            m.diff_repo.clone().ok_or("not a diff pane")?,
+            m.diff_spec.clone().ok_or("not a diff pane")?,
+        )
+    };
+    cmux_core::diff::load(std::path::Path::new(&repo), &spec)
+}
+
+/// Points an existing diff pane at another spec (the pane's own header
+/// switcher: uncommitted / staged / HEAD).
+#[tauri::command]
+pub fn set_diff_spec(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    spec: String,
+) -> Result<(), String> {
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.get_mut(&pane_id).ok_or_else(|| format!("no pane {pane_id}"))?;
+        if entry.diff_spec.is_none() {
+            return Err("not a diff pane".into());
+        }
+        entry.diff_spec = Some(spec);
+    }
+    emit_workspace(&app);
+    Ok(())
 }
 
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY

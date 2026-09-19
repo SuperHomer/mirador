@@ -92,6 +92,9 @@ pub struct WorkspaceSnapshot {
     /// Remote (SSH) panes and their display host.
     #[serde(default)]
     pub remote_panes: Vec<RemotePane>,
+    /// Diff panes and what each one is showing.
+    #[serde(default)]
+    pub diff_panes: Vec<DiffPane>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -99,6 +102,16 @@ pub struct WorkspaceSnapshot {
 pub struct BrowserPane {
     pub pane_id: String,
     pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffPane {
+    pub pane_id: String,
+    /// Repository root the diff is taken in.
+    pub repo: String,
+    /// What is being diffed: "worktree", "staged", or a revspec.
+    pub spec: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -238,6 +251,16 @@ pub enum Request {
         #[serde(default)]
         cancel: bool,
     },
+    /// Opens a diff pane (split of the focused pane, or a new tab). The
+    /// repository comes from the source pane's cwd.
+    DiffOpen {
+        /// "worktree" (default), "staged", or a revspec ("abc123",
+        /// "main...HEAD").
+        #[serde(default)]
+        spec: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -329,4 +352,57 @@ pub struct ResolvedConfig {
     /// accelerator ("mod+shift+d") → action id ("split_down")
     pub keybindings: std::collections::HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
+}
+
+/// One line of a diff hunk.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    /// "context" | "add" | "del" | "meta" ("\ No newline at end of file").
+    pub kind: String,
+    /// Line number on the old side (None for additions).
+    pub old_line: Option<u32>,
+    /// Line number on the new side (None for deletions).
+    pub new_line: Option<u32>,
+    /// Line text, without the leading +/-/space marker.
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffHunk {
+    pub old_start: u32,
+    pub new_start: u32,
+    /// Text trailing the `@@ … @@` marker — git's guess at the enclosing
+    /// function or section.
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffFile {
+    pub path: String,
+    /// Where a rename or copy came from.
+    pub old_path: Option<String>,
+    /// "added" | "deleted" | "renamed" | "copied" | "modified" | "untracked"
+    pub status: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub binary: bool,
+    /// Body dropped for being too large; the counts are still exact.
+    pub truncated: bool,
+    pub hunks: Vec<DiffHunk>,
+}
+
+/// What a diff pane renders.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffResult {
+    pub repo: String,
+    /// The spec as requested ("worktree", "staged", or a revspec).
+    pub spec: String,
+    /// Header line: "uncommitted changes", a commit subject, a range.
+    pub label: String,
+    pub files: Vec<DiffFile>,
 }

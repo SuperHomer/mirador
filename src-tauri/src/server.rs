@@ -218,6 +218,16 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane_id }))
         }
+        Request::DiffOpen { spec, target } => {
+            let pane_id = crate::commands::open_diff(
+                app.clone(),
+                app.state(),
+                None,
+                target.as_deref() == Some("tab"),
+                spec,
+            )?;
+            Ok(json!({ "paneId": pane_id }))
+        }
         Request::BrowserNavigate { pane_id, url } => {
             let pane = resolve_browser_pane(&state, pane_id)?;
             crate::browser::navigate(app, &pane, &url)?;

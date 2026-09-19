@@ -81,7 +81,27 @@ Snapshots cap at 400 elements. The page gets **no** IPC access to Mirador —
 automation results travel over an intercepted navigation, so a malicious
 page cannot drive your terminal.
 
-## 5. Workspace control
+## 5. Show the human what you changed
+
+```bash
+mira diff                      # uncommitted changes, in a reviewable pane
+mira diff --staged             # the index against HEAD
+mira diff 0e47a2c              # one commit
+mira diff main...HEAD          # everything on this branch
+mira diff --tab                # new tab instead of a split
+```
+
+A diff pane is the review surface for a turn's work: file tree on the
+left, hunks on the right, and the repository taken from the pane you ran
+it in — so no path argument. Untracked files are included in the
+uncommitted view, because a file git has never seen is still work you
+just did. Working-tree diffs re-run whenever the pane regains focus, so
+the view never lies about the current state.
+
+Opening one when you finish a turn beats asking the human to scroll your
+transcript.
+
+## 6. Workspace control
 
 ```bash
 mira list-tabs                 # tabs + panes, focus markers (--json for data)
@@ -91,7 +111,7 @@ mira focus <pane>
 mira close-pane <pane>
 ```
 
-## 6. Remote workspaces (SSH)
+## 7. Remote workspaces (SSH)
 
 ```bash
 mira ssh hosts                     # aliases from ~/.ssh/config
@@ -116,7 +136,7 @@ Disconnects leave the pane idle with `[press any key to reconnect]`;
 restarting Mirador restores remote panes idle too — it never re-opens an
 SSH session behind your back.
 
-## 7. Raw socket protocol
+## 8. Raw socket protocol
 
 Newline-delimited JSON on the socket named in the discovery file:
 
@@ -128,7 +148,7 @@ Newline-delimited JSON on the socket named in the discovery file:
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session browser_open
 browser_navigate browser_snapshot browser_click browser_fill browser_eval
-browser_history ssh_open ssh_hosts ssh_forward`. Requests are
+browser_history ssh_open ssh_hosts ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)
