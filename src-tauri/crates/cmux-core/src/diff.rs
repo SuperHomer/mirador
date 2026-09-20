@@ -576,32 +576,47 @@ diff --git a/a.txt b/a.txt
         assert!(shipped <= MAX_LINES_PER_FILE, "shipped {shipped} lines");
     }
 
+    fn git(dir: &Path, args: &[&str]) {
+        let output = crate::proc::command("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git must be installed to run this test");
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// A throwaway repository. Tests that need history build their own:
+    /// CI checks this project out shallow, so the ambient repo has no
+    /// HEAD~1 and cannot stand in for one.
+    fn new_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "cmux-diff-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.email", "t@example.com"]);
+        git(&dir, &["config", "user.name", "Test"]);
+        // A developer with global commit signing must not fail this test.
+        git(&dir, &["config", "commit.gpgsign", "false"]);
+        dir
+    }
+
     /// End to end against a real repository: the invocation, the
     /// untracked synthesis and the labels are all things only `git`
     /// itself can confirm.
     #[test]
     fn load_reads_a_real_repository() {
-        let dir = std::env::temp_dir().join(format!("cmux-diff-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = new_repo("load");
         std::fs::create_dir_all(dir.join("src")).unwrap();
-        let git = |args: &[&str]| {
-            let status = crate::proc::command("git")
-                .args(args)
-                .current_dir(&dir)
-                .output()
-                .expect("git must be installed to run this test");
-            assert!(
-                status.status.success(),
-                "git {args:?}: {}",
-                String::from_utf8_lossy(&status.stderr)
-            );
-        };
-        git(&["init", "-q"]);
-        git(&["config", "user.email", "t@example.com"]);
-        git(&["config", "user.name", "Test"]);
         std::fs::write(dir.join("src/keep.txt"), "one\ntwo\nthree\n").unwrap();
-        git(&["add", "-A"]);
-        git(&["commit", "-qm", "first commit"]);
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "first commit"]);
 
         std::fs::write(dir.join("src/keep.txt"), "one\nTWO\nthree\n").unwrap();
         std::fs::write(dir.join("src/fresh.txt"), "brand new\n").unwrap();
@@ -636,15 +651,24 @@ diff --git a/a.txt b/a.txt
 
     #[test]
     fn unknown_revisions_are_rejected_before_a_pane_opens() {
-        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        assert!(verify_spec(repo, WORKTREE).is_ok());
-        assert!(verify_spec(repo, STAGED).is_ok());
-        assert!(verify_spec(repo, "HEAD").is_ok());
-        assert!(verify_spec(repo, "HEAD~1...HEAD").is_ok());
+        let repo = new_repo("verify");
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-qm", "first"]);
+        std::fs::write(repo.join("a.txt"), "two\n").unwrap();
+        git(&repo, &["commit", "-qam", "second"]);
+
+        assert!(verify_spec(&repo, WORKTREE).is_ok());
+        assert!(verify_spec(&repo, STAGED).is_ok());
+        assert!(verify_spec(&repo, "HEAD").is_ok());
+        // Ranges reach git as-is, so they have to survive verification.
+        assert!(verify_spec(&repo, "HEAD~1...HEAD").is_ok());
         assert_eq!(
-            verify_spec(repo, "no-such-ref-ever").unwrap_err(),
+            verify_spec(&repo, "no-such-ref-ever").unwrap_err(),
             "unknown revision `no-such-ref-ever`"
         );
+
+        let _ = std::fs::remove_dir_all(&repo);
     }
 
     #[test]
