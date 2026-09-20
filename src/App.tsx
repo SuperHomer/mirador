@@ -123,6 +123,7 @@ export default function App() {
               agentPanes={snapshot.agentPanes}
               browserPanes={snapshot.browserPanes}
               remotePanes={snapshot.remotePanes}
+              diffPanes={snapshot.diffPanes}
             />
           </div>
         ))}

@@ -39,6 +39,44 @@ export interface BrowserPaneInfo {
   url: string;
 }
 
+export interface DiffPaneInfo {
+  paneId: string;
+  repo: string;
+  spec: string;
+}
+
+export interface DiffLine {
+  kind: "context" | "add" | "del" | "meta";
+  oldLine: number | null;
+  newLine: number | null;
+  content: string;
+}
+
+export interface DiffHunk {
+  oldStart: number;
+  newStart: number;
+  header: string;
+  lines: DiffLine[];
+}
+
+export interface DiffFile {
+  path: string;
+  oldPath: string | null;
+  status: "added" | "deleted" | "renamed" | "copied" | "modified" | "untracked";
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  truncated: boolean;
+  hunks: DiffHunk[];
+}
+
+export interface DiffResult {
+  repo: string;
+  spec: string;
+  label: string;
+  files: DiffFile[];
+}
+
 export interface RemotePaneInfo {
   paneId: string;
   host: string;
@@ -51,6 +89,7 @@ export interface WorkspaceSnapshot {
   agentPanes: AgentPane[];
   browserPanes: BrowserPaneInfo[];
   remotePanes: RemotePaneInfo[];
+  diffPanes: DiffPaneInfo[];
 }
 
 export interface NotificationDto {
@@ -136,6 +175,15 @@ export const attachPane = (
   });
 export const openBrowser = (paneId: string | null, tab: boolean, url: string) =>
   invoke<string>("open_browser", { paneId, tab, url });
+export const openDiff = (
+  paneId: string | null,
+  tab: boolean,
+  spec: string | null,
+) => invoke<string>("open_diff", { paneId, tab, spec });
+export const loadDiff = (paneId: string) =>
+  invoke<DiffResult>("load_diff", { paneId });
+export const setDiffSpec = (paneId: string, spec: string) =>
+  invoke<void>("set_diff_spec", { paneId, spec });
 export const openSsh = (paneId: string | null, tab: boolean, host: string) =>
   invoke<string>("open_ssh", { paneId, tab, host });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");

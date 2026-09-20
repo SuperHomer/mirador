@@ -31,6 +31,10 @@ pub struct SessionPane {
     pub agent_session: Option<String>,
     #[serde(default)]
     pub remote_host: Option<String>,
+    #[serde(default)]
+    pub diff_repo: Option<String>,
+    #[serde(default)]
+    pub diff_spec: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +121,8 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         browser_url: m.and_then(|m| m.browser_url.clone()),
                         agent_session: m.and_then(|m| m.agent_session.clone()),
                         remote_host: m.and_then(|m| m.remote_host.clone()),
+                        diff_repo: m.and_then(|m| m.diff_repo.clone()),
+                        diff_spec: m.and_then(|m| m.diff_spec.clone()),
                     },
                 )
             })
@@ -181,6 +187,8 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     browser_url: p.browser_url,
                     agent_session: p.agent_session,
                     remote_host: p.remote_host,
+                    diff_repo: p.diff_repo,
+                    diff_spec: p.diff_spec,
                     ..Default::default()
                 },
             )

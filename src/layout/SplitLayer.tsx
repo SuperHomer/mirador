@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
   BrowserPaneInfo,
+  DiffPaneInfo,
   Node,
   SplitDir,
   TabSnapshot,
@@ -8,6 +9,7 @@ import {
 } from "../bindings";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { BrowserPane } from "../browser/BrowserPane";
+import { DiffPane } from "../diff/DiffPane";
 
 interface Frac {
   x: number;
@@ -46,12 +48,14 @@ export function SplitLayer({
   agentPanes,
   browserPanes,
   remotePanes,
+  diffPanes,
 }: {
   tab: TabSnapshot;
   unreadPanes: string[];
   agentPanes: { paneId: string; command: string }[];
   browserPanes: BrowserPaneInfo[];
   remotePanes: { paneId: string; host: string }[];
+  diffPanes: DiffPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -114,12 +118,20 @@ export function SplitLayer({
     <div className="split-layer" ref={layerRef}>
       {panes.map((p) => {
         const browser = browserPanes.find((b) => b.paneId === p.paneId);
+        const diff = diffPanes.find((d) => d.paneId === p.paneId);
         return (
           <div key={p.paneId} className="pane-slot" style={frac(p.rect)}>
             {browser ? (
               <BrowserPane
                 paneId={p.paneId}
                 url={browser.url}
+                focused={p.paneId === tab.focusedPane}
+              />
+            ) : diff ? (
+              <DiffPane
+                paneId={p.paneId}
+                repo={diff.repo}
+                spec={diff.spec}
                 focused={p.paneId === tab.focusedPane}
               />
             ) : (
