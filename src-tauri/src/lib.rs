@@ -119,6 +119,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             setup_menu(app.handle())?;
             notify::ensure_permission(app.handle());
+            // Before session restore can want it for a rerun.
+            cmux_core::pty::shell::warm_interactive_path();
             intel::spawn(app.handle().clone());
             config_watch::spawn(app.handle().clone());
             spawn_session_saver(app.handle().clone());

@@ -160,9 +160,44 @@ pub fn interactive(cwd: Option<&str>) -> CommandBuilder {
 /// agrees on (fish's `$PATH` is a list, and prints space-separated).
 #[cfg(unix)]
 pub fn interactive_path() -> Option<&'static str> {
-    static PATH: OnceLock<Option<String>> = OnceLock::new();
-    PATH.get_or_init(resolve_interactive_path).as_deref()
+    static PATH: OnceLock<String> = OnceLock::new();
+    cached_path(&PATH, resolve_interactive_path)
 }
+
+/// Memoizes a *successful* lookup only.
+///
+/// Caching the failure too is what made one slow moment permanent: the
+/// lookup runs a whole interactive shell, so a machine busy restoring a
+/// session can blow the deadline once — and every command pane for the
+/// rest of the app's life then ran with launchd's PATH. The visible
+/// symptom was a restored `claude --resume` pane dying with "command not
+/// found", for a binary that pane's own shell finds fine. A failure is
+/// now just a miss: the next command pane asks again.
+#[cfg(unix)]
+fn cached_path(
+    cache: &'static OnceLock<String>,
+    resolve: impl FnOnce() -> Option<String>,
+) -> Option<&'static str> {
+    if let Some(path) = cache.get() {
+        return Some(path.as_str());
+    }
+    let resolved = resolve()?;
+    Some(cache.get_or_init(|| resolved).as_str())
+}
+
+/// Resolves the PATH ahead of the first command pane, off the main
+/// thread. Asking at spawn time meant paying an interactive shell's
+/// startup exactly when the app was busiest — during session restore,
+/// which is also when a restored agent pane wants to rerun.
+#[cfg(unix)]
+pub fn warm_interactive_path() {
+    std::thread::spawn(|| {
+        let _ = interactive_path();
+    });
+}
+
+#[cfg(not(unix))]
+pub fn warm_interactive_path() {}
 
 #[cfg(unix)]
 fn resolve_interactive_path() -> Option<String> {
@@ -285,6 +320,34 @@ mod tests {
         let dbg = format!("{:?}", run_command("claude --resume abc", None));
         assert!(dbg.contains("-lc"), "got: {dbg}");
         assert!(!dbg.contains("-ilc"), "job control breaks pane close: {dbg}");
+    }
+
+    /// The regression that broke `claude --resume`: one slow lookup used
+    /// to be cached as a permanent failure, so every later command pane
+    /// ran with launchd's PATH. A miss must stay retryable.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_path_lookup_is_not_remembered() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static CACHE: OnceLock<String> = OnceLock::new();
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+
+        let flaky = || {
+            // Fails the first time, as a blown deadline would.
+            match CALLS.fetch_add(1, Ordering::SeqCst) {
+                0 => None,
+                _ => Some("/usr/bin:/opt/real".to_string()),
+            }
+        };
+
+        assert_eq!(cached_path(&CACHE, flaky), None);
+        assert_eq!(cached_path(&CACHE, flaky), Some("/usr/bin:/opt/real"));
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2, "the failure must be retried");
+
+        // And a success is memoized: no third shell is ever spawned.
+        assert_eq!(cached_path(&CACHE, flaky), Some("/usr/bin:/opt/real"));
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2, "a hit must not re-resolve");
     }
 
     /// The whole point: a tool on the interactive PATH must be reachable.
