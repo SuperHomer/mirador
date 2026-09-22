@@ -30,12 +30,25 @@ mira hooks setup      # idempotent; edits ~/.claude/settings.json
 mira hooks remove     # uninstall
 ```
 
-This wires three hooks, all calling `mira claude-hook`:
+This wires three hooks, all calling `mira claude-hook`, and installs the
+`/mira-diff` skill in `~/.claude/skills/mira-diff/`:
 
 - **Notification** → the pane running that Claude session lights up with
   Claude's message (needs-permission, idle, …)
 - **Stop** → "finished responding" notification when a turn completes
 - **SessionStart** → records the Claude session id on the pane
+
+`/mira-diff` is the human's side of `mira diff`: typing it in a Claude Code
+pane opens the same review surface, with the same arguments. It sets
+`disable-model-invocation`, because an agent that wants a diff pane should
+run `mira diff` rather than reach for a slash command. Both actions only
+touch a file carrying their own marker, so a `/mira-diff` you wrote yourself
+is left alone by `setup` and by `remove`.
+
+A skill rather than a `commands/mira-diff.md`: Claude Code merged custom
+commands into skills and both spellings still produce `/mira-diff`, but
+skills are where new work goes. Its one shell line needs Claude Code
+2.1.228 or newer to run.
 
 The hook resolves *which pane* its Claude session runs in from `MIRA_PANE`,
 which every process inside a pane inherits, so five parallel agents notify
@@ -97,6 +110,11 @@ it in — so no path argument. Untracked files are included in the
 uncommitted view, because a file git has never seen is still work you
 just did. Working-tree diffs re-run whenever the pane regains focus, so
 the view never lies about the current state.
+
+Because the repository comes from the calling pane, `mira diff` refuses to
+run outside one: from another terminal it has no way to tell which repo you
+mean, and guessing would show the human someone else's work. Inside the app,
+the command palette's "New Diff Pane" is the same action.
 
 Opening one when you finish a turn beats asking the human to scroll your
 transcript.

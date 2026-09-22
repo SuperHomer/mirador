@@ -251,8 +251,9 @@ pub enum Request {
         #[serde(default)]
         cancel: bool,
     },
-    /// Opens a diff pane (split of the focused pane, or a new tab). The
-    /// repository comes from the source pane's cwd.
+    /// Opens a diff pane (split of the source pane, or a new tab). The
+    /// repository comes from the source pane's cwd: the calling pane when
+    /// the CLI knows it, else whichever pane is focused.
     DiffOpen {
         /// "worktree" (default), "staged", or a revspec ("abc123",
         /// "main...HEAD").
@@ -260,6 +261,10 @@ pub enum Request {
         spec: Option<String>,
         #[serde(default)]
         target: Option<String>,
+        /// The pane `mira diff` ran in. Absent from older clients, and
+        /// when the environment is lost (sudo, a detached session).
+        #[serde(default)]
+        pane_id: Option<String>,
     },
 }
 
