@@ -59,8 +59,9 @@ export default function Hero() {
         }}
       >
         A cross-platform terminal built for AI coding-agent workflows. Tabs, splits,
-        attention rings, a scriptable browser pane, and remote workspaces — every action
-        drivable from the <span className="mono" style={{ color: "var(--text)" }}>mira</span> CLI.
+        attention rings, diff panes, a scriptable browser pane, and remote workspaces —
+        every action drivable from the{" "}
+        <span className="mono" style={{ color: "var(--text)" }}>mira</span> CLI.
       </p>
       <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 34, flexWrap: "wrap" }}>
         <a

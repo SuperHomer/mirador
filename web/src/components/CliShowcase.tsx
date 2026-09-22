@@ -2,6 +2,7 @@ import CopyButton from "./CopyButton";
 
 const COMMANDS = [
   'mira run --wait npm test',
+  'mira diff main...HEAD',
   'mira browser open localhost:3000',
   'mira ssh open prod-box',
   'mira notify "build green"',
@@ -40,6 +41,7 @@ export default function CliShowcase() {
         </div>
         <div className="mono" style={{ background: "var(--crust)", border: "1px solid var(--surface)", borderRadius: 12, padding: "22px 24px", fontSize: 13, lineHeight: 2, boxShadow: "0 16px 40px rgba(0,0,0,.4)" }}>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira run --wait npm test<span style={{ color: "var(--muted)" }}>      # observable, exit code</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser open <span style={{ color: "var(--green)" }}>localhost:3000</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira ssh open <span style={{ color: "var(--mauve)" }}>prod-box</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira notify <span style={{ color: "var(--green)" }}>"build green"</span></div>

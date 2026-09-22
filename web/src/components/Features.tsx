@@ -4,6 +4,7 @@ const FEATURES: Feature[] = [
   { icon: "⧉", title: "Tabs & splits", body: "Horizontal and vertical splits, WebGL rendering with fallback, and flow-controlled PTY streaming — a runaway <cat> can’t freeze the UI." },
   { icon: "◎", title: "Agent notifications", body: "Panes get an attention ring and tabs light up on OSC 9/99/777 or <mira notify>. Native alerts when the window is unfocused." },
   { icon: "▶", title: "Command panes", body: "Agent-launched commands run in a visible, interruptible pane. <--wait> returns clean output and an exit code to the caller." },
+  { icon: "±", title: "Diff panes", body: "Review what changed without leaving the terminal: file tree, hunks, and your own theme. <mira diff> for uncommitted work, a commit, or a branch — untracked files included." },
   { icon: "◱", title: "Scriptable browser", body: "Agents open pages, snapshot the DOM, click, fill, and eval — while you watch it happen in a real pane via <mira browser>." },
   { icon: "⇄", title: "Remote workspaces", body: "Panes run the system <ssh> — 2FA and ProxyJump just work. ControlMaster port forwarding brings remote dev servers to your browser pane." },
   { icon: "⟳", title: "Session persistence", body: "Layout, cwds, scrollback, and browser URLs survive restarts and crashes. Config hot-reloads from <mirador.json>." },
