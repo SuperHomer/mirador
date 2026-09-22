@@ -34,42 +34,49 @@ export function BrowserPane({ paneId, url, focused }: Props) {
     const el = placeholderRef.current;
     if (!el) return;
 
-    // getBoundingClientRect is in viewport coordinates, but a child webview
-    // is positioned against the window frame — which on macOS includes the
-    // titlebar. Passing the rect straight through drew every browser page a
-    // titlebar-height too high, hiding the chrome row above it. Measure the
-    // gap instead of hardcoding it: it is 0 on undecorated windows and in
-    // fullscreen, and this keeps Windows and Linux correct for free.
-    const chromeOffset = async () => {
+    // Two coordinate hops separate this placeholder from the child webview
+    // that draws over it. Rust handles the first — where the host webview
+    // sits inside the window. This handles the second: the window's content
+    // view spans the whole frame, but WebKit lays the page out below the
+    // titlebar, so the page's viewport origin sits a titlebar lower than
+    // the view's. Pass the rect with that gap added back.
+    //
+    // The gap is the window's inner height minus the page's own: two real
+    // measurements, 0 on an undecorated window, in fullscreen, and on
+    // platforms that inset nothing. Deriving it from window.screenY instead
+    // was the bug this replaces — a wry webview reports no window rect, so
+    // screenY reads back as the screen height and drew every page hundreds
+    // of pixels below its pane.
+    const viewportInset = async () => {
       try {
         const win = getCurrentWindow();
-        const [outer, scale] = await Promise.all([
-          win.outerPosition(),
+        const [inner, scale] = await Promise.all([
+          win.innerSize(),
           win.scaleFactor(),
         ]);
-        return Math.max(0, window.screenY - outer.y / scale);
+        return Math.max(0, inner.height / scale - window.innerHeight);
       } catch {
         return 0;
       }
     };
 
-    let offset = 0;
+    let inset = 0;
     const report = () => {
       const rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
-      void setBrowserBounds(paneId, rect.x, rect.y + offset, rect.width, rect.height);
+      void setBrowserBounds(paneId, rect.x, rect.y + inset, rect.width, rect.height);
     };
 
-    // Re-measured alongside the bounds poll: a window moved between screens
-    // or toggled fullscreen changes the gap.
-    void chromeOffset().then((v) => {
-      offset = v;
+    // Re-measured on the bounds poll: toggling fullscreen or decorations
+    // changes the gap.
+    void viewportInset().then((v) => {
+      inset = v;
       report();
     });
     const remeasure = setInterval(() => {
-      void chromeOffset().then((v) => {
-        if (v !== offset) {
-          offset = v;
+      void viewportInset().then((v) => {
+        if (v !== inset) {
+          inset = v;
           report();
         }
       });

@@ -38,6 +38,41 @@ fn parse_url(url: &str) -> Result<Url, String> {
     candidate.parse().map_err(|e| format!("bad url: {e}"))
 }
 
+/// Where the host webview's client area starts inside the window.
+///
+/// A child webview is positioned against the window, but the frontend
+/// measures a pane's placeholder in host-webview viewport coordinates. The
+/// two differ by wherever the host webview itself begins: nothing when it
+/// fills the frame, a titlebar's worth when it does not. Asking the host
+/// for its own position reads that gap out of the very coordinate space
+/// `set_position` writes into, so there is no per-platform titlebar
+/// arithmetic to get wrong.
+///
+/// This replaces deriving the gap from `window.screenY` in the frontend.
+/// That is not a real coordinate in a wry webview: it reports no window
+/// rect (`outerWidth`/`outerHeight` read back as 0), so `screenY` comes out
+/// as the screen height — ~870px of bogus offset, which pushed every
+/// browser page off the bottom of the window and made the panes look empty.
+fn host_origin(window: &tauri::Window) -> (f64, f64) {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let host = window
+        .webviews()
+        .into_iter()
+        .find(|w| !w.label().starts_with("browser-"));
+    let Some(pos) = host.and_then(|w| w.position().ok()) else {
+        return (0.0, 0.0);
+    };
+    let (x, y) = (f64::from(pos.x) / scale, f64::from(pos.y) / scale);
+    // An inset is a window decoration at most. Anything bigger means the
+    // coordinate space is not the one assumed here, and keeping pages on
+    // their pane matters more than honouring it.
+    if (0.0..=200.0).contains(&x) && (0.0..=200.0).contains(&y) {
+        (x, y)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
 /// Creates the pane's child webview if needed and applies bounds.
 pub fn ensure_webview(
     app: &AppHandle,
@@ -48,6 +83,12 @@ pub fn ensure_webview(
     h: f64,
 ) -> Result<(), String> {
     let label = label_for(pane_id);
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main window missing".to_string())?;
+    let (origin_x, origin_y) = host_origin(&window);
+    let (x, y) = (x + origin_x, y + origin_y);
+
     if let Some(webview) = app.get_webview(&label) {
         let _ = webview.set_position(LogicalPosition::new(x, y));
         let _ = webview.set_size(LogicalSize::new(w.max(1.0), h.max(1.0)));
@@ -61,10 +102,6 @@ pub fn ensure_webview(
             .and_then(|m| m.browser_url.clone())
             .unwrap_or_else(|| "about:blank".to_string())
     };
-
-    let window = app
-        .get_window("main")
-        .ok_or_else(|| "main window missing".to_string())?;
 
     let nav_app = app.clone();
     let nav_pane = pane_id.to_string();
