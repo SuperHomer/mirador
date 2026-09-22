@@ -451,7 +451,13 @@ pub fn open_diff(
     tab: bool,
     spec: Option<String>,
 ) -> Result<String, String> {
-    let source = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    // `mira diff` reports the pane it ran in, so an agent's diff lands on
+    // its own repository rather than whichever pane the human is looking
+    // at. Fall back to the focused pane when that id is absent (an older
+    // CLI, or a lost environment) or stale (the pane has since closed).
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
     // Resolve the repo before the layout changes: a new tab's pane has no
     // cwd of its own yet, and a split's does not until its shell reports one.
     let repo = {

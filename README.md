@@ -31,7 +31,8 @@ The CLI command is **`mira`** ("look!").
 - **Config**: `~/.config/mirador/mirador.json` (hot-reloaded), Ghostty/wezterm
   theme import, configurable keybindings, command palette (`mod+K`)
 - **Claude Code integration**: `mira hooks setup` lights up tabs when your
-  agent needs you and enables per-pane session resume
+  agent needs you, enables per-pane session resume, and adds a `/mira-diff`
+  skill for reviewing the turn's work
 
 ## Install (macOS)
 

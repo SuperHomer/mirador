@@ -86,7 +86,7 @@ enum Command {
         action: BrowserAction,
     },
     /// Open a diff pane: a reviewable view of what changed, with a file
-    /// tree — the repository comes from the focused pane.
+    /// tree — the repository comes from the pane you run it in.
     Diff {
         /// A commit ("0e47a2c"), a range ("main...HEAD"), or nothing for
         /// the uncommitted changes.
@@ -117,7 +117,8 @@ enum Command {
     /// the hook payload from stdin.
     #[command(hide = true)]
     ClaudeHook { event: String },
-    /// Install or remove the Claude Code hooks that light up Mirador tabs.
+    /// Install or remove the Claude Code integration: the hooks that light
+    /// up Mirador tabs, and the `/mira-diff` slash command.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -260,6 +261,17 @@ fn run(cli: Cli) -> Result<(), String> {
             if staged && spec.is_some() {
                 return Err("--staged takes no revision".into());
             }
+            // Without a pane we cannot tell which repository is meant.
+            // The app would fall back to whichever pane is focused, which
+            // from another terminal silently diffs someone else's work —
+            // so refuse instead of guessing.
+            let pane_id = own_pane().ok_or(
+                "`mira diff` must run inside a Mirador pane: it takes the \
+                 repository from the pane it was called in, and this shell \
+                 is not one (MIRA_PANE is unset; `sudo` and detached \
+                 sessions drop it too). From the app, the command palette's \
+                 \"New Diff Pane\" does the same thing.",
+            )?;
             Request::DiffOpen {
                 spec: if staged {
                     Some("staged".to_string())
@@ -267,6 +279,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     spec
                 },
                 target: tab.then(|| "tab".to_string()),
+                pane_id: Some(pane_id),
             }
         }
         Command::Ssh { action } => match action {
@@ -621,10 +634,88 @@ fn is_our_hook(matcher: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Idempotently installs (or removes) Mirador hooks in ~/.claude/settings.json.
+/// The `/mira-diff` skill `mira hooks setup` installs. Agents already
+/// reach the diff pane through `mira diff`; this is the human's
+/// affordance, which is why it opts out of model invocation.
+///
+/// A skill rather than a `commands/mira-diff.md` file: Claude Code merged
+/// custom commands into skills, both spellings still produce `/mira-diff`,
+/// and skills are where new work is supposed to go. The `!` line needs
+/// Claude Code 2.1.228 or newer to run; on anything older the skill still
+/// loads, it just hands Claude the literal line instead of the output.
+const SKILL_DIR: &str = "mira-diff";
+const SKILL_FILE: &str = "SKILL.md";
+
+/// Marks the file as ours. `setup` only overwrites a file carrying it and
+/// `remove` only deletes one, so a hand-written skill of the same name
+/// survives both — and deleting the line opts a file out of management.
+const SKILL_MARKER: &str = "Installed by `mira hooks setup`";
+
+const SKILL_BODY: &str = r#"---
+name: mira-diff
+description: Open a Mirador diff pane for the work in this pane
+argument-hint: [commit | range | --staged | --tab]
+allowed-tools: Bash(mira diff) Bash(mira diff:*)
+disable-model-invocation: true
+---
+<!-- Installed by `mira hooks setup`, removed by `mira hooks remove`.
+     Delete the line above and Mirador stops touching this file. -->
+
+!`mira diff $ARGUMENTS`
+
+If the command printed an error, relay it in one line. Otherwise a diff pane
+is now open for review: acknowledge in one short line, and do not describe or
+summarize the diff — the pane already shows it.
+"#;
+
+/// Installs (or removes) the `/mira-diff` skill under a Claude Code skills
+/// directory. A file rather than a settings key, but the same rule as the
+/// hooks: only ever touch what we put there.
+fn skill_at(skills_dir: &std::path::Path, action: &str) -> Result<(), String> {
+    let dir = skills_dir.join(SKILL_DIR);
+    let path = dir.join(SKILL_FILE);
+    // None = no file, Some(false) = someone else's, Some(true) = ours.
+    let ours = std::fs::read_to_string(&path)
+        .ok()
+        .map(|text| text.contains(SKILL_MARKER));
+
+    match action {
+        "setup" => {
+            if ours == Some(false) {
+                println!("kept your own {} (not installed by Mirador)", path.display());
+                return Ok(());
+            }
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(&path, SKILL_BODY).map_err(|e| e.to_string())?;
+            println!("installed /mira-diff ({})", path.display());
+        }
+        "remove" => match ours {
+            Some(true) => {
+                std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+                // A skill is a directory; leaving an empty one behind
+                // would show up as a broken `/mira-diff`. Only ours, and
+                // only if nothing else was put in it.
+                let _ = std::fs::remove_dir(&dir);
+                println!("removed /mira-diff");
+            }
+            Some(false) => {
+                println!("kept your own {} (not installed by Mirador)", path.display())
+            }
+            None => {}
+        },
+        other => return Err(format!("unknown hooks action `{other}` (setup|remove)")),
+    }
+    Ok(())
+}
+
+/// Idempotently installs (or removes) the Mirador hooks in
+/// ~/.claude/settings.json and the `/mira-diff` skill beside them.
 fn hooks(action: &str) -> Result<(), String> {
     let home = cmux_core::config::home_dir().ok_or("could not find your home directory")?;
-    hooks_at(&std::path::PathBuf::from(home).join(".claude/settings.json"), action)
+    let claude = std::path::PathBuf::from(home).join(".claude");
+    // The skill first so the PATH note that ends the settings edit stays last.
+    skill_at(&claude.join("skills"), action)?;
+    hooks_at(&claude.join("settings.json"), action)
 }
 
 /// The same, against an explicit settings file — so the edit can be tested
@@ -839,6 +930,85 @@ mod tests {
         let stop = settings["hooks"]["Stop"].as_array().unwrap();
         assert_eq!(stop.len(), 1, "the old cmux hook should be replaced");
         assert_eq!(stop[0]["hooks"][0]["command"], "mira claude-hook stop");
+    }
+
+    /// A throwaway `skills/` directory (the parent the skill goes under).
+    fn temp_skills(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("mira-skills-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn skill_path(skills: &std::path::Path) -> std::path::PathBuf {
+        skills.join(SKILL_DIR).join(SKILL_FILE)
+    }
+
+    /// `mira hooks setup` writes the slash command, re-running leaves one
+    /// copy, and `remove` takes it away again — the same contract the hooks
+    /// edit keeps, so an install can be repeated or undone safely.
+    #[test]
+    fn setup_installs_the_skill_and_remove_takes_it_back() {
+        let skills = temp_skills("roundtrip");
+        let path = skill_path(&skills);
+
+        skill_at(&skills, "setup").unwrap();
+        let first = std::fs::read_to_string(&path).unwrap();
+        assert!(first.contains("mira diff $ARGUMENTS"), "should call mira diff");
+        assert!(
+            first.contains("disable-model-invocation: true"),
+            "the human types this one; agents already have `mira diff`"
+        );
+
+        skill_at(&skills, "setup").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), first, "not idempotent");
+
+        skill_at(&skills, "remove").unwrap();
+        assert!(!path.exists(), "remove should delete our file");
+        // A skill is a directory: an empty one left behind reads as a
+        // broken /mira-diff in Claude Code.
+        assert!(!skills.join(SKILL_DIR).exists(), "the skill dir should go too");
+    }
+
+    /// The directory cleanup must not take anything that isn't ours.
+    #[test]
+    fn remove_keeps_a_skill_directory_that_holds_other_files() {
+        let skills = temp_skills("companion");
+        skill_at(&skills, "setup").unwrap();
+        let theirs = skills.join(SKILL_DIR).join("notes.md");
+        std::fs::write(&theirs, "mine").unwrap();
+
+        skill_at(&skills, "remove").unwrap();
+
+        assert!(!skill_path(&skills).exists(), "ours should go");
+        assert!(theirs.exists(), "a file someone else put there must survive");
+    }
+
+    /// A user's own `/mira-diff` must survive both actions. Without the
+    /// marker check, `hooks setup` would silently overwrite a command
+    /// someone wrote themselves — and `remove` would delete it.
+    #[test]
+    fn a_hand_written_skill_of_the_same_name_is_never_touched() {
+        let skills = temp_skills("foreign");
+        let path = skill_path(&skills);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mine = "---\ndescription: my own thing\n---\n!`echo hi`\n";
+        std::fs::write(&path, mine).unwrap();
+
+        skill_at(&skills, "setup").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "setup clobbered it");
+
+        skill_at(&skills, "remove").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "remove deleted it");
+    }
+
+    /// Removing from a directory that never had the command is a no-op,
+    /// not an error — `hooks remove` runs on machines that never ran setup.
+    #[test]
+    fn remove_without_an_install_is_quiet() {
+        let skills = temp_skills("absent");
+        skill_at(&skills, "remove").unwrap();
+        assert!(!skill_path(&skills).exists());
     }
 
     /// How a hook knows which pane its agent runs in. The tty fallback is

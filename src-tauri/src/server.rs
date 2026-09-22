@@ -218,11 +218,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane_id }))
         }
-        Request::DiffOpen { spec, target } => {
+        Request::DiffOpen {
+            spec,
+            target,
+            pane_id,
+        } => {
             let pane_id = crate::commands::open_diff(
                 app.clone(),
                 app.state(),
-                None,
+                pane_id,
                 target.as_deref() == Some("tab"),
                 spec,
             )?;
