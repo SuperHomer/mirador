@@ -2,6 +2,7 @@ import CopyButton from "./CopyButton";
 
 const COMMANDS = [
   'mira run --wait npm test',
+  'mira diff main...HEAD',
   'mira browser open localhost:3000',
   'mira ssh open prod-box',
   'mira notify "build green"',
