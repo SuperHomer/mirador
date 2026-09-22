@@ -147,6 +147,7 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘T / ⌘W | Ctrl+Shift+T / Ctrl+Shift+W | new tab / close pane |
 | ⌘⇧W | Ctrl+Shift+Q | close tab |
 | ⌘D / ⌘⇧D | Ctrl+Shift+D / Ctrl+Shift+E | split right / down |
+| ⌘G | Ctrl+Shift+G | diff pane for this repo |
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |

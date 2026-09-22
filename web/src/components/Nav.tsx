@@ -29,6 +29,7 @@ export default function Nav() {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 28, fontSize: 14, color: "var(--subtext)" }}>
         <a href="#features" style={{ color: "var(--subtext)" }}>Features</a>
+        <a href="#diff" style={{ color: "var(--subtext)" }}>Review</a>
         <a href="#cli" style={{ color: "var(--subtext)" }}>CLI</a>
         <a href="#install" style={{ color: "var(--subtext)" }}>Install</a>
         <a href="#contribute" style={{ color: "var(--subtext)" }}>Contribute</a>
