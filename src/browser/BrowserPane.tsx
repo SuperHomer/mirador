@@ -47,6 +47,13 @@ export function BrowserPane({ paneId, url, focused }: Props) {
     // was the bug this replaces — a wry webview reports no window rect, so
     // screenY reads back as the screen height and drew every page hundreds
     // of pixels below its pane.
+    //
+    // Note what a height difference can and cannot say: it gives the total
+    // vertical inset, not where that inset sits. Adding it to rect.y spends
+    // all of it at the top, which is right wherever the inset *is* a
+    // titlebar. A platform that inset the same amount at the bottom would
+    // read identically here and push every page down by it — so if pages
+    // ever sit low on some platform, this line is the one to doubt.
     const viewportInset = async () => {
       try {
         const win = getCurrentWindow();

@@ -19,6 +19,9 @@ const BRIDGE_JS: &str = include_str!("browser_bridge.js");
 pub struct BrowserBridge {
     pending: Mutex<HashMap<u64, mpsc::Sender<String>>>,
     next_id: AtomicU64,
+    /// Memoized host-view origin. Cleared by `forget_host_origin` when the
+    /// window moves or resizes, which is the only time it can change.
+    host_origin: Mutex<Option<(f64, f64)>>,
 }
 
 fn label_for(pane_id: &str) -> String {
@@ -53,7 +56,29 @@ fn parse_url(url: &str) -> Result<Url, String> {
 /// rect (`outerWidth`/`outerHeight` read back as 0), so `screenY` comes out
 /// as the screen height — ~870px of bogus offset, which pushed every
 /// browser page off the bottom of the window and made the panes look empty.
-fn host_origin(window: &tauri::Window) -> (f64, f64) {
+fn host_origin(app: &AppHandle, window: &tauri::Window) -> (f64, f64) {
+    if let Some(cached) = *app.state::<AppState>().browser_bridge.host_origin.lock().unwrap() {
+        return cached;
+    }
+    let measured = measure_host_origin(window);
+    *app.state::<AppState>()
+        .browser_bridge
+        .host_origin
+        .lock()
+        .unwrap() = Some(measured);
+    measured
+}
+
+/// Drops the memoized origin. The host view can only move within the window
+/// when the window itself changes — a resize, a screen change, entering or
+/// leaving fullscreen — so those events are what invalidate it.
+pub fn forget_host_origin(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        *state.browser_bridge.host_origin.lock().unwrap() = None;
+    }
+}
+
+fn measure_host_origin(window: &tauri::Window) -> (f64, f64) {
     let scale = window.scale_factor().unwrap_or(1.0);
     let host = window
         .webviews()
@@ -86,7 +111,7 @@ pub fn ensure_webview(
     let window = app
         .get_window("main")
         .ok_or_else(|| "main window missing".to_string())?;
-    let (origin_x, origin_y) = host_origin(&window);
+    let (origin_x, origin_y) = host_origin(app, &window);
     let (x, y) = (x + origin_x, y + origin_y);
 
     if let Some(webview) = app.get_webview(&label) {
