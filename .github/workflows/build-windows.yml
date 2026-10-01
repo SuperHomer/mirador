@@ -19,6 +19,8 @@ on:
       - "src/**"
       - "src-tauri/**"
       - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/build-windows.yml"
   release:
     types: [published]
