@@ -10,7 +10,7 @@ cmux-protocol = { path = "../cmux-protocol" }
 portable-pty = "0.9"
 serde.workspace = true
 serde_json.workspace = true
-toml = "0.8"
+toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
