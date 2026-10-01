@@ -1,0 +1,43 @@
+name: Build landing page
+
+# The landing page had no CI at all: no build workflow watched `web/**`, and
+# deploy-web.yml only runs after a merge to main. So a change that broke the
+# page — or a dependency bump that broke the build — was discovered by the
+# deploy, in public. This is the same `tsc -b && vite build` the deploy runs,
+# on the pull request instead.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/build-web.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/build-web.yml"
+  workflow_dispatch:
+
+# Only `npm ci` and a build; nothing here needs to write to the repository.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck + build
+        run: npm run build
