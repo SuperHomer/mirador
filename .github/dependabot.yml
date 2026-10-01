@@ -10,6 +10,22 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # React and Vite each ship as a set whose members pin each other's peer
+    # ranges, so a lone bump cannot resolve: vite 8 is outside
+    # @vitejs/plugin-react 4's peer range, and @types/react 19 will not sit
+    # beside @types/react-dom 18. Ungrouped, dependabot opened four PRs
+    # that could never go green no matter how often they were rebased.
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
 
   # The landing page (its own lockfile).
   - package-ecosystem: npm
@@ -17,6 +33,22 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # React and Vite each ship as a set whose members pin each other's peer
+    # ranges, so a lone bump cannot resolve: vite 8 is outside
+    # @vitejs/plugin-react 4's peer range, and @types/react 19 will not sit
+    # beside @types/react-dom 18. Ungrouped, dependabot opened four PRs
+    # that could never go green no matter how often they were rebased.
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
 
   # Tauri and the Rust workspace.
   - package-ecosystem: cargo
