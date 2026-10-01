@@ -18,6 +18,8 @@ on:
       - "src/**"
       - "src-tauri/**"
       - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/build-macos.yml"
   release:
     types: [published]
