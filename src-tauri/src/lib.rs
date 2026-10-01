@@ -108,11 +108,22 @@ pub fn run() {
             session_dirty: AtomicBool::new(false),
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Focused(focused) = event {
-                let state = window.state::<AppState>();
-                state
-                    .window_focused
-                    .store(*focused, std::sync::atomic::Ordering::Relaxed);
+            match event {
+                tauri::WindowEvent::Focused(focused) => {
+                    let state = window.state::<AppState>();
+                    state
+                        .window_focused
+                        .store(*focused, std::sync::atomic::Ordering::Relaxed);
+                }
+                // The host view's origin within the window is memoized, and
+                // these are the only events that can move it: a resize, a
+                // move between displays, or a scale change.
+                tauri::WindowEvent::Resized(_)
+                | tauri::WindowEvent::Moved(_)
+                | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                    browser::forget_host_origin(window.app_handle());
+                }
+                _ => {}
             }
         })
         .setup(|app| {
