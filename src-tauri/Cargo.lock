@@ -611,7 +611,7 @@ dependencies = [
  "serde_json",
  "toml 1.1.2+spec-1.1.0",
  "uuid",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
