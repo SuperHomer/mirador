@@ -39,14 +39,17 @@ The CLI command is **`mira`** ("look!").
 
 ## Install (macOS)
 
+Grab `Mirador-macOS-arm64.dmg` from the
+[latest release](https://github.com/SuperHomer/mirador/releases/latest),
+open it and drag **Mirador.app** to `/Applications`. Or build it yourself:
+
 ```bash
 npm install
 npm run tauri build          # builds Mirador.app + .dmg (and the mira CLI)
 ```
 
-The bundle lands in `src-tauri/target/release/bundle/`. Drag
-**Mirador.app** to `/Applications`, then put the CLI on your PATH — it
-ships inside the app:
+The bundle lands in `src-tauri/target/release/bundle/`. Either way, put the
+CLI on your PATH afterwards — it ships inside the app:
 
 ```bash
 /Applications/Mirador.app/Contents/MacOS/mira install   # → ~/.local/bin/mira
@@ -58,9 +61,9 @@ right-click → **Open** to get past Gatekeeper. macOS remembers the choice.
 
 ## Install (Windows)
 
-Grab `Mirador_<version>_x64-setup.exe` from the
-[latest release](https://github.com/yoanmarti/mirador/releases) — it
-installs per user, so no admin prompt — or build it yourself:
+Grab `Mirador-Windows-x64-setup.exe` from the
+[latest release](https://github.com/SuperHomer/mirador/releases/latest) —
+it installs per user, so no admin prompt — or build it yourself:
 
 ```powershell
 npm install
