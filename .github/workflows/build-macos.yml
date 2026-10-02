@@ -71,9 +71,7 @@ jobs:
         run: cargo test --workspace
 
       # TAURI_SIGNING_PRIVATE_KEY makes the build emit the updater payload
-      # (Mirador.app.tar.gz) plus a detached .sig. Without it the bundle still
-      # builds, just unsigned and therefore unusable as an update — which is
-      # why a fork without the secret keeps working.
+      # (Mirador.app.tar.gz) plus a detached .sig.
       - name: Build app + .dmg
         env:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
