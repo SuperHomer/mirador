@@ -118,8 +118,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # The .sig sits beside the installer, so move it before the glob
-          # that renames the installer stops matching it.
+          # The updater payload on Windows is the NSIS installer itself, so
+          # the same file is both a fresh install and an update; the .sig
+          # beside it is what the plugin verifies. (`*.exe` does not match
+          # `*.exe.sig`, so the order of these two does not matter.)
           mv dist/bundle/nsis/*-setup.exe.sig Mirador-Windows-x64-setup.exe.sig
           mv dist/bundle/nsis/*.exe Mirador-Windows-x64-setup.exe
           mv dist/bundle/msi/*.msi  Mirador-Windows-x64.msi
