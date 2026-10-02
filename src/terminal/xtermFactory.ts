@@ -49,16 +49,24 @@ export function applyConfig(term: Terminal, config: ResolvedConfig): void {
 /**
  * Prefer the WebGL renderer; fall back to xterm's DOM renderer when the
  * context can't be created (WebKitGTK blacklists) or is lost at runtime.
+ * Returns the addon so the caller can release the context, or null when
+ * the DOM renderer is in use; `onLost` fires if the context is lost later.
  */
-export function attachRenderer(term: Terminal): void {
+export function attachRenderer(
+  term: Terminal,
+  onLost?: () => void,
+): WebglAddon | null {
   try {
     const webgl = new WebglAddon();
     webgl.onContextLoss(() => {
       console.warn("WebGL context lost; falling back to DOM renderer");
       webgl.dispose();
+      onLost?.();
     });
     term.loadAddon(webgl);
+    return webgl;
   } catch (err) {
     console.warn("WebGL renderer unavailable; using DOM renderer", err);
+    return null;
   }
 }

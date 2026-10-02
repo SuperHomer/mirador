@@ -7,6 +7,8 @@ import { storeScrollback } from "../bindings";
 interface Entry {
   term: Terminal;
   serialize: SerializeAddon;
+  /** Output arrived since the last save. */
+  dirty: boolean;
 }
 
 const terminals = new Map<string, Entry>();
@@ -16,7 +18,11 @@ export function registerTerminal(
   term: Terminal,
   serialize: SerializeAddon,
 ) {
-  terminals.set(paneId, { term, serialize });
+  const entry: Entry = { term, serialize, dirty: false };
+  term.onWriteParsed(() => {
+    entry.dirty = true;
+  });
+  terminals.set(paneId, entry);
 }
 
 export function unregisterTerminal(paneId: string, term: Terminal) {
@@ -31,11 +37,17 @@ export function registeredPanes(): string[] {
   return [...terminals.keys()];
 }
 
-/** Persist every pane's scrollback (30s tick + window blur). */
+/**
+ * Persist the scrollback of every pane that changed since its last save
+ * (30s tick + window blur). Serializing 10k lines blocks the renderer, so
+ * idle panes — most of them, with many tabs open — are skipped.
+ */
 export function saveAllScrollbacks(maxLines = 10_000) {
-  for (const [paneId, { serialize }] of terminals) {
+  for (const [paneId, entry] of terminals) {
+    if (!entry.dirty) continue;
     try {
-      const data = serialize.serialize({ scrollback: maxLines });
+      const data = entry.serialize.serialize({ scrollback: maxLines });
+      entry.dirty = false;
       if (data) void storeScrollback(paneId, data);
     } catch {
       /* pane mid-teardown */

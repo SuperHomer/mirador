@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
+import type { WebglAddon } from "@xterm/addon-webgl";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
 import { registerTerminal, unregisterTerminal } from "./registry";
@@ -23,6 +24,23 @@ const restoredScrollback = new Set<string>();
 const ACK_THRESHOLD = 256 * 1024;
 
 /**
+ * How long a pane on a background tab keeps its WebGL context. Chromium
+ * allows ~16 live contexts per page and drops the oldest past that, so with
+ * many panes open, idle ones give theirs back; a quick tab flip back and
+ * forth still finds the renderer warm.
+ */
+const WEBGL_RELEASE_DELAY_MS = 30_000;
+
+/**
+ * Moves a background pane's terminal out of the viewport. Tabs stack with
+ * `visibility: hidden`, which still counts as on-screen to the
+ * IntersectionObserver xterm pauses rendering with — so every hidden pane
+ * kept repainting its output. A transform leaves layout (and so fit and the
+ * PTY size) untouched.
+ */
+const OFFSCREEN: React.CSSProperties = { transform: "translateX(-200vw)" };
+
+/**
  * Input modes a serialized buffer replays onto a pane whose process is gone.
  * Mouse tracking is the harmful one: xterm turns off selection and reports
  * every mouse move as input, which an idle pane reads as "a key was pressed".
@@ -41,6 +59,8 @@ const IDLE_MODE_RESET =
 interface Props {
   paneId: string;
   focused: boolean;
+  /** The pane's tab is the active one. */
+  visible: boolean;
   unread: boolean;
   /** Set when this is a command pane (🤖): the command it runs. */
   agentCommand?: string;
@@ -48,9 +68,12 @@ interface Props {
   remoteHost?: string;
 }
 
-export function TerminalPane({
+// Memoized: every workspace snapshot re-renders the whole layout, and the
+// props are primitives that rarely change for a given pane.
+export const TerminalPane = memo(function TerminalPane({
   paneId,
   focused,
+  visible,
   unread,
   agentCommand,
   remoteHost,
@@ -59,6 +82,7 @@ export function TerminalPane({
   const termRef = useRef<ReturnType<typeof createTerminal> | null>(null);
   const config = useConfigStore((s) => s.config);
   const fitRef = useRef<FitAddon | null>(null);
+  const webglRef = useRef<WebglAddon | null>(null);
 
   // Hot-reloaded config applies to the live terminal without recreating it.
   useEffect(() => {
@@ -93,7 +117,7 @@ export function TerminalPane({
     fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
-    attachRenderer(term);
+    // The renderer is the visibility effect's job.
     fit.fit();
 
     /**
@@ -188,24 +212,38 @@ export function TerminalPane({
       }
     };
 
-    // Batch same-tick keystroke bursts (e.g. paste) into one IPC call.
+    // One write in flight per pane; input arriving meanwhile is batched
+    // into the next. `write_pty` runs off the UI thread, where concurrent
+    // calls could land out of order — awaiting each keeps keystrokes in
+    // sequence, and under load typing coalesces instead of queueing up one
+    // IPC call per key.
     let writeQueue = "";
-    let flushScheduled = false;
+    let writing = false;
+    const flushWrites = async () => {
+      try {
+        while (writeQueue) {
+          const data = writeQueue;
+          writeQueue = "";
+          try {
+            await writePty(paneId, data);
+          } catch {
+            // Pane exited mid-write; pane-exit reports it.
+          }
+        }
+      } finally {
+        writing = false;
+      }
+    };
     term.onData((d) => {
       // An idle pane has no PTY to take this. Re-running is onKey's job:
       // onData also carries mouse and focus reports, so a stray mouse move
       // over a restored pane must not count as "any key".
       if (exited) return;
       writeQueue += d;
-      if (!flushScheduled) {
-        flushScheduled = true;
-        queueMicrotask(() => {
-          flushScheduled = false;
-          if (writeQueue) {
-            void writePty(paneId, writeQueue);
-            writeQueue = "";
-          }
-        });
+      if (!writing) {
+        writing = true;
+        // Same-tick bursts still go out as one call.
+        queueMicrotask(() => void flushWrites());
       }
     });
 
@@ -271,11 +309,28 @@ export function TerminalPane({
       observer.disconnect();
       unlisten?.();
       termRef.current = null;
+      webglRef.current = null;
       unregisterTerminal(paneId, term);
       // The PTY itself belongs to the Rust tree; unmount only drops the view.
       term.dispose();
     };
   }, [paneId]);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    if (visible) {
+      webglRef.current ??= attachRenderer(term, () => {
+        webglRef.current = null;
+      });
+      return;
+    }
+    const timer = setTimeout(() => {
+      webglRef.current?.dispose();
+      webglRef.current = null;
+    }, WEBGL_RELEASE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [visible, paneId]);
 
   useEffect(() => {
     if (focused) termRef.current?.focus();
@@ -286,7 +341,11 @@ export function TerminalPane({
       className={`pane${focused ? " focused" : ""}${unread ? " unread" : ""}`}
       onMouseDown={() => void focusPane(paneId)}
     >
-      <div className="pane-term" ref={containerRef} />
+      <div
+        className="pane-term"
+        ref={containerRef}
+        style={visible ? undefined : OFFSCREEN}
+      />
       {remoteHost ? (
         <div className="agent-chip remote-chip" title={`ssh ${remoteHost}`}>
           ⇅ {remoteHost}
@@ -300,4 +359,4 @@ export function TerminalPane({
       )}
     </div>
   );
-}
+});
