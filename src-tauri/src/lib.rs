@@ -180,6 +180,7 @@ pub fn run() {
             commands::write_pty,
             commands::resize_pty,
             commands::ack_pty,
+            update::app_version,
             update::available_update,
             update::check_update,
             update::install_update,

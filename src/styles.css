@@ -1021,3 +1021,14 @@ body,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A check that found nothing, or failed: an answer, not an alert. */
+.update-banner.quiet {
+  border-color: var(--surface);
+  background: var(--bg-alt);
+}
+
+.update-banner-note {
+  font-size: 11.5px;
+  color: var(--subtext);
+}

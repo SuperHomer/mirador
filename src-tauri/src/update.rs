@@ -96,6 +96,12 @@ fn announce(app: &AppHandle, info: UpdateInfo) {
         .show();
 }
 
+/// This build's version, so the UI can name what "up to date" means.
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 /// The update found by a previous check, if any. The frontend calls this on
 /// mount so a check that finished first is not lost.
 #[tauri::command]

@@ -133,6 +133,7 @@ export interface UpdateInfo {
   notes: string | null;
 }
 
+export const appVersion = () => invoke<string>("app_version");
 /** The update a previous check found, if any. Pulled on mount because the
  *  `update-available` event can fire before React is listening. */
 export const availableUpdate = () =>

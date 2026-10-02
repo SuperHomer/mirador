@@ -76,8 +76,18 @@ jobs:
       # why a fork without the secret keeps working.
       - name: Build app + .dmg
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: npm run tauri build
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          # Export the key only when there is one. Dependabot runs read
+          # secrets from the Dependabot store rather than the Actions store,
+          # so this is empty for them — and tauri treats an empty
+          # TAURI_SIGNING_PRIVATE_KEY as a malformed one and fails the build
+          # ("Missing comment in secret key") instead of skipping signing.
+          # Unsigned is the right outcome there: those builds never release.
+          if [ -n "$UPDATER_KEY" ]; then
+            export TAURI_SIGNING_PRIVATE_KEY="$UPDATER_KEY"
+          fi
+          npm run tauri build
 
       # Unsigned (no Developer ID), so first launch needs right-click → Open.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
