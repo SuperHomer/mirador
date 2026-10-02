@@ -318,10 +318,21 @@ body,
 .pane-term {
   width: 100%;
   height: 100%;
+  /* The terminal's own background, not the app chrome's. FitAddon rounds
+     rows down, so a terminal is always a fraction of a row shorter than
+     its pane; whatever shows through there has to match the terminal or
+     it reads as a stripe along the bottom edge. The two happen to be
+     identical in the default theme, which is why this went unnoticed —
+     an imported Ghostty theme makes them differ. */
+  background: var(--term-bg, var(--bg));
 }
 
+/* Deliberately not height: 100%. Forcing .xterm taller than its own
+   content gives the WebGL renderer's canvas room past the last row, and
+   it clears that area to black rather than to the theme background. The
+   rule came from the original scaffold, not from a fix. */
 .pane .xterm {
-  height: 100%;
+  height: auto;
 }
 
 /* ---------- Browser pane ---------- */

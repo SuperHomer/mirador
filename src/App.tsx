@@ -106,7 +106,12 @@ export default function App() {
   if (!snapshot || !config) return <div className="app" />;
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      // The resolved terminal background, exposed to CSS so a pane's
+      // sub-row remainder can match the terminal rather than the chrome.
+      style={{ "--term-bg": config.colors.background } as React.CSSProperties}
+    >
       <Sidebar />
       <div className="tabs-host">
         {snapshot.tabs.map((tab) => (
