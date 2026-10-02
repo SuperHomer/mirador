@@ -78,8 +78,12 @@ jobs:
       # payload. On Windows that is the NSIS installer plus its .sig.
       - name: Build app + installers
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: npm run tauri build
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          # See build-macos.yml: empty key means do not sign, because tauri
+          # fails on an empty one rather than skipping. pwsh here, not bash.
+          if ($env:UPDATER_KEY) { $env:TAURI_SIGNING_PRIVATE_KEY = $env:UPDATER_KEY }
+          npm run tauri build
 
       # NSIS (per-user, no admin prompt) and MSI, plus the bare CLI for
       # anyone who only wants `mira`.

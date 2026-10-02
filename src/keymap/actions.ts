@@ -139,9 +139,22 @@ export const actions: ActionDef[] = [
     id: "check_for_updates",
     title: "Check for Updates",
     run: () => {
-      void checkUpdate().then((u) => {
-        useUpdateStore.getState().setUpdate(u);
-      });
+      // A background check is allowed to find nothing in silence. This one
+      // was asked for, so it answers either way — "up to date" is a result,
+      // and so is a failure. Without this the command looked broken when it
+      // had in fact worked.
+      const store = useUpdateStore.getState();
+      store.setError(null);
+      store.setCheck("checking");
+      void checkUpdate()
+        .then((u) => {
+          store.setUpdate(u);
+          store.setCheck(u ? null : "uptodate");
+        })
+        .catch((e: unknown) => {
+          store.setError(String(e));
+          store.setCheck("error");
+        });
     },
   },
   {

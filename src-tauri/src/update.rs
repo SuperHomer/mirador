@@ -96,6 +96,12 @@ fn announce(app: &AppHandle, info: UpdateInfo) {
         .show();
 }
 
+/// This build's version, so the UI can name what "up to date" means.
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 /// The update found by a previous check, if any. The frontend calls this on
 /// mount so a check that finished first is not lost.
 #[tauri::command]
@@ -124,7 +130,12 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "no update available".to_string())?;
 
+    // Two phases worth distinguishing: the download has a size and can be
+    // reported as a fraction, the install after it cannot. `total` is an
+    // Option because a server need not send Content-Length, so the UI has to
+    // cope with not knowing.
     let progress = app.clone();
+    let finished = app.clone();
     let mut downloaded = 0usize;
     update
         .download_and_install(
@@ -135,7 +146,9 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
                     serde_json::json!({ "downloaded": downloaded, "total": total }),
                 );
             },
-            || {},
+            move || {
+                let _ = finished.emit("update-download-finished", ());
+            },
         )
         .await
         .map_err(|e| e.to_string())?;
