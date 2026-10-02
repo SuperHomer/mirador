@@ -302,6 +302,9 @@ pub fn set_split_ratios(
 /// hundreds of ms) stays off the UI thread when a restored session mounts
 /// many panes at once; holding this keeps the old one-at-a-time ordering,
 /// so two attaches for one pane can never both see it idle and both spawn.
+/// Taken on a blocking-pool thread: queued attaches waiting on it inside
+/// the async runtime would tie up its workers, and `write_pty`/`ack_pty`
+/// run there too.
 static ATTACH_LOCK: Mutex<()> = Mutex::new(());
 
 /// Connects a mounted frontend pane to its PTY: spawns on first attach
@@ -315,14 +318,29 @@ static ATTACH_LOCK: Mutex<()> = Mutex::new(());
 #[tauri::command]
 pub async fn attach_pane(
     app: AppHandle,
-    state: State<'_, AppState>,
     pane_id: String,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
     rerun: bool,
 ) -> Result<String, String> {
-    let _serialized = ATTACH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let _serialized = ATTACH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        attach_pane_blocking(&app, pane_id, cols, rows, on_data, rerun)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn attach_pane_blocking(
+    app: &AppHandle,
+    pane_id: String,
+    cols: u16,
+    rows: u16,
+    on_data: Channel<InvokeResponseBody>,
+    rerun: bool,
+) -> Result<String, String> {
+    let state = app.state::<AppState>();
     // Remote panes run `ssh -tt <host>`; command panes run their command
     // directly in the PTY (exit detection, output capture); shell panes get
     // an interactive login shell.

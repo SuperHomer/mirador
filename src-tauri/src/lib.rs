@@ -189,6 +189,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 save_session(&app.state::<AppState>());
+                app.state::<AppState>().pty.finish_kills();
                 // Only the instance that owns the endpoint clears it.
                 if let Some(disc) = cmux_core::ipc::read_discovery() {
                     if disc.pid == std::process::id() {

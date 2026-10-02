@@ -90,6 +90,9 @@ struct PtyPane {
 #[derive(Default)]
 struct Inner {
     panes: Mutex<HashMap<PaneId, PtyPane>>,
+    /// Background tree kills still running (Windows); `finish_kills` waits
+    /// for them so quitting right after a close can't orphan the tree.
+    kills: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
 /// Owns every live PTY. Reader threads stream output through the `on_data`
@@ -327,12 +330,18 @@ impl PtyManager {
                 // ours to kill once the tree is gone.
                 let inner = Arc::clone(&self.inner);
                 let id = id.to_string();
-                std::thread::spawn(move || {
-                    kill_tree(pid);
-                    if let Some(pane) = inner.panes.lock().unwrap().get_mut(&id) {
-                        let _ = pane.child.kill();
+                let kill = std::thread::spawn({
+                    let inner = Arc::clone(&inner);
+                    move || {
+                        kill_tree(pid);
+                        if let Some(pane) = inner.panes.lock().unwrap().get_mut(&id) {
+                            let _ = pane.child.kill();
+                        }
                     }
                 });
+                let mut kills = inner.kills.lock().unwrap();
+                kills.retain(|k| !k.is_finished());
+                kills.push(kill);
             }
 
             // Escalate to SIGKILL if the process ignores SIGHUP. The pane
@@ -351,6 +360,16 @@ impl PtyManager {
             }
         }
         Ok(())
+    }
+
+    /// Blocks until every tree kill started by `close` has run. Call before
+    /// the process exits: a pending `taskkill` dies with it, leaving the
+    /// closed pane's grandchildren (a dev server, say) running.
+    pub fn finish_kills(&self) {
+        let kills = std::mem::take(&mut *self.inner.kills.lock().unwrap());
+        for kill in kills {
+            let _ = kill.join();
+        }
     }
 }
 
