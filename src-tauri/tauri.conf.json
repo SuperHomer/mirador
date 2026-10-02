@@ -15,7 +15,7 @@
       "endpoints": [
         "https://github.com/SuperHomer/mirador/releases/latest/download/latest-{{target}}-{{arch}}.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGRkE2RTRBMDVFNkZGRTQKUldUay8rWUZTbTc2TCtHamdEZkVrVktUdndVS3B3Ky9CRWZDVE9ReGZPWmNjZytGRiswc3ZBa2MK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyRTdBM0EwQzQwODMwODQKUldTRU1BakVvS1BuTXRsc2lkSzNPU3plcFRvODN1N2FsZ2hSRXVhRW1aa0txd05yT2dCR2ZIeHUK"
     }
   },
   "app": {
