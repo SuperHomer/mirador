@@ -71,23 +71,26 @@ jobs:
         run: cargo test --workspace
 
       # TAURI_SIGNING_PRIVATE_KEY makes the build emit the updater payload
-      # (Mirador.app.tar.gz) plus a detached .sig. Without it the bundle still
-      # builds, just unsigned and therefore unusable as an update — which is
-      # why a fork without the secret keeps working.
+      # (Mirador.app.tar.gz) plus a detached .sig.
       - name: Build app + .dmg
         env:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          # Export the key only when there is one. Dependabot runs read
-          # secrets from the Dependabot store rather than the Actions store,
-          # so this is empty for them — and tauri treats an empty
-          # TAURI_SIGNING_PRIVATE_KEY as a malformed one and fails the build
-          # ("Missing comment in secret key") instead of skipping signing.
-          # Unsigned is the right outcome there: those builds never release.
+          # Dependabot runs read a separate secret store, so this is empty
+          # for them; an empty TAURI_SIGNING_PRIVATE_KEY is worse than none,
+          # tauri reads it as malformed ("Missing comment in secret key").
+          # No key means no update payload — and tauri refuses to build at
+          # all rather than emit an unsigned one ("A public key has been
+          # found, but no private key"), so the artifacts have to be turned
+          # off explicitly. That is the case for every Dependabot run, every
+          # fork, and anyone building locally without the secret.
           if [ -n "$UPDATER_KEY" ]; then
             export TAURI_SIGNING_PRIVATE_KEY="$UPDATER_KEY"
+            npm run tauri build
+          else
+            npm run tauri build -- \
+              --config '{"bundle":{"createUpdaterArtifacts":false}}'
           fi
-          npm run tauri build
 
       # Unsigned (no Developer ID), so first launch needs right-click → Open.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

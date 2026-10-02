@@ -80,10 +80,18 @@ jobs:
         env:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
-          # See build-macos.yml: empty key means do not sign, because tauri
-          # fails on an empty one rather than skipping. pwsh here, not bash.
-          if ($env:UPDATER_KEY) { $env:TAURI_SIGNING_PRIVATE_KEY = $env:UPDATER_KEY }
-          npm run tauri build
+          # See build-macos.yml. Two differences here: pwsh, not bash, and the
+          # override goes through a file rather than inline JSON — PowerShell's
+          # native-argument parsing is liable to eat the quotes in
+          # `--config '{"...":...}'`, and `--config` accepts a path too.
+          if ($env:UPDATER_KEY) {
+            $env:TAURI_SIGNING_PRIVATE_KEY = $env:UPDATER_KEY
+            npm run tauri build
+          } else {
+            '{"bundle":{"createUpdaterArtifacts":false}}' |
+              Set-Content -Path no-updater.json -Encoding utf8
+            npm run tauri build -- --config no-updater.json
+          }
 
       # NSIS (per-user, no admin prompt) and MSI, plus the bare CLI for
       # anyone who only wants `mira`.
