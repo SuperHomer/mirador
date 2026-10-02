@@ -70,7 +70,13 @@ jobs:
         working-directory: src-tauri
         run: cargo test --workspace
 
+      # TAURI_SIGNING_PRIVATE_KEY makes the build emit the updater payload
+      # (Mirador.app.tar.gz) plus a detached .sig. Without it the bundle still
+      # builds, just unsigned and therefore unusable as an update — which is
+      # why a fork without the secret keeps working.
       - name: Build app + .dmg
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: npm run tauri build
 
       # Unsigned (no Developer ID), so first launch needs right-click → Open.
@@ -79,6 +85,8 @@ jobs:
           name: mirador-macos
           path: |
             src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/release/mira
           if-no-files-found: error
 
@@ -97,11 +105,41 @@ jobs:
           path: dist
 
       # Version-free name on purpose — see the note in build-windows.yml.
-      - name: Attach the .dmg to the release
+      - name: Attach the .dmg and the update payload
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           mv dist/bundle/dmg/*.dmg Mirador-macOS-arm64.dmg
-          gh release upload "${{ github.event.release.tag_name }}" \
+          mv dist/bundle/macos/*.app.tar.gz     Mirador-macOS-arm64.app.tar.gz
+          mv dist/bundle/macos/*.app.tar.gz.sig Mirador-macOS-arm64.app.tar.gz.sig
+
+          # The manifest the updater fetches. Keyed by the platform triple the
+          # plugin asks for, and pointing at this release's own tag rather than
+          # /latest, so a manifest always describes the build it shipped with.
+          python3 - <<'PY' > latest-darwin-aarch64.json
+          import datetime, json, os, sys
+          tag = os.environ["TAG"]
+          repo = os.environ["REPO"]
+          sig = open("Mirador-macOS-arm64.app.tar.gz.sig").read().strip()
+          json.dump({
+              "version": tag.lstrip("v"),
+              "notes": f"See https://github.com/{repo}/releases/tag/{tag}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {
+                  "darwin-aarch64": {
+                      "signature": sig,
+                      "url": f"https://github.com/{repo}/releases/download/{tag}/Mirador-macOS-arm64.app.tar.gz",
+                  }
+              },
+          }, sys.stdout, indent=2)
+          PY
+
+          gh release upload "$TAG" \
             Mirador-macOS-arm64.dmg \
-            --repo "${{ github.repository }}" --clobber
+            Mirador-macOS-arm64.app.tar.gz \
+            Mirador-macOS-arm64.app.tar.gz.sig \
+            latest-darwin-aarch64.json \
+            --repo "$REPO" --clobber

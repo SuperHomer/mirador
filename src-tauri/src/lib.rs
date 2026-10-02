@@ -5,6 +5,7 @@ mod intel;
 mod notify;
 mod runs;
 mod server;
+mod update;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -40,6 +41,8 @@ pub struct AppState {
     pub browser_bridge: browser::BrowserBridge,
     /// Set on every workspace change; the saver thread persists and clears.
     pub session_dirty: AtomicBool,
+    /// Update offered by the last check, if any.
+    pub update: update::UpdateState,
 }
 
 pub fn save_session(state: &AppState) {
@@ -88,6 +91,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState {
@@ -106,6 +110,7 @@ pub fn run() {
             restored_panes: Mutex::new(restored_panes),
             browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
+            update: update::UpdateState::default(),
         })
         .on_window_event(|window, event| {
             match event {
@@ -136,6 +141,7 @@ pub fn run() {
             config_watch::spawn(app.handle().clone());
             spawn_session_saver(app.handle().clone());
             server::spawn(app.handle().clone());
+            update::spawn_check_loop(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -170,6 +176,9 @@ pub fn run() {
             commands::write_pty,
             commands::resize_pty,
             commands::ack_pty,
+            update::available_update,
+            update::check_update,
+            update::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running Mirador")

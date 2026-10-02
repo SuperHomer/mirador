@@ -127,6 +127,20 @@ export interface ResolvedConfig {
   customCommands: CustomCommand[];
 }
 
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+}
+
+/** The update a previous check found, if any. Pulled on mount because the
+ *  `update-available` event can fire before React is listening. */
+export const availableUpdate = () =>
+  invoke<UpdateInfo | null>("available_update");
+export const checkUpdate = () => invoke<UpdateInfo | null>("check_update");
+/** Downloads, verifies, installs and restarts. Does not return. */
+export const installUpdate = () => invoke<void>("install_update");
+
 export const workspaceSnapshot = () =>
   invoke<WorkspaceSnapshot>("workspace_snapshot");
 export const getConfig = () => invoke<ResolvedConfig>("get_config");

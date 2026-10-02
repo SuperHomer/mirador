@@ -8,6 +8,7 @@ import {
   renameTab,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { UpdateBanner } from "../update/UpdateBanner";
 
 export function Sidebar() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
@@ -29,6 +30,7 @@ export function Sidebar() {
       <button className="sidebar-new-tab" onClick={() => void newTab()}>
         + New Tab
       </button>
+      <UpdateBanner />
     </div>
   );
 }

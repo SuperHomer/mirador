@@ -33,6 +33,9 @@ The CLI command is **`mira`** ("look!").
 - **Claude Code integration**: `mira hooks setup` lights up tabs when your
   agent needs you, enables per-pane session resume, and adds a `/mira-diff`
   skill for reviewing the turn's work
+- **Updates**: checks on launch and offers an in-app install; payloads are
+  signed, so a tampered release cannot install even though the app carries
+  no Apple signature
 
 ## Install (macOS)
 
@@ -96,6 +99,24 @@ Two Windows caveats: notifications only appear once the app is installed
 silent), and `mira ssh forward` opens its own `ssh -N -L` connection
 because Windows' OpenSSH has no ControlMaster, so a password-based host
 asks to authenticate a second time.
+
+## Releasing
+
+Releases are signed for the in-app updater with a minisign keypair that is
+**not** the Apple code signature (there isn't one). The private key lives in
+the `TAURI_SIGNING_PRIVATE_KEY` repository secret and nowhere else that
+matters.
+
+**Losing it means every installed copy can never update again** — a new key
+produces payloads the installed public key rejects, so the only way back is
+asking users to reinstall by hand. Keep a copy somewhere durable.
+
+Each platform's release job publishes its own manifest —
+`latest-darwin-aarch64.json`, `latest-windows-x86_64.json` — because macOS and
+Windows build in separate workflow runs and a shared `latest.json` would make
+one wait for the other. The app asks for
+`latest-{{target}}-{{arch}}.json` under `/releases/latest/download/`, which
+GitHub resolves to the newest release, so no workflow rewrites any config.
 
 ## Development
 

@@ -9,9 +9,12 @@ import {
   setActiveTab,
   openBrowser,
   openDiff,
+  checkUpdate,
+  installUpdate,
   writePty,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
+import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { getTerminal } from "../terminal/registry";
 
@@ -127,6 +130,28 @@ export const actions: ActionDef[] = [
       void navigator.clipboard.readText().then((text) => {
         if (text) void writePty(pane, text);
       });
+    },
+  },
+  {
+    id: "check_for_updates",
+    title: "Check for Updates",
+    run: () => {
+      void checkUpdate().then((u) => {
+        useUpdateStore.getState().setUpdate(u);
+      });
+    },
+  },
+  {
+    id: "install_update",
+    title: "Install Update and Restart",
+    run: () => {
+      // Only offered when a check already found something; the banner is the
+      // discoverable route and this is the keyboard one.
+      if (!useUpdateStore.getState().update) return;
+      useUpdateStore.getState().setInstalling(true);
+      void installUpdate().catch((e: unknown) =>
+        useUpdateStore.getState().setError(String(e)),
+      );
     },
   },
   {
