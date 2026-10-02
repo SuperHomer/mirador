@@ -10,6 +10,14 @@
     "beforeBuildCommand": "npm run build && npm run build:cli",
     "frontendDist": "../dist"
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/SuperHomer/mirador/releases/latest/download/latest-{{target}}-{{arch}}.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGRkE2RTRBMDVFNkZGRTQKUldUay8rWUZTbTc2TCtHamdEZkVrVktUdndVS3B3Ky9CRWZDVE9ReGZPWmNjZytGRiswc3ZBa2MK"
+    }
+  },
   "app": {
     "windows": [
       {
@@ -26,6 +34,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "category": "DeveloperTool",
     "copyright": "\u00a9 2026 Yoan Marti",
