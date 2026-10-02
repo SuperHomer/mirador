@@ -6,7 +6,27 @@ import {
   availableUpdate,
   installUpdate,
 } from "../bindings";
-import { useUpdateStore } from "../state/updateStore";
+import { Progress, useUpdateStore } from "../state/updateStore";
+
+/** "6.7 MB" — one decimal is as much as a progress line can use. */
+function mb(bytes: number): string {
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+/**
+ * What to show while installing. A download the server sized becomes a
+ * fraction; one it did not becomes a running total, which still moves and so
+ * still reads as progress. Once the download finishes there is nothing left
+ * to count — verifying and swapping the bundle have no size.
+ */
+function installLabel(progress: Progress | null): string {
+  if (!progress) return "Installing…";
+  const { downloaded, total } = progress;
+  // A zero or absent total is "unknown size", not "complete".
+  if (total === null || total <= 0) return `Downloading… ${mb(downloaded)}`;
+  const pct = Math.min(100, Math.round((downloaded / total) * 100));
+  return `Downloading… ${pct}% of ${mb(total)}`;
+}
 
 /** How long a "nothing to do" answer stays on screen. */
 const TRANSIENT_MS = 4000;
@@ -24,6 +44,8 @@ const TRANSIENT_MS = 4000;
 export function UpdateBanner() {
   const update = useUpdateStore((s) => s.update);
   const installing = useUpdateStore((s) => s.installing);
+  const progress = useUpdateStore((s) => s.progress);
+  const setProgress = useUpdateStore((s) => s.setProgress);
   const error = useUpdateStore((s) => s.error);
   const check = useUpdateStore((s) => s.check);
   const setUpdate = useUpdateStore((s) => s.setUpdate);
@@ -43,8 +65,19 @@ export function UpdateBanner() {
     const unlisten = listen<UpdateInfo>("update-available", (e) =>
       setUpdate(e.payload),
     );
-    return () => void unlisten.then((fn) => fn());
-  }, [setUpdate]);
+    const unlistenProgress = listen<Progress>("update-progress", (e) =>
+      setProgress(e.payload),
+    );
+    // The download is over; what follows has no size to report.
+    const unlistenDone = listen("update-download-finished", () =>
+      setProgress(null),
+    );
+    return () => {
+      void unlisten.then((fn) => fn());
+      void unlistenProgress.then((fn) => fn());
+      void unlistenDone.then((fn) => fn());
+    };
+  }, [setUpdate, setProgress]);
 
   // Clear a transient answer on its own, so the sidebar settles back.
   useEffect(() => {
@@ -58,6 +91,7 @@ export function UpdateBanner() {
 
   const start = () => {
     setError(null);
+    setProgress(null);
     setInstalling(true);
     // Resolves only on failure — success replaces the app and restarts it.
     void installUpdate().catch((e: unknown) => setError(String(e)));
@@ -83,7 +117,7 @@ export function UpdateBanner() {
             onClick={start}
             title="Download, install and restart"
           >
-            {installing ? "Installing…" : "Install and restart"}
+            {installing ? installLabel(progress) : "Install and restart"}
           </button>
         )}
       </div>
