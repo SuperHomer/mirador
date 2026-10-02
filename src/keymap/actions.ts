@@ -11,7 +11,6 @@ import {
   openDiff,
   checkUpdate,
   installUpdate,
-  writePty,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
@@ -128,7 +127,11 @@ export const actions: ActionDef[] = [
       const pane = focusedPane();
       if (!pane) return;
       void navigator.clipboard.readText().then((text) => {
-        if (text) void writePty(pane, text);
+        // Through xterm, not straight to the PTY: it applies bracketed
+        // paste (a multi-line paste must not run line by line) and newline
+        // normalization, and its input path keeps the paste in order with
+        // typing.
+        if (text) getTerminal(pane)?.paste(text);
       });
     },
   },

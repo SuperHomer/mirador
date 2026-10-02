@@ -70,7 +70,12 @@ type Sink = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send>>>;
 type ExitHook = Arc<Mutex<Option<Box<dyn FnOnce(&str, Option<i32>) + Send>>>>;
 
 struct PtyPane {
-    writer: Box<dyn Write + Send>,
+    /// Input queue drained by the pane's writer thread. A PTY input write
+    /// blocks whenever the child isn't reading its stdin (a busy agent, a
+    /// suspended process, a large paste into ConPTY); done inline under the
+    /// panes lock, one stalled pane froze every other pane's ack, resize and
+    /// exit polling — and, from `write_pty`, the UI thread with them.
+    input: std::sync::mpsc::Sender<Vec<u8>>,
     /// Taken to close the PTY. On Windows that is what finally unblocks a
     /// reader parked on a dead child — see `spawn_exit_watcher`.
     master: Option<Box<dyn MasterPty + Send>>,
@@ -85,6 +90,9 @@ struct PtyPane {
 #[derive(Default)]
 struct Inner {
     panes: Mutex<HashMap<PaneId, PtyPane>>,
+    /// Background tree kills still running (Windows); `finish_kills` waits
+    /// for them so quitting right after a close can't orphan the tree.
+    kills: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
 /// Owns every live PTY. Reader threads stream output through the `on_data`
@@ -138,6 +146,22 @@ impl PtyManager {
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
         let id = id.to_string();
+
+        // Unbounded so `write` never waits; the thread ends (dropping the
+        // writer) once the pane leaves the map and the sender goes with it.
+        let (input, input_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::Builder::new()
+            .name(format!("pty-writer-{id}"))
+            .spawn(move || {
+                let mut writer = writer;
+                while let Ok(data) = input_rx.recv() {
+                    if writer.write_all(&data).is_err() {
+                        break;
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+
         let pid = child.process_id();
         let flow = Arc::new(FlowControl::default());
         let sink: Sink = Arc::new(Mutex::new(Box::new(on_data)));
@@ -213,7 +237,7 @@ impl PtyManager {
         self.inner.panes.lock().unwrap().insert(
             id.clone(),
             PtyPane {
-                writer,
+                input,
                 master: Some(pair.master),
                 child,
                 flow,
@@ -252,10 +276,13 @@ impl PtyManager {
             .collect()
     }
 
+    /// Queues `data` for the pane's writer thread; never blocks on the child.
     pub fn write(&self, id: &str, data: &[u8]) -> Result<(), String> {
-        let mut panes = self.inner.panes.lock().unwrap();
-        let pane = panes.get_mut(id).ok_or_else(|| format!("no pane {id}"))?;
-        pane.writer.write_all(data).map_err(|e| e.to_string())
+        let panes = self.inner.panes.lock().unwrap();
+        let pane = panes.get(id).ok_or_else(|| format!("no pane {id}"))?;
+        pane.input
+            .send(data.to_vec())
+            .map_err(|_| format!("pane {id} is closing"))
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
@@ -297,8 +324,24 @@ impl PtyManager {
             {
                 // No process groups: taskkill /T walks the tree so a shell's
                 // children (the dev server, the test runner) go with it.
-                kill_tree(pid);
-                let _ = pane.child.kill();
+                // taskkill takes hundreds of ms per pane and close runs on
+                // the UI thread, so the kill happens off it. The pane stays
+                // in the map until its exit is observed, so `child` is still
+                // ours to kill once the tree is gone.
+                let inner = Arc::clone(&self.inner);
+                let id = id.to_string();
+                let kill = std::thread::spawn({
+                    let inner = Arc::clone(&inner);
+                    move || {
+                        kill_tree(pid);
+                        if let Some(pane) = inner.panes.lock().unwrap().get_mut(&id) {
+                            let _ = pane.child.kill();
+                        }
+                    }
+                });
+                let mut kills = inner.kills.lock().unwrap();
+                kills.retain(|k| !k.is_finished());
+                kills.push(kill);
             }
 
             // Escalate to SIGKILL if the process ignores SIGHUP. The pane
@@ -317,6 +360,16 @@ impl PtyManager {
             }
         }
         Ok(())
+    }
+
+    /// Blocks until every tree kill started by `close` has run. Call before
+    /// the process exits: a pending `taskkill` dies with it, leaving the
+    /// closed pane's grandchildren (a dev server, say) running.
+    pub fn finish_kills(&self) {
+        let kills = std::mem::take(&mut *self.inner.kills.lock().unwrap());
+        for kill in kills {
+            let _ = kill.join();
+        }
     }
 }
 

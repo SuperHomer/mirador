@@ -43,6 +43,8 @@ pub struct AppState {
     pub session_dirty: AtomicBool,
     /// Update offered by the last check, if any.
     pub update: update::UpdateState,
+    /// Throttles snapshots triggered by terminal output (titles, cwd).
+    pub emit_coalescer: commands::EmitCoalescer,
 }
 
 pub fn save_session(state: &AppState) {
@@ -111,6 +113,7 @@ pub fn run() {
             browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
             update: update::UpdateState::default(),
+            emit_coalescer: commands::EmitCoalescer::default(),
         })
         .on_window_event(|window, event| {
             match event {
@@ -140,6 +143,7 @@ pub fn run() {
             intel::spawn(app.handle().clone());
             config_watch::spawn(app.handle().clone());
             spawn_session_saver(app.handle().clone());
+            commands::spawn_emit_coalescer(app.handle().clone());
             server::spawn(app.handle().clone());
             update::spawn_check_loop(app.handle().clone());
             Ok(())
@@ -185,6 +189,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 save_session(&app.state::<AppState>());
+                app.state::<AppState>().pty.finish_kills();
                 // Only the instance that owns the endpoint clears it.
                 if let Some(disc) = cmux_core::ipc::read_discovery() {
                     if disc.pid == std::process::id() {

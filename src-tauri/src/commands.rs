@@ -1,3 +1,6 @@
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
+
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -94,11 +97,58 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
 
 pub fn emit_workspace(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let snapshot = build_snapshot(&state);
     state
         .session_dirty
         .store(true, std::sync::atomic::Ordering::Relaxed);
+    broadcast_workspace(app);
+}
+
+/// Sends a fresh snapshot without scheduling a session save: for changes
+/// the session file doesn't hold, like derived pane titles.
+fn broadcast_workspace(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let snapshot = build_snapshot(&state);
     let _ = app.emit("workspace-changed", snapshot);
+}
+
+/// Minimum gap between snapshots requested through `request_workspace_emit`.
+const COALESCED_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Pending flag for snapshot changes driven by terminal output. Agent CLIs
+/// animate their window title several times a second; a full snapshot per
+/// frame, per pane, re-rendered every pane of every tab and kept the webview
+/// busy enough to stop responding once a few agents ran side by side.
+#[derive(Default)]
+pub struct EmitCoalescer {
+    pending: Mutex<bool>,
+    cond: Condvar,
+}
+
+/// Coalesced snapshot broadcast: the first request after a quiet period
+/// goes out at once, later ones fold into at most one emit per interval.
+/// For high-frequency sources only — user actions keep the immediate emit.
+/// It does not schedule a session save (an animated title would rewrite
+/// the session file every second); callers changing persisted state set
+/// `session_dirty` themselves.
+pub fn request_workspace_emit(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    *state.emit_coalescer.pending.lock().unwrap() = true;
+    state.emit_coalescer.cond.notify_one();
+}
+
+pub fn spawn_emit_coalescer(handle: AppHandle) {
+    std::thread::spawn(move || loop {
+        {
+            let state = handle.state::<AppState>();
+            let mut pending = state.emit_coalescer.pending.lock().unwrap();
+            while !*pending {
+                pending = state.emit_coalescer.cond.wait(pending).unwrap();
+            }
+            *pending = false;
+        }
+        broadcast_workspace(&handle);
+        std::thread::sleep(COALESCED_EMIT_INTERVAL);
+    });
 }
 
 #[tauri::command]
@@ -248,6 +298,15 @@ pub fn set_split_ratios(
     }
 }
 
+/// Serializes attaches. The command is async so a ConPTY spawn (tens to
+/// hundreds of ms) stays off the UI thread when a restored session mounts
+/// many panes at once; holding this keeps the old one-at-a-time ordering,
+/// so two attaches for one pane can never both see it idle and both spawn.
+/// Taken on a blocking-pool thread: queued attaches waiting on it inside
+/// the async runtime would tie up its workers, and `write_pty`/`ack_pty`
+/// run there too.
+static ATTACH_LOCK: Mutex<()> = Mutex::new(());
+
 /// Connects a mounted frontend pane to its PTY: spawns on first attach
 /// (or after exit), swaps the output channel on remount. Returns
 /// "spawned", "reattached", or "restored" (command pane from a previous
@@ -257,15 +316,31 @@ pub fn set_split_ratios(
 /// remount, or any other attach leaves a session-restored pane idle — only
 /// the user starts last session's command.
 #[tauri::command]
-pub fn attach_pane(
+pub async fn attach_pane(
     app: AppHandle,
-    state: State<'_, AppState>,
     pane_id: String,
     cols: u16,
     rows: u16,
     on_data: Channel<InvokeResponseBody>,
     rerun: bool,
 ) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _serialized = ATTACH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        attach_pane_blocking(&app, pane_id, cols, rows, on_data, rerun)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn attach_pane_blocking(
+    app: &AppHandle,
+    pane_id: String,
+    cols: u16,
+    rows: u16,
+    on_data: Channel<InvokeResponseBody>,
+    rerun: bool,
+) -> Result<String, String> {
+    let state = app.state::<AppState>();
     // Remote panes run `ssh -tt <host>`; command panes run their command
     // directly in the PTY (exit detection, output capture); shell panes get
     // an interactive login shell.
@@ -333,7 +408,11 @@ pub fn attach_pane(
                     }
                 };
                 if changed {
-                    emit_workspace(&app);
+                    // cwd is restored with the session; titles are not.
+                    state
+                        .session_dirty
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    request_workspace_emit(&app);
                 }
             }
             OscEvent::Title(title) => {
@@ -356,7 +435,7 @@ pub fn attach_pane(
                     }
                 };
                 if changed {
-                    emit_workspace(&app);
+                    request_workspace_emit(&app);
                 }
             }
         })
@@ -608,8 +687,10 @@ pub fn browser_history(app: AppHandle, pane_id: String, action: String) -> Resul
 }
 
 /// Frontend persists a pane's serialized scrollback (30s tick / blur).
+/// Async: up to 10k lines per pane go to disk, which must not happen on the
+/// UI thread.
 #[tauri::command]
-pub fn store_scrollback(pane_id: String, data: String) {
+pub async fn store_scrollback(pane_id: String, data: String) {
     if let Err(e) = cmux_core::session::save_scrollback(&pane_id, &data) {
         eprintln!("mirador: scrollback save failed for {pane_id}: {e}");
     }
@@ -617,13 +698,16 @@ pub fn store_scrollback(pane_id: String, data: String) {
 
 /// Scrollback from the previous session, if any.
 #[tauri::command]
-pub fn load_scrollback(pane_id: String) -> Option<String> {
+pub async fn load_scrollback(pane_id: String) -> Option<String> {
     cmux_core::session::load_scrollback(&pane_id)
 }
 
+/// Async so keystrokes never queue behind the UI thread's other work
+/// (output delivery, snapshot emits); the frontend keeps one call in flight
+/// per pane, which preserves their order.
 #[tauri::command]
-pub fn write_pty(state: State<'_, AppState>, pane_id: String, data: String) -> Result<(), String> {
-    state.pty.write(&pane_id, data.as_bytes())
+pub async fn write_pty(app: AppHandle, pane_id: String, data: String) -> Result<(), String> {
+    app.state::<AppState>().pty.write(&pane_id, data.as_bytes())
 }
 
 #[tauri::command]
@@ -639,8 +723,8 @@ pub fn resize_pty(
 /// Frontend acknowledges processed output bytes; resumes a reader paused at
 /// the flow-control high watermark.
 #[tauri::command]
-pub fn ack_pty(state: State<'_, AppState>, pane_id: String, bytes: u64) {
-    state.pty.ack(&pane_id, bytes);
+pub async fn ack_pty(app: AppHandle, pane_id: String, bytes: u64) {
+    app.state::<AppState>().pty.ack(&pane_id, bytes);
 }
 
 fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {

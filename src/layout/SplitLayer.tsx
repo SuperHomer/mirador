@@ -44,6 +44,7 @@ interface DividerBox {
  */
 export function SplitLayer({
   tab,
+  active,
   unreadPanes,
   agentPanes,
   browserPanes,
@@ -51,6 +52,8 @@ export function SplitLayer({
   diffPanes,
 }: {
   tab: TabSnapshot;
+  /** This tab is the one on screen. */
+  active: boolean;
   unreadPanes: string[];
   agentPanes: { paneId: string; command: string }[];
   browserPanes: BrowserPaneInfo[];
@@ -138,6 +141,7 @@ export function SplitLayer({
               <TerminalPane
                 paneId={p.paneId}
                 focused={p.paneId === tab.focusedPane}
+                visible={active}
                 unread={unreadPanes.includes(p.paneId)}
                 agentCommand={
                   agentPanes.find((a) => a.paneId === p.paneId)?.command

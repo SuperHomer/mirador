@@ -119,6 +119,7 @@ export default function App() {
           >
             <SplitLayer
               tab={tab}
+              active={tab.id === snapshot.activeTab}
               unreadPanes={snapshot.unreadPanes}
               agentPanes={snapshot.agentPanes}
               browserPanes={snapshot.browserPanes}

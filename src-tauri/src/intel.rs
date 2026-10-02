@@ -105,7 +105,13 @@ pub fn spawn(handle: tauri::AppHandle) {
                     t.dedup();
                     t
                 };
-                let refresh_all = tick.is_multiple_of(30);
+                // The periodic refresh spawns `gh` per (repo, branch); in the
+                // background nobody is looking at the badges, so only new
+                // branches are fetched until the window has focus again.
+                let focused = state
+                    .window_focused
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let refresh_all = focused && tick.is_multiple_of(30);
                 for (root, branch) in targets {
                     let known = state
                         .pr_cache
