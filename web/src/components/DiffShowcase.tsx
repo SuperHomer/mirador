@@ -160,7 +160,28 @@ function DiffMockup() {
         <span style={{ fontSize: 11, color: "var(--muted)" }}>
           3 files <Stat add={59} del={5} />
         </span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 3 }}>
+        {/* The worktree picker, which the real pane shows whenever a
+            repository has more than one checkout. */}
+        <span
+          className="mono"
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            fontSize: 10.5,
+            padding: "2px 6px",
+            borderRadius: 5,
+            border: "1px solid var(--surface)",
+            background: "var(--bg)",
+            color: "var(--subtext)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          feat/refresh
+          <span style={{ color: "var(--muted)", fontSize: 8 }}>▾</span>
+        </span>
+        <span style={{ display: "flex", gap: 3 }}>
           <span
             style={{
               fontSize: 10.5,
@@ -299,7 +320,9 @@ export default function DiffShowcase() {
           A turn ends and the work is buried in scrollback. Open a diff pane beside it
           instead: file tree on the left, hunks on the right, in your terminal's own
           theme. Untracked files are included — a file git has never seen is still work
-          the agent just did.
+          the agent just did. Running agents in parallel git worktrees? The header
+          switches between them, so you can review one branch while another keeps
+          working in its own.
         </p>
         <div
           style={{
@@ -319,7 +342,9 @@ export default function DiffShowcase() {
           <span className="mono" style={{ color: "var(--text)" }}>
             mira diff
           </span>
-          <span style={{ color: "var(--muted)" }}>· a commit, a range, --staged</span>
+          <span style={{ color: "var(--muted)" }}>
+            · a commit, a range, --staged, --worktree
+          </span>
         </div>
       </div>
       <DiffMockup />

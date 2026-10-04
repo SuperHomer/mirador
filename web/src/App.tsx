@@ -2,6 +2,7 @@ import Nav from "./components/Nav";
 import Hero from "./components/Hero";
 import Features from "./components/Features";
 import DiffShowcase from "./components/DiffShowcase";
+import GraphShowcase from "./components/GraphShowcase";
 import CliShowcase from "./components/CliShowcase";
 import Install from "./components/Install";
 import Keybindings from "./components/Keybindings";
@@ -16,6 +17,7 @@ export default function App() {
       <Hero />
       <Features />
       <DiffShowcase />
+      <GraphShowcase />
       <CliShowcase />
       <Install />
       {SHOW_SHORTCUTS && <Keybindings />}
