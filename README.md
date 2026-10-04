@@ -7,6 +7,9 @@ via wezterm's `portable-pty`) to run on macOS, Windows, and Linux.
 
 The CLI command is **`mira`** ("look!").
 
+**[superhomer.github.io/mirador](https://superhomer.github.io/mirador/)** —
+downloads, the feature tour and the keybinding reference.
+
 ## Features
 
 - **Terminal core**: tabs, horizontal/vertical splits, WebGL rendering with
