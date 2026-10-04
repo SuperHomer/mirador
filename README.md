@@ -7,6 +7,9 @@ via wezterm's `portable-pty`) to run on macOS, Windows, and Linux.
 
 The CLI command is **`mira`** ("look!").
 
+**[superhomer.github.io/mirador](https://superhomer.github.io/mirador/)** —
+downloads, the feature tour and the keybinding reference.
+
 ## Features
 
 - **Terminal core**: tabs, horizontal/vertical splits, WebGL rendering with
@@ -102,6 +105,37 @@ Two Windows caveats: notifications only appear once the app is installed
 silent), and `mira ssh forward` opens its own `ssh -N -L` connection
 because Windows' OpenSSH has no ControlMaster, so a password-based host
 asks to authenticate a second time.
+
+## Shell setup
+
+Mirador renders whatever your shell prints, so the niceties people expect
+from a modern terminal — inline suggestions, syntax highlighting, fuzzy
+history — come from the shell, not from here. Two worth having:
+
+**zsh** (macOS, Linux):
+
+```bash
+brew install zsh-autosuggestions
+echo 'source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh' >> ~/.zshrc
+```
+
+Fish-style greyed-out completions drawn from your history, accepted with →.
+Panes are login shells, so a new one picks it up with no restart. The path
+above is Homebrew's; distro packages put it elsewhere.
+
+**PowerShell** (Windows): PSReadLine ships with PowerShell 7 and does the
+same thing once prediction is switched on.
+
+```powershell
+Set-PSReadLineOption -PredictionSource History
+```
+
+Add it to your `$PROFILE` to keep it.
+
+Mirador deliberately implements none of this itself. A terminal emulator
+cannot reliably tell where your input line starts or where the cursor sits
+within it, so anything it drew would be guesswork — and it would fight a
+shell that already does the job properly.
 
 ## Releasing
 
