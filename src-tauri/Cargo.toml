@@ -38,6 +38,16 @@ tauri-plugin-updater = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-window-state = "2"
 notify = "8"
+# Already in the tree via tauri-plugin-updater, whose `rustls-tls` supplies
+# the TLS stack through feature unification — hence only `blocking` (release
+# notes are fetched off the main thread) and `json` here, and no second
+# implementation of TLS in the bundle.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
+# The updater selects reqwest's `rustls-no-provider`, so the process has no
+# default rustls crypto provider until something installs one. `ring` is
+# already compiled (rustls-webpki uses it), unlike aws-lc-rs, which would
+# want NASM on the Windows runner.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 portable-pty = "0.9"
 uuid = { version = "1", features = ["v4"] }
 serde.workspace = true

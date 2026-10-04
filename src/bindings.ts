@@ -88,6 +88,33 @@ export interface DiffResult {
   files: DiffFile[];
 }
 
+export type NoteSpan =
+  | { kind: "text"; text: string }
+  | { kind: "code"; text: string }
+  | { kind: "strong"; text: string }
+  | { kind: "em"; text: string }
+  | { kind: "link"; text: string; href: string };
+
+export type NoteBlock =
+  | { kind: "heading"; level: number; spans: NoteSpan[] }
+  | { kind: "paragraph"; spans: NoteSpan[] }
+  | { kind: "list"; items: NoteSpan[][] }
+  | { kind: "code"; text: string; lang: string | null }
+  | { kind: "rule" };
+
+export interface ReleaseNotes {
+  version: string;
+  title: string;
+  /** Parsed in Rust; see cmux-core/src/notes.rs for why. */
+  blocks: NoteBlock[];
+  url: string;
+}
+
+export interface WhatsNewPaneInfo {
+  paneId: string;
+  version: string;
+}
+
 export interface RemotePaneInfo {
   paneId: string;
   host: string;
@@ -101,6 +128,7 @@ export interface WorkspaceSnapshot {
   browserPanes: BrowserPaneInfo[];
   remotePanes: RemotePaneInfo[];
   diffPanes: DiffPaneInfo[];
+  whatsNewPanes: WhatsNewPaneInfo[];
 }
 
 export interface NotificationDto {
@@ -211,6 +239,9 @@ export const loadDiff = (paneId: string) =>
   invoke<DiffResult>("load_diff", { paneId });
 export const setDiffSpec = (paneId: string, spec: string) =>
   invoke<void>("set_diff_spec", { paneId, spec });
+export const whatsNew = (version: string) =>
+  invoke<ReleaseNotes>("whats_new", { version });
+export const openWhatsNew = () => invoke<string>("open_whats_new");
 export const listWorktrees = (paneId: string) =>
   invoke<Worktree[]>("list_worktrees", { paneId });
 export const setDiffWorktree = (paneId: string, worktree: string) =>

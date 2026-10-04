@@ -81,6 +81,17 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    snapshot.whats_new_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                m.whats_new.as_ref().map(|v| cmux_protocol::WhatsNewPane {
+                    pane_id: pane.clone(),
+                    version: v.clone(),
+                })
+            })
+            .collect()
+    };
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()

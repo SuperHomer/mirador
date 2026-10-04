@@ -39,7 +39,8 @@ downloads, the feature tour and the keybinding reference.
   skill for reviewing the turn's work
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
-  no Apple signature
+  no Apple signature. After one lands, a **What's New** pane opens itself
+  once with that release's notes (`What's New` in the palette reopens it)
 
 ## Install (macOS)
 
@@ -246,3 +247,22 @@ you split, which is almost always what you want. `defaultCwd` fills in only
 where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
+
+## What's New after an update
+
+When the running version differs from the one last launched, Mirador opens a
+read-only pane with that release's notes, in a tab of its own that does
+*not* steal focus — the pane you were typing in keeps the cursor. The
+palette's **What's New** reopens it any time.
+
+Notes are the GitHub release body for the running tag, fetched once and
+cached under the app's data directory, so reopening works offline. A fresh
+install shows nothing (there is no "new" yet), and so does a failed
+fetch — release notes are never worth an error dialog in a terminal.
+
+The markdown is parsed in Rust
+([`notes.rs`](src-tauri/crates/cmux-core/src/notes.rs)) into blocks of plain
+text that the pane maps to elements. Nothing in this path renders HTML:
+notes are remote text displayed in the webview that holds the IPC bridge, so
+raw HTML in a release body shows as the characters it is made of, and only
+`http(s)` links are navigable.

@@ -39,6 +39,8 @@ pub struct PaneMeta {
     pub diff_repo: Option<String>,
     /// Diff pane: "worktree", "staged", or a revspec.
     pub diff_spec: Option<String>,
+    /// What's New pane: the version whose release notes it shows.
+    pub whats_new: Option<String>,
 }
 
 #[derive(Debug)]
@@ -282,6 +284,7 @@ impl Workspace {
             browser_panes: Vec::new(),
             remote_panes: Vec::new(),
             diff_panes: Vec::new(),
+            whats_new_panes: Vec::new(),
         }
     }
 }

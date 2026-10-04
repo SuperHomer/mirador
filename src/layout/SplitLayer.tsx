@@ -5,11 +5,13 @@ import {
   Node,
   SplitDir,
   TabSnapshot,
+  WhatsNewPaneInfo,
   setSplitRatios,
 } from "../bindings";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { BrowserPane } from "../browser/BrowserPane";
 import { DiffPane } from "../diff/DiffPane";
+import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 
 interface Frac {
   x: number;
@@ -50,6 +52,7 @@ export function SplitLayer({
   browserPanes,
   remotePanes,
   diffPanes,
+  whatsNewPanes,
 }: {
   tab: TabSnapshot;
   /** This tab is the one on screen. */
@@ -59,6 +62,7 @@ export function SplitLayer({
   browserPanes: BrowserPaneInfo[];
   remotePanes: { paneId: string; host: string }[];
   diffPanes: DiffPaneInfo[];
+  whatsNewPanes: WhatsNewPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -122,12 +126,19 @@ export function SplitLayer({
       {panes.map((p) => {
         const browser = browserPanes.find((b) => b.paneId === p.paneId);
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
+        const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         return (
           <div key={p.paneId} className="pane-slot" style={frac(p.rect)}>
             {browser ? (
               <BrowserPane
                 paneId={p.paneId}
                 url={browser.url}
+                focused={p.paneId === tab.focusedPane}
+              />
+            ) : news ? (
+              <WhatsNewPane
+                paneId={p.paneId}
+                version={news.version}
                 focused={p.paneId === tab.focusedPane}
               />
             ) : diff ? (

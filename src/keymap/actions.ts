@@ -10,6 +10,7 @@ import {
   openBrowser,
   openDiff,
   checkUpdate,
+  openWhatsNew,
   installUpdate,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
@@ -134,6 +135,13 @@ export const actions: ActionDef[] = [
         if (text) getTerminal(pane)?.paste(text);
       });
     },
+  },
+  {
+    id: "whats_new",
+    title: "What's New",
+    // Opens the release notes for the running version — the same pane the
+    // app shows itself once after an update, for reading again later.
+    run: () => void openWhatsNew(),
   },
   {
     id: "check_for_updates",
