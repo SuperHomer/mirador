@@ -98,6 +98,9 @@ pub struct WorkspaceSnapshot {
     /// Release-notes panes and the version each one shows.
     #[serde(default)]
     pub whats_new_panes: Vec<WhatsNewPane>,
+    /// Commit-graph panes and the repository each one reads.
+    #[serde(default)]
+    pub graph_panes: Vec<GraphPane>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -253,6 +256,14 @@ pub enum Request {
         port: u16,
         #[serde(default)]
         cancel: bool,
+    },
+    /// Opens a commit-graph pane (split of the source pane, or a new tab),
+    /// for the repository the calling pane sits in.
+    GraphOpen {
+        #[serde(default)]
+        target: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
     },
     /// Lists the checkouts of the repository the calling pane sits in, so
     /// an agent can name one for `DiffOpen`.
@@ -414,6 +425,63 @@ pub struct DiffFile {
 }
 
 /// What a diff pane renders.
+/// A ref pointing at a commit, as the graph labels it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRef {
+    pub name: String,
+    /// "head" | "branch" | "remote" | "tag"
+    pub kind: String,
+}
+
+/// One segment of a branch line, drawn between a row and the row below it:
+/// `from` is its lane on this row, `to` its lane on the next. Equal lanes
+/// are a straight line down; differing ones a branch or a merge.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphLink {
+    pub from: u32,
+    pub to: u32,
+}
+
+/// One commit, placed in a lane, with the lines leaving its row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRow {
+    pub sha: String,
+    pub short: String,
+    pub subject: String,
+    pub author: String,
+    /// Author time, seconds since the epoch.
+    pub timestamp: i64,
+    pub refs: Vec<GraphRef>,
+    /// Which lane the commit's dot sits in.
+    pub lane: u32,
+    pub links: Vec<GraphLink>,
+    /// More than one parent, so the dot is drawn hollow.
+    pub merge: bool,
+}
+
+/// A repository's commit graph.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphResult {
+    pub repo: String,
+    pub rows: Vec<GraphRow>,
+    /// Lanes in use, so the view can size its gutter once.
+    pub lanes: u32,
+    /// History was cut at the row limit; older commits exist.
+    pub truncated: bool,
+}
+
+/// A pane showing a commit graph, and the repository it reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphPane {
+    pub pane_id: String,
+    pub repo: String,
+}
+
 /// One inline run inside a release note's text. Carries text, never markup:
 /// the frontend maps each variant to a React element, so remote note text is
 /// never interpreted as HTML in the privileged webview.

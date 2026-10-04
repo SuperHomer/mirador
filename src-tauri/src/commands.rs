@@ -92,6 +92,17 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    snapshot.graph_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                m.graph_repo.as_ref().map(|r| cmux_protocol::GraphPane {
+                    pane_id: pane.clone(),
+                    repo: r.clone(),
+                })
+            })
+            .collect()
+    };
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -756,6 +767,125 @@ pub fn set_diff_spec(
     }
     emit_workspace(&app);
     Ok(())
+}
+
+/// Opens a commit-graph pane: split of `pane_id` (or a new tab), reading
+/// the repository of the pane it was opened from — the same rule as
+/// `open_diff`, so both review surfaces follow the pane you work in.
+#[tauri::command]
+pub fn open_graph(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+) -> Result<String, String> {
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let repo = source_repo(&state, &source)?;
+
+    let new_pane = if tab {
+        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        pane
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(new_pane.clone()).or_default();
+        entry.cwd = Some(repo.clone());
+        entry.graph_repo = Some(repo);
+    }
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// Reads the pane's graph. Async for the same reason as `load_diff`: a
+/// `git log` over a large repository must not block the UI thread.
+#[tauri::command]
+pub async fn load_graph(
+    state: State<'_, AppState>,
+    pane_id: String,
+    limit: Option<usize>,
+) -> Result<cmux_protocol::GraphResult, String> {
+    let repo = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta
+            .get(&pane_id)
+            .ok_or_else(|| format!("no pane {pane_id}"))?;
+        m.graph_repo.clone().ok_or("not a graph pane")?
+    };
+    let limit = limit.unwrap_or(cmux_core::graph::DEFAULT_LIMIT);
+    tauri::async_runtime::spawn_blocking(move || {
+        cmux_core::graph::load(std::path::Path::new(&repo), limit)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Shows a commit picked in the graph.
+///
+/// The graph keeps one diff pane and retargets it, because clicking through
+/// history is how the graph is read and a pane per commit would bury the
+/// graph itself within a dozen clicks. The remembered pane is used only
+/// while it still exists and is still a diff pane — closing it means the
+/// next click opens a fresh one.
+#[tauri::command]
+pub fn graph_show_commit(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    sha: String,
+) -> Result<String, String> {
+    let (repo, existing) = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta
+            .get(&pane_id)
+            .ok_or_else(|| format!("no pane {pane_id}"))?;
+        (
+            m.graph_repo.clone().ok_or("not a graph pane")?,
+            m.graph_diff_pane.clone(),
+        )
+    };
+    cmux_core::diff::verify_spec(std::path::Path::new(&repo), &sha)?;
+
+    let reusable = existing.filter(|id| {
+        let meta = state.meta.lock().unwrap();
+        meta.get(id).is_some_and(|m| m.diff_spec.is_some())
+    });
+    if let Some(diff_pane) = reusable {
+        {
+            let mut meta = state.meta.lock().unwrap();
+            if let Some(entry) = meta.get_mut(&diff_pane) {
+                entry.diff_spec = Some(sha);
+            }
+        }
+        emit_workspace(&app);
+        return Ok(diff_pane);
+    }
+
+    let diff_pane = open_diff(
+        app.clone(),
+        state.clone(),
+        Some(pane_id.clone()),
+        false,
+        Some(sha),
+        None,
+    )?;
+    state
+        .meta
+        .lock()
+        .unwrap()
+        .entry(pane_id)
+        .or_default()
+        .graph_diff_pane = Some(diff_pane.clone());
+    emit_workspace(&app);
+    Ok(diff_pane)
 }
 
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY

@@ -41,6 +41,11 @@ pub struct PaneMeta {
     pub diff_spec: Option<String>,
     /// What's New pane: the version whose release notes it shows.
     pub whats_new: Option<String>,
+    /// Graph pane: the repository root whose commits it draws.
+    pub graph_repo: Option<String>,
+    /// Graph pane: the diff pane it opened, retargeted on the next click
+    /// rather than piling up a pane per commit.
+    pub graph_diff_pane: Option<String>,
 }
 
 #[derive(Debug)]
@@ -285,6 +290,7 @@ impl Workspace {
             remote_panes: Vec::new(),
             diff_panes: Vec::new(),
             whats_new_panes: Vec::new(),
+            graph_panes: Vec::new(),
         }
     }
 }

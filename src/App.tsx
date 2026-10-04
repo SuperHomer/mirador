@@ -131,6 +131,7 @@ export default function App() {
               remotePanes={snapshot.remotePanes}
               diffPanes={snapshot.diffPanes}
               whatsNewPanes={snapshot.whatsNewPanes}
+              graphPanes={snapshot.graphPanes}
             />
           </div>
         ))}

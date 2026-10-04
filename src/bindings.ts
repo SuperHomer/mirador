@@ -116,6 +116,41 @@ export interface WhatsNewPaneInfo {
   version: string;
 }
 
+export interface GraphRef {
+  name: string;
+  kind: "head" | "branch" | "remote" | "tag";
+}
+
+/** One lane segment between a row and the row below it. */
+export interface GraphLink {
+  from: number;
+  to: number;
+}
+
+export interface GraphRow {
+  sha: string;
+  short: string;
+  subject: string;
+  author: string;
+  timestamp: number;
+  refs: GraphRef[];
+  lane: number;
+  links: GraphLink[];
+  merge: boolean;
+}
+
+export interface GraphResult {
+  repo: string;
+  rows: GraphRow[];
+  lanes: number;
+  truncated: boolean;
+}
+
+export interface GraphPaneInfo {
+  paneId: string;
+  repo: string;
+}
+
 export interface RemotePaneInfo {
   paneId: string;
   host: string;
@@ -130,6 +165,7 @@ export interface WorkspaceSnapshot {
   remotePanes: RemotePaneInfo[];
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
+  graphPanes: GraphPaneInfo[];
 }
 
 export interface NotificationDto {
@@ -248,6 +284,12 @@ export const releaseImage = (url: string) =>
   invoke<ArrayBuffer>("release_image", { url });
 export const openWhatsNew = (version: string | null = null) =>
   invoke<string>("open_whats_new", { version });
+export const openGraph = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_graph", { paneId, tab });
+export const loadGraph = (paneId: string, limit: number | null = null) =>
+  invoke<GraphResult>("load_graph", { paneId, limit });
+export const graphShowCommit = (paneId: string, sha: string) =>
+  invoke<string>("graph_show_commit", { paneId, sha });
 export const listWorktrees = (paneId: string) =>
   invoke<Worktree[]>("list_worktrees", { paneId });
 export const setDiffWorktree = (paneId: string, worktree: string) =>

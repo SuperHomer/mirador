@@ -105,6 +105,12 @@ enum Command {
         #[arg(long, conflicts_with_all = ["spec", "staged", "tab", "worktree"])]
         list_worktrees: bool,
     },
+    /// Open the commit graph for this pane's repository.
+    Graph {
+        /// Open in a new tab instead of a split.
+        #[arg(long)]
+        tab: bool,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -302,6 +308,21 @@ fn run(cli: Cli) -> Result<(), String> {
                     pane_id: Some(pane_id),
                     worktree,
                 }
+            }
+        }
+        Command::Graph { tab } => {
+            // Same rule as `mira diff`: the repository comes from the pane
+            // this ran in, so from another terminal there is nothing to
+            // guess from and guessing would show someone else's history.
+            let pane_id = own_pane().ok_or(
+                "`mira graph` must run inside a Mirador pane: it takes the \
+                 repository from the pane it was called in, and this shell \
+                 is not one (MIRA_PANE is unset). From the app, the command \
+                 palette's \"Git: Commit Graph\" does the same thing.",
+            )?;
+            Request::GraphOpen {
+                target: tab.then(|| "tab".to_string()),
+                pane_id: Some(pane_id),
             }
         }
         Command::Ssh { action } => match action {
