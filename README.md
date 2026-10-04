@@ -24,6 +24,8 @@ downloads, the feature tour and the keybinding reference.
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,
   a commit, or a branch — file tree, hunks, and your terminal's own theme.
   A header picker switches between the repository's git worktrees
+- **Commit graph** (`mira graph`): every branch's history with lane lines,
+  refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: agents open pages, snapshot the DOM, click,
   fill, and eval — while you watch (`mira browser …`)
 - **Remote workspaces**: `mira ssh open <host>` panes run the system ssh

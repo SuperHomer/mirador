@@ -10,6 +10,7 @@ import {
   openBrowser,
   openDiff,
   checkUpdate,
+  openGraph,
   openWhatsNew,
   installUpdate,
 } from "../bindings";
@@ -137,6 +138,15 @@ export const actions: ActionDef[] = [
     },
   },
   {
+    id: "commit_graph",
+    title: "Git: Commit Graph",
+    run: () => {
+      const { snapshot } = useWorkspaceStore.getState();
+      const pane = activeTab(snapshot)?.focusedPane;
+      if (pane) void openGraph(pane, false);
+    },
+  },
+  {
     id: "whats_new",
     title: "What's New",
     // Opens the release notes for the running version — the same pane the
@@ -180,7 +190,7 @@ export const actions: ActionDef[] = [
   },
   {
     id: "new_diff_pane",
-    title: "New Diff Pane (uncommitted changes)",
+    title: "Git: New Diff Pane (uncommitted changes)",
     run: () => {
       const pane = focusedPane();
       if (pane) void openDiff(pane, false, null);

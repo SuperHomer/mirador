@@ -128,6 +128,16 @@ the command palette's "New Diff Pane" is the same action.
 Opening one when you finish a turn beats asking the human to scroll your
 transcript.
 
+```bash
+mira graph                     # the commit graph, in a reviewable pane
+mira graph --tab               # new tab instead of a split
+```
+
+The graph pane draws every ref's history with branch lines, and clicking a
+commit opens its diff — it keeps one diff pane and retargets it, so walking
+history does not bury the graph under a pane per commit. Like `mira diff`,
+it takes the repository from the pane it ran in and refuses outside one.
+
 ## 6. Workspace control
 
 ```bash
