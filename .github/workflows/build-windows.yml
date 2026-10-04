@@ -128,6 +128,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
           REPO: ${{ github.repository }}
+          # Read via os.environ below, never interpolated into the script: a
+          # release body is arbitrary text, and `${{ }}` inside a run block
+          # would hand a backtick or a quote in it to the shell.
+          BODY: ${{ github.event.release.body }}
         run: |
           set -euo pipefail
           # The updater payload on Windows is the NSIS installer itself, so
@@ -147,7 +151,12 @@ jobs:
           sig = open("Mirador-Windows-x64-setup.exe.sig").read().strip()
           json.dump({
               "version": tag.lstrip("v"),
-              "notes": f"See https://github.com/{repo}/releases/tag/{tag}",
+              # The release body itself, so the app can show what changed
+              # without a second request to an API that rate-limits by IP.
+              # Empty body (a release published before its notes were
+              # written) falls back to the link it used to carry.
+              "notes": os.environ.get("BODY", "").strip()
+                       or f"See https://github.com/{repo}/releases/tag/{tag}",
               "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "platforms": {
                   "windows-x86_64": {

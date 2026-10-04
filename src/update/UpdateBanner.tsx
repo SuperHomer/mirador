@@ -5,6 +5,7 @@ import {
   appVersion,
   availableUpdate,
   installUpdate,
+  openWhatsNew,
 } from "../bindings";
 import { Progress, useUpdateStore } from "../state/updateStore";
 
@@ -111,14 +112,28 @@ export function UpdateBanner() {
             {error}
           </div>
         ) : (
-          <button
-            className="update-banner-action"
-            disabled={installing}
-            onClick={start}
-            title="Download, install and restart"
-          >
-            {installing ? installLabel(progress) : "Install and restart"}
-          </button>
+          <>
+            <button
+              className="update-banner-action"
+              disabled={installing}
+              onClick={start}
+              title="Download, install and restart"
+            >
+              {installing ? installLabel(progress) : "Install and restart"}
+            </button>
+            {/* Deciding whether to restart a terminal mid-task is easier
+                having read what the update does. The notes come from the
+                update manifest, so this costs no request. */}
+            {update.notes && !installing && (
+              <button
+                className="update-banner-notes"
+                onClick={() => void openWhatsNew(update.version)}
+                title={`What's new in ${update.version}`}
+              >
+                What's new
+              </button>
+            )}
+          </>
         )}
       </div>
     );

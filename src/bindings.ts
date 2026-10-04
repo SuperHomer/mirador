@@ -241,7 +241,9 @@ export const setDiffSpec = (paneId: string, spec: string) =>
   invoke<void>("set_diff_spec", { paneId, spec });
 export const whatsNew = (version: string) =>
   invoke<ReleaseNotes>("whats_new", { version });
-export const openWhatsNew = () => invoke<string>("open_whats_new");
+/** Omit `version` for the running build; pass one to preview an update's. */
+export const openWhatsNew = (version: string | null = null) =>
+  invoke<string>("open_whats_new", { version });
 export const listWorktrees = (paneId: string) =>
   invoke<Worktree[]>("list_worktrees", { paneId });
 export const setDiffWorktree = (paneId: string, worktree: string) =>

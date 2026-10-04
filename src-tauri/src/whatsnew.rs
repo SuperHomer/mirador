@@ -219,19 +219,63 @@ fn open_pane(app: &AppHandle, version: &str, focus: bool) -> String {
     pane_id
 }
 
-/// The pane's own content request.
+/// Notes carried by the update manifest for a version still on offer.
+///
+/// An update's own manifest already holds its release body, so the notes for
+/// a version you have not installed need no request at all — which matters
+/// because the API that would serve them rate-limits by IP, and a shared
+/// office address can be out of requests through no fault of yours.
+fn offered_notes(app: &AppHandle, version: &str) -> Option<ReleaseNotes> {
+    let state = app.state::<AppState>();
+    let offer = state.update.available.lock().unwrap().clone()?;
+    if offer.version != version {
+        return None;
+    }
+    notes_from_manifest(version, offer.notes.as_deref()?)
+}
+
+/// Turns a manifest's `notes` into renderable notes, or `None` when it has
+/// nothing worth rendering — in which case the caller falls through to the
+/// API and gets the real thing.
+fn notes_from_manifest(version: &str, body: &str) -> Option<ReleaseNotes> {
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+    // Manifests published before the notes were real carried a bare link in
+    // their place; a pane containing one sentence pointing elsewhere is
+    // worse than the fetch this skips.
+    if !body.contains('\n') && body.starts_with("See https://") {
+        return None;
+    }
+    Some(ReleaseNotes {
+        version: version.to_string(),
+        // A manifest has no release title, and "v0.1.16" is the honest
+        // heading for something not yet installed anyway.
+        title: format!("v{version}"),
+        blocks: cmux_core::notes::parse(body),
+        url: format!("https://github.com/{REPO}/releases/tag/v{version}"),
+    })
+}
+
+/// The pane's own content request: the manifest's notes when this version is
+/// the one on offer, else the cache, else GitHub.
 #[tauri::command]
-pub async fn whats_new(version: String) -> Result<ReleaseNotes, String> {
+pub async fn whats_new(app: AppHandle, version: String) -> Result<ReleaseNotes, String> {
+    if let Some(notes) = offered_notes(&app, &version) {
+        return Ok(notes);
+    }
     tauri::async_runtime::spawn_blocking(move || notes_for(&version))
         .await
         .map_err(|e| e.to_string())?
 }
 
-/// The palette's "What's New": opens the notes for the running version, in
-/// the foreground because this time the user asked for them.
+/// Opens the notes pane in the foreground, because reaching this means the
+/// user asked: the palette's "What's New" (the running version) or the
+/// update banner's (the version on offer).
 #[tauri::command]
-pub fn open_whats_new(app: AppHandle) -> String {
-    let version = app.package_info().version.to_string();
+pub fn open_whats_new(app: AppHandle, version: Option<String>) -> String {
+    let version = version.unwrap_or_else(|| app.package_info().version.to_string());
     open_pane(&app, &version, true)
 }
 
@@ -255,6 +299,33 @@ mod tests {
         assert_eq!(decide(Some("0.1.15"), "0.1.16"), Some("0.1.16".into()));
         // A downgrade is still a change of what you are running.
         assert_eq!(decide(Some("0.1.16"), "0.1.15"), Some("0.1.15".into()));
+    }
+
+    #[test]
+    fn manifest_notes_are_used_only_when_they_are_notes() {
+        // The shape every release from now on carries.
+        let notes = notes_from_manifest("0.1.16", "## Fixed\n\nA thing.\n")
+            .expect("a real body is renderable");
+        assert_eq!(notes.title, "v0.1.16");
+        assert_eq!(notes.url, "https://github.com/SuperHomer/mirador/releases/tag/v0.1.16");
+        assert_eq!(notes.blocks.len(), 2);
+
+        // The shape older manifests carry: fall through, fetch the real one.
+        assert!(notes_from_manifest(
+            "0.1.15",
+            "See https://github.com/SuperHomer/mirador/releases/tag/v0.1.15"
+        )
+        .is_none());
+        assert!(notes_from_manifest("0.1.15", "").is_none());
+        assert!(notes_from_manifest("0.1.15", "   \n  ").is_none());
+
+        // A real body that merely opens with that sentence is still a body:
+        // the placeholder is one line and nothing else.
+        assert!(notes_from_manifest(
+            "0.1.16",
+            "See https://github.com/SuperHomer/mirador/releases/tag/v0.1.16\n\n## Also fixed\n\nMore."
+        )
+        .is_some());
     }
 
     #[test]
