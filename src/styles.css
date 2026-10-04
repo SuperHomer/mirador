@@ -1051,6 +1051,23 @@ body,
   cursor: default;
 }
 
+/* Secondary to "Install and restart": reading the notes is the cautious
+   path, not the primary one. */
+.update-banner-notes {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 4px 2px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.update-banner-notes:hover {
+  color: var(--text);
+}
+
 .update-banner-error {
   font-size: 10.5px;
   color: var(--red);
