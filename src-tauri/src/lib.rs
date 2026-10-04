@@ -6,6 +6,7 @@ mod notify;
 mod runs;
 mod server;
 mod update;
+mod whatsnew;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -157,6 +158,7 @@ pub fn run() {
             commands::spawn_emit_coalescer(app.handle().clone());
             server::spawn(app.handle().clone());
             update::spawn_check_loop(app.handle().clone());
+            whatsnew::announce_on_launch(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -184,6 +186,8 @@ pub fn run() {
             commands::set_diff_spec,
             commands::list_worktrees,
             commands::set_diff_worktree,
+            whatsnew::whats_new,
+            whatsnew::open_whats_new,
             commands::open_ssh,
             commands::ssh_hosts,
             commands::set_browser_bounds,

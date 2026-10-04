@@ -95,6 +95,9 @@ pub struct WorkspaceSnapshot {
     /// Diff panes and what each one is showing.
     #[serde(default)]
     pub diff_panes: Vec<DiffPane>,
+    /// Release-notes panes and the version each one shows.
+    #[serde(default)]
+    pub whats_new_panes: Vec<WhatsNewPane>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -411,6 +414,39 @@ pub struct DiffFile {
 }
 
 /// What a diff pane renders.
+/// One inline run inside a release note's text. Carries text, never markup:
+/// the frontend maps each variant to a React element, so remote note text is
+/// never interpreted as HTML in the privileged webview.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NoteSpan {
+    Text { text: String },
+    Code { text: String },
+    Strong { text: String },
+    Em { text: String },
+    /// Only `http(s)` links become links; anything else stays Text.
+    Link { text: String, href: String },
+}
+
+/// One block of a release note.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NoteBlock {
+    Heading { level: u8, spans: Vec<NoteSpan> },
+    Paragraph { spans: Vec<NoteSpan> },
+    List { items: Vec<Vec<NoteSpan>> },
+    Code { text: String, lang: Option<String> },
+    Rule,
+}
+
+/// A pane showing release notes, and which version's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhatsNewPane {
+    pub pane_id: String,
+    pub version: String,
+}
+
 /// One checkout of a repository, as `git worktree list` reports it.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

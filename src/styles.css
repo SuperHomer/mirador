@@ -1069,3 +1069,178 @@ body,
   font-size: 11.5px;
   color: var(--subtext);
 }
+
+/* ── What's New pane ─────────────────────────────────────────────────────
+   Release notes read as prose, so this pane is the one place in the app
+   with a proportional font and a measure limit; everything else is a
+   terminal grid. Colours come from the resolved theme, so imported
+   Ghostty/wezterm schemes apply here too. */
+
+.whatsnew-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--term-bg, var(--bg));
+}
+
+.whatsnew-chrome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--surface);
+  flex-shrink: 0;
+  min-height: 30px;
+}
+
+.whatsnew-badge {
+  flex-shrink: 0;
+  background: var(--accent, var(--surface));
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.whatsnew-title {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.whatsnew-link {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.whatsnew-link:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.whatsnew-close {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.whatsnew-close:hover {
+  color: var(--text);
+}
+
+.whatsnew-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 40px;
+}
+
+.whatsnew-notes {
+  /* A readable measure, centred, rather than notes stretched across a
+     wide pane. */
+  max-width: 68ch;
+  margin: 0 auto;
+  color: var(--term-fg, var(--text));
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.whatsnew-notes h2,
+.whatsnew-notes h3,
+.whatsnew-notes h4 {
+  color: var(--text);
+  line-height: 1.3;
+  margin: 1.6em 0 0.5em;
+}
+
+.whatsnew-notes h2 {
+  font-size: 1.3em;
+}
+
+.whatsnew-notes h3 {
+  font-size: 1.12em;
+}
+
+.whatsnew-notes h4 {
+  font-size: 1em;
+}
+
+.whatsnew-notes > :first-child {
+  margin-top: 0;
+}
+
+.whatsnew-notes p,
+.whatsnew-notes ul {
+  margin: 0 0 0.9em;
+}
+
+.whatsnew-notes ul {
+  padding-left: 1.3em;
+}
+
+.whatsnew-notes li {
+  margin-bottom: 0.3em;
+}
+
+.whatsnew-notes a {
+  color: var(--accent, var(--text));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.whatsnew-notes code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--surface);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.whatsnew-notes hr {
+  border: none;
+  border-top: 1px solid var(--surface);
+  margin: 1.6em 0;
+}
+
+.whatsnew-code {
+  background: var(--bg-alt);
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0 0 1em;
+}
+
+.whatsnew-code code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.whatsnew-loading,
+.whatsnew-error {
+  max-width: 68ch;
+  margin: 0 auto;
+  color: var(--muted);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+}
