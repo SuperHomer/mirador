@@ -12,3 +12,4 @@ pub mod proc;
 pub mod pty;
 pub mod state;
 pub mod transport;
+pub mod worktree;

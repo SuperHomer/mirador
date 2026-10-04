@@ -251,6 +251,12 @@ pub enum Request {
         #[serde(default)]
         cancel: bool,
     },
+    /// Lists the checkouts of the repository the calling pane sits in, so
+    /// an agent can name one for `DiffOpen`.
+    DiffWorktrees {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Opens a diff pane (split of the source pane, or a new tab). The
     /// repository comes from the source pane's cwd: the calling pane when
     /// the CLI knows it, else whichever pane is focused.
@@ -265,6 +271,10 @@ pub enum Request {
         /// when the environment is lost (sudo, a detached session).
         #[serde(default)]
         pane_id: Option<String>,
+        /// Another checkout of the same repository to review instead of the
+        /// calling pane's, by path or branch name.
+        #[serde(default)]
+        worktree: Option<String>,
     },
 }
 
@@ -401,6 +411,28 @@ pub struct DiffFile {
 }
 
 /// What a diff pane renders.
+/// One checkout of a repository, as `git worktree list` reports it.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Worktree {
+    /// Absolute path of the checkout — the identity a diff pane stores.
+    pub path: String,
+    /// Short branch name ("feature/login"), absent when detached or bare.
+    pub branch: Option<String>,
+    /// Short HEAD sha, absent on a bare repository.
+    pub head: Option<String>,
+    /// The repository's original checkout, as opposed to a linked one.
+    pub main: bool,
+    /// A bare repository has no files to diff.
+    pub bare: bool,
+    /// `git worktree lock` — shown so a pane can say why writes may fail.
+    pub locked: bool,
+    /// Git considers this entry stale (its directory is gone).
+    pub prunable: bool,
+    /// The checkout the asking pane is currently reading.
+    pub current: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffResult {

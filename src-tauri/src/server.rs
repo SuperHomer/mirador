@@ -218,10 +218,18 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane_id }))
         }
+        Request::DiffWorktrees { pane_id } => {
+            let pane = pane_id
+                .filter(|id| state.meta.lock().unwrap().contains_key(id))
+                .unwrap_or_else(|| focused_pane(&state));
+            let worktrees = crate::commands::worktrees_for_source(&state, &pane)?;
+            serde_json::to_value(worktrees).map_err(|e| e.to_string())
+        }
         Request::DiffOpen {
             spec,
             target,
             pane_id,
+            worktree,
         } => {
             let pane_id = crate::commands::open_diff(
                 app.clone(),
@@ -229,6 +237,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 pane_id,
                 target.as_deref() == Some("tab"),
                 spec,
+                worktree,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }

@@ -19,7 +19,8 @@ The CLI command is **`mira`** ("look!").
 - **Command panes** (`mira run`): agent-launched commands run in a visible,
   interruptible pane; `--wait` returns clean output + exit code to the caller
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,
-  a commit, or a branch — file tree, hunks, and your terminal's own theme
+  a commit, or a branch — file tree, hunks, and your terminal's own theme.
+  A header picker switches between the repository's git worktrees
 - **Scriptable browser pane**: agents open pages, snapshot the DOM, click,
   fill, and eval — while you watch (`mira browser …`)
 - **Remote workspaces**: `mira ssh open <host>` panes run the system ssh

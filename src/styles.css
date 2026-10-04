@@ -670,6 +670,32 @@ body,
   flex-shrink: 0;
 }
 
+/* Worktree picker: a native select, so it keeps platform keyboard and
+   dismiss behavior; only the chrome around it is restyled. */
+.diff-worktree {
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 180px;
+  border: 1px solid var(--surface);
+  background: var(--bg-alt);
+  color: var(--subtext);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.diff-worktree:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+/* The spec buttons claim the free space when no picker is shown. */
+.diff-worktree + .diff-specs {
+  margin-left: 8px;
+}
+
 .diff-specs {
   display: flex;
   gap: 2px;

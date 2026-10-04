@@ -182,6 +182,8 @@ pub fn run() {
             commands::open_diff,
             commands::load_diff,
             commands::set_diff_spec,
+            commands::list_worktrees,
+            commands::set_diff_worktree,
             commands::open_ssh,
             commands::ssh_hosts,
             commands::set_browser_bounds,

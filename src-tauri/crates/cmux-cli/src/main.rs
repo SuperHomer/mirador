@@ -97,6 +97,13 @@ enum Command {
         /// Open in a new tab instead of a split.
         #[arg(long)]
         tab: bool,
+        /// Review another checkout of this repository, by branch name
+        /// ("feature/login") or path. Defaults to the calling pane's.
+        #[arg(long, value_name = "BRANCH|PATH")]
+        worktree: Option<String>,
+        /// List this repository's worktrees instead of opening a pane.
+        #[arg(long, conflicts_with_all = ["spec", "staged", "tab", "worktree"])]
+        list_worktrees: bool,
     },
     /// Remote workspaces over SSH.
     Ssh {
@@ -257,29 +264,44 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Runs => Request::ListRuns,
-        Command::Diff { spec, staged, tab } => {
+        Command::Diff {
+            spec,
+            staged,
+            tab,
+            worktree,
+            list_worktrees,
+        } => {
             if staged && spec.is_some() {
                 return Err("--staged takes no revision".into());
             }
-            // Without a pane we cannot tell which repository is meant.
-            // The app would fall back to whichever pane is focused, which
-            // from another terminal silently diffs someone else's work —
-            // so refuse instead of guessing.
-            let pane_id = own_pane().ok_or(
-                "`mira diff` must run inside a Mirador pane: it takes the \
-                 repository from the pane it was called in, and this shell \
-                 is not one (MIRA_PANE is unset; `sudo` and detached \
-                 sessions drop it too). From the app, the command palette's \
-                 \"New Diff Pane\" does the same thing.",
-            )?;
-            Request::DiffOpen {
-                spec: if staged {
-                    Some("staged".to_string())
-                } else {
-                    spec
-                },
-                target: tab.then(|| "tab".to_string()),
-                pane_id: Some(pane_id),
+            if list_worktrees {
+                // A listing only has to find a repository, and falling back
+                // to the focused pane cannot write to the wrong one.
+                Request::DiffWorktrees {
+                    pane_id: own_pane(),
+                }
+            } else {
+                // Without a pane we cannot tell which repository is meant.
+                // The app would fall back to whichever pane is focused,
+                // which from another terminal silently diffs someone else's
+                // work — so refuse instead of guessing.
+                let pane_id = own_pane().ok_or(
+                    "`mira diff` must run inside a Mirador pane: it takes the \
+                     repository from the pane it was called in, and this shell \
+                     is not one (MIRA_PANE is unset; `sudo` and detached \
+                     sessions drop it too). From the app, the command palette's \
+                     \"New Diff Pane\" does the same thing.",
+                )?;
+                Request::DiffOpen {
+                    spec: if staged {
+                        Some("staged".to_string())
+                    } else {
+                        spec
+                    },
+                    target: tab.then(|| "tab".to_string()),
+                    pane_id: Some(pane_id),
+                    worktree,
+                }
             }
         }
         Command::Ssh { action } => match action {
@@ -441,9 +463,54 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 println!("{}", serde_json::to_string_pretty(&data).unwrap());
             }
         }
+        // `diff --list-worktrees` answers with an array.
+        serde_json::Value::Array(items)
+            if items.first().is_some_and(|i| i.get("path").is_some()) =>
+        {
+            render_worktrees(items);
+        }
         other => println!("{}", serde_json::to_string_pretty(other).unwrap()),
     }
     Ok(())
+}
+
+/// Worktrees as a table: the current one marked, so `mira diff --worktree`
+/// can be fed straight from the first column.
+fn render_worktrees(items: &[serde_json::Value]) {
+    let name = |w: &serde_json::Value| match w["branch"].as_str() {
+        Some(branch) => branch.to_string(),
+        // Detached or bare: there is no branch to name it by, so show what
+        // there is — and it is still selectable by path.
+        None => match w["head"].as_str() {
+            Some(head) => format!("(detached {head})"),
+            None => "(bare)".to_string(),
+        },
+    };
+    let width = items.iter().map(|w| name(w).chars().count()).max().unwrap_or(0);
+    for w in items {
+        let mut tags: Vec<&str> = Vec::new();
+        if w["main"].as_bool() == Some(true) {
+            tags.push("main");
+        }
+        if w["locked"].as_bool() == Some(true) {
+            tags.push("locked");
+        }
+        if w["prunable"].as_bool() == Some(true) {
+            tags.push("prunable");
+        }
+        let suffix = if tags.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", tags.join(", "))
+        };
+        println!(
+            "{} {:width$}  {}{}",
+            if w["current"].as_bool() == Some(true) { "*" } else { " " },
+            name(w),
+            w["path"].as_str().unwrap_or(""),
+            suffix,
+        );
+    }
 }
 
 fn render_page_snapshot(data: &serde_json::Value) {
