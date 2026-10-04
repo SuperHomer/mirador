@@ -40,6 +40,16 @@ const showsHeaderRow = (hunk: { header: string; oldStart: number }) =>
   Boolean(hunk.header) || hunk.oldStart > 0;
 
 /**
+ * A spec as the header shows it. A commit reached from the graph arrives as
+ * a full 40-character sha, which is forty characters of chrome saying what
+ * seven already say — and it crowded the label describing the commit down
+ * to an ellipsis. Ranges and names are left alone; the full value stays in
+ * the control's tooltip.
+ */
+const shortSpec = (spec: string) =>
+  /^[0-9a-f]{12,40}$/i.test(spec) ? spec.slice(0, 7) : spec;
+
+/**
  * How a checkout is named in the picker. A branch names itself, and git
  * allows it in only one worktree at a time, so it is unambiguous on its
  * own; a detached or bare one has no name, so it borrows its directory's.
@@ -236,7 +246,11 @@ export function DiffPane({ paneId, repo, spec, focused }: Props) {
               {title}
             </button>
           ))}
-          {!live && <span className="active">{spec}</span>}
+          {!live && (
+            <span className="active" title={spec}>
+              {shortSpec(spec)}
+            </span>
+          )}
         </div>
         <button
           className="diff-refresh"

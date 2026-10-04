@@ -687,6 +687,11 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* The only shrinkable item in the row, so it absorbed every overflow and
+     collapsed to a single character. It now takes the slack instead, and
+     keeps a floor so a narrow split still says something. */
+  flex: 1 1 auto;
+  min-width: 7ch;
 }
 
 .diff-totals {
