@@ -3,10 +3,13 @@ import {
   DiffFile,
   DiffResult,
   ResolvedColors,
+  Worktree,
   closePane,
   focusPane,
+  listWorktrees,
   loadDiff,
   setDiffSpec,
+  setDiffWorktree,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
 import { TreeNode, buildTree } from "./fileTree";
@@ -36,6 +39,17 @@ interface Props {
 const showsHeaderRow = (hunk: { header: string; oldStart: number }) =>
   Boolean(hunk.header) || hunk.oldStart > 0;
 
+/**
+ * How a checkout is named in the picker. A branch names itself, and git
+ * allows it in only one worktree at a time, so it is unambiguous on its
+ * own; a detached or bare one has no name, so it borrows its directory's.
+ */
+const worktreeName = (w: Worktree) => {
+  if (w.branch) return w.branch;
+  const dir = w.path.split(/[/\\]/).filter(Boolean).pop() ?? w.path;
+  return w.head ? `detached ${w.head} — ${dir}` : `bare — ${dir}`;
+};
+
 const STATUS_GLYPH: Record<string, string> = {
   added: "A",
   untracked: "A",
@@ -52,6 +66,7 @@ const STATUS_GLYPH: Record<string, string> = {
  */
 export function DiffPane({ paneId, repo, spec, focused }: Props) {
   const [result, setResult] = useState<DiffResult | null>(null);
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
@@ -67,6 +82,15 @@ export function DiffPane({ paneId, repo, spec, focused }: Props) {
   const refresh = useCallback(() => {
     setLoading(true);
     let stale = false;
+    // A failed listing is not a failed diff: the pane still works, it just
+    // cannot offer the picker, so the error is swallowed.
+    void listWorktrees(paneId)
+      .then((w) => {
+        if (!stale) setWorktrees(w);
+      })
+      .catch(() => {
+        if (!stale) setWorktrees([]);
+      });
     void loadDiff(paneId)
       .then((r) => {
         if (stale) return;
@@ -84,7 +108,7 @@ export function DiffPane({ paneId, repo, spec, focused }: Props) {
     };
   }, [paneId]);
 
-  useEffect(() => refresh(), [refresh, spec]);
+  useEffect(() => refresh(), [refresh, spec, repo]);
 
   // A working-tree diff goes stale the moment anything writes a file, and
   // the usual writer is the agent in the pane next door. Coming back to
@@ -169,6 +193,34 @@ export function DiffPane({ paneId, repo, spec, focused }: Props) {
           <span className="diff-add-text"> +{totals.additions}</span>
           <span className="diff-del-text"> −{totals.deletions}</span>
         </span>
+        {worktrees.length > 1 && (
+          <select
+            className="diff-worktree"
+            title={`Checkout under review — ${repo}`}
+            value={worktrees.find((w) => w.current)?.path ?? repo}
+            onChange={(e) => {
+              const target = e.target.value;
+              void setDiffWorktree(paneId, target).catch((err: unknown) =>
+                setError(String(err)),
+              );
+            }}
+          >
+            {worktrees.map((w) => (
+              <option
+                key={w.path}
+                value={w.path}
+                // Nothing is checked out in a bare repo, and a prunable
+                // entry's directory is gone: both would only produce an
+                // error once selected.
+                disabled={w.bare || w.prunable}
+              >
+                {worktreeName(w)}
+                {w.main ? " (main)" : ""}
+                {w.locked ? " 🔒" : ""}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="diff-specs">
           {(
             [

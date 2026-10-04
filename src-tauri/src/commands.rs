@@ -561,6 +561,7 @@ pub fn open_diff(
     pane_id: Option<String>,
     tab: bool,
     spec: Option<String>,
+    worktree: Option<String>,
 ) -> Result<String, String> {
     // `mira diff` reports the pane it ran in, so an agent's diff lands on
     // its own repository rather than whichever pane the human is looking
@@ -571,15 +572,13 @@ pub fn open_diff(
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
     // Resolve the repo before the layout changes: a new tab's pane has no
     // cwd of its own yet, and a split's does not until its shell reports one.
-    let repo = {
-        let meta = state.meta.lock().unwrap();
-        let m = meta.get(&source);
-        m.and_then(|m| m.repo_root.clone())
-            .or_else(|| {
-                let cwd = m.and_then(|m| m.cwd.clone())?;
-                Some(cmux_core::git::find_repo_root(&cwd)?.to_string_lossy().to_string())
-            })
-            .ok_or_else(|| "not inside a git repository".to_string())?
+    let repo = source_repo(&state, &source)?;
+    // `--worktree` reviews another checkout than the one the calling pane
+    // sits in; without it the pane's own checkout is the subject, which is
+    // what `mira diff` has always meant.
+    let repo = match worktree {
+        Some(wanted) => resolve_worktree(std::path::Path::new(&repo), &wanted)?,
+        None => repo,
     };
 
     let spec = spec.unwrap_or_else(|| cmux_core::diff::WORKTREE.to_string());
@@ -623,6 +622,108 @@ pub async fn load_diff(
         )
     };
     cmux_core::diff::load(std::path::Path::new(&repo), &spec)
+}
+
+/// The repository a *source* pane speaks for: the intel poller's answer
+/// when it has one, else the repo containing the pane's cwd. Inside a
+/// linked worktree this is that worktree's root, which is what makes
+/// `mira diff` review the checkout you ran it in.
+fn source_repo(state: &AppState, pane_id: &str) -> Result<String, String> {
+    let meta = state.meta.lock().unwrap();
+    let m = meta.get(pane_id);
+    m.and_then(|m| m.repo_root.clone())
+        .or_else(|| {
+            let cwd = m.and_then(|m| m.cwd.clone())?;
+            Some(cmux_core::git::find_repo_root(&cwd)?.to_string_lossy().to_string())
+        })
+        .ok_or_else(|| "not inside a git repository".to_string())
+}
+
+/// Every checkout of the repository a source pane sits in — the socket's
+/// listing, which runs from a terminal pane rather than a diff pane.
+pub fn worktrees_for_source(
+    state: &AppState,
+    pane_id: &str,
+) -> Result<Vec<cmux_protocol::Worktree>, String> {
+    let repo = source_repo(state, pane_id)?;
+    cmux_core::worktree::list(std::path::Path::new(&repo))
+}
+
+/// The repository root a diff pane is reading, or an error naming why the
+/// pane has none.
+fn diff_repo_of(state: &AppState, pane_id: &str) -> Result<String, String> {
+    let meta = state.meta.lock().unwrap();
+    let m = meta
+        .get(pane_id)
+        .ok_or_else(|| format!("no pane {pane_id}"))?;
+    m.diff_repo.clone().ok_or_else(|| "not a diff pane".into())
+}
+
+/// Every checkout of a diff pane's repository, for the pane's worktree
+/// picker. Listed on demand rather than polled: `git worktree list` is a
+/// process spawn, and worktrees are created by hand, not by the second.
+#[tauri::command]
+pub fn list_worktrees(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<Vec<cmux_protocol::Worktree>, String> {
+    let repo = diff_repo_of(&state, &pane_id)?;
+    cmux_core::worktree::list(std::path::Path::new(&repo))
+}
+
+/// Points a diff pane at another checkout of the same repository, by path
+/// or by branch name. The spec is left alone, so switching worktrees keeps
+/// you on "uncommitted changes" (or whichever view you were reading).
+#[tauri::command]
+pub fn set_diff_worktree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    worktree: String,
+) -> Result<(), String> {
+    let repo = diff_repo_of(&state, &pane_id)?;
+    let target = resolve_worktree(std::path::Path::new(&repo), &worktree)?;
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta
+            .get_mut(&pane_id)
+            .ok_or_else(|| format!("no pane {pane_id}"))?;
+        entry.diff_repo = Some(target.clone());
+        // The pane's cwd follows, so a `mira diff` run from inside the pane
+        // and the sidebar's branch both describe the checkout on screen.
+        entry.cwd = Some(target);
+    }
+    state
+        .session_dirty
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    emit_workspace(&app);
+    Ok(())
+}
+
+/// Resolves a worktree the caller named against `repo`, rejecting one that
+/// cannot be diffed. Shared by the picker and by `mira diff --worktree`, so
+/// a branch name means the same thing in the UI and on the command line.
+fn resolve_worktree(repo: &std::path::Path, wanted: &str) -> Result<String, String> {
+    let worktrees = cmux_core::worktree::list(repo)?;
+    let found = cmux_core::worktree::resolve(&worktrees, wanted).ok_or_else(|| {
+        let known: Vec<&str> = worktrees
+            .iter()
+            .map(|w| w.branch.as_deref().unwrap_or(w.path.as_str()))
+            .collect();
+        format!("no worktree `{wanted}` (have: {})", known.join(", "))
+    })?;
+    // A bare repository has no files on disk, and a pruned one's directory
+    // is gone: either would make `git diff` fail with git's own wording
+    // some way into the pane. Say so here instead.
+    if found.bare {
+        return Err(format!("`{wanted}` is a bare repository: nothing is checked out"));
+    }
+    if found.prunable {
+        return Err(format!(
+            "worktree `{wanted}` is stale — its directory is gone (`git worktree prune`)"
+        ));
+    }
+    Ok(found.path.clone())
 }
 
 /// Points an existing diff pane at another spec (the pane's own header

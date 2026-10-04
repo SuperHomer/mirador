@@ -70,6 +70,17 @@ export interface DiffFile {
   hunks: DiffHunk[];
 }
 
+export interface Worktree {
+  path: string;
+  branch: string | null;
+  head: string | null;
+  main: boolean;
+  bare: boolean;
+  locked: boolean;
+  prunable: boolean;
+  current: boolean;
+}
+
 export interface DiffResult {
   repo: string;
   spec: string;
@@ -194,11 +205,16 @@ export const openDiff = (
   paneId: string | null,
   tab: boolean,
   spec: string | null,
-) => invoke<string>("open_diff", { paneId, tab, spec });
+  worktree: string | null = null,
+) => invoke<string>("open_diff", { paneId, tab, spec, worktree });
 export const loadDiff = (paneId: string) =>
   invoke<DiffResult>("load_diff", { paneId });
 export const setDiffSpec = (paneId: string, spec: string) =>
   invoke<void>("set_diff_spec", { paneId, spec });
+export const listWorktrees = (paneId: string) =>
+  invoke<Worktree[]>("list_worktrees", { paneId });
+export const setDiffWorktree = (paneId: string, worktree: string) =>
+  invoke<void>("set_diff_worktree", { paneId, worktree });
 export const openSsh = (paneId: string | null, tab: boolean, host: string) =>
   invoke<string>("open_ssh", { paneId, tab, host });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
