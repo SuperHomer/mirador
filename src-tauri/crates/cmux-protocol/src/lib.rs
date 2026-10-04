@@ -433,6 +433,10 @@ pub enum NoteSpan {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum NoteBlock {
     Heading { level: u8, spans: Vec<NoteSpan> },
+    /// A screenshot or GIF on a line of its own. The bytes are fetched and
+    /// cached separately, by `url`; `alt` is what stands in for it while
+    /// loading, or if it never arrives.
+    Image { alt: String, url: String },
     Paragraph { spans: Vec<NoteSpan> },
     List { items: Vec<Vec<NoteSpan>> },
     Code { text: String, lang: Option<String> },

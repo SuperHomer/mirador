@@ -96,6 +96,7 @@ export type NoteSpan =
   | { kind: "link"; text: string; href: string };
 
 export type NoteBlock =
+  | { kind: "image"; alt: string; url: string }
   | { kind: "heading"; level: number; spans: NoteSpan[] }
   | { kind: "paragraph"; spans: NoteSpan[] }
   | { kind: "list"; items: NoteSpan[][] }
@@ -242,6 +243,9 @@ export const setDiffSpec = (paneId: string, spec: string) =>
 export const whatsNew = (version: string) =>
   invoke<ReleaseNotes>("whats_new", { version });
 /** Omit `version` for the running build; pass one to preview an update's. */
+/** Raw image bytes, fetched and cached by the backend — never by the page. */
+export const releaseImage = (url: string) =>
+  invoke<ArrayBuffer>("release_image", { url });
 export const openWhatsNew = (version: string | null = null) =>
   invoke<string>("open_whats_new", { version });
 export const listWorktrees = (paneId: string) =>

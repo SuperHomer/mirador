@@ -169,6 +169,145 @@ fn fetch(version: &str) -> Result<ReleaseNotes, String> {
     })
 }
 
+/// Hosts a release-note image may be fetched from.
+///
+/// A release body is authored by whoever can publish a release, and these
+/// are where GitHub actually stores note images — an upload lands under
+/// `github.com/user-attachments`. Narrowing to them means a release body
+/// cannot make the app fetch from an arbitrary host, and anything else
+/// degrades to a link the user can choose to open.
+const IMAGE_HOSTS: &[&str] = &["github.com", "githubusercontent.com"];
+
+/// Per image, and across one release. A note is a page to read, not a
+/// payload: a demo GIF is worth a few megabytes, a disk image is not.
+const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+
+/// What a stored image may be. Checked against the bytes themselves rather
+/// than a header or a file extension, so nothing but a raster image is
+/// ever written to disk or handed to the webview — an SVG, which can carry
+/// script, does not qualify.
+fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.starts_with(PNG) {
+        return Some("png");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("gif");
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("jpeg");
+    }
+    if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    if bytes.len() > 12 && &bytes[4..12] == b"ftypavif" {
+        return Some("avif");
+    }
+    None
+}
+
+/// True when `url` is an https URL on a host we will fetch an image from.
+fn allowed_image_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split('@')
+        .next_back()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    IMAGE_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{h}")))
+}
+
+/// A stable, filesystem-safe name for a url. FNV-1a: this is a cache key,
+/// not a signature — it only has to be the same next launch.
+fn image_id(url: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in url.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn image_path(url: &str) -> PathBuf {
+    cmux_core::session::data_dir()
+        .join("release-images")
+        .join(image_id(url))
+}
+
+/// The bytes of a release-note image, from the cache or from GitHub.
+///
+/// Fetched here rather than by the pane: the notes view runs in the webview
+/// that holds the IPC bridge, and it should not be making requests to
+/// anywhere. Bytes come back raw over IPC and the pane turns them into a
+/// blob, so nothing in the page ever holds a remote URL.
+#[tauri::command]
+pub async fn release_image(url: String) -> Result<tauri::ipc::Response, String> {
+    if !allowed_image_url(&url) {
+        return Err(format!("not a fetchable image url: {url}"));
+    }
+    let bytes = tauri::async_runtime::spawn_blocking(move || image_bytes(&url))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+fn image_bytes(url: &str) -> Result<Vec<u8>, String> {
+    let path = image_path(url);
+    if let Ok(bytes) = std::fs::read(&path) {
+        // Re-checked on the way out as well as in: a cache directory is an
+        // ordinary directory, and this is the last point before the bytes
+        // reach the webview.
+        if sniff_image(&bytes).is_some() {
+            return Ok(bytes);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    ensure_crypto_provider();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS * 3))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, USER_AGENT)
+        .send()
+        .map_err(|e| format!("could not fetch the image: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("image fetch failed ({})", response.status()));
+    }
+    // Checked before reading the body as well as after: a server that
+    // declares a huge image should not get to stream it first.
+    if let Some(len) = response.content_length() {
+        if len > MAX_IMAGE_BYTES as u64 {
+            return Err(format!("image is larger than {MAX_IMAGE_BYTES} bytes"));
+        }
+    }
+    let bytes = response.bytes().map_err(|e| e.to_string())?.to_vec();
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!("image is larger than {MAX_IMAGE_BYTES} bytes"));
+    }
+    if sniff_image(&bytes).is_none() {
+        return Err("not an image the pane will display".into());
+    }
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, &bytes);
+    Ok(bytes)
+}
+
 /// After an update, opens the pane in a tab of its own — once, in the
 /// background, and only if there are notes to read.
 ///
@@ -326,6 +465,53 @@ mod tests {
             "See https://github.com/SuperHomer/mirador/releases/tag/v0.1.16\n\n## Also fixed\n\nMore."
         )
         .is_some());
+    }
+
+    #[test]
+    fn only_github_https_urls_are_fetchable() {
+        assert!(allowed_image_url(
+            "https://github.com/user-attachments/assets/8f3c1d2e-aaaa"
+        ));
+        assert!(allowed_image_url("https://raw.githubusercontent.com/o/r/main/a.png"));
+        assert!(allowed_image_url("https://USER-IMAGES.GithubUserContent.com/x.gif"));
+
+        // Plain http is not fetched even from an allowed host.
+        assert!(!allowed_image_url("http://github.com/a.png"));
+        // Nor any other host, however it is dressed up.
+        assert!(!allowed_image_url("https://example.com/a.png"));
+        // A suffix match must not accept a lookalike domain.
+        assert!(!allowed_image_url("https://evil-github.com/a.png"));
+        assert!(!allowed_image_url("https://github.com.evil.test/a.png"));
+        // Nor userinfo smuggling the real host past a naive prefix check.
+        assert!(!allowed_image_url("https://github.com@evil.test/a.png"));
+        assert!(!allowed_image_url(""));
+        assert!(!allowed_image_url("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn only_raster_image_bytes_are_accepted() {
+        assert_eq!(sniff_image(b"\x89PNG\r\n\x1a\nrest"), Some("png"));
+        assert_eq!(sniff_image(b"GIF89a....."), Some("gif"));
+        assert_eq!(sniff_image(b"GIF87a....."), Some("gif"));
+        assert_eq!(sniff_image(&[0xff, 0xd8, 0xff, 0xe0, 0x00]), Some("jpeg"));
+        assert_eq!(sniff_image(b"RIFF\0\0\0\0WEBPVP8 "), Some("webp"));
+        assert_eq!(sniff_image(b"\0\0\0\x20ftypavif\0\0"), Some("avif"));
+
+        // An SVG can carry script, so it is not something this will store
+        // or hand to the webview, whatever the server called it.
+        assert_eq!(sniff_image(b"<svg xmlns=\"http://www.w3.org/2000/svg\">"), None);
+        assert_eq!(sniff_image(b"<!doctype html><script>"), None);
+        assert_eq!(sniff_image(b""), None);
+        assert_eq!(sniff_image(b"RIFF"), None, "a truncated header is not a webp");
+    }
+
+    #[test]
+    fn an_image_id_is_stable_and_per_url() {
+        let a = image_id("https://github.com/user-attachments/assets/one");
+        assert_eq!(a, image_id("https://github.com/user-attachments/assets/one"));
+        assert_ne!(a, image_id("https://github.com/user-attachments/assets/two"));
+        // It names a file, so it must not carry anything path-like.
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
