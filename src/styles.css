@@ -498,7 +498,9 @@ body,
 .palette-item {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  /* The accelerator pins itself right with margin-left; space-between
+     would instead spread a hint away from the title it describes. */
+  justify-content: flex-start;
   gap: 12px;
   padding: 7px 10px;
   border-radius: 6px;
@@ -514,12 +516,35 @@ body,
 }
 
 .palette-hint {
+  /* Takes the slack so a long command ellipsizes instead of pushing the
+     accelerator off the row. min-width:0 is what lets it shrink at all. */
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
   font-size: 11px;
   color: var(--muted);
   font-family: Menlo, monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.palette-accel {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--subtext);
+  background: var(--bg-alt);
+  border: 1px solid var(--surface);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.palette-item.selected .palette-accel {
+  color: var(--text);
+  border-color: var(--muted);
 }
 
 .palette-empty {

@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { useConfigStore } from "../state/configStore";
+import { isMac } from "./accelerator";
 import { runAction } from "./actions";
-
-const isMac = navigator.platform.toUpperCase().includes("MAC");
 
 /**
  * Normalizes a KeyboardEvent or accelerator string ("mod+shift+d") to a
