@@ -187,6 +187,7 @@ pub fn run() {
             commands::list_worktrees,
             commands::set_diff_worktree,
             whatsnew::whats_new,
+            whatsnew::release_image,
             whatsnew::open_whats_new,
             commands::open_ssh,
             commands::ssh_hosts,

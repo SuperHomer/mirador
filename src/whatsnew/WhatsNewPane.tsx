@@ -6,6 +6,7 @@ import {
   ReleaseNotes,
   closePane,
   focusPane,
+  releaseImage,
   whatsNew,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
@@ -130,9 +131,99 @@ const BlockView = ({ block }: { block: NoteBlock }) => {
           <code>{block.text}</code>
         </pre>
       );
+    case "image":
+      return <NoteImage alt={block.alt} url={block.url} />;
     case "rule":
       return <hr />;
   }
+};
+
+/**
+ * The same formats the backend will store, recognised from the bytes
+ * rather than from the url — a release note's image has no file extension
+ * when it was uploaded to GitHub.
+ */
+function imageType(bytes: Uint8Array): string | null {
+  const starts = (sig: number[]) => sig.every((b, i) => bytes[i] === b);
+  if (starts([0x89, 0x50, 0x4e, 0x47])) return "image/png";
+  if (starts([0x47, 0x49, 0x46, 0x38])) return "image/gif";
+  if (starts([0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (starts([0x52, 0x49, 0x46, 0x46]) && bytes.length > 12) {
+    const tag = String.fromCharCode(...bytes.slice(8, 12));
+    if (tag === "WEBP") return "image/webp";
+  }
+  if (bytes.length > 12) {
+    const brand = String.fromCharCode(...bytes.slice(4, 12));
+    if (brand === "ftypavif") return "image/avif";
+  }
+  return null;
+}
+
+/**
+ * A screenshot or GIF from the notes.
+ *
+ * The bytes come over IPC and become a blob, so the page never holds a
+ * remote url and the privileged webview never makes the request. If they
+ * do not arrive — offline before it was ever cached, too large, or not an
+ * image — the alt text becomes a link, which is what the note would have
+ * shown anyway.
+ */
+const NoteImage = ({ alt, url }: { alt: string; url: string }) => {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let stale = false;
+    let objectUrl: string | null = null;
+    setSrc(null);
+    setFailed(false);
+    void releaseImage(url)
+      .then((buffer) => {
+        if (stale) return;
+        const bytes = new Uint8Array(buffer);
+        const type = imageType(bytes);
+        if (!type) {
+          setFailed(true);
+          return;
+        }
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type }));
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!stale) setFailed(true);
+      });
+    return () => {
+      stale = true;
+      // Freed on unmount, or a pane left open on a GIF holds it forever.
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  if (failed) {
+    return (
+      <p>
+        <a
+          href={url}
+          title={url}
+          onClick={(e) => {
+            e.preventDefault();
+            void openUrl(url);
+          }}
+        >
+          {alt || "image"}
+        </a>
+      </p>
+    );
+  }
+  return (
+    <figure className="whatsnew-figure">
+      {src ? (
+        <img src={src} alt={alt} />
+      ) : (
+        <span className="whatsnew-figure-loading">{alt || "image"}</span>
+      )}
+    </figure>
+  );
 };
 
 const Spans = ({ spans }: { spans: NoteSpan[] }) => (

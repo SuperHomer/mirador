@@ -62,6 +62,17 @@ pub fn parse(src: &str) -> Vec<NoteBlock> {
             continue;
         }
 
+        // An image on a line of its own becomes a block. Release notes put
+        // screenshots between paragraphs, never mid-sentence, and a block
+        // is the only place one can be shown at a useful size.
+        if let Some((alt, url)) = lone_image(line) {
+            flush_para(&mut para, &mut blocks);
+            flush_list(&mut items, &mut blocks);
+            blocks.push(NoteBlock::Image { alt, url });
+            i += 1;
+            continue;
+        }
+
         if let Some((level, text)) = heading(line) {
             flush_para(&mut para, &mut blocks);
             flush_list(&mut items, &mut blocks);
@@ -134,6 +145,23 @@ fn is_rule(line: &str) -> bool {
         && (t.chars().all(|c| c == '-') || t.chars().all(|c| c == '*') || t.chars().all(|c| c == '_'))
 }
 
+/// `![alt](url)` alone on a line → its alt text and url. Anything else on
+/// the line means it is prose that happens to contain an image, which is
+/// handled inline instead.
+fn lone_image(line: &str) -> Option<(String, String)> {
+    let t = line.trim();
+    let rest = t.strip_prefix('!')?;
+    let (span, end) = take_link(rest, 0)?;
+    // The link must be the whole of what followed the `!`.
+    if end != rest.len() {
+        return None;
+    }
+    match span {
+        NoteSpan::Link { text, href } => Some((text, href)),
+        _ => None,
+    }
+}
+
 fn heading(line: &str) -> Option<(u8, &str)> {
     let hashes = line.chars().take_while(|c| *c == '#').count();
     if !(1..=3).contains(&hashes) {
@@ -177,6 +205,11 @@ pub fn parse_inline(src: &str) -> Vec<NoteSpan> {
                 )
             }),
             b'[' => take_link(src, i),
+            // `![alt](url)` inside a sentence: the image marker is dropped
+            // and the link kept, rather than leaving a stray `!` behind.
+            b'!' if src.as_bytes().get(i + 1) == Some(&b'[') => {
+                take_link(src, i + 1)
+            }
             b'*' if src[i..].starts_with("**") => take_delimited(src, i, "**", "**")
                 .map(|(inner, end)| (NoteSpan::Strong { text: inner.to_string() }, end)),
             b'_' if src[i..].starts_with("__") => take_delimited(src, i, "__", "__")
@@ -418,6 +451,49 @@ See the [README](https://github.com/SuperHomer/mirador#install-macos).
         assert_eq!(spans[0], text("une "));
         assert_eq!(spans[1], NoteSpan::Strong { text: "mise à jour".into() });
         assert_eq!(spans[2], text(" — déjà là"));
+    }
+
+    #[test]
+    fn an_image_on_its_own_line_is_a_block() {
+        let blocks = parse("Before.\n\n![a demo](https://example.com/demo.gif)\n\nAfter.");
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(
+            blocks[1],
+            NoteBlock::Image {
+                alt: "a demo".into(),
+                url: "https://example.com/demo.gif".into()
+            }
+        );
+    }
+
+    #[test]
+    fn an_image_in_a_sentence_keeps_the_prose() {
+        // Not a block: the line is prose. The `!` must not survive as text.
+        let spans = parse_inline("see ![a demo](https://example.com/d.gif) here");
+        assert_eq!(
+            spans,
+            vec![
+                text("see "),
+                NoteSpan::Link {
+                    text: "a demo".into(),
+                    href: "https://example.com/d.gif".into()
+                },
+                text(" here"),
+            ]
+        );
+        // A bare `!` is still a `!`.
+        assert_eq!(parse_inline("wow! really"), vec![text("wow! really")]);
+    }
+
+    #[test]
+    fn an_image_with_an_unopenable_url_is_not_a_block() {
+        // The same rule as links: only http(s) is addressable, so this
+        // stays prose rather than becoming an image that cannot load.
+        let blocks = parse("![x](javascript:alert(1))");
+        assert!(matches!(blocks.as_slice(), [NoteBlock::Paragraph { .. }]));
+        // And a line with anything else on it is prose, not a block.
+        let blocks = parse("look: ![x](https://example.com/a.png)");
+        assert!(matches!(blocks.as_slice(), [NoteBlock::Paragraph { .. }]));
     }
 
     #[test]

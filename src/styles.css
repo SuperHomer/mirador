@@ -1277,6 +1277,32 @@ body,
   line-height: 1.5;
 }
 
+/* Screenshots and GIFs sit full-width in the measure, which is as wide as
+   a note's text gets anyway. */
+.whatsnew-figure {
+  margin: 0 0 1.2em;
+}
+
+.whatsnew-figure img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  background: var(--bg-alt);
+}
+
+/* Holds the row while the bytes arrive, so the text below does not jump. */
+.whatsnew-figure-loading {
+  display: block;
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  border: 1px dashed var(--surface);
+  border-radius: 8px;
+}
+
 .whatsnew-loading,
 .whatsnew-error {
   max-width: 68ch;
