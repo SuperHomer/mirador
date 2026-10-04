@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { newTab, splitPane, openSsh, sshHosts } from "../bindings";
+import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { actions } from "../keymap/actions";
 import { useConfigStore } from "../state/configStore";
 import { useUiStore } from "../state/uiStore";
@@ -9,6 +10,8 @@ interface Entry {
   id: string;
   title: string;
   hint?: string;
+  /** Already formatted for this platform; absent when nothing is bound. */
+  accel?: string;
   run: () => void;
 }
 
@@ -38,15 +41,27 @@ export function CommandPalette() {
   const customCommands = useConfigStore(
     (s) => s.config?.customCommands ?? [],
   );
+  const keybindings = useConfigStore((s) => s.config?.keybindings);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [hosts, setHosts] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const entries = useMemo<Entry[]>(() => {
+    // Shown so the palette teaches its own shortcuts: the keys a command
+    // already has are the reason to stop opening the palette for it.
+    const accels = acceleratorsByAction(keybindings);
     const base: Entry[] = actions
       .filter((a) => a.id !== "command_palette")
-      .map((a) => ({ id: a.id, title: a.title, run: a.run }));
+      .map((a) => {
+        const accel = accels.get(a.id);
+        return {
+          id: a.id,
+          title: a.title,
+          accel: accel ? formatAccel(accel) : undefined,
+          run: a.run,
+        };
+      });
     const custom: Entry[] = customCommands.map((c) => ({
       id: `custom:${c.name}`,
       title: c.name,
@@ -69,7 +84,7 @@ export function CommandPalette() {
       run: () => void openSsh(null, false, host),
     }));
     return [...custom, ...ssh, ...base];
-  }, [customCommands, hosts]);
+  }, [customCommands, hosts, keybindings]);
 
   const filtered = useMemo(() => {
     return entries
@@ -141,6 +156,9 @@ export function CommandPalette() {
               <span className="palette-title">{entry.title}</span>
               {entry.hint && (
                 <span className="palette-hint">{entry.hint}</span>
+              )}
+              {entry.accel && (
+                <kbd className="palette-accel">{entry.accel}</kbd>
               )}
             </div>
           ))}
