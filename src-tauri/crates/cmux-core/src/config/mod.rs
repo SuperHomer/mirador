@@ -7,7 +7,7 @@ pub mod ghostty;
 pub mod wezterm;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use cmux_protocol::{CustomCommand, ResolvedColors, ResolvedConfig};
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,10 @@ pub struct Config {
     /// Arguments for a custom `shell`. When set, Mirador adds none of its
     /// own (no `-l`, no PowerShell prompt hook).
     pub shell_args: Option<Vec<String>>,
+    /// Where a new tab's first pane starts. Splits always inherit their
+    /// source pane's directory, so this only applies to panes with nothing
+    /// to inherit. Unset → the home directory, as before.
+    pub default_cwd: Option<String>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
 }
@@ -93,6 +97,46 @@ pub fn home_dir() -> Option<String> {
     {
         std::env::var("HOME").ok()
     }
+}
+
+/// Where a new tab's first pane starts, from the `defaultCwd` config key.
+/// A split inherits its source pane's cwd and never consults this.
+///
+/// `~` and `~/…` expand against the home directory; anything else has to be
+/// an absolute path, since the app's own working directory is not somewhere
+/// a user can reason about. A value that is not a directory is reported and
+/// ignored, leaving the home-directory fallback in `pty::shell` in place.
+/// Read per tab, like the `shell` key, so an edited config applies to the
+/// next one.
+pub fn default_cwd() -> Option<String> {
+    let (cfg, _) = load();
+    let path = expand_tilde(cfg.default_cwd?.trim())?;
+    if Path::new(&path).is_dir() {
+        return Some(path);
+    }
+    eprintln!(
+        "mirador: defaultCwd {path:?} is not a directory; new tabs open in the home directory"
+    );
+    None
+}
+
+/// Expands a leading `~` (alone or followed by a separator) against the home
+/// directory. `~user` is not supported and passes through untouched.
+fn expand_tilde(raw: &str) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+    let Some(rest) = raw.strip_prefix('~') else {
+        return Some(raw.to_string());
+    };
+    if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
+        return Some(raw.to_string());
+    }
+    let home = home_dir()?;
+    if rest.is_empty() {
+        return Some(home);
+    }
+    Some(format!("{}{}", home.trim_end_matches(['/', '\\']), rest))
 }
 
 /// Loads mirador.json (missing file → defaults; parse errors are reported but
@@ -337,6 +381,24 @@ pub(crate) fn normalize_color(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tilde_expands_against_home() {
+        let home = home_dir().expect("a home directory");
+        assert_eq!(expand_tilde("~"), Some(home.clone()));
+        assert_eq!(expand_tilde("~/code"), Some(format!("{home}/code")));
+        // Absolute paths and `~user` pass through; empty means "unset".
+        assert_eq!(expand_tilde("/tmp/x"), Some("/tmp/x".into()));
+        assert_eq!(expand_tilde("~other/code"), Some("~other/code".into()));
+        assert_eq!(expand_tilde(""), None);
+    }
+
+    #[test]
+    fn default_cwd_is_absent_unless_configured() {
+        // `defaultCwd` is opt-in: with no key, new tabs keep the old
+        // home-directory behavior.
+        assert!(Config::default().default_cwd.is_none());
+    }
 
     #[test]
     fn defaults_resolve_without_config() {

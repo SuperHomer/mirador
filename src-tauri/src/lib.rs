@@ -67,9 +67,20 @@ pub fn run() {
     }
 
     // Restore the previous session; command panes come back idle.
-    let (workspace, mut meta) = cmux_core::session::load()
-        .and_then(cmux_core::session::restore)
-        .unwrap_or_else(|| (Workspace::default(), HashMap::new()));
+    let restored = cmux_core::session::load().and_then(cmux_core::session::restore);
+    let (workspace, mut meta) = match restored {
+        Some(restored) => restored,
+        // First launch, or a session file that no longer loads: the single
+        // pane is as new as one in a new tab, so `defaultCwd` applies.
+        None => {
+            let workspace = Workspace::default();
+            let mut meta: HashMap<String, PaneMeta> = HashMap::new();
+            if let Some(cwd) = cmux_core::config::default_cwd() {
+                meta.entry(workspace.focused_pane()).or_default().cwd = Some(cwd);
+            }
+            (workspace, meta)
+        }
+    };
     // Panes that ran a known agent offer to resume its session: they
     // become command panes running `<agent> --resume <id>` (idle until a
     // keypress, like every restored command pane).

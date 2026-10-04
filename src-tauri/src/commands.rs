@@ -190,8 +190,13 @@ pub fn new_tab(
     command: Option<String>,
 ) -> NewTabResult {
     let (tab_id, pane_id) = state.workspace.lock().unwrap().new_tab();
-    if let Some(cmd) = command {
-        state.meta.lock().unwrap().entry(pane_id.clone()).or_default().command = Some(cmd);
+    // A fresh tab has no pane to inherit a directory from the way a split
+    // does, so its one pane starts in `defaultCwd` when that is configured.
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(pane_id.clone()).or_default();
+        entry.cwd = cmux_core::config::default_cwd();
+        entry.command = command;
     }
     emit_workspace(&app);
     NewTabResult { tab_id, pane_id }
@@ -199,9 +204,34 @@ pub fn new_tab(
 
 #[tauri::command]
 pub fn close_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String) {
+    let before = state.workspace.lock().unwrap().all_pane_ids();
     let killed = state.workspace.lock().unwrap().close_tab(&tab_id);
+    seed_recreated_panes(&state, &before);
     kill_panes(&app, &state, &killed);
     emit_workspace(&app);
+}
+
+/// Closing the last tab makes the workspace recreate an empty one, whether
+/// the tab was closed directly or by closing its last pane. That pane is as
+/// new as a new tab's, so it opens in `defaultCwd` — and since the workspace
+/// creates it internally, it is spotted by diffing pane ids rather than
+/// threaded back out through two return types.
+fn seed_recreated_panes(state: &AppState, before: &[String]) {
+    let fresh: Vec<String> = {
+        let ws = state.workspace.lock().unwrap();
+        ws.all_pane_ids()
+            .into_iter()
+            .filter(|p| !before.contains(p))
+            .collect()
+    };
+    if fresh.is_empty() {
+        return;
+    }
+    let cwd = cmux_core::config::default_cwd();
+    let mut meta = state.meta.lock().unwrap();
+    for pane in fresh {
+        meta.entry(pane).or_default().cwd = cwd.clone();
+    }
 }
 
 #[tauri::command]
@@ -257,7 +287,9 @@ pub fn split_pane(
 
 #[tauri::command]
 pub fn close_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
+    let before = state.workspace.lock().unwrap().all_pane_ids();
     let killed = state.workspace.lock().unwrap().close_pane(&pane_id);
+    seed_recreated_panes(&state, &before);
     kill_panes(&app, &state, &killed);
     emit_workspace(&app);
 }

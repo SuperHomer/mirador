@@ -190,3 +190,24 @@ need Option for characters:
 // ~/.config/mirador/mirador.json
 { "macOptionIsMeta": true }
 ```
+
+## Where new tabs open
+
+New tabs open in your home directory. Point them somewhere else with
+`defaultCwd`:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "defaultCwd": "~/Workspace" }
+```
+
+`~` and `~/…` expand; anything else must be an absolute path. A path that
+isn't a directory is ignored (with a line on stderr) and the home directory
+is used instead. Like `shell`, the key is read per tab, so an edit applies
+to the next one without a restart.
+
+Splits are unaffected — `mod+D` keeps inheriting the directory of the pane
+you split, which is almost always what you want. `defaultCwd` fills in only
+where there is nothing to inherit: a new tab, the first pane on a fresh
+install, and the tab Mirador recreates when you close the last one. A
+restored session keeps each pane's own saved directory.
