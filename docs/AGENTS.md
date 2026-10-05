@@ -50,14 +50,20 @@ commands into skills and both spellings still produce `/mira-diff`, but
 skills are where new work goes. Its one shell line needs Claude Code
 2.1.228 or newer to run.
 
-The hook resolves *which pane* its Claude session runs in from `MIRA_PANE`,
-which every process inside a pane inherits, so five parallel agents notify
-five different tabs correctly. (On unix it falls back to the parent
-process's tty when the environment was lost — over `sudo`, say.)
+The hook resolves *which pane* its Claude session runs in from its
+terminal: on unix, the pane whose tty it runs on, so five parallel agents
+notify five different tabs correctly. A session hosted by Claude Code's
+background daemon (`claude --bg`) runs on the daemon's terminal instead, and
+belongs to the pane running `claude attach <job>` for it. The inherited
+`MIRA_PANE` is used only where there are no ttys (Windows) — the daemon
+passes on the `MIRA_PANE` of whichever pane started it to every session it
+hosts, so trusting it put every tab's session on the same pane.
 
 **Session resume**: because session ids are recorded per pane, restarting
-Mirador restores each agent pane idle with `[press any key to rerun:
-claude --resume <id>]` — one keypress and the conversation continues.
+Mirador brings each agent pane back as the shell it was, with `claude
+--resume <id>` (or `claude attach <job>`) typed in for you — no keypress,
+and `/exit` leaves you at a prompt. A session you exited before quitting is
+forgotten, so it does not come back.
 
 ## 3. Run commands the human can watch (and interrupt)
 

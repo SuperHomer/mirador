@@ -82,16 +82,36 @@ pub fn run() {
             (workspace, meta)
         }
     };
-    // Panes that ran a known agent offer to resume its session: they
-    // become command panes running `<agent> --resume <id>` (idle until a
-    // keypress, like every restored command pane).
+    // Panes that ran Claude Code come back as the shell they were, with
+    // `claude --resume <id>` (or `claude attach <job>` for a daemon
+    // session) typed into it — no keypress, and exiting Claude leaves you
+    // at a prompt rather than offering to run it again. The one exception
+    // to restored panes waiting for a keypress: resuming a conversation
+    // runs nothing until you type into it.
     for m in meta.values_mut() {
-        if let Some(session) = &m.agent_session {
-            if let Some((agent, id)) = session.split_once(':') {
-                if agent == "claude" {
-                    m.command = Some(format!("claude --resume {id}"));
-                }
-            }
+        // Versions before this restored the resume as a command pane, and
+        // saved it as one: it is a shell again, session or not, or it would
+        // come back as an idle command pane on every launch from now on.
+        if m
+            .command
+            .as_deref()
+            .is_some_and(|c| c.starts_with("claude --resume "))
+        {
+            m.command = None;
+        }
+        let Some(session) = m.agent_session.clone() else {
+            continue;
+        };
+        // A real command pane (`mira run claude …`) keeps its own command.
+        if m.command.is_some() || m.remote_host.is_some() {
+            continue;
+        }
+        if let Some(input) = cmux_core::agents::restore_command(&session) {
+            m.startup_input = Some(input);
+        } else if let Some(command) = cmux_core::agents::legacy_resume_command(&session) {
+            // An older version's record, possibly misattributed: offered on
+            // a keypress like any restored command pane, never typed in.
+            m.command = Some(command);
         }
     }
     // Command panes AND remote (SSH) panes come back idle: relaunching the

@@ -150,8 +150,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             tty,
             title,
             body,
+            job,
         } => {
-            let pane = resolve_pane(&state, pane_id, tty).unwrap_or_else(|| focused_pane(&state));
+            let pane =
+                resolve_pane(&state, pane_id, tty, job).unwrap_or_else(|| focused_pane(&state));
             notify::handle_notification(app, &pane, title, body);
             Ok(json!({ "paneId": pane }))
         }
@@ -160,13 +162,18 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             tty,
             agent,
             session_id,
+            job,
         } => {
-            let pane = resolve_pane(&state, pane_id, tty)
+            if agent != "claude" {
+                return Err(format!("unknown agent `{agent}`"));
+            }
+            let record = cmux_core::agents::session_record(&session_id, job.as_deref())
+                .ok_or("not a session id")?;
+            let pane = resolve_pane(&state, pane_id, tty, job)
                 .ok_or("could not resolve the pane for this agent session")?;
             {
                 let mut meta = state.meta.lock().unwrap();
-                meta.entry(pane.clone()).or_default().agent_session =
-                    Some(format!("{agent}:{session_id}"));
+                meta.entry(pane.clone()).or_default().agent_session = Some(record);
             }
             state
                 .session_dirty
@@ -343,42 +350,37 @@ fn resolve_remote_pane(
         .clone())
 }
 
-/// Which pane a request came from: the `MIRA_PANE` the caller inherited
-/// (checked against live panes, since a stale environment outlives its
-/// pane), else its tty.
-fn resolve_pane(state: &AppState, pane_id: Option<String>, tty: Option<String>) -> Option<String> {
+/// Which pane a request came from. The `MIRA_PANE` the caller inherited is
+/// checked against live panes, since a stale environment outlives its pane,
+/// and then yields to the caller's terminal wherever there is one — see
+/// `cmux_core::agents::hook_pane` for why an inherited id cannot be trusted.
+fn resolve_pane(
+    state: &AppState,
+    pane_id: Option<String>,
+    tty: Option<String>,
+    job: Option<String>,
+) -> Option<String> {
     let claimed = pane_id.filter(|id| {
         let ws = state.workspace.lock().unwrap();
         ws.tabs
             .iter()
             .any(|t| cmux_core::layout::contains(&t.root, id))
     });
-    claimed.or_else(|| tty.as_deref().and_then(|t| pane_by_tty(state, t)))
-}
-
-/// Finds the pane whose shell owns the given tty (e.g. "ttys004"). The
-/// primary way a process identifies its pane is the `MIRA_PANE` environment
-/// variable it inherited; this is the fallback for processes that lost the
-/// environment, and Windows (no ttys) has only the former.
-#[cfg(unix)]
-fn pane_by_tty(state: &AppState, tty: &str) -> Option<String> {
-    let wanted = tty.trim_start_matches("/dev/");
-    for (pane, pid) in state.pty.pids() {
-        let output = std::process::Command::new("ps")
-            .args(["-o", "tty=", "-p", &pid.to_string()])
-            .output()
-            .ok()?;
-        let pane_tty = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if pane_tty == wanted {
-            return Some(pane);
-        }
-    }
-    None
-}
-
-#[cfg(not(unix))]
-fn pane_by_tty(_state: &AppState, _tty: &str) -> Option<String> {
-    None
+    let procs = if tty.is_some() || job.is_some() {
+        cmux_core::agents::process_table()
+    } else {
+        Vec::new()
+    };
+    // Windows lists no processes here; a job id there would match nothing
+    // and discard the claim, so it only counts where it can be resolved.
+    let job = job.filter(|_| cfg!(unix));
+    cmux_core::agents::hook_pane(
+        &procs,
+        &state.pty.pids(),
+        claimed,
+        tty.as_deref(),
+        job.as_deref(),
+    )
 }
 
 /// Default browser pane: the given one, or the first browser pane of the

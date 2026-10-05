@@ -413,11 +413,20 @@ fn attach_pane_blocking(
         let pane = pane_id.clone();
         // An SSH session isn't a "run": no output capture, no history.
         let capture = pane_command.is_some() && remote_host.is_none();
+        // A restored agent pane types its resume command once the shell
+        // has printed something. Checked from every sink, not just the
+        // spawning one, so a remount before the first prompt (StrictMode)
+        // cannot lose it; `take` makes it happen once.
+        let mut startup_pending = pane_command.is_none() && remote_host.is_none();
         move |bytes: &[u8]| {
             let _ = on_data.send(InvokeResponseBody::Raw(bytes.to_vec()));
             if capture {
                 let state = sink_app.state::<AppState>();
                 crate::runs::capture_output(&state, &pane, bytes);
+            }
+            if startup_pending {
+                startup_pending = false;
+                type_startup_input(&sink_app, &pane);
             }
         }
     };
@@ -538,6 +547,32 @@ fn attach_pane_blocking(
     )?;
 
     Ok("spawned".into())
+}
+
+/// Types a restored pane's `startup_input` into its shell. The first output
+/// is usually the start of the prompt, not the end of shell startup, so it
+/// waits a moment longer; input that still arrives early is not lost —
+/// the tty holds it until the line editor reads it.
+fn type_startup_input(app: &AppHandle, pane_id: &str) {
+    let state = app.state::<AppState>();
+    let Some(input) = state
+        .meta
+        .lock()
+        .unwrap()
+        .get_mut(pane_id)
+        .and_then(|m| m.startup_input.take())
+    else {
+        return;
+    };
+    let app = app.clone();
+    let pane = pane_id.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let _ = app
+            .state::<AppState>()
+            .pty
+            .write(&pane, format!("{input}\r").as_bytes());
+    });
 }
 
 /// Opens a browser pane: split of `pane_id` (or a new tab when `tab` is
