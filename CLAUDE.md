@@ -1,0 +1,195 @@
+# Working on Mirador
+
+A cross-platform terminal (Tauri 2 + React + xterm.js) built for watching AI
+coding agents work. Panes are PTYs; a `mira` CLI and Unix socket drive every
+action from outside.
+
+Read these first, and don't duplicate them here:
+
+- [`README.md`](README.md) — install, config keys, keybindings, releasing
+- [`docs/AGENTS.md`](docs/AGENTS.md) — the `mira` CLI and socket protocol
+
+This file is for what the code and those docs don't tell you.
+
+## Layout
+
+```
+src/                        React frontend (the host webview)
+  terminal/ diff/ graph/ browser/ whatsnew/   one directory per pane type
+  layout/SplitLayer.tsx     picks which pane component renders a pane id
+  bindings.ts               every Tauri command + its DTOs, hand-written
+  keymap/                   accelerators, the actions table, the palette's source
+src-tauri/
+  src/                      app crate: commands.rs, server.rs (socket), intel.rs,
+                            whatsnew.rs, update.rs, browser.rs
+  crates/cmux-core/         PTY, git, diff, graph, notes, config, session, layout
+  crates/cmux-protocol/     every DTO crossing Rust↔TS or the socket
+  crates/cmux-cli/          the `mira` binary
+web/                        the marketing site (separate vite app, own tsconfig)
+```
+
+**Logic lives in Rust, the frontend renders.** Parsing, git, and anything
+testable belongs in `cmux-core`, which has a test suite CI runs. There is no
+JavaScript test runner, so logic put in TypeScript is logic that cannot be
+tested — that is the reason `notes.rs` (markdown) and `graph.rs` (lane
+placement) are in Rust rather than in the components that draw them.
+
+## Build and check
+
+Run what CI runs, **from `src-tauri`**:
+
+```bash
+cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
+cd src-tauri && cargo test --workspace
+npx tsc --noEmit && npm run build          # repo root
+cd web && npx tsc --noEmit && npm run build # only if web/ changed
+```
+
+`cargo clippy --manifest-path src-tauri/Cargo.toml` checks **only** the root
+package. `cmux-cli` and friends are skipped, and a type error in them sails
+through a clean-looking run. Always `--workspace`.
+
+## Verifying a change
+
+**CI compiles and unit-tests but never mounts the app.** `tsc`, `vite build`,
+clippy and the Rust suite all pass without a single pane ever opening, so
+whole classes of breakage ride a green suite: a React version mismatch that
+stops the tree mounting, a panic on a background thread, a pane drawn
+off-window, CSS that makes a row unshrinkable.
+
+Anything touching a pane, the PTY, or startup needs a **second instance**:
+
+```bash
+npm run build                                   # a debug binary embeds no frontend
+python3 -m http.server 1420 --directory dist &  # ...it loads this instead
+SBX=/tmp/msbx-home   # sandbox $HOME, with the real dotfiles symlinked in
+env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh HOME=$SBX \
+  XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx \
+  ./src-tauri/target/debug/mirador &
+```
+
+Why each part matters:
+
+- **A debug build with `build.devUrl` set embeds no assets** and loads
+  `localhost:1420`. With nothing there the window is blank, React never
+  mounts, no PTY spawns — and the log is empty, which makes it look mysterious.
+- **`SHELL=/bin/zsh` must be set** under `env -i`. A Finder-launched app has
+  it; without it the shell falls back to bash and reads the wrong dotfiles.
+- **Keep `XDG_RUNTIME_DIR` short** (`/tmp/msbx`): a Unix socket path over
+  ~104 chars fails with `SUN_LEN` and the instance comes up with no socket.
+- **Give `XDG_CONFIG_HOME` its own directory.** The dev and release apps
+  otherwise share a socket and data directory, so only one gets automation —
+  and the sandbox would overwrite the discovery file your real instance uses.
+
+State is all environment-derived: session + scrollback under
+`$HOME/Library/Application Support/Mirador` (macOS), socket in
+`$XDG_RUNTIME_DIR`, config and `socket.json` under `$XDG_CONFIG_HOME`.
+
+Then drive it with `mira` and check the three things only a running app shows:
+
+```bash
+mira send-input --pane <id> $'echo ok\n' && mira read-screen --pane <id>  # PTY + xterm
+mira diff --tab        # a pane that mounts proves the React bundle loaded
+mira browser open https://example.com --tab && mira browser eval --pane <id> 'document.readyState'
+```
+
+**Automated tooling cannot see the UI.** The app draws in the host webview,
+which no DOM tooling reaches — browser automation only gets at browser panes'
+*child* webviews — and screen capture needs a macOS screen-recording grant
+that a CLI process typically does not have. So an agent working here is
+blind to the result of its own visual change, and should say so rather than
+implying otherwise: measure what can be measured, launch a sandbox instance
+with the change in it, and ask a human to look. For a visual bug, remove
+*every* candidate cause at once rather than tuning the one you suspect —
+guessing one at a time has made things worse here before.
+
+The `web/` site is the exception — serve it and inspect the real DOM with the
+browser tools. Note it builds with a `/mirador/` base, so serving `dist` at
+the root 404s every asset.
+
+## Adding a pane type
+
+Panes are a pane id plus fields on `PaneMeta`. The whole chain, in order:
+
+1. `src-tauri/crates/cmux-core/src/state.rs` — a field on `PaneMeta` (e.g. `graph_repo`)
+2. `cmux-protocol` — a `…Pane` DTO and a `Vec` of them on `WorkspaceSnapshot`
+   (plus `Vec::new()` in `Workspace::snapshot`, which the compiler will demand)
+3. `src-tauri/src/commands.rs` — build that Vec in `workspace_snapshot`, and
+   an `open_*` command that splits or opens a tab
+4. `src-tauri/src/lib.rs` — register commands in `generate_handler!`
+5. `src/bindings.ts` — the DTO and invoke wrappers
+6. `src/layout/SplitLayer.tsx` — dispatch on the snapshot list
+7. `src/keymap/actions.ts` — a palette entry; `src/styles.css` — styles
+8. `cmux-protocol` `Request` + `server.rs` + `cmux-cli` — socket/CLI parity
+
+Every existing pane type has CLI parity. A new one without it is an
+inconsistency reviewers will notice.
+
+## Things that bite
+
+- **A running app keeps executing the binary it started with.** After an
+  in-place update the disk and the process disagree about the version.
+- **Restored panes must not act on their own.** Command panes and SSH panes
+  come back *idle*; relaunching must never re-run `npm test` or silently
+  reopen an SSH session. A keypress does it.
+- **React StrictMode double-mounts in dev** and has twice broken the terminal
+  by swapping the output sink out from under a pending attach.
+- **A flex row's only shrinkable item absorbs all overflow** and collapses to
+  nothing. Bit the diff header (label shrank to `1…`) and the graph row.
+- **Dependabot cannot group across ecosystems**: an npm `@tauri-apps/*` bump
+  must land with its Rust crate's matching minor, and a bump can silently
+  disable a `[patch.crates-io]` that exists for a reason.
+- **The intel poller** (`intel.rs`, every 2s) writes `cwd`, branch, repo root
+  and ports into `PaneMeta`, but OSC 7 latches `cwd_from_shell` and wins
+  permanently. It has to: PowerShell's `cd` moves its own location and never
+  the process working directory the poller reads, so on Windows the two
+  disagree forever. Mirador injects a shell-integration script to get OSC 7
+  out of PowerShell at all.
+
+## Security boundaries
+
+The frontend in `src/` runs in the **privileged webview** that holds the IPC
+bridge. Anything remote that reaches it is untrusted:
+
+- **Never render remote content as HTML.** Release notes are parsed in Rust
+  into typed blocks the components map to elements; there is no
+  `dangerouslySetInnerHTML` anywhere, and raw HTML in a note shows as text.
+- **Only `http(s)` links are navigable**, and they open in the real browser
+  via the opener plugin.
+- **Remote bytes are fetched by Rust, not the page.** Release-note images are
+  downloaded, host-checked (`github.com`, `*.githubusercontent.com`), size-
+  capped, and format-checked *from the bytes* — SVG is refused because it can
+  carry script. They reach the page as raw IPC bytes turned into a blob.
+- Updater payloads are verified against the public key in `tauri.conf.json`.
+  There is no Apple signature; the minisign key is the only thing protecting
+  an install.
+
+## Conventions
+
+**Commits** explain *why*, in prose, at length — read `git log` before
+writing one. Record the mechanism, the alternative not taken, and what was
+actually verified. A one-line summary of a non-trivial change will look out
+of place.
+
+**Pull requests** carry the same weight: the design decision, what a reviewer
+should argue with, and a verification section separating what tests prove
+from what a running app proved.
+
+**Releases** go straight to `main` as a `Release vX.Y.Z` commit touching four
+files — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
+and the lockfile. Then a GitHub release, which triggers the artifact jobs.
+
+Two things about that, both learned the hard way:
+
+- **Publishing breaks the updater for a few minutes.** The artifact jobs fire
+  *on* `release: published`, so `/releases/latest/` points at a release whose
+  `latest-<target>-<arch>.json` does not exist yet and every running app's
+  check 404s. It self-heals; don't tell anyone to update until the jobs finish.
+- **The release body is user-facing UI.** The What's New pane renders it after
+  an update, and the update manifest carries it verbatim. Write it before
+  tagging, not after. Images must be on an allowed host — attaching a
+  screenshot to the release itself works, since the asset URL is on
+  `github.com`.
+- A PR from this repo has the signing secret, so it always takes the signed
+  build path. Only Dependabot PRs and forks exercise the keyless one; to test
+  that, run `env -u TAURI_SIGNING_PRIVATE_KEY npm run tauri build` locally.
