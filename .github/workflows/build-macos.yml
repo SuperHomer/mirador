@@ -21,13 +21,13 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/build-macos.yml"
-  release:
-    types: [published]
+  # release.yml calls this on a tag push and does the attaching itself.
+  workflow_call:
   workflow_dispatch:
 
 # The build runs `npm ci` and `cargo build`, i.e. dependency build scripts.
-# Those must never hold a token that can write to the repository; only the
-# release job below gets one, and only on a release event.
+# Those must never hold a token that can write to the repository; the jobs
+# in release.yml that do write never run any of it.
 permissions:
   contents: read
 
@@ -102,66 +102,3 @@ jobs:
             src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/release/mira
           if-no-files-found: error
-
-  # Separate job so repo-write lives here and nowhere near the build's
-  # dependency graph.
-  release:
-    needs: build
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: mirador-macos
-          path: dist
-
-      # Version-free name on purpose — see the note in build-windows.yml.
-      - name: Attach the .dmg and the update payload
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-          REPO: ${{ github.repository }}
-          # Read via os.environ below, never interpolated into the script: a
-          # release body is arbitrary text, and `${{ }}` inside a run block
-          # would hand a backtick or a quote in it to the shell.
-          BODY: ${{ github.event.release.body }}
-        run: |
-          set -euo pipefail
-          mv dist/bundle/dmg/*.dmg Mirador-macOS-arm64.dmg
-          mv dist/bundle/macos/*.app.tar.gz     Mirador-macOS-arm64.app.tar.gz
-          mv dist/bundle/macos/*.app.tar.gz.sig Mirador-macOS-arm64.app.tar.gz.sig
-
-          # The manifest the updater fetches. Keyed by the platform triple the
-          # plugin asks for, and pointing at this release's own tag rather than
-          # /latest, so a manifest always describes the build it shipped with.
-          python3 - <<'PY' > latest-darwin-aarch64.json
-          import datetime, json, os, sys
-          tag = os.environ["TAG"]
-          repo = os.environ["REPO"]
-          sig = open("Mirador-macOS-arm64.app.tar.gz.sig").read().strip()
-          json.dump({
-              "version": tag.lstrip("v"),
-              # The release body itself, so the app can show what changed
-              # without a second request to an API that rate-limits by IP.
-              # Empty body (a release published before its notes were
-              # written) falls back to the link it used to carry.
-              "notes": os.environ.get("BODY", "").strip()
-                       or f"See https://github.com/{repo}/releases/tag/{tag}",
-              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "platforms": {
-                  "darwin-aarch64": {
-                      "signature": sig,
-                      "url": f"https://github.com/{repo}/releases/download/{tag}/Mirador-macOS-arm64.app.tar.gz",
-                  }
-              },
-          }, sys.stdout, indent=2)
-          PY
-
-          gh release upload "$TAG" \
-            Mirador-macOS-arm64.dmg \
-            Mirador-macOS-arm64.app.tar.gz \
-            Mirador-macOS-arm64.app.tar.gz.sig \
-            latest-darwin-aarch64.json \
-            --repo "$REPO" --clobber

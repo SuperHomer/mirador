@@ -152,10 +152,13 @@ matters.
 produces payloads the installed public key rejects, so the only way back is
 asking users to reinstall by hand. Keep a copy somewhere durable.
 
-Each platform's release job publishes its own manifest —
-`latest-darwin-aarch64.json`, `latest-windows-x86_64.json` — because macOS and
-Windows build in separate workflow runs and a shared `latest.json` would make
-one wait for the other. The app asks for
+A release is cut from a draft: write the notes into
+`gh release create vX.Y.Z --draft`, then push the `vX.Y.Z` tag.
+[release.yml](.github/workflows/release.yml) builds both platforms, attaches
+the installers and one manifest per platform —
+`latest-darwin-aarch64.json`, `latest-windows-x86_64.json` — and only then
+publishes the draft, so no updater ever sees a release without its manifest.
+The app asks for
 `latest-{{target}}-{{arch}}.json` under `/releases/latest/download/`, which
 GitHub resolves to the newest release, so no workflow rewrites any config.
 

@@ -222,19 +222,29 @@ from what a running app proved.
 
 **Releases** go straight to `main` as a `Release vX.Y.Z` commit touching four
 files — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
-and the lockfile. Then a GitHub release, which triggers the artifact jobs.
+and the lockfile. Then a *draft* release with its notes, then the tag:
 
-Three things about that, all learned the hard way:
+```bash
+gh release create vX.Y.Z --draft --title "vX.Y.Z — …" --notes-file notes.md
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
 
-- **Publishing breaks the updater for a few minutes.** The artifact jobs fire
-  *on* `release: published`, so `/releases/latest/` points at a release whose
-  `latest-<target>-<arch>.json` does not exist yet and every running app's
-  check 404s. It self-heals; don't tell anyone to update until the jobs finish.
+The tag push runs `release.yml`: it checks the tag matches
+`tauri.conf.json` and that the draft exists, builds both platforms, attaches
+everything, and publishes the draft last. Never publish it by hand — that
+reopens the window where `/releases/latest/` names a release with no
+`latest-<target>-<arch>.json` and every running app's update check 404s,
+which is what the old publish-then-build order did. A failed build leaves
+an invisible draft; re-run the failed jobs.
+
+Two things about that, both learned the hard way:
+
 - **The release body is user-facing UI.** The What's New pane renders it after
-  an update, and the update manifest carries it verbatim. Write it before
-  tagging, not after. Images must be on an allowed host — attaching a
-  screenshot to the release itself works, since the asset URL is on
-  `github.com`.
+  an update, and the update manifests carry it verbatim — read from the
+  draft at attach time, so edits after publishing reach the pane but never
+  the manifests. The workflow refuses a tag with no draft for that reason.
+  Images must be on an allowed host — attaching a screenshot to the release
+  itself works, since the asset URL is on `github.com`.
 - A PR from this repo has the signing secret, so it always takes the signed
   build path. Only Dependabot PRs and forks exercise the keyless one; to test
   that, run `env -u TAURI_SIGNING_PRIVATE_KEY npm run tauri build` locally.
