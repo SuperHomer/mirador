@@ -21,7 +21,8 @@ src/                        React frontend (the host webview)
   keymap/                   accelerators, the actions table, the palette's source
 src-tauri/
   src/                      app crate: commands.rs, server.rs (socket), intel.rs,
-                            whatsnew.rs, update.rs, browser.rs
+                            whatsnew.rs, update.rs, runs.rs (command-pane runs),
+                            browser.rs + browser_bridge.js (injected into pages)
   crates/cmux-core/         PTY, git, diff, graph, notes, config, session, layout
   crates/cmux-protocol/     every DTO crossing Rust↔TS or the socket
   crates/cmux-cli/          the `mira` binary
@@ -36,13 +37,13 @@ placement) are in Rust rather than in the components that draw them.
 
 ## Build and check
 
-Run what CI runs, **from `src-tauri`**:
+Run what CI runs — the cargo commands **from `src-tauri`**:
 
 ```bash
 cd src-tauri && cargo clippy --workspace --all-targets -- -D warnings
 cd src-tauri && cargo test --workspace
-npx tsc --noEmit && npm run build          # repo root
-cd web && npx tsc --noEmit && npm run build # only if web/ changed
+npm run build               # repo root; the script is `tsc && vite build`
+cd web && npm run build     # only if web/ changed; `tsc -b && vite build`
 ```
 
 `cargo clippy --manifest-path src-tauri/Cargo.toml` checks **only** the root
@@ -83,15 +84,40 @@ Why each part matters:
 
 State is all environment-derived: session + scrollback under
 `$HOME/Library/Application Support/Mirador` (macOS), socket in
-`$XDG_RUNTIME_DIR`, config and `socket.json` under `$XDG_CONFIG_HOME`.
+`$XDG_RUNTIME_DIR`, config and `socket.json` under `$XDG_CONFIG_HOME/mirador`.
 
-Then drive it with `mira` and check the three things only a running app shows:
+**Don't seed the sandbox with the real `session.json`.** A pane that ran
+Claude restores as `claude --resume <id>`; one keypress in the sandbox would
+then start a second process writing the live conversation. If a test needs a
+restored agent pane, give it a stale session id.
+
+**Drive it with the same environment.** `mira` finds its socket through
+`$XDG_CONFIG_HOME/mirador/socket.json`, so a bare `mira` from your own shell
+talks to the *real* instance — and `send-input` there types into whatever
+pane id you named, possibly the session running you. Use the debug CLI with
+the sandbox's variables (a function, not a `$VAR` — zsh does not word-split
+an unquoted variable):
 
 ```bash
-mira send-input --pane <id> $'echo ok\n' && mira read-screen --pane <id>  # PTY + xterm
-mira diff --tab        # a pane that mounts proves the React bundle loaded
-mira browser open https://example.com --tab && mira browser eval --pane <id> 'document.readyState'
+smira() { XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx ./src-tauri/target/debug/mira "$@"; }
 ```
+
+Then check the three things only a running app shows (`smira list-tabs` gives
+pane ids):
+
+```bash
+smira send-input --pane <id> $'echo ok\n' && smira read-screen --pane <id>  # PTY + xterm
+smira diff --tab        # a pane that mounts proves the React bundle loaded
+smira browser open https://example.com --tab && smira browser eval --pane <id> 'document.readyState'
+```
+
+A `read-screen` that times out with "pane not mounted?" is the signature of a
+render throw. And `send-input` cannot stand in for a keypress on an idle
+restored pane — its PTY does not exist yet; that path needs a human.
+
+A release binary embeds `dist` and needs no server, but it embeds whatever
+`dist` was on disk at build time — rebuild the frontend first or you are
+testing a stale bundle.
 
 **Automated tooling cannot see the UI.** The app draws in the host webview,
 which no DOM tooling reaches — browser automation only gets at browser panes'
@@ -103,9 +129,17 @@ with the change in it, and ask a human to look. For a visual bug, remove
 *every* candidate cause at once rather than tuning the one you suspect —
 guessing one at a time has made things worse here before.
 
-The `web/` site is the exception — serve it and inspect the real DOM with the
-browser tools. Note it builds with a `/mirador/` base, so serving `dist` at
-the root 404s every asset.
+The `web/` site is the exception — `npm run preview` in `web/` (port 4173)
+and inspect the real DOM, with the browser tools or `mira browser eval`. Note
+it builds with a `/mirador/` base, so serving `dist` at the root 404s every
+asset. Query what renders, not the bundle: a string grepped out of the built
+JS once passed while the visible listing beside it was still wrong.
+
+Browser panes are the other place you can measure: `mira browser eval` gives
+`readyState`, `innerWidth/innerHeight` and body length, which splits "not
+loaded" from "loaded but drawn in the wrong place". Don't trust
+`screenX/screenY/outerWidth/outerHeight` there — WKWebView in wry reports no
+window rect, and a browser-pane offset bug once came from `window.screenY`.
 
 ## Adding a pane type
 
@@ -136,9 +170,15 @@ inconsistency reviewers will notice.
   by swapping the output sink out from under a pending attach.
 - **A flex row's only shrinkable item absorbs all overflow** and collapses to
   nothing. Bit the diff header (label shrank to `1…`) and the graph row.
-- **Dependabot cannot group across ecosystems**: an npm `@tauri-apps/*` bump
-  must land with its Rust crate's matching minor, and a bump can silently
-  disable a `[patch.crates-io]` that exists for a reason.
+- **Tauri versions come in pairs, and Dependabot can't group them.** `tauri
+  build` aborts with `Found version mismatched Tauri packages` unless npm
+  `@tauri-apps/api` matches cargo `tauri`'s minor (and `plugin-opener`
+  matches `tauri-plugin-opener`). It compares `api`, not `cli`, so a
+  Dependabot PR for the crate alone can never go green; combine it by hand
+  (`npm install @tauri-apps/api@X.Y.Z` + `cargo update -p tauri --precise
+  X.Y.Z`). A tauri bump also moves wry/tao and can orphan a
+  `[patch.crates-io]` pin — cargo prints `patch … was not used`, but that is
+  not a lint, and clippy still exits 0.
 - **The intel poller** (`intel.rs`, every 2s) writes `cwd`, branch, repo root
   and ports into `PaneMeta`, but OSC 7 latches `cwd_from_shell` and wins
   permanently. It has to: PowerShell's `cd` moves its own location and never
@@ -160,6 +200,11 @@ bridge. Anything remote that reaches it is untrusted:
   downloaded, host-checked (`github.com`, `*.githubusercontent.com`), size-
   capped, and format-checked *from the bytes* — SVG is refused because it can
   carry script. They reach the page as raw IPC bytes turned into a blob.
+- **Browser panes get no IPC.** They load remote origins, and no capability
+  grants those IPC (`capabilities/default.json` has no `remote` entry — keep
+  it that way). Automation results leave the page by navigating to a
+  `mira-result://` URL that Rust intercepts and cancels. Don't give that
+  bridge a shortcut back into Tauri commands.
 - Updater payloads are verified against the public key in `tauri.conf.json`.
   There is no Apple signature; the minisign key is the only thing protecting
   an install.
@@ -179,7 +224,7 @@ from what a running app proved.
 files — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
 and the lockfile. Then a GitHub release, which triggers the artifact jobs.
 
-Two things about that, both learned the hard way:
+Three things about that, all learned the hard way:
 
 - **Publishing breaks the updater for a few minutes.** The artifact jobs fire
   *on* `release: published`, so `/releases/latest/` points at a release whose
@@ -193,3 +238,8 @@ Two things about that, both learned the hard way:
 - A PR from this repo has the signing secret, so it always takes the signed
   build path. Only Dependabot PRs and forks exercise the keyless one; to test
   that, run `env -u TAURI_SIGNING_PRIVATE_KEY npm run tauri build` locally.
+  Broken, it fails hard: "A public key has been found, but no private key."
+
+Gate a release on the sandbox checks under *Verifying a change*, run on the
+release commit, not on CI alone — a React/react-dom mismatch that rendered
+nothing and three releases of off-window browser panes all shipped green.
