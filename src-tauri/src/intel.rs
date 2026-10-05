@@ -79,6 +79,37 @@ pub fn spawn(handle: tauri::AppHandle) {
                 }
             }
 
+            // Agent sessions: once a pane's Claude has been seen running and
+            // then is gone, it was exited — forget it, or the next launch
+            // would type `claude --resume` into a pane you had moved on
+            // from. Only panes that recorded a session cost a `ps`. Windows
+            // lists no processes, so there nothing is ever seen or forgotten.
+            let has_agents = {
+                let meta = state.meta.lock().unwrap();
+                pids.iter()
+                    .any(|(pane, _)| meta.get(pane).is_some_and(|m| m.agent_session.is_some()))
+            };
+            if has_agents {
+                let procs = cmux_core::agents::process_table();
+                let running = cmux_core::agents::panes_running_claude(&procs, &pids);
+                let mut meta = state.meta.lock().unwrap();
+                for (pane, _) in &pids {
+                    let Some(entry) = meta.get_mut(pane) else { continue };
+                    if entry.agent_session.is_none() {
+                        continue;
+                    }
+                    if running.contains(pane) {
+                        entry.agent_live = true;
+                    } else if entry.agent_live && entry.startup_input.is_none() {
+                        entry.agent_live = false;
+                        entry.agent_session = None;
+                        state
+                            .session_dirty
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            }
+
             // Ports every other tick (~4s).
             if tick.is_multiple_of(2) {
                 let ports = cmux_core::ports::ports_for_panes(&pids);

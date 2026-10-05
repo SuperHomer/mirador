@@ -87,9 +87,10 @@ State is all environment-derived: session + scrollback under
 `$XDG_RUNTIME_DIR`, config and `socket.json` under `$XDG_CONFIG_HOME/mirador`.
 
 **Don't seed the sandbox with the real `session.json`.** A pane that ran
-Claude restores as `claude --resume <id>`; one keypress in the sandbox would
-then start a second process writing the live conversation. If a test needs a
-restored agent pane, give it a stale session id.
+Claude restores by typing `claude --resume <id>` (or `claude attach <job>`)
+into its shell *with no keypress*, so the sandbox would start a second
+process writing the live conversation the moment it launched. If a test
+needs a restored agent pane, give it a stale session id.
 
 **Drive it with the same environment.** `mira` finds its socket through
 `$XDG_CONFIG_HOME/mirador/socket.json`, so a bare `mira` from your own shell
@@ -165,7 +166,14 @@ inconsistency reviewers will notice.
   in-place update the disk and the process disagree about the version.
 - **Restored panes must not act on their own.** Command panes and SSH panes
   come back *idle*; relaunching must never re-run `npm test` or silently
-  reopen an SSH session. A keypress does it.
+  reopen an SSH session. A keypress does it. The one exception is a pane
+  that ran Claude Code: it comes back as a shell with the resume typed in,
+  because resuming a conversation runs nothing until you type into it.
+- **`MIRA_PANE` is inherited, so it can lie.** Claude Code's background
+  daemon inherits it from whichever pane started it and passes it to every
+  session it hosts. Hooks are matched to a pane by their tty, or by the
+  pane running `claude attach <job>` (`cmux_core::agents`); the inherited
+  id only counts where there are no ttys (Windows).
 - **React StrictMode double-mounts in dev** and has twice broken the terminal
   by swapping the output sink out from under a pending attach.
 - **A flex row's only shrinkable item absorbs all overflow** and collapses to

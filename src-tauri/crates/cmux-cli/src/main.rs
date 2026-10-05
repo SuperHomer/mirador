@@ -393,6 +393,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 tty: own_tty(),
                 title,
                 body,
+                job: own_job(),
             }
         }
         Command::ClaudeHook { event } => return claude_hook(&event),
@@ -663,6 +664,14 @@ fn own_tty() -> Option<String> {
     None
 }
 
+/// The Claude Code daemon job this process runs under, if any. A session
+/// the daemon hosts has `CLAUDE_JOB_DIR` set to `…/jobs/<job>`; it is the
+/// one thing that ties it to the pane running `claude attach <job>`.
+fn own_job() -> Option<String> {
+    let dir = std::env::var("CLAUDE_JOB_DIR").ok()?;
+    cmux_core::agents::job_from_dir(&dir)
+}
+
 /// Handles a Claude Code hook event: payload arrives as JSON on stdin.
 /// Never fails loudly — a broken hook must not break Claude Code.
 fn claude_hook(event: &str) -> Result<(), String> {
@@ -672,6 +681,7 @@ fn claude_hook(event: &str) -> Result<(), String> {
     let payload: serde_json::Value = serde_json::from_str(&input).unwrap_or(serde_json::json!({}));
     let tty = own_tty();
     let pane = own_pane();
+    let job = own_job();
 
     if let Some(session_id) = payload["session_id"].as_str() {
         let _ = send_request(Request::AgentSession {
@@ -679,6 +689,7 @@ fn claude_hook(event: &str) -> Result<(), String> {
             tty: tty.clone(),
             agent: "claude".into(),
             session_id: session_id.to_string(),
+            job: job.clone(),
         });
     }
 
@@ -698,6 +709,7 @@ fn claude_hook(event: &str) -> Result<(), String> {
             tty,
             title: Some("Claude Code".into()),
             body,
+            job,
         });
     }
     Ok(())

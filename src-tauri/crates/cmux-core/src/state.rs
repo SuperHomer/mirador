@@ -29,9 +29,17 @@ pub struct PaneMeta {
     pub ports: Vec<u16>,
     /// Browser pane: current URL of its child webview.
     pub browser_url: Option<String>,
-    /// "agent:session_id" of the AI agent running in this pane
-    /// (e.g. "claude:abc-123"), captured via hooks for resume-on-restore.
+    /// The AI agent session running in this pane, captured via hooks for
+    /// resume-on-restore: "claude:<session>" for one running in the pane,
+    /// "claude-bg:<job>" for a daemon session the pane attaches.
     pub agent_session: Option<String>,
+    /// True once the poller has seen that session's process in the pane
+    /// this run. When it then disappears the session was exited, and is
+    /// forgotten so a restart does not bring back a conversation you left.
+    pub agent_live: bool,
+    /// Typed into the pane's shell once it first prints, then cleared: how
+    /// a restored pane resumes its agent session without a keypress.
+    pub startup_input: Option<String>,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with

@@ -173,6 +173,10 @@ pub enum Request {
         #[serde(default)]
         title: Option<String>,
         body: String,
+        /// Claude Code daemon job id, for a hook from a background session:
+        /// its tty and inherited pane id are the daemon's, not a pane's.
+        #[serde(default)]
+        job: Option<String>,
     },
     /// Records the agent session running in a pane (for resume-on-restore).
     AgentSession {
@@ -182,6 +186,9 @@ pub enum Request {
         tty: Option<String>,
         agent: String,
         session_id: String,
+        /// See `Notify::job`.
+        #[serde(default)]
+        job: Option<String>,
     },
     /// Agent-visible command execution: opens a command pane (split of the
     /// focused pane, or a new tab) whose PTY runs the command directly —
