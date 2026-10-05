@@ -22,13 +22,13 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/build-windows.yml"
-  release:
-    types: [published]
+  # release.yml calls this on a tag push and does the attaching itself.
+  workflow_call:
   workflow_dispatch:
 
 # The build runs `npm ci` and `cargo build`, i.e. dependency build scripts.
-# Those must never hold a token that can write to the repository; only the
-# release job below gets one, and only on a release event.
+# Those must never hold a token that can write to the repository; the jobs
+# in release.yml that do write never run any of it.
 permissions:
   contents: read
 
@@ -104,72 +104,3 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/mira.exe
           if-no-files-found: error
-
-  # Separate job so repo-write lives here and nowhere near the build's
-  # dependency graph. Runs on Linux — it only moves files.
-  release:
-    needs: build
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: mirador-windows
-          path: dist
-
-      # Uploaded under version-free names on purpose: that is what makes
-      # /releases/latest/download/<name> a permanent link, so the landing
-      # page can point straight at the installer and never need updating.
-      # The version lives in the release tag.
-      - name: Attach installers and the update manifest
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-          REPO: ${{ github.repository }}
-          # Read via os.environ below, never interpolated into the script: a
-          # release body is arbitrary text, and `${{ }}` inside a run block
-          # would hand a backtick or a quote in it to the shell.
-          BODY: ${{ github.event.release.body }}
-        run: |
-          set -euo pipefail
-          # The updater payload on Windows is the NSIS installer itself, so
-          # the same file is both a fresh install and an update; the .sig
-          # beside it is what the plugin verifies. (`*.exe` does not match
-          # `*.exe.sig`, so the order of these two does not matter.)
-          mv dist/bundle/nsis/*-setup.exe.sig Mirador-Windows-x64-setup.exe.sig
-          mv dist/bundle/nsis/*.exe Mirador-Windows-x64-setup.exe
-          mv dist/bundle/msi/*.msi  Mirador-Windows-x64.msi
-
-          # One manifest per platform — macOS publishes its own from the other
-          # workflow, so neither has to wait for the other's artifacts.
-          python3 - <<'PY' > latest-windows-x86_64.json
-          import datetime, json, os, sys
-          tag = os.environ["TAG"]
-          repo = os.environ["REPO"]
-          sig = open("Mirador-Windows-x64-setup.exe.sig").read().strip()
-          json.dump({
-              "version": tag.lstrip("v"),
-              # The release body itself, so the app can show what changed
-              # without a second request to an API that rate-limits by IP.
-              # Empty body (a release published before its notes were
-              # written) falls back to the link it used to carry.
-              "notes": os.environ.get("BODY", "").strip()
-                       or f"See https://github.com/{repo}/releases/tag/{tag}",
-              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "platforms": {
-                  "windows-x86_64": {
-                      "signature": sig,
-                      "url": f"https://github.com/{repo}/releases/download/{tag}/Mirador-Windows-x64-setup.exe",
-                  }
-              },
-          }, sys.stdout, indent=2)
-          PY
-
-          gh release upload "$TAG" \
-            Mirador-Windows-x64-setup.exe \
-            Mirador-Windows-x64-setup.exe.sig \
-            Mirador-Windows-x64.msi \
-            latest-windows-x86_64.json \
-            --repo "$REPO" --clobber
