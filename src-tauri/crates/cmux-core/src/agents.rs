@@ -142,7 +142,7 @@ pub fn hook_pane(
         attaching.sort_by_key(|p| p.pid);
         return attaching
             .iter()
-            .find_map(|p| p.tty.as_deref().and_then(&pane_on));
+            .find_map(|p| p.tty.as_deref().and_then(pane_on));
     }
     if let Some(tty) = tty {
         return pane_on(tty);
