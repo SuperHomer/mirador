@@ -87,32 +87,18 @@ pub fn run() {
     // session) typed into it — no keypress, and exiting Claude leaves you
     // at a prompt rather than offering to run it again. The one exception
     // to restored panes waiting for a keypress: resuming a conversation
-    // runs nothing until you type into it.
+    // runs nothing until you type into it. Not on Windows, which cannot
+    // see Claude exit and so would resume closed conversations forever —
+    // see `cmux_core::agents::AUTO_RESUME`.
     for m in meta.values_mut() {
-        // Versions before this restored the resume as a command pane, and
-        // saved it as one: it is a shell again, session or not, or it would
-        // come back as an idle command pane on every launch from now on.
-        if m
-            .command
-            .as_deref()
-            .is_some_and(|c| c.starts_with("claude --resume "))
-        {
-            m.command = None;
-        }
-        let Some(session) = m.agent_session.clone() else {
-            continue;
-        };
-        // A real command pane (`mira run claude …`) keeps its own command.
-        if m.command.is_some() || m.remote_host.is_some() {
-            continue;
-        }
-        if let Some(input) = cmux_core::agents::restore_command(&session) {
-            m.startup_input = Some(input);
-        } else if let Some(command) = cmux_core::agents::legacy_resume_command(&session) {
-            // An older version's record, possibly misattributed: offered on
-            // a keypress like any restored command pane, never typed in.
-            m.command = Some(command);
-        }
+        let restored = cmux_core::agents::restore_pane(
+            m.command.as_deref(),
+            m.remote_host.is_some(),
+            m.agent_session.as_deref(),
+            cmux_core::agents::AUTO_RESUME,
+        );
+        m.command = restored.command;
+        m.startup_input = restored.startup_input;
     }
     // Command panes AND remote (SSH) panes come back idle: relaunching the
     // app must never re-run a command or silently re-open an SSH session.

@@ -205,6 +205,61 @@ pub fn legacy_resume_command(agent_session: &str) -> Option<String> {
     is_safe_id(id).then(|| format!("claude --resume {id}"))
 }
 
+/// Whether a restored Claude pane may resume by itself. Only where the
+/// poller can see Claude exit (it reads the process table) is an exited
+/// session forgotten; without that, auto-resume would bring back on every
+/// launch a conversation you closed long ago. Windows lists no processes
+/// here, so its panes wait for a keypress as they always did.
+pub const AUTO_RESUME: bool = cfg!(unix);
+
+/// How a pane comes back from the session file.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Restored {
+    /// Command pane: runs this, idle until a keypress.
+    pub command: Option<String>,
+    /// Shell pane: types this in once the shell first prints.
+    pub startup_input: Option<String>,
+}
+
+/// Decides how a saved pane is restored, given its saved `command`, whether
+/// it is remote, its `agent_session`, and [`AUTO_RESUME`] (a parameter so
+/// both platforms' behavior is tested everywhere).
+pub fn restore_pane(
+    command: Option<&str>,
+    remote: bool,
+    agent_session: Option<&str>,
+    auto_resume: bool,
+) -> Restored {
+    // A resume this app put there, saved back as a command pane — by an
+    // older version, or by a platform without auto-resume. It is derived
+    // again from `agent_session` below, or the pane would come back as a
+    // command pane on every launch after the session is gone.
+    let command = command
+        .filter(|c| !c.starts_with("claude --resume ") && !c.starts_with("claude attach "));
+    let keep = Restored {
+        command: command.map(str::to_string),
+        startup_input: None,
+    };
+    // A real command pane (`mira run claude …`) or an SSH pane keeps its own.
+    let Some(session) = agent_session.filter(|_| command.is_none() && !remote) else {
+        return keep;
+    };
+    if let Some(input) = restore_command(session) {
+        if auto_resume {
+            Restored { command: None, startup_input: Some(input) }
+        } else {
+            Restored { command: Some(input), startup_input: None }
+        }
+    } else {
+        // An older version's record, possibly misattributed: offered on a
+        // keypress like any restored command pane, never typed in.
+        Restored {
+            command: legacy_resume_command(session),
+            startup_input: None,
+        }
+    }
+}
+
 /// The job id from a `CLAUDE_JOB_DIR` (`…/jobs/<job>`).
 pub fn job_from_dir(dir: &str) -> Option<String> {
     let job = basename(dir.trim_end_matches(['/', '\\']));
@@ -331,6 +386,47 @@ mod tests {
         assert_eq!(legacy_resume_command("claude:abc-1").as_deref(), Some("claude --resume abc-1"));
         assert_eq!(legacy_resume_command("claude:a;b"), None);
         assert_eq!(legacy_resume_command("claude-fg:abc-1"), None);
+    }
+
+    #[test]
+    fn restores_claude_panes_by_platform() {
+        let typed = |s: &str| Restored { command: None, startup_input: Some(s.into()) };
+        let idle = |s: &str| Restored { command: Some(s.into()), startup_input: None };
+
+        // unix: typed into the shell.
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), true), typed("claude --resume a1"));
+        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), true), typed("claude attach j9"));
+        // Windows: idle, a keypress resumes, as before.
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), false), idle("claude --resume a1"));
+        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), false), idle("claude attach j9"));
+        // The command Windows saved back is derived again, not kept: once the
+        // session is gone the pane is a plain shell.
+        assert_eq!(
+            restore_pane(Some("claude attach j9"), false, Some("claude-bg:j9"), false),
+            idle("claude attach j9")
+        );
+        assert_eq!(restore_pane(Some("claude attach j9"), false, None, false), Restored::default());
+        assert_eq!(restore_pane(Some("claude --resume a1"), false, None, true), Restored::default());
+    }
+
+    #[test]
+    fn restore_leaves_other_panes_alone() {
+        // Legacy records are offered on a keypress on every platform.
+        for auto in [true, false] {
+            assert_eq!(
+                restore_pane(Some("claude --resume old"), false, Some("claude:old"), auto),
+                Restored { command: Some("claude --resume old".into()), startup_input: None }
+            );
+        }
+        // A real command pane and an SSH pane keep what they had.
+        assert_eq!(
+            restore_pane(Some("npm test"), false, Some("claude-fg:a1"), true),
+            Restored { command: Some("npm test".into()), startup_input: None }
+        );
+        assert_eq!(restore_pane(None, true, Some("claude-fg:a1"), true), Restored::default());
+        // A plain shell, and a record that is not ours.
+        assert_eq!(restore_pane(None, false, None, true), Restored::default());
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a;b"), true), Restored::default());
     }
 
     #[test]
