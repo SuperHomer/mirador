@@ -50,6 +50,15 @@ cd web && npm run build     # only if web/ changed; `tsc -b && vite build`
 package. `cmux-cli` and friends are skipped, and a type error in them sails
 through a clean-looking run. Always `--workspace`.
 
+**CI's Rust is whatever stable is current that day**, not what you have.
+The workflows install `stable` at run time, so a clippy release with a new
+lint fails CI on code that passes locally — PR #75 went red on
+`needless_borrows_for_generic_args`, new between the 1.97 on the dev
+machine and the 1.99 CI pulled. `rustup update stable` before trusting a
+local clippy run. And when CI does fail on a lint, re-run the whole
+workspace locally on the new toolchain: cargo stops at the first crate
+that fails, so the crates after it were never linted.
+
 ## Verifying a change
 
 **CI compiles and unit-tests but never mounts the app.** `tsc`, `vite build`,
