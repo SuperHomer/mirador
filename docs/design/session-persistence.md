@@ -40,7 +40,7 @@ holder is gone (after a reboot, say).
 |---|---|---|
 | A crash takes down | one pane | every pane |
 | After an in-place update | each holder keeps its old code; only the small wire protocol has to stay compatible | the old daemon runs *all* panes on old code until it is restarted, which kills them |
-| Processes | one per pane, idle while its shell is quiet (memory to be measured in step 1) | one |
+| Processes | one per pane, idle while its shell is quiet (2.8 MB RSS measured, release build) | one |
 | Complexity | protocol + spawn/reattach | the same, plus multiplexing and in-daemon state for every pane |
 
 Per-pane holders keep the failure and version-skew blast radius to one pane.
@@ -56,15 +56,21 @@ and the user's own `~/.tmux.conf` would leak into Mirador's behavior.
   rather than a third binary. It is already bundled as a sidecar, and a
   running holder keeps executing the binary it started with — the same rule
   as the app itself — so updates never yank code out from under one.
-- **Spawn:** the app runs `mira __hold --pane <id> --socket <path> -- <cmd…>`.
+- **Spawn:** the app runs `mira __hold --pane <id> --socket <path>
+  [--cwd <dir>] [--cols N --rows N] [--command <line> | --ssh <host>]`.
   The holder calls `setsid()`, so it is outside the app's process group and
   session, and survives the app's exit. It opens the PTY and spawns the child
   exactly as `PtyManager::spawn` does today (same `MIRA_PANE`, same shell
   selection, same cwd).
 - **Socket:** `$XDG_RUNTIME_DIR/mirador/holders/<pane>.sock`, falling back to
-  the data dir; directory `0700`, socket `0600`. Anyone who can connect can
-  type into the shell, so the directory permissions *are* the security
-  boundary — same user only.
+  `~/.mirador/holders/<pane>.sock`. Not the data directory: on macOS
+  (`~/Library/Application Support/Mirador`) it puts a socket path at ~100 of
+  the 104 bytes `sockaddr_un` allows. Not the temp directory: macOS sweeps it
+  of files untouched for days, which would cut a long-lived session off from
+  its socket. The directory must be owned by the user and `0700`, the socket
+  `0600`. Anyone who can connect can type into the shell, so the directory
+  permissions *are* the security boundary — same user only. A live socket is
+  never taken over; one left by a dead holder is replaced.
 - **One client at a time.** A new attach displaces the old one (a crashed
   app's half-open connection must not lock a pane out forever).
 - **Exit:** when the child exits, the holder keeps the exit code and its
@@ -80,17 +86,23 @@ that has to stay compatible across releases, so it stays small:
 
 | client → holder | holder → client |
 |---|---|
-| `Hello { version, cols, rows }` | `Hello { version, pid, alive, exit_code }` |
+| `Hello { version, cols, rows }` | `Hello { version, pid, exit_code }` |
 | `Input(bytes)` | `Output(bytes)` |
 | `Resize { cols, rows }` | `Replay(bytes)` — the catch-up, sent once after `Hello` |
-| `Ack(n)` | `Exited(code)` |
-| `Kill` | |
+| `Kill` | `Exited(code)` |
 | `Detach` | |
 
-**Flow control** stays end to end: the holder applies today's high/low
-watermarks to unacked `Output` bytes and stops reading the PTY when the
-client falls behind. Detached, it keeps reading into its buffer instead —
-a shell must not block because nobody is watching.
+Frames are `[u32 length][u8 type][payload]`. A type the receiver doesn't
+know is skipped, and so are trailing bytes after the fields it does know,
+so a newer peer can add both without breaking an older one.
+
+**Flow control** needs no frame of its own. The holder writes `Output` to a
+blocking socket, so a client that stops reading fills the socket buffer,
+blocks the holder's writer, and through it the PTY and the child — the same
+backpressure the app's own watermarks give today, without acknowledgements
+in the protocol. Detached, the holder keeps reading into its buffer instead
+(`PtyManager::unthrottled`): a shell must not block because nobody is
+watching.
 
 ## What you see when you reattach
 
@@ -99,7 +111,10 @@ do it:
 
 **A. Raw replay.** The holder keeps a ring buffer of the last N bytes of
 output (4 MB). On attach, the app clears the pane, writes the
-buffer into xterm, then resizes the PTY so full-screen programs redraw.
+buffer into xterm, then sizes the PTY to the pane so full-screen programs
+redraw. The holder applies the size the client attaches with; it does not
+force a redraw when the size is unchanged. Whether real programs come back
+right without one is what step 2 measures.
 
 - Cheap: no parsing in the holder, near-zero CPU.
 - Mode state rides along when it is inside the buffer (alternate screen,
@@ -191,7 +206,7 @@ Each step is a PR that leaves `main` releasable.
 1. **Holder and protocol** in `cmux-core` plus `mira __hold`, with tests that
    spawn a holder around `sh`, attach, detach, reattach and check output,
    replay trimming, mode tracking and exit codes. No app change. CI runs
-   these, which is more than any terminal code has had so far.
+   these, which is more than any terminal code has had so far. — #78
 2. **App on holders**, behind a config key (`persistSessions`, default
    *off*): spawn via holder, reattach on launch, replay without side effects,
    Cmd+Q detaches.
