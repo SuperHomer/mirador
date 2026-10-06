@@ -257,8 +257,11 @@ site in the same PR or the one right after: its card in
 and a showcase section of its own when it is a headline (as the diff pane
 and the commit graph have). A changed feature corrects its card — the
 "Session persistence" card described the old restore for two releases
-after processes started surviving the quit. Check the rendered page, not
-the bundle (see *Verifying a change*).
+after processes started surviving the quit. Shortcuts go through
+`BothKeys` in `web/src/components/Keys.tsx`, which shows the macOS and the
+Windows/Linux key side by side: the page is static and gets shared, so it
+never guesses the reader's OS. Check the rendered page, not the bundle
+(see *Verifying a change*).
 
 **Releases** go straight to `main` as a `Release vX.Y.Z` commit touching four
 files — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`

@@ -8,23 +8,8 @@
  * sessions are the real palette entry and command.
  */
 
-function Key({ children }: { children: string }) {
-  return (
-    <span
-      className="mono"
-      style={{
-        fontSize: 12,
-        color: "var(--text)",
-        background: "var(--surface)",
-        border: "1px solid var(--overlay)",
-        borderRadius: 6,
-        padding: "2px 8px",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
+import { BothKeys } from "./Keys";
+
 
 type Line = { text: string; color?: string };
 
@@ -67,7 +52,7 @@ type Step = { when: string; label: string; panes: { title: string; lines: Line[]
 const STEPS: Step[] = [
   {
     when: "14:02",
-    label: "⌘Q, with work in flight",
+    label: "Quit, with work in flight",
     panes: [
       { title: "npm run build", lines: [{ text: "$ npm run build" }, { text: "  bundling…  41%", color: "var(--yellow)" }] },
       { title: "claude", lines: [{ text: "❯ add refresh-token rotation" }, { text: "✻ Thinking…", color: "var(--mauve)" }] },
@@ -171,7 +156,7 @@ export default function PersistShowcase() {
           }}
         >
           <span>To end them all:</span>
-          <Key>⌘K</Key>
+          <BothKeys mac="⌘K" other="Ctrl+Shift+K" />
           <span style={{ color: "var(--muted)", fontSize: 12.5 }}>→ “Quit and End All Sessions”</span>
           <span>or</span>
           <span className="mono" style={{ color: "var(--text)" }}>
