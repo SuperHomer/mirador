@@ -400,13 +400,30 @@ mod imp {
                 None => Owned(create_instance(&self.name, false)?),
             };
             let h = instance.0;
-            let result = overlapped(h, None, |ov| unsafe { ConnectNamedPipe(h, ov) });
-            match result {
-                Ok(_) => {}
-                // A client got in between creating the instance and
-                // waiting on it: already connected, which is a success.
-                Err(e) if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {}
-                Err(e) => return Err(e),
+            loop {
+                let result = overlapped(h, None, |ov| unsafe { ConnectNamedPipe(h, ov) });
+                match result {
+                    Ok(_) => break,
+                    // A client got in between creating the instance and
+                    // waiting on it: already connected, which is a success.
+                    Err(e) if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => break,
+                    // A client connected *and left* before we waited — a
+                    // liveness probe does exactly that. Reset the instance
+                    // and listen on it again: dropping it here would leave
+                    // the pipe with no instance at all for a moment, and a
+                    // client arriving then is told the holder is gone.
+                    Err(e) if e.raw_os_error() == Some(ERROR_NO_DATA as i32) => unsafe {
+                        DisconnectNamedPipe(h);
+                    },
+                    Err(e) => {
+                        // Same reason: the replacement listens before this
+                        // one closes.
+                        if let Ok(next) = create_instance(&self.name, false) {
+                            *self.pending.lock().unwrap() = Some(Owned(next));
+                        }
+                        return Err(e);
+                    }
+                }
             }
             if let Ok(next) = create_instance(&self.name, false) {
                 *self.pending.lock().unwrap() = Some(Owned(next));
