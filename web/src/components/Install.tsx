@@ -183,7 +183,7 @@ export default function Install() {
         </p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18, maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(360px, 100%), 1fr))", gap: 18, maxWidth: 1100, margin: "0 auto" }}>
         <Platform name="macOS" sub="Apple silicon" href={DOWNLOAD_MACOS} cta="Download .dmg" steps={MACOS} prompt="$" />
         <Platform name="Windows" sub="x64 installer" href={DOWNLOAD_WINDOWS} cta="Download .exe" steps={WINDOWS} prompt=">" />
       </div>

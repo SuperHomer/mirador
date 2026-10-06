@@ -28,13 +28,14 @@ export default function Nav() {
         <span style={{ fontSize: 19, fontWeight: 750, letterSpacing: "-.02em" }}>Mirador</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 28, fontSize: 14, color: "var(--subtext)" }}>
-        <a href="#features" style={{ color: "var(--subtext)" }}>Features</a>
-        <a href="#diff" style={{ color: "var(--subtext)" }}>Review</a>
-        <a href="#graph" style={{ color: "var(--subtext)" }}>History</a>
-        <a href="#cli" style={{ color: "var(--subtext)" }}>CLI</a>
-        <a href="#install" style={{ color: "var(--subtext)" }}>Install</a>
-        <a href="#contribute" style={{ color: "var(--subtext)" }}>Contribute</a>
-        <a href={GITHUB_URL} style={{ color: "var(--subtext)" }}>GitHub</a>
+        <a href="#features" className="nav-link" style={{ color: "var(--subtext)" }}>Features</a>
+        <a href="#diff" className="nav-link" style={{ color: "var(--subtext)" }}>Review</a>
+        <a href="#graph" className="nav-link" style={{ color: "var(--subtext)" }}>History</a>
+        <a href="#sessions" className="nav-link" style={{ color: "var(--subtext)" }}>Sessions</a>
+        <a href="#cli" className="nav-link" style={{ color: "var(--subtext)" }}>CLI</a>
+        <a href="#install" className="nav-link" style={{ color: "var(--subtext)" }}>Install</a>
+        <a href="#contribute" className="nav-link" style={{ color: "var(--subtext)" }}>Contribute</a>
+        <a href={GITHUB_URL} className="nav-link" style={{ color: "var(--subtext)" }}>GitHub</a>
         <a
           href={RELEASES_URL}
           style={{

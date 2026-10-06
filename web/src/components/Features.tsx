@@ -8,7 +8,7 @@ const FEATURES: Feature[] = [
   { icon: "⑂", title: "Commit graph", body: "The branch structure across every ref, with lanes, tags and remotes. Click a commit and its diff opens beside it — <mira graph>, or the palette." },
   { icon: "◱", title: "Scriptable browser", body: "Agents open pages, snapshot the DOM, click, fill, and eval — while you watch it happen in a real pane via <mira browser>." },
   { icon: "⇄", title: "Remote workspaces", body: "Panes run the system <ssh> — 2FA and ProxyJump just work. ControlMaster port forwarding brings remote dev servers to your browser pane." },
-  { icon: "⟳", title: "Session persistence", body: "Layout, cwds, scrollback, and browser URLs survive restarts and crashes. Config hot-reloads from <mirador.json>." },
+  { icon: "⟳", title: "Sessions that outlive the app", body: "Quit and your shells, builds and agents keep running; the next launch reattaches to the same processes. Layout and scrollback survive a reboot. Config hot-reloads from <mirador.json>." },
 ];
 
 function Body({ text }: { text: string }) {
