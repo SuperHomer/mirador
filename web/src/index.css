@@ -40,6 +40,13 @@ button { font-family: inherit; cursor: pointer; }
   .cli-grid { grid-template-columns: 1fr !important; }
 }
 
+/* The section links need ~930px; below that they would push the page into
+   a sideways scroll. The logo and Download stay — the sections are a
+   scroll away, and Download is what a phone visitor came for. */
+@media (max-width: 960px) {
+  .nav-link { display: none; }
+}
+
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
 .cursor {
