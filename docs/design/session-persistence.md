@@ -149,7 +149,10 @@ app was closed. Replaying them through the scanner would re-raise every
 `Notification` from the last 4 MB. So `Replay` goes straight to xterm and only
 the *last* cwd and title in it are applied; notifications that arrived while
 detached are summarized as one ("3 notifications while Mirador was closed")
-rather than replayed one by one.
+rather than replayed one by one. Counted by the holder, which knows
+whether anyone was attached; the replay alone cannot tell a notification
+the app already showed before quitting from one it never saw. The count and
+the last one ride in `HolderHello` as trailing fields.
 
 ## App changes
 
@@ -163,8 +166,11 @@ rather than replayed one by one.
   from the pane id, so this is mostly about knowing a holder *should* exist.
 - **Launch:** for each pane in the session, try its socket. Alive →
   reattach (the existing `"reattached"` path in `attach_pane`). Gone → today's
-  restore. Holders in the directory that no pane names (the app crashed after
-  closing a pane) are killed.
+  restore. Holders in the directory that no pane names get a tab of their
+  own at the end. (The first draft killed them. But the realistic orphan is
+  a crash, or an app that died before saving a pane it had just opened —
+  exactly when the holder has work worth keeping — so they are reopened,
+  and closing the tab ends them like any pane.)
 - **Quit:** Cmd+Q sends `Detach` to every holder and exits. *Quit and end all
   sessions* sends `Kill` first.
 - **Command panes** (`mira run`) keep running across a restart too; their exit
@@ -209,10 +215,11 @@ Each step is a PR that leaves `main` releasable.
    these, which is more than any terminal code has had so far. — #78
 2. **App on holders**, behind a config key (`persistSessions`, default
    *off*): spawn via holder, reattach on launch, replay without side effects,
-   Cmd+Q detaches.
-3. ***Quit and end all sessions*,** orphan cleanup, the notification summary,
-   and the default flipped to on.
-4. **Windows.**
+   Cmd+Q detaches. — #79
+3. ***Quit and end all sessions*** (palette, and `mira quit --end-sessions`),
+   orphans reopened in tabs, the notification summary.
+4. **The default flipped to on**, after a release of real use.
+5. **Windows.**
 
 ## Decisions
 

@@ -13,6 +13,7 @@ import {
   openGraph,
   openWhatsNew,
   installUpdate,
+  quitEndingSessions,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
@@ -145,6 +146,13 @@ export const actions: ActionDef[] = [
       const pane = activeTab(snapshot)?.focusedPane;
       if (pane) void openGraph(pane, false);
     },
+  },
+  {
+    id: "quit_ending_sessions",
+    title: "Quit and End All Sessions",
+    // With persistSessions on, Cmd+Q leaves every terminal running for the
+    // next launch; this ends them first. Without it, it is a plain quit.
+    run: () => void quitEndingSessions(),
   },
   {
     id: "whats_new",

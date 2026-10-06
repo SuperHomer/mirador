@@ -65,19 +65,22 @@ pub fn save_session(state: &AppState) {
     }
 }
 
-/// The panes, among `panes`, that a live session holder still serves.
-fn live_holders(panes: &[String]) -> HashSet<String> {
+/// The panes a live session holder still serves. Holders the session does
+/// not name — left by a crash, or by an app that died before saving a pane
+/// it had just opened — are given tabs of their own at the end rather than
+/// killed: those are the times their work matters most.
+fn live_holders(workspace: &mut Workspace) -> HashSet<String> {
     #[cfg(unix)]
     {
-        panes
-            .iter()
-            .filter(|id| cmux_core::hold::is_alive(id))
-            .cloned()
-            .collect()
+        let live = cmux_core::hold::live_panes();
+        for orphan in cmux_core::hold::orphans(&live, &workspace.all_pane_ids()) {
+            workspace.adopt_pane(&orphan);
+        }
+        live.into_iter().collect()
     }
     #[cfg(not(unix))]
     {
-        let _ = panes;
+        let _ = workspace;
         HashSet::new()
     }
 }
@@ -127,7 +130,8 @@ pub fn run() {
     // them is restored, so no resume is typed and no keypress is waited for.
     // Checked whatever `persistSessions` says now — turning it off must not
     // strand processes that are already running.
-    let held_at_launch = live_holders(&workspace.all_pane_ids());
+    let mut workspace = workspace;
+    let held_at_launch = live_holders(&mut workspace);
     for id in &held_at_launch {
         if let Some(m) = meta.get_mut(id) {
             m.startup_input = None;
@@ -209,6 +213,7 @@ pub fn run() {
             commands::get_config,
             commands::new_tab,
             commands::close_tab,
+            commands::quit_ending_sessions,
             commands::set_active_tab,
             commands::rename_tab,
             commands::move_tab,

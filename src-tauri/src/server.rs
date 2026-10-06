@@ -157,6 +157,19 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             notify::handle_notification(app, &pane, title, body);
             Ok(json!({ "paneId": pane }))
         }
+        Request::Quit { end_sessions } => {
+            // Answer first: once the app exits, nobody is left to reply.
+            let app = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if end_sessions {
+                    tauri::async_runtime::block_on(crate::commands::quit_ending_sessions(app));
+                } else {
+                    app.exit(0);
+                }
+            });
+            Ok(Value::Null)
+        }
         Request::AgentSession {
             pane_id,
             tty,

@@ -136,6 +136,12 @@ enum Command {
         /// "setup" or "remove"
         action: String,
     },
+    /// Quit Mirador. With `persistSessions` on, terminals keep running for
+    /// the next launch unless --end-sessions ends them first.
+    Quit {
+        #[arg(long)]
+        end_sessions: bool,
+    },
     /// Put `mira` on your PATH: a symlink in ~/.local/bin on macOS and
     /// Linux; on Windows, the install directory joins your user PATH.
     Install,
@@ -420,6 +426,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::ClaudeHook { event } => return claude_hook(&event),
         Command::Hooks { action } => return hooks(&action),
         Command::Install => return install(),
+        Command::Quit { end_sessions } => Request::Quit { end_sessions },
         Command::Hold {
             pane,
             socket,
@@ -705,6 +712,13 @@ fn hold(
     ssh: Option<String>,
 ) -> Result<(), String> {
     use cmux_core::hold::server::{serve, HoldConfig, Program};
+    // Nothing inherited survives: on macOS a socket becomes close-on-exec
+    // only after it exists, so a holder launched while the app was opening
+    // a connection to *another* holder can inherit that connection — and,
+    // living for days, keep it open after the app quits, so that holder
+    // thinks a client is still reading and its child blocks on a full
+    // socket. Nothing above stderr is ours yet, so all of it goes.
+    close_inherited_fds();
     // A session of its own: no controlling terminal to hang it up, and out
     // of the app's process group, so neither the app quitting nor a signal
     // to its group reaches the shell this holds.
@@ -728,6 +742,21 @@ fn hold(
     })
     .map_err(|e| e.to_string())?;
     std::process::exit(code.unwrap_or(1));
+}
+
+/// Closes every descriptor above stderr. Runs first thing in a holder,
+/// before any thread exists or any file of its own is open.
+#[cfg(unix)]
+fn close_inherited_fds() {
+    let max = match unsafe { libc::sysconf(libc::_SC_OPEN_MAX) } {
+        n if n > 0 => (n as i32).min(65_536),
+        _ => 4096,
+    };
+    for fd in 3..max {
+        unsafe {
+            libc::close(fd);
+        }
+    }
 }
 
 #[cfg(not(unix))]

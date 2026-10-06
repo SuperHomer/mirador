@@ -13,6 +13,9 @@ pub struct Attached {
     pub pid: Option<u32>,
     /// `Some` if the child had already exited before this attach.
     pub exit_code: Option<i32>,
+    /// Notifications raised while nothing was attached, and the last one.
+    pub missed: u32,
+    pub last_missed: Option<String>,
     /// What was printed before this attach, modes first.
     pub replay: Vec<u8>,
     /// Further frames: `Output`, then `Exited`. Write `Input`, `Resize`,
@@ -34,6 +37,8 @@ pub fn attach(socket: &Path, cols: u16, rows: u16) -> io::Result<Attached> {
         version,
         pid,
         exit_code,
+        missed,
+        last_missed,
     }) = read_frame(&mut stream)?
     else {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "holder sent no hello"));
@@ -45,6 +50,8 @@ pub fn attach(socket: &Path, cols: u16, rows: u16) -> io::Result<Attached> {
         version,
         pid,
         exit_code,
+        missed,
+        last_missed,
         replay,
         stream,
     })

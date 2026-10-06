@@ -270,7 +270,13 @@ owns its terminal. Closing a pane ends it and everything in it, as before.
 The key is read when a pane opens, so turning it on applies to new panes,
 and turning it off never strands the ones already running: they still
 reattach on the next launch. After a reboot there is nothing to reattach,
-and panes are restored the usual way. Design:
+and panes are restored the usual way.
+
+To end everything instead, use **Quit and End All Sessions** in the palette
+(or `mira quit --end-sessions`). Notifications raised while Mirador was
+closed arrive as one, when it reopens. A session with no pane to come back
+to — after a crash, say — reopens in a tab of its own, never silently
+killed. Design:
 [docs/design/session-persistence.md](docs/design/session-persistence.md).
 
 ## What's New after an update

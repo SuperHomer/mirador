@@ -28,6 +28,12 @@ pub enum Frame {
         pid: Option<u32>,
         /// Present once the child has exited.
         exit_code: Option<i32>,
+        /// Notifications the child raised while no client was attached —
+        /// counted by the holder, because the replay alone cannot tell them
+        /// from ones the app already saw before it quit.
+        missed: u32,
+        /// The last of those, `title: body` or just the body.
+        last_missed: Option<String>,
     },
     /// Client → holder: keystrokes for the child.
     Input(Vec<u8>),
@@ -74,11 +80,19 @@ impl Frame {
                 version,
                 pid,
                 exit_code,
+                missed,
+                last_missed,
             } => {
-                let mut p = Vec::with_capacity(12);
+                let mut p = Vec::with_capacity(16);
                 p.extend_from_slice(&version.to_be_bytes());
                 p.extend_from_slice(&pid.unwrap_or(0).to_be_bytes());
                 push_code(&mut p, *exit_code);
+                // Added after version 1 shipped: trailing, so a holder or app
+                // that predates them skips them, and reads them as absent.
+                p.extend_from_slice(&missed.to_be_bytes());
+                let text = last_missed.as_deref().unwrap_or("").as_bytes();
+                p.extend_from_slice(&(text.len() as u32).to_be_bytes());
+                p.extend_from_slice(text);
                 (HOLDER_HELLO, p)
             }
             Frame::Input(b) => (INPUT, b.clone()),
@@ -113,6 +127,8 @@ impl Frame {
                 version: r.u16()?,
                 pid: Some(r.u32()?).filter(|&pid| pid != 0),
                 exit_code: r.code()?,
+                missed: if r.is_empty() { 0 } else { r.u32()? },
+                last_missed: if r.is_empty() { None } else { r.text()? },
             },
             INPUT => Frame::Input(p),
             OUTPUT => Frame::Output(p),
@@ -153,6 +169,19 @@ impl Payload<'_> {
     }
     fn u32(&mut self) -> io::Result<u32> {
         self.take().map(u32::from_be_bytes)
+    }
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    /// A length-prefixed UTF-8 string; empty reads as absent.
+    fn text(&mut self) -> io::Result<Option<String>> {
+        let len = self.u32()? as usize;
+        if self.0.len() < len {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "short frame"));
+        }
+        let (head, rest) = self.0.split_at(len);
+        self.0 = rest;
+        Ok((len > 0).then(|| String::from_utf8_lossy(head).into_owned()))
     }
     fn code(&mut self) -> io::Result<Option<i32>> {
         let [present] = self.take()?;
@@ -214,8 +243,20 @@ mod tests {
     #[test]
     fn every_frame_roundtrips() {
         roundtrip(Frame::ClientHello { version: VERSION, cols: 120, rows: 40 });
-        roundtrip(Frame::HolderHello { version: VERSION, pid: Some(4242), exit_code: None });
-        roundtrip(Frame::HolderHello { version: VERSION, pid: None, exit_code: Some(-1) });
+        roundtrip(Frame::HolderHello {
+            version: VERSION,
+            pid: Some(4242),
+            exit_code: None,
+            missed: 0,
+            last_missed: None,
+        });
+        roundtrip(Frame::HolderHello {
+            version: VERSION,
+            pid: None,
+            exit_code: Some(-1),
+            missed: 3,
+            last_missed: Some("Claude Code: finished responding".into()),
+        });
         roundtrip(Frame::Input(b"ls\r".to_vec()));
         roundtrip(Frame::Output(vec![0x1b, b'[', b'm', 0xff]));
         roundtrip(Frame::Replay(Vec::new()));
@@ -241,6 +282,27 @@ mod tests {
         assert_eq!(read_frame(&mut r).unwrap(), Some(Frame::Resize { cols: 80, rows: 24 }));
         assert_eq!(read_frame(&mut r).unwrap(), Some(Frame::Detach));
         assert_eq!(read_frame(&mut r).unwrap(), None);
+    }
+
+    #[test]
+    fn a_hello_from_before_missed_notifications_reads_as_none_missed() {
+        // Exactly what a version-1 holder sends: version, pid, exit code.
+        let mut p = vec![HOLDER_HELLO];
+        p.extend_from_slice(&VERSION.to_be_bytes());
+        p.extend_from_slice(&77u32.to_be_bytes());
+        p.extend_from_slice(&[0, 0, 0, 0, 0]);
+        let mut buf = (p.len() as u32).to_be_bytes().to_vec();
+        buf.extend(p);
+        assert_eq!(
+            read_frame(&mut buf.as_slice()).unwrap(),
+            Some(Frame::HolderHello {
+                version: VERSION,
+                pid: Some(77),
+                exit_code: None,
+                missed: 0,
+                last_missed: None,
+            })
+        );
     }
 
     #[test]

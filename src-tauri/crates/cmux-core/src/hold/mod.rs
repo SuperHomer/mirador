@@ -113,3 +113,101 @@ pub fn launch(
 pub fn is_alive(pane_id: &str) -> bool {
     std::os::unix::net::UnixStream::connect(socket_path(pane_id)).is_ok()
 }
+
+/// Pane ids with a live holder in `holders_dir()`. Socket files whose
+/// holder is gone are removed on the way, so the directory doesn't
+/// accumulate them.
+#[cfg(unix)]
+pub fn live_panes() -> Vec<String> {
+    live_panes_in(&holders_dir())
+}
+
+#[cfg(unix)]
+fn live_panes_in(dir: &std::path::Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut panes = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(pane) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".sock"))
+        else {
+            continue;
+        };
+        if std::os::unix::net::UnixStream::connect(&path).is_ok() {
+            panes.push(pane.to_string());
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    panes.sort();
+    panes
+}
+
+/// Live holders no pane in the session names: what is left when the app
+/// crashed, or died before saving a pane it had just opened. Reopened
+/// rather than killed — those are exactly the cases where the holder has
+/// work the user wants back.
+pub fn orphans(live: &[String], session_panes: &[String]) -> Vec<String> {
+    live.iter()
+        .filter(|p| !session_panes.contains(p))
+        .cloned()
+        .collect()
+}
+
+/// Ends every holder in `holders_dir()` — attached or not, orphaned or not
+/// — and waits up to `patience` for them to go. For "Quit and end all
+/// sessions". Returns the panes whose holder was still answering at the
+/// deadline.
+///
+/// Each connection stays open until its holder reports the exit: a holder
+/// whose child dies with nobody attached waits a day for someone to
+/// collect it, so hanging up straight after `Kill` would leave it there.
+#[cfg(unix)]
+pub fn end_all(patience: std::time::Duration) -> Vec<String> {
+    end_all_in(&holders_dir(), patience)
+}
+
+#[cfg(unix)]
+fn end_all_in(dir: &std::path::Path, patience: std::time::Duration) -> Vec<String> {
+    use std::time::Instant;
+    let deadline = Instant::now() + patience;
+    let panes = live_panes_in(dir);
+    let sock = |pane: &str| dir.join(format!("{pane}.sock"));
+    let mut attached = Vec::new();
+    for pane in &panes {
+        // Attaching takes the pane over from the app, which is quitting.
+        if let Ok(mut a) = client::attach(&sock(pane), 80, 24) {
+            if wire::write_frame(&mut a.stream, &wire::Frame::Kill).is_ok() {
+                attached.push(a);
+            }
+        }
+    }
+    for mut a in attached {
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() || a.stream.set_read_timeout(Some(left)).is_err() {
+                break;
+            }
+            match wire::read_frame(&mut a.stream) {
+                Ok(Some(wire::Frame::Exited(_))) | Ok(None) | Err(_) => break,
+                Ok(Some(_)) => {}
+            }
+        }
+    }
+    // The holder removes its socket as it exits; give the last ones a moment.
+    loop {
+        let left: Vec<String> = panes
+            .iter()
+            .filter(|p| std::os::unix::net::UnixStream::connect(sock(p)).is_ok())
+            .cloned()
+            .collect();
+        if left.is_empty() || Instant::now() >= deadline {
+            return left;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}

@@ -187,3 +187,65 @@ fn a_held_pane_works_like_a_local_one_and_survives_its_manager() {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
+
+/// A holder must not keep descriptors it inherited: one that held on to
+/// the app's connection to another holder would keep that connection open
+/// after the app quits, and freeze that holder's child behind a socket
+/// nobody reads.
+#[test]
+fn a_holder_keeps_nothing_it_inherited() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    let dir = PathBuf::from(format!("/tmp/mhi-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let canary = dir.join("canary.sock");
+    let socket = dir.join("h").join("p.sock");
+
+    // An inheritable listener: close-on-exec cleared, as in the race.
+    let listener = UnixListener::bind(&canary).unwrap();
+    unsafe {
+        libc::fcntl(listener.as_raw_fd(), libc::F_SETFD, 0);
+    }
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "'{}' __hold --pane t --socket '{}' --command 'sleep 30' \
+             </dev/null >/dev/null 2>&1 & echo $!",
+            env!("CARGO_BIN_EXE_mira"),
+            socket.display()
+        ))
+        .output()
+        .unwrap();
+    let holder: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    while !socket.exists() {
+        assert!(Instant::now() < deadline, "holder never bound its socket");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // Ours gone, only an inheritor could still be listening. Other tests in
+    // this binary fork short-lived children (`sh`, `ps`) that can inherit it
+    // for a moment too, so wait those out: only the holder lives on.
+    drop(listener);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut leaked = true;
+    while Instant::now() < deadline {
+        if UnixStream::connect(&canary).is_err() {
+            leaked = false;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let mut a = attach(&socket, 80, 24).unwrap();
+    write_frame(&mut a.stream, &Frame::Kill).unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    while ps("pid", holder).is_some() {
+        assert!(Instant::now() < deadline, "holder still running after Kill");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!leaked, "the holder kept a descriptor it inherited");
+}

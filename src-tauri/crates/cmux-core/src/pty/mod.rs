@@ -444,6 +444,9 @@ impl PtyManager {
     /// already happened), then live output flows through the same scanner,
     /// sink and flow control as a local pane. Every other method works on
     /// the pane as before; `close` asks the holder to end it.
+    ///
+    /// Returns the notifications the child raised while nothing was
+    /// attached, as a count and the last one, for the caller to summarize.
     #[allow(clippy::too_many_arguments)]
     pub fn attach_held(
         &self,
@@ -454,7 +457,7 @@ impl PtyManager {
         mut scanner: Box<dyn StreamScanner>,
         on_data: impl FnMut(&[u8]) + Send + 'static,
         on_exit: impl FnOnce(&str, Option<i32>) + Send + 'static,
-    ) -> Result<(), String> {
+    ) -> Result<(u32, Option<String>), String> {
         use crate::hold::client::attach;
         use crate::hold::wire::{read_frame, write_frame, Frame};
 
@@ -462,6 +465,7 @@ impl PtyManager {
             return Err(format!("pane {id} already running"));
         }
         let attached = attach(socket, cols, rows).map_err(|e| e.to_string())?;
+        let missed = (attached.missed, attached.last_missed);
         let mut reader = attached.stream;
         let mut writer = reader.try_clone().map_err(|e| e.to_string())?;
         let id = id.to_string();
@@ -550,7 +554,7 @@ impl PtyManager {
                 finish(&inner, &id, &hook, code);
             })
             .map_err(|e| e.to_string())?;
-        Ok(())
+        Ok(missed)
     }
 }
 
