@@ -59,6 +59,15 @@ local clippy run. And when CI does fail on a lint, re-run the whole
 workspace locally on the new toolchain: cargo stops at the first crate
 that fails, so the crates after it were never linted.
 
+**Only Windows CI lints the app crate for Windows.** From macOS,
+`cargo clippy --target x86_64-pc-windows-msvc` works for `cmux-core` and
+`cmux-protocol` but not the app crate, whose `ring` dependency needs Windows
+C headers. So unix-only code there can break the Windows build unseen: a
+field or helper read only under `#[cfg(unix)]` is dead code on Windows, and
+`-D warnings` makes that an error (#79). Mark it
+`#[cfg_attr(not(unix), allow(dead_code))]`, as `pty::Signal` does, and keep
+the logic itself in `cmux-core`, where the cross-check reaches.
+
 ## Verifying a change
 
 **CI compiles and unit-tests but never mounts the app.** `tsc`, `vite build`,
