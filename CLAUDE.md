@@ -104,6 +104,15 @@ State is all environment-derived: session + scrollback under
 `$HOME/Library/Application Support/Mirador` (macOS), socket in
 `$XDG_RUNTIME_DIR`, config and `socket.json` under `$XDG_CONFIG_HOME/mirador`.
 
+**A symlinked dotfile is the real one.** The sandbox `$HOME` links
+`.zshrc`, `.local` and the rest to the user's, so anything deleted or
+written *through* those links happens to the real files — a cleanup of
+`$SBX/.local/bin/mira` once deleted the user's own `~/.local/bin/mira`.
+Never `rm` under a linked path, and keep the app's own writes away from
+them: don't link `.claude` (the app repairs and sets up hooks there; give
+the sandbox an empty one), and don't click *Set up* in a sandbox whose
+`.local` is linked (it writes `~/.local/bin/mira`).
+
 **Sandbox holders outlive the sandbox.** `persistSessions` is on by
 default, so every sandbox pane is a `mira __hold` process that keeps running
 after the instance quits — that is the feature. Unless persistence is what
