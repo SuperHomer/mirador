@@ -7,6 +7,8 @@
  * app would never produce.
  */
 
+import { BothKeys } from "./Keys";
+
 const ROW_H = 26;
 const LANE_W = 16;
 const DOT_R = 4;
@@ -130,24 +132,6 @@ function RefChip({ chip }: { chip: Ref }) {
   );
 }
 
-function Key({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd
-      className="mono"
-      style={{
-        background: "var(--bg-alt)",
-        border: "1px solid var(--surface)",
-        borderRadius: 6,
-        padding: "4px 10px",
-        fontSize: 12.5,
-        color: "var(--text)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </kbd>
-  );
-}
 
 function GraphMockup() {
   const lanes = 2;
@@ -326,7 +310,7 @@ export default function GraphShowcase() {
             mira graph
           </span>
           <span>or</span>
-          <Key>⌘K</Key>
+          <BothKeys mac="⌘K" other="Ctrl+Shift+K" />
           <span style={{ color: "var(--muted)", fontSize: 12.5 }}>→ “Git: Commit Graph”</span>
         </div>
       </div>

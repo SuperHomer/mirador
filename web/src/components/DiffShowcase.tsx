@@ -1,29 +1,11 @@
+import { BothKeys } from "./Keys";
+
 const ADD_BG = "rgba(166,227,161,.13)";
 const DEL_BG = "rgba(243,139,168,.13)";
 const ADD_NUM_BG = "rgba(166,227,161,.22)";
 const DEL_NUM_BG = "rgba(243,139,168,.22)";
 
 type Row = { old?: number; now?: number; kind: "ctx" | "add" | "del"; text: string };
-
-/** Both platforms' keys, because only one of them is yours. */
-function Key({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd
-      className="mono"
-      style={{
-        background: "var(--bg-alt)",
-        border: "1px solid var(--surface)",
-        borderRadius: 6,
-        padding: "4px 10px",
-        fontSize: 12.5,
-        color: "var(--text)",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </kbd>
-  );
-}
 
 const ROWS: Row[] = [
   { old: 18, now: 18, kind: "ctx", text: "  const ttl = Number(env.TOKEN_TTL ?? 3600);" },
@@ -335,9 +317,7 @@ export default function DiffShowcase() {
             color: "var(--subtext)",
           }}
         >
-          <Key>⌘G</Key>
-          <span style={{ color: "var(--muted)", fontSize: 12.5 }}>/</span>
-          <Key>Ctrl+Shift+G</Key>
+          <BothKeys mac="⌘G" other="Ctrl+Shift+G" />
           <span>or</span>
           <span className="mono" style={{ color: "var(--text)" }}>
             mira diff
