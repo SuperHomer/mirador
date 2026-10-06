@@ -227,7 +227,7 @@ Each step is a PR that leaves `main` releasable.
    Cmd+Q detaches. — #79
 3. ***Quit and end all sessions*** (palette, and `mira quit --end-sessions`),
    orphans reopened in tabs, the notification summary.
-4. **The default flipped to on**, after a release of real use.
+4. **The default flipped to on.**
 5. **Windows** — overlapped named pipes, detached holders, and the holder
    test suite running on Windows CI.
 
@@ -244,4 +244,7 @@ Settled on 2026-10-06:
    exit code, then exits.
 4. **Step 2 ships off by default** (`persistSessions: false`) for one
    release, so it is tried in a real app before it changes Cmd+Q for
-   everyone.
+   everyone. (It shipped off in v0.1.18 and v0.1.19; the default was then
+   turned on everywhere, Windows included, at the user's call — before a
+   release of real use, and before the app itself had run with it on
+   Windows.)

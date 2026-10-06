@@ -255,28 +255,30 @@ restored session keeps each pane's own saved directory.
 
 ## Terminals that keep running when you quit
 
-*Experimental.* Turn it on and quitting Mirador no longer
-ends what runs in it: shells, builds, dev servers and agents keep going, and
-the next launch reattaches to them — same processes, with what they printed
-while Mirador was closed.
+Quitting Mirador doesn't end what runs in it: shells, builds, dev servers and
+agents keep going, and the next launch reattaches to them — the same
+processes, with what they printed while Mirador was closed.
 
-```jsonc
-// ~/.config/mirador/mirador.json
-{ "persistSessions": true }
-```
+- **Closing a pane** ends it and everything in it, as before.
+- **Quit and End All Sessions** in the palette (or `mira quit --end-sessions`)
+  ends every session, then quits. Cmd+Q keeps them.
+- **Notifications** raised while Mirador was closed arrive as one when it
+  reopens.
+- **A session with no pane to come back to** — after a crash, say — reopens
+  in a tab of its own, never silently killed.
 
 Each pane runs in a small holder process (`mira __hold`, about 3 MB) that
-owns its terminal. Closing a pane ends it and everything in it, as before.
-The key is read when a pane opens, so turning it on applies to new panes,
-and turning it off never strands the ones already running: they still
-reattach on the next launch. After a reboot there is nothing to reattach,
-and panes are restored the usual way.
+owns its terminal. After a reboot there is nothing to reattach, and panes are
+restored the usual way. To have Cmd+Q end everything as it used to:
 
-To end everything instead, use **Quit and End All Sessions** in the palette
-(or `mira quit --end-sessions`). Notifications raised while Mirador was
-closed arrive as one, when it reopens. A session with no pane to come back
-to — after a crash, say — reopens in a tab of its own, never silently
-killed. Design:
+```jsonc
+// ~/.config/mirador/mirador.json  (%APPDATA%\mirador\mirador.json on Windows)
+{ "persistSessions": false }
+```
+
+The key is read when a pane opens, so it applies to new panes; sessions that
+are already running still reattach on the next launch rather than being
+stranded. Design:
 [docs/design/session-persistence.md](docs/design/session-persistence.md).
 
 ## What's New after an update

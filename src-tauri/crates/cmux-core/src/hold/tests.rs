@@ -1,6 +1,6 @@
 //! A real holder around a real shell, driven over its socket or pipe.
 //! These run on every platform CI builds: on Windows they are the only
-//! place the holder ever runs before a user turns `persistSessions` on.
+//! place the holder ever runs before a user's app does.
 //!
 //! Shell commands come in two spellings, POSIX for unix and PowerShell for
 //! Windows (what a command pane runs there).

@@ -53,8 +53,8 @@ pub struct Config {
     /// to inherit. Unset → the home directory, as before.
     pub default_cwd: Option<String>,
     /// Keep terminals running when Mirador quits, and reattach to them on
-    /// the next launch. Off by default while it is new;
-    /// read when a pane opens, so turning it on applies to new panes.
+    /// the next launch. On unless set to `false`; read when a pane opens,
+    /// so changing it applies to new panes.
     pub persist_sessions: Option<bool>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
@@ -105,7 +105,13 @@ pub fn home_dir() -> Option<String> {
 
 /// The `persistSessions` key: whether new panes run in a session holder.
 pub fn persist_sessions() -> bool {
-    load().0.persist_sessions.unwrap_or(false)
+    persist_sessions_in(&load().0)
+}
+
+/// On unless the user said `false`: shipped opt-in in v0.1.18 and v0.1.19,
+/// on by default since.
+fn persist_sessions_in(cfg: &Config) -> bool {
+    cfg.persist_sessions.unwrap_or(true)
 }
 
 /// Where a new tab's first pane starts, from the `defaultCwd` config key.
@@ -410,10 +416,12 @@ mod tests {
     }
 
     #[test]
-    fn persist_sessions_is_off_unless_configured() {
-        assert_eq!(Config::default().persist_sessions, None);
-        let cfg: Config = serde_json::from_str(r#"{ "persistSessions": true }"#).unwrap();
-        assert_eq!(cfg.persist_sessions, Some(true));
+    fn persist_sessions_is_on_unless_turned_off() {
+        assert!(persist_sessions_in(&Config::default()));
+        let on: Config = serde_json::from_str(r#"{ "persistSessions": true }"#).unwrap();
+        assert!(persist_sessions_in(&on));
+        let off: Config = serde_json::from_str(r#"{ "persistSessions": false }"#).unwrap();
+        assert!(!persist_sessions_in(&off));
     }
 
     #[test]
