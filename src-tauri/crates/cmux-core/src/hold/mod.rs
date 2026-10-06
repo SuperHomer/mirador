@@ -42,3 +42,74 @@ pub fn socket_path(pane_id: &str) -> PathBuf {
         .collect();
     holders_dir().join(format!("{safe}.sock"))
 }
+
+/// Starts `mira __hold` for a pane and returns once its socket accepts
+/// connections. `mira` is the bundled CLI next to the app binary.
+///
+/// The holder is our child until we exit, so a thread waits on it: a
+/// holder that ends while the app runs would otherwise linger as a zombie.
+#[cfg(unix)]
+pub fn launch(
+    mira: &std::path::Path,
+    pane: &str,
+    socket: &std::path::Path,
+    cwd: Option<&str>,
+    cols: u16,
+    rows: u16,
+    program: &server::Program,
+) -> std::io::Result<()> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let mut cmd = Command::new(mira);
+    cmd.arg("__hold")
+        .args(["--pane", pane])
+        .arg("--socket")
+        .arg(socket)
+        .args(["--cols", &cols.to_string(), "--rows", &rows.to_string()]);
+    if let Some(cwd) = cwd {
+        cmd.args(["--cwd", cwd]);
+    }
+    match program {
+        server::Program::Shell => {}
+        server::Program::Command(line) => {
+            cmd.args(["--command", line]);
+        }
+        server::Program::Ssh(host) => {
+            cmd.args(["--ssh", host]);
+        }
+    }
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            // Never leave a holder behind that nobody can reach.
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("holder for {pane} never opened {}", socket.display()),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Whether a live holder answers on this pane's socket.
+#[cfg(unix)]
+pub fn is_alive(pane_id: &str) -> bool {
+    std::os::unix::net::UnixStream::connect(socket_path(pane_id)).is_ok()
+}

@@ -408,7 +408,10 @@ fn attach_pane_blocking(
         )
     };
 
-    let sink = {
+    // A factory: a held pane that fails to attach falls back to a local
+    // one, and each attempt consumes its own sink.
+    let make_sink = || {
+        let on_data = on_data.clone();
         let sink_app = app.clone();
         let pane = pane_id.clone();
         // An SSH session isn't a "run": no output capture, no history.
@@ -432,9 +435,30 @@ fn attach_pane_blocking(
     };
 
     if state.pty.is_running(&pane_id) {
-        state.pty.set_sink(&pane_id, sink);
+        state.pty.set_sink(&pane_id, make_sink());
         let _ = state.pty.resize(&pane_id, cols, rows);
         return Ok("reattached".into());
+    }
+
+    // A pane whose holder outlived the last quit: its process never
+    // stopped, so it is reattached rather than restored — and none of the
+    // idle-until-keypress rules apply, because nothing is being started.
+    #[cfg(unix)]
+    if state.pending_reattach.lock().unwrap().remove(&pane_id) {
+        let socket = cmux_core::hold::socket_path(&pane_id);
+        match state.pty.attach_held(
+            &pane_id,
+            &socket,
+            cols,
+            rows,
+            pane_scanner(app, &pane_id),
+            make_sink(),
+            pane_exit_hook(app),
+        ) {
+            Ok(()) => return Ok("resumed".into()),
+            // It died since launch: open the pane as if it had none.
+            Err(e) => eprintln!("mirador: reattaching {pane_id}: {e}"),
+        }
     }
 
     // Session-restored command/remote panes attach idle: never auto-rerun
@@ -446,63 +470,6 @@ fn attach_pane_blocking(
         return Ok("restored".into());
     }
     state.restored_panes.lock().unwrap().remove(&pane_id);
-
-    // Scanner events run on the pane's forwarder thread.
-    let scanner = {
-        let app = app.clone();
-        let pane_id = pane_id.clone();
-        OscScanner::new(move |event| match event {
-            OscEvent::Notification { title, body } => {
-                notify::handle_notification(&app, &pane_id, title, body);
-            }
-            OscEvent::Cwd(path) => {
-                let state = app.state::<AppState>();
-                let changed = {
-                    let mut meta = state.meta.lock().unwrap();
-                    let entry = meta.entry(pane_id.clone()).or_default();
-                    // Latch: from here on the poller leaves this pane's
-                    // cwd alone, even between prompts.
-                    entry.cwd_from_shell = true;
-                    if entry.cwd.as_deref() != Some(path.as_str()) {
-                        entry.cwd = Some(path);
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if changed {
-                    // cwd is restored with the session; titles are not.
-                    state
-                        .session_dirty
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
-                    request_workspace_emit(&app);
-                }
-            }
-            OscEvent::Title(title) => {
-                let state = app.state::<AppState>();
-                let changed = {
-                    let mut meta = state.meta.lock().unwrap();
-                    let entry = meta.entry(pane_id.clone()).or_default();
-                    let title = if title.trim().is_empty()
-                        || !cmux_core::state::is_meaningful_title(&title)
-                    {
-                        None
-                    } else {
-                        Some(title)
-                    };
-                    if entry.title != title {
-                        entry.title = title;
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if changed {
-                    request_workspace_emit(&app);
-                }
-            }
-        })
-    };
 
     let command_builder = match remote_host.as_deref() {
         // Remote pane: the system ssh handles auth/agent/2FA/ProxyJump.
@@ -518,36 +485,183 @@ fn attach_pane_blocking(
         }
     }
 
-    let exit_app = app.clone();
+    let program = match (remote_host.as_deref(), pane_command.as_deref()) {
+        (Some(host), _) => Program::Ssh(host.to_string()),
+        (None, Some(cmd)) => Program::Command(cmd.to_string()),
+        (None, None) => Program::Shell,
+    };
+    if spawn_held(app, &pane_id, cwd.as_deref(), cols, rows, &program, &make_sink) {
+        return Ok("spawned".into());
+    }
+
     state.pty.spawn(
         &pane_id,
         cols,
         rows,
         cwd.as_deref(),
         command_builder,
-        Box::new(scanner),
-        sink,
-        move |exited_id, exit_code| {
-            let is_command = crate::runs::finish_run(&exit_app, exited_id, exit_code);
-            let is_remote = {
-                let state = exit_app.state::<AppState>();
-                let meta = state.meta.lock().unwrap();
-                meta.get(exited_id).is_some_and(|m| m.remote_host.is_some())
-            };
-            let _ = exit_app.emit(
-                "pane-exit",
-                PaneExitPayload {
-                    pane_id: exited_id.to_string(),
-                    exit_code,
-                    is_command,
-                    is_remote,
-                },
-            );
-        },
+        pane_scanner(app, &pane_id),
+        make_sink(),
+        pane_exit_hook(app),
     )?;
 
     Ok("spawned".into())
 }
+
+/// The OSC scanner every terminal pane's output goes through. Its events
+/// run on the pane's reader thread.
+fn pane_scanner(app: &AppHandle, pane_id: &str) -> Box<dyn cmux_core::osc::StreamScanner> {
+let app = app.clone();
+let pane_id = pane_id.to_string();
+    Box::new(OscScanner::new(move |event| match event {
+        OscEvent::Notification { title, body } => {
+            notify::handle_notification(&app, &pane_id, title, body);
+        }
+        OscEvent::Cwd(path) => {
+            let state = app.state::<AppState>();
+            let changed = {
+                let mut meta = state.meta.lock().unwrap();
+                let entry = meta.entry(pane_id.clone()).or_default();
+                // Latch: from here on the poller leaves this pane's
+                // cwd alone, even between prompts.
+                entry.cwd_from_shell = true;
+                if entry.cwd.as_deref() != Some(path.as_str()) {
+                    entry.cwd = Some(path);
+                    true
+                } else {
+                    false
+                }
+            };
+            if changed {
+                // cwd is restored with the session; titles are not.
+                state
+                    .session_dirty
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                request_workspace_emit(&app);
+            }
+        }
+        OscEvent::Title(title) => {
+            let state = app.state::<AppState>();
+            let changed = {
+                let mut meta = state.meta.lock().unwrap();
+                let entry = meta.entry(pane_id.clone()).or_default();
+                let title = if title.trim().is_empty()
+                    || !cmux_core::state::is_meaningful_title(&title)
+                {
+                    None
+                } else {
+                    Some(title)
+                };
+                if entry.title != title {
+                    entry.title = title;
+                    true
+                } else {
+                    false
+                }
+            };
+            if changed {
+                request_workspace_emit(&app);
+            }
+        }
+    }))
+}
+
+/// What a terminal pane does when its process exits, wherever it ran.
+fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 'static {
+    let exit_app = app.clone();
+    move |exited_id, exit_code| {
+        let is_command = crate::runs::finish_run(&exit_app, exited_id, exit_code);
+        let is_remote = {
+            let state = exit_app.state::<AppState>();
+            let meta = state.meta.lock().unwrap();
+            meta.get(exited_id).is_some_and(|m| m.remote_host.is_some())
+        };
+        let _ = exit_app.emit(
+            "pane-exit",
+            PaneExitPayload {
+                pane_id: exited_id.to_string(),
+                exit_code,
+                is_command,
+                is_remote,
+            },
+        );
+    }
+}
+
+/// Where a terminal pane's process runs.
+enum Program {
+    Shell,
+    Command(String),
+    Ssh(String),
+}
+
+/// With `persistSessions` on, runs the pane in a session holder so it
+/// outlives the app. Returns false — and the caller spawns locally — when
+/// it is off, unsupported here, or anything about the holder fails: a
+/// broken holder must never cost the user a terminal.
+fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
+    app: &AppHandle,
+    pane_id: &str,
+    cwd: Option<&str>,
+    cols: u16,
+    rows: u16,
+    program: &Program,
+    make_sink: &impl Fn() -> S,
+) -> bool {
+    #[cfg(unix)]
+    {
+        use cmux_core::hold::server::Program as Held;
+        if !cmux_core::config::persist_sessions() {
+            return false;
+        }
+        let Some(mira) = mira_binary() else {
+            eprintln!("mirador: persistSessions is on but the mira binary is missing");
+            return false;
+        };
+        let socket = cmux_core::hold::socket_path(pane_id);
+        let held = match program {
+            Program::Shell => Held::Shell,
+            Program::Command(cmd) => Held::Command(cmd.clone()),
+            Program::Ssh(host) => Held::Ssh(host.clone()),
+        };
+        let state = app.state::<AppState>();
+        let result = cmux_core::hold::launch(&mira, pane_id, &socket, cwd, cols, rows, &held)
+            .map_err(|e| e.to_string())
+            .and_then(|()| {
+                state.pty.attach_held(
+                    pane_id,
+                    &socket,
+                    cols,
+                    rows,
+                    pane_scanner(app, pane_id),
+                    make_sink(),
+                    pane_exit_hook(app),
+                )
+            });
+        match result {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("mirador: session holder for {pane_id} failed, running it locally: {e}");
+                false
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (app, pane_id, cwd, cols, rows, program, make_sink);
+        false
+    }
+}
+
+/// The bundled `mira` CLI, which doubles as the session holder. It sits
+/// next to the app binary — in the bundle, and in `target/<profile>` when
+/// the workspace has been built.
+#[cfg(unix)]
+fn mira_binary() -> Option<std::path::PathBuf> {
+    let path = std::env::current_exe().ok()?.parent()?.join("mira");
+    path.is_file().then_some(path)
+}
+
 
 /// Types a restored pane's `startup_input` into its shell. The first output
 /// is usually the start of the prompt, not the end of shell startup, so it
@@ -1007,8 +1121,14 @@ pub async fn store_scrollback(pane_id: String, data: String) {
 
 /// Scrollback from the previous session, if any.
 #[tauri::command]
-pub async fn load_scrollback(pane_id: String) -> Option<String> {
-    cmux_core::session::load_scrollback(&pane_id)
+pub async fn load_scrollback(state: State<'_, AppState>, pane_id: String) -> Result<Option<String>, ()> {
+    // A pane reattaching to its holder gets the holder's replay, which is
+    // newer than any saved scrollback; showing both would print the same
+    // history twice.
+    if state.held_at_launch.contains(&pane_id) {
+        return Ok(None);
+    }
+    Ok(cmux_core::session::load_scrollback(&pane_id))
 }
 
 /// Async so keystrokes never queue behind the UI thread's other work

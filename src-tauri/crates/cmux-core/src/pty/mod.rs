@@ -83,15 +83,40 @@ struct PtyPane {
     /// panes lock, one stalled pane froze every other pane's ack, resize and
     /// exit polling — and, from `write_pty`, the UI thread with them.
     input: std::sync::mpsc::Sender<Vec<u8>>,
-    /// Taken to close the PTY. On Windows that is what finally unblocks a
-    /// reader parked on a dead child — see `spawn_exit_watcher`.
-    master: Option<Box<dyn MasterPty + Send>>,
-    child: Box<dyn Child + Send + Sync>,
+    backend: Backend,
     flow: Arc<FlowControl>,
     /// Replaceable output callback: a remounted frontend pane re-attaches
     /// with a fresh channel without respawning the shell.
     sink: Sink,
     pid: Option<u32>,
+}
+
+/// Where a pane's terminal lives.
+enum Backend {
+    /// In this process: the PTY master and the child are ours.
+    Local {
+        /// Taken to close the PTY. On Windows that is what finally unblocks
+        /// a reader parked on a dead child — see `spawn_exit_watcher`.
+        master: Option<Box<dyn MasterPty + Send>>,
+        child: Box<dyn Child + Send + Sync>,
+    },
+    /// In a session holder (`crate::hold`): resize, kill and detach are
+    /// frames for its writer thread.
+    #[cfg(unix)]
+    Held {
+        control: std::sync::mpsc::Sender<crate::hold::wire::Frame>,
+    },
+}
+
+impl Backend {
+    /// The child, when it is ours to wait on or kill directly.
+    fn child_mut(&mut self) -> Option<&mut Box<dyn Child + Send + Sync>> {
+        match self {
+            Backend::Local { child, .. } => Some(child),
+            #[cfg(unix)]
+            Backend::Held { .. } => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -258,8 +283,10 @@ impl PtyManager {
             id.clone(),
             PtyPane {
                 input,
-                master: Some(pair.master),
-                child,
+                backend: Backend::Local {
+                    master: Some(pair.master),
+                    child,
+                },
                 flow,
                 sink,
                 pid,
@@ -308,18 +335,22 @@ impl PtyManager {
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
         let panes = self.inner.panes.lock().unwrap();
         let pane = panes.get(id).ok_or_else(|| format!("no pane {id}"))?;
-        let master = pane
-            .master
-            .as_ref()
-            .ok_or_else(|| format!("pane {id} is closing"))?;
-        master
-            .resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| e.to_string())
+        match &pane.backend {
+            Backend::Local { master, .. } => master
+                .as_ref()
+                .ok_or_else(|| format!("pane {id} is closing"))?
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| e.to_string()),
+            #[cfg(unix)]
+            Backend::Held { control } => control
+                .send(crate::hold::wire::Frame::Resize { cols, rows })
+                .map_err(|_| format!("pane {id} is closing")),
+        }
     }
 
     /// Acknowledge `n` bytes processed by the UI, potentially resuming a
@@ -338,7 +369,14 @@ impl PtyManager {
             // Unpark a flow-control-paused reader; it switches to drain mode
             // so the child's pending tty writes can flush and EOF arrives.
             pane.flow.close();
-            let pid = pane.child.process_id();
+            // A holder ends its own child's process group, which it leads
+            // and we cannot see from here.
+            #[cfg(unix)]
+            if let Backend::Held { control } = &pane.backend {
+                let _ = control.send(crate::hold::wire::Frame::Kill);
+                return Ok(());
+            }
+            let pid = pane.pid;
             signal_group(pid, Signal::Hangup);
             #[cfg(windows)]
             {
@@ -354,8 +392,14 @@ impl PtyManager {
                     let inner = Arc::clone(&inner);
                     move || {
                         kill_tree(pid);
-                        if let Some(pane) = inner.panes.lock().unwrap().get_mut(&id) {
-                            let _ = pane.child.kill();
+                        if let Some(child) = inner
+                            .panes
+                            .lock()
+                            .unwrap()
+                            .get_mut(&id)
+                            .and_then(|pane| pane.backend.child_mut())
+                        {
+                            let _ = child.kill();
                         }
                     }
                 });
@@ -390,6 +434,123 @@ impl PtyManager {
         for kill in kills {
             let _ = kill.join();
         }
+    }
+}
+
+#[cfg(unix)]
+impl PtyManager {
+    /// Attaches a pane to its session holder instead of spawning a child:
+    /// the holder's replay is scanned once with events suppressed (they
+    /// already happened), then live output flows through the same scanner,
+    /// sink and flow control as a local pane. Every other method works on
+    /// the pane as before; `close` asks the holder to end it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn attach_held(
+        &self,
+        id: &str,
+        socket: &std::path::Path,
+        cols: u16,
+        rows: u16,
+        mut scanner: Box<dyn StreamScanner>,
+        on_data: impl FnMut(&[u8]) + Send + 'static,
+        on_exit: impl FnOnce(&str, Option<i32>) + Send + 'static,
+    ) -> Result<(), String> {
+        use crate::hold::client::attach;
+        use crate::hold::wire::{read_frame, write_frame, Frame};
+
+        if self.inner.panes.lock().unwrap().contains_key(id) {
+            return Err(format!("pane {id} already running"));
+        }
+        let attached = attach(socket, cols, rows).map_err(|e| e.to_string())?;
+        let mut reader = attached.stream;
+        let mut writer = reader.try_clone().map_err(|e| e.to_string())?;
+        let id = id.to_string();
+
+        // One writer for every frame, so input, resizes and the kill never
+        // interleave on the socket — and a holder slow to read blocks this
+        // thread, never the UI.
+        let (control, control_rx) = std::sync::mpsc::channel::<Frame>();
+        std::thread::Builder::new()
+            .name(format!("held-writer-{id}"))
+            .spawn(move || {
+                for frame in control_rx {
+                    if write_frame(&mut writer, &frame).is_err() {
+                        break;
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        let (input, input_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        {
+            let control = control.clone();
+            std::thread::Builder::new()
+                .name(format!("held-input-{id}"))
+                .spawn(move || {
+                    for bytes in input_rx {
+                        if control.send(Frame::Input(bytes)).is_err() {
+                            break;
+                        }
+                    }
+                })
+                .map_err(|e| e.to_string())?;
+        }
+
+        let flow = Arc::new(FlowControl::default());
+        let sink: Sink = Arc::new(Mutex::new(Box::new(on_data)));
+        let hook: ExitHook = Arc::new(Mutex::new(Some(Box::new(on_exit))));
+        // In the map before any output is read, so an exit that arrives at
+        // once still finds the pane to remove.
+        self.inner.panes.lock().unwrap().insert(
+            id.clone(),
+            PtyPane {
+                input,
+                backend: Backend::Held { control },
+                flow: Arc::clone(&flow),
+                sink: Arc::clone(&sink),
+                pid: attached.pid,
+            },
+        );
+
+        let inner = Arc::clone(&self.inner);
+        let replay = attached.replay;
+        std::thread::Builder::new()
+            .name(format!("held-reader-{id}"))
+            .spawn(move || {
+                let mut forwarding = true;
+                let mut forward = |scanner: &mut Box<dyn StreamScanner>, bytes: &[u8]| {
+                    if !forwarding {
+                        return;
+                    }
+                    let out = scanner.scan(bytes);
+                    if !out.is_empty() {
+                        (sink.lock().unwrap())(&out);
+                    }
+                    if !flow.add_and_wait(bytes.len() as u64) {
+                        forwarding = false;
+                    }
+                };
+                scanner.set_replaying(true);
+                forward(&mut scanner, &replay);
+                scanner.set_replaying(false);
+
+                let mut code = None;
+                loop {
+                    match read_frame(&mut reader) {
+                        Ok(Some(Frame::Output(bytes))) => forward(&mut scanner, &bytes),
+                        Ok(Some(Frame::Exited(c))) => {
+                            code = c;
+                            break;
+                        }
+                        // EOF without an exit: the holder was killed, or
+                        // another client took the pane over.
+                        Ok(None) | Err(_) => break,
+                        Ok(Some(_)) => {}
+                    }
+                }
+                finish(&inner, &id, &hook, code);
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 
@@ -429,7 +590,10 @@ fn finish(inner: &Arc<Inner>, id: &str, hook: &ExitHook, code: Option<i32>) {
     };
     let pane = inner.panes.lock().unwrap().remove(id);
     let code = code.or_else(|| {
-        pane.and_then(|mut pane| pane.child.wait().ok().map(|s| s.exit_code() as i32))
+        pane.and_then(|mut pane| {
+            let status = pane.backend.child_mut()?.wait().ok()?;
+            Some(status.exit_code() as i32)
+        })
     });
     on_exit(id, code);
 }
@@ -457,8 +621,8 @@ fn spawn_exit_watcher(inner: Arc<Inner>, id: String, hook: ExitHook) {
                 let Some(pane) = panes.get_mut(&id) else {
                     return; // pane already gone: closed, or cleaned up
                 };
-                match pane.child.try_wait() {
-                    Ok(Some(status)) => status.exit_code() as i32,
+                match pane.backend.child_mut().map(|child| child.try_wait()) {
+                    Some(Ok(Some(status))) => status.exit_code() as i32,
                     _ => continue,
                 }
             };

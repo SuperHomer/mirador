@@ -73,3 +73,117 @@ fn the_holder_outlives_the_process_that_started_it() {
     assert!(!socket.exists(), "socket left behind");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The app's side of a held pane, end to end: `hold::launch` starts the real
+/// holder, `PtyManager::attach_held` drives it through the same scanner,
+/// sink and exit hook a local pane uses, and a second manager — the next
+/// launch — reattaches to the same process.
+#[test]
+fn a_held_pane_works_like_a_local_one_and_survives_its_manager() {
+    use cmux_core::hold::server::Program;
+    use cmux_core::osc::{OscEvent, OscScanner};
+    use cmux_core::pty::PtyManager;
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+
+    let dir = PathBuf::from(format!("/tmp/mhp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let socket = dir.join("p.sock");
+    let marker = dir.join("printed");
+    let mira = PathBuf::from(env!("CARGO_BIN_EXE_mira"));
+    // A failed assertion must not leave a holder running for good.
+    struct Reap(PathBuf);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = Command::new("pkill")
+                .args(["-f", &format!("--socket {}", self.0.display())])
+                .status();
+            let _ = std::fs::remove_dir_all(self.0.parent().unwrap());
+        }
+    }
+    let _reap = Reap(socket.clone());
+
+    // A notification goes out before anyone attaches — the marker says it
+    // has, since a login shell's startup time is anyone's guess — then the
+    // shell waits.
+    let script = format!(
+        "printf '\\033]777;notify;T;early\\007'; echo ready; touch {}; \
+         read line; echo got:$line; stty size; read never",
+        marker.display()
+    );
+    cmux_core::hold::launch(&mira, "p", &socket, None, 80, 24, &Program::Command(script))
+        .unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "the script never ran");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let attach = |mgr: &PtyManager, events: Arc<Mutex<Vec<OscEvent>>>| {
+        let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
+        let (exit_tx, exit_rx) = mpsc::channel::<Option<i32>>();
+        mgr.attach_held(
+            "p",
+            &socket,
+            80,
+            24,
+            Box::new(OscScanner::new(move |e| events.lock().unwrap().push(e))),
+            move |b: &[u8]| {
+                let _ = out_tx.send(b.to_vec());
+            },
+            move |_, code| {
+                let _ = exit_tx.send(code);
+            },
+        )
+        .unwrap();
+        (out_rx, exit_rx)
+    };
+    let wait_for = |rx: &mpsc::Receiver<Vec<u8>>, seen: &mut String, needle: &str| {
+        let deadline = Instant::now() + PATIENCE;
+        while !seen.contains(needle) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(b) => seen.push_str(&String::from_utf8_lossy(&b)),
+                Err(_) => panic!("never saw {needle:?}; got {seen:?}"),
+            }
+        }
+    };
+
+    // First launch: the replay carries the early notification, which must
+    // not fire again — but it is still stripped from what the pane shows.
+    let first = PtyManager::new();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let (out, _exit) = attach(&first, Arc::clone(&events));
+    let mut seen = String::new();
+    wait_for(&out, &mut seen, "ready");
+    assert!(!seen.contains("early"), "the OSC sequence reached the screen: {seen:?}");
+    assert!(
+        !events.lock().unwrap().iter().any(|e| matches!(e, OscEvent::Notification { .. })),
+        "a replayed notification fired"
+    );
+    let pid = first.pids().first().map(|(_, pid)| *pid).expect("held pane reports its pid");
+
+    // The app quits: its manager goes away without killing anything.
+    drop(out);
+    drop(first);
+
+    // Next launch: a fresh manager reattaches to the same process.
+    let second = PtyManager::new();
+    let (out, exit) = attach(&second, Arc::new(Mutex::new(Vec::new())));
+    assert_eq!(second.pids().first().map(|(_, p)| *p), Some(pid), "not the same process");
+    let mut seen = String::new();
+    wait_for(&out, &mut seen, "ready");
+    second.resize("p", 100, 30).unwrap();
+    second.write("p", b"hello\r").unwrap();
+    wait_for(&out, &mut seen, "got:hello");
+    wait_for(&out, &mut seen, "30 100");
+
+    // Closing the pane ends it, wherever it runs.
+    second.close("p").unwrap();
+    exit.recv_timeout(PATIENCE).expect("no exit after close");
+    let deadline = Instant::now() + PATIENCE;
+    while ps("pid", pid).is_some() {
+        assert!(Instant::now() < deadline, "child {pid} survived close");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}

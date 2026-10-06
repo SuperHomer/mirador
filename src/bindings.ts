@@ -257,7 +257,7 @@ export const attachPane = (
   onData: Channel<PtyData>,
   rerun = false,
 ) =>
-  invoke<"spawned" | "reattached" | "restored">("attach_pane", {
+  invoke<"spawned" | "reattached" | "resumed" | "restored">("attach_pane", {
     paneId,
     cols,
     rows,
