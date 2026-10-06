@@ -52,6 +52,10 @@ pub struct Config {
     /// source pane's directory, so this only applies to panes with nothing
     /// to inherit. Unset → the home directory, as before.
     pub default_cwd: Option<String>,
+    /// Keep terminals running when Mirador quits, and reattach to them on
+    /// the next launch (macOS and Linux). Off by default while it is new;
+    /// read when a pane opens, so turning it on applies to new panes.
+    pub persist_sessions: Option<bool>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
 }
@@ -97,6 +101,12 @@ pub fn home_dir() -> Option<String> {
     {
         std::env::var("HOME").ok()
     }
+}
+
+/// The `persistSessions` key: whether new panes run in a session holder.
+/// Always false where holders don't exist yet.
+pub fn persist_sessions() -> bool {
+    cfg!(unix) && load().0.persist_sessions.unwrap_or(false)
 }
 
 /// Where a new tab's first pane starts, from the `defaultCwd` config key.
@@ -398,6 +408,13 @@ mod tests {
         // `defaultCwd` is opt-in: with no key, new tabs keep the old
         // home-directory behavior.
         assert!(Config::default().default_cwd.is_none());
+    }
+
+    #[test]
+    fn persist_sessions_is_off_unless_configured() {
+        assert_eq!(Config::default().persist_sessions, None);
+        let cfg: Config = serde_json::from_str(r#"{ "persistSessions": true }"#).unwrap();
+        assert_eq!(cfg.persist_sessions, Some(true));
     }
 
     #[test]

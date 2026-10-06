@@ -253,6 +253,26 @@ where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
 
+## Terminals that keep running when you quit
+
+*Experimental, macOS and Linux.* Turn it on and quitting Mirador no longer
+ends what runs in it: shells, builds, dev servers and agents keep going, and
+the next launch reattaches to them — same processes, with what they printed
+while Mirador was closed.
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "persistSessions": true }
+```
+
+Each pane runs in a small holder process (`mira __hold`, about 3 MB) that
+owns its terminal. Closing a pane ends it and everything in it, as before.
+The key is read when a pane opens, so turning it on applies to new panes,
+and turning it off never strands the ones already running: they still
+reattach on the next launch. After a reboot there is nothing to reattach,
+and panes are restored the usual way. Design:
+[docs/design/session-persistence.md](docs/design/session-persistence.md).
+
 ## What's New after an update
 
 When the running version differs from the one last launched, Mirador opens a

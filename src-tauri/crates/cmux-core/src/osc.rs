@@ -13,6 +13,12 @@ use std::borrow::Cow;
 pub trait StreamScanner: Send {
     /// Scan one chunk of raw PTY output and return the bytes to forward.
     fn scan<'a>(&mut self, chunk: &'a [u8]) -> Cow<'a, [u8]>;
+
+    /// Output being scanned now is a replay of what a session holder kept
+    /// while the app was away: state (cwd, title) still applies, but its
+    /// events already happened and must not fire again. Default: no events
+    /// to suppress.
+    fn set_replaying(&mut self, _replaying: bool) {}
 }
 
 /// Forwards everything untouched (tests / non-interactive panes).
@@ -57,6 +63,9 @@ pub struct OscScanner<F: FnMut(OscEvent) + Send> {
     raw: Vec<u8>,
     /// Parameter bytes only (between `ESC ]` and the terminator).
     data: Vec<u8>,
+    /// See `StreamScanner::set_replaying`: notifications are still stripped
+    /// from the stream, but not raised.
+    replaying: bool,
 }
 
 impl<F: FnMut(OscEvent) + Send> OscScanner<F> {
@@ -66,7 +75,15 @@ impl<F: FnMut(OscEvent) + Send> OscScanner<F> {
             state: State::Ground,
             raw: Vec::new(),
             data: Vec::new(),
+            replaying: false,
         }
+    }
+
+    fn emit(&mut self, event: OscEvent) {
+        if self.replaying && matches!(event, OscEvent::Notification { .. }) {
+            return;
+        }
+        (self.on_event)(event);
     }
 
     /// Parses the completed sequence. Returns true when the sequence was
@@ -79,7 +96,7 @@ impl<F: FnMut(OscEvent) + Send> OscScanner<F> {
         };
         match num {
             "9" => {
-                (self.on_event)(OscEvent::Notification {
+                self.emit(OscEvent::Notification {
                     title: None,
                     body: rest.to_string(),
                 });
@@ -91,7 +108,7 @@ impl<F: FnMut(OscEvent) + Send> OscScanner<F> {
                         Some((t, b)) => (Some(t.to_string()), b.to_string()),
                         None => (None, payload.to_string()),
                     };
-                    (self.on_event)(OscEvent::Notification { title, body });
+                    self.emit(OscEvent::Notification { title, body });
                     true
                 } else {
                     false
@@ -125,18 +142,18 @@ impl<F: FnMut(OscEvent) + Send> OscScanner<F> {
                     } else {
                         (None, decoded)
                     };
-                    (self.on_event)(OscEvent::Notification { title, body });
+                    self.emit(OscEvent::Notification { title, body });
                 }
                 true
             }
             "7" => {
                 if let Some(path) = parse_file_url(rest) {
-                    (self.on_event)(OscEvent::Cwd(path));
+                    self.emit(OscEvent::Cwd(path));
                 }
                 false
             }
             "0" | "2" => {
-                (self.on_event)(OscEvent::Title(rest.to_string()));
+                self.emit(OscEvent::Title(rest.to_string()));
                 false
             }
             _ => false,
@@ -155,6 +172,10 @@ impl<F: FnMut(OscEvent) + Send> OscScanner<F> {
 }
 
 impl<F: FnMut(OscEvent) + Send> StreamScanner for OscScanner<F> {
+    fn set_replaying(&mut self, replaying: bool) {
+        self.replaying = replaying;
+    }
+
     fn scan<'a>(&mut self, chunk: &'a [u8]) -> Cow<'a, [u8]> {
         // Fast path: nothing pending and no ESC anywhere in the chunk.
         if self.state == State::Ground && !chunk.contains(&0x1b) {
@@ -396,6 +417,27 @@ mod tests {
             out.extend_from_slice(&scanner.scan(std::slice::from_ref(b)));
         }
         out
+    }
+
+    #[test]
+    fn a_replay_keeps_state_but_raises_no_notifications() {
+        let (mut s, events) = scanner_with_events();
+        s.set_replaying(true);
+        let out = scan_all(
+            &mut s,
+            b"\x1b]777;notify;Claude;done\x07\x1b]7;file://host/tmp/a\x07\x1b]2;vim\x07",
+        );
+        // Still stripped, so xterm never sees it...
+        assert!(!String::from_utf8_lossy(&out).contains("notify"));
+        // ...but only the state survives.
+        assert_eq!(
+            events.lock().unwrap().as_slice(),
+            &[OscEvent::Cwd("/tmp/a".into()), OscEvent::Title("vim".into())]
+        );
+
+        s.set_replaying(false);
+        scan_all(&mut s, b"\x1b]9;live\x07");
+        assert_eq!(events.lock().unwrap().len(), 3);
     }
 
     #[test]

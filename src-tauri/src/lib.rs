@@ -38,6 +38,12 @@ pub struct AppState {
     /// Command panes restored from a previous session: they attach idle
     /// (a keypress reruns) instead of auto-running their command.
     pub restored_panes: Mutex<HashSet<String>>,
+    /// Panes whose session holder outlived the last quit, still to be
+    /// reattached (each leaves the set on its first attach).
+    pub pending_reattach: Mutex<HashSet<String>>,
+    /// The same panes, for the whole run: their saved scrollback is older
+    /// than what the holder replays, so it is not shown.
+    pub held_at_launch: HashSet<String>,
     /// Pending browser automation round-trips.
     pub browser_bridge: browser::BrowserBridge,
     /// Set on every workspace change; the saver thread persists and clears.
@@ -56,6 +62,23 @@ pub fn save_session(state: &AppState) {
     };
     if let Err(e) = cmux_core::session::save(&file) {
         eprintln!("mirador: session save failed: {e}");
+    }
+}
+
+/// The panes, among `panes`, that a live session holder still serves.
+fn live_holders(panes: &[String]) -> HashSet<String> {
+    #[cfg(unix)]
+    {
+        panes
+            .iter()
+            .filter(|id| cmux_core::hold::is_alive(id))
+            .cloned()
+            .collect()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = panes;
+        HashSet::new()
     }
 }
 
@@ -100,11 +123,23 @@ pub fn run() {
         m.command = restored.command;
         m.startup_input = restored.startup_input;
     }
+    // Panes whose holder survived the quit are still running: nothing about
+    // them is restored, so no resume is typed and no keypress is waited for.
+    // Checked whatever `persistSessions` says now — turning it off must not
+    // strand processes that are already running.
+    let held_at_launch = live_holders(&workspace.all_pane_ids());
+    for id in &held_at_launch {
+        if let Some(m) = meta.get_mut(id) {
+            m.startup_input = None;
+        }
+    }
     // Command panes AND remote (SSH) panes come back idle: relaunching the
     // app must never re-run a command or silently re-open an SSH session.
     let restored_panes: HashSet<String> = meta
         .iter()
-        .filter(|(_, m)| m.command.is_some() || m.remote_host.is_some())
+        .filter(|(id, m)| {
+            (m.command.is_some() || m.remote_host.is_some()) && !held_at_launch.contains(*id)
+        })
         .map(|(id, _)| id.clone())
         .collect();
     cmux_core::session::gc_scrollback(&workspace.all_pane_ids());
@@ -128,6 +163,8 @@ pub fn run() {
             run_waiters: Mutex::new(HashMap::new()),
             pr_cache: Mutex::new(HashMap::new()),
             restored_panes: Mutex::new(restored_panes),
+            pending_reattach: Mutex::new(held_at_launch.clone()),
+            held_at_launch,
             browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
             update: update::UpdateState::default(),
