@@ -228,6 +228,19 @@ fn a_live_holder_is_never_taken_over() {
     holder.join().unwrap().unwrap();
 }
 
+/// Leaves a socket file nobody listens on. Not just bind-then-drop: on
+/// macOS a socket is made close-on-exec a moment after it is created, so a
+/// child that another test forks in that moment inherits it and keeps it
+/// answering until the child exits. Wait that out.
+fn stale_socket(path: &std::path::Path) {
+    drop(std::os::unix::net::UnixListener::bind(path).unwrap());
+    let deadline = Instant::now() + PATIENCE;
+    while UnixStream::connect(path).is_ok() {
+        assert!(Instant::now() < deadline, "{} never went stale", path.display());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn a_stale_socket_file_is_replaced() {
     let path = socket();
@@ -235,9 +248,8 @@ fn a_stale_socket_file_is_replaced() {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path.parent().unwrap(), std::fs::Permissions::from_mode(0o700))
         .unwrap();
-    // A socket nobody listens on any more: bind, then drop the listener.
-    drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
-    assert!(path.exists() && UnixStream::connect(&path).is_err());
+    stale_socket(&path);
+    assert!(path.exists());
 
     let config = HoldConfig {
         pane: "p".into(),
@@ -270,4 +282,93 @@ fn a_directory_others_can_enter_is_refused() {
         exited_grace: Duration::from_millis(200),
     };
     assert_eq!(serve(config).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+}
+
+#[test]
+fn notifications_raised_while_detached_are_reported_once() {
+    // A marker, not polling: every attach counts as being seen live, so
+    // checking by attaching could swallow the very notification under test.
+    let marker = std::env::temp_dir().join(format!("mh-sent-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    let (path, holder) = start(
+        &format!(
+            "echo up; read a; printf '\\033]777;notify;Claude Code;finished responding\\007'; \
+             touch {}; read b; printf '\\033]9;seen live\\007'; echo live; read c",
+            marker.display()
+        ),
+        PATIENCE,
+    );
+    let mut a = connect(&path);
+    assert_eq!(a.missed, 0);
+    let replay = std::mem::take(&mut a.replay);
+    read_until(&mut a, replay, "up");
+    // Leave, then let the child notify with nobody attached.
+    send(&mut a, Frame::Input(b"go\r".to_vec()));
+    send(&mut a, Frame::Detach);
+    drop(a);
+    let deadline = Instant::now() + PATIENCE;
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "the notification was never sent");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = std::fs::remove_file(&marker);
+    let mut b = connect(&path);
+    assert_eq!(b.missed, 1);
+    assert_eq!(b.last_missed.as_deref(), Some("Claude Code: finished responding"));
+
+    // One raised while attached was seen live: not counted for next time.
+    send(&mut b, Frame::Input(b"go\r".to_vec()));
+    read_until(&mut b, Vec::new(), "live");
+    send(&mut b, Frame::Detach);
+    drop(b);
+    let mut c = connect(&path);
+    assert_eq!((c.missed, c.last_missed.as_deref()), (0, None));
+
+    send(&mut c, Frame::Kill);
+    wait_exit(&mut c);
+    holder.join().unwrap().unwrap();
+}
+
+#[test]
+fn end_all_ends_every_holder_and_sweeps_dead_sockets() {
+    let dir = socket().parent().unwrap().to_path_buf();
+    let mut holders = Vec::new();
+    for pane in ["a", "b"] {
+        let config = HoldConfig {
+            pane: pane.into(),
+            socket: dir.join(format!("{pane}.sock")),
+            cwd: None,
+            cols: 80,
+            rows: 24,
+            program: Program::Command("sleep 60".into()),
+            replay_bytes: 1024,
+            exited_grace: PATIENCE,
+        };
+        holders.push(std::thread::spawn(move || serve(config)));
+    }
+    let deadline = Instant::now() + PATIENCE;
+    while super::live_panes_in(&dir).len() < 2 {
+        assert!(Instant::now() < deadline, "holders never came up");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // A socket file whose holder died long ago.
+    stale_socket(&dir.join("dead.sock"));
+    assert_eq!(super::live_panes_in(&dir), vec!["a".to_string(), "b".to_string()]);
+    assert!(!dir.join("dead.sock").exists(), "dead socket not swept");
+
+    // One of them has a client attached, as the app would.
+    let _app = attach(&dir.join("a.sock"), 80, 24).unwrap();
+    assert!(super::end_all_in(&dir, PATIENCE).is_empty());
+    for h in holders {
+        h.join().unwrap().unwrap();
+    }
+    assert!(super::live_panes_in(&dir).is_empty());
+}
+
+#[test]
+fn orphans_are_live_holders_the_session_does_not_name() {
+    let live = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+    let session = vec!["b".to_string(), "z".to_string()];
+    assert_eq!(super::orphans(&live, &session), vec!["a".to_string(), "c".to_string()]);
+    assert!(super::orphans(&[], &session).is_empty());
 }

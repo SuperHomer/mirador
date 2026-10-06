@@ -125,6 +125,22 @@ impl Workspace {
         (id, pane)
     }
 
+    /// Adds a tab at the end for an existing pane id, leaving the active tab
+    /// alone: how a session holder no saved pane names gets a home.
+    pub fn adopt_pane(&mut self, pane: &str) -> String {
+        let tab = Tab {
+            id: new_id(),
+            title: None,
+            root: Node::Leaf {
+                pane_id: pane.to_string(),
+            },
+            focused: pane.to_string(),
+        };
+        let id = tab.id.clone();
+        self.tabs.push(tab);
+        id
+    }
+
     /// Removes a tab, returning the pane ids to kill. Always keeps at least
     /// one tab (a fresh one is created if the last was closed).
     pub fn close_tab(&mut self, tab_id: &str) -> Vec<String> {
@@ -397,6 +413,17 @@ mod tests {
         // What a program actually setting a title looks like.
         assert!(is_meaningful_title("vim: main.rs"));
         assert!(is_meaningful_title("yoan@box:~/src"));
+    }
+
+    #[test]
+    fn an_adopted_pane_gets_a_tab_at_the_end_without_taking_focus() {
+        let mut ws = Workspace::default();
+        let (_, second) = ws.new_tab();
+        let active = ws.active;
+        ws.adopt_pane("orphan-1");
+        assert_eq!(ws.active, active);
+        assert_eq!(ws.focused_pane(), second);
+        assert_eq!(ws.all_pane_ids().last().map(String::as_str), Some("orphan-1"));
     }
 
     #[test]

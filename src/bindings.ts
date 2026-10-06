@@ -221,6 +221,8 @@ export const installUpdate = () => invoke<void>("install_update");
 export const workspaceSnapshot = () =>
   invoke<WorkspaceSnapshot>("workspace_snapshot");
 export const getConfig = () => invoke<ResolvedConfig>("get_config");
+/** Ends every terminal session, held ones included, then quits. */
+export const quitEndingSessions = () => invoke<void>("quit_ending_sessions");
 export const newTab = (command?: string) =>
   invoke<{ tabId: string; paneId: string }>("new_tab", {
     command: command ?? null,

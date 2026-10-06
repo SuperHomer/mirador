@@ -16,7 +16,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::osc::PassthroughScanner;
+use crate::osc::{OscEvent, OscScanner, PassthroughScanner, StreamScanner};
 use crate::pty::PtyManager;
 
 use super::replay::ReplayBuffer;
@@ -63,6 +63,35 @@ struct Shared {
     client: Option<Client>,
     /// `Some` once the child has exited, holding its code.
     exited: Option<Option<i32>>,
+    /// Sees every chunk, so its parse state survives attaches; it only
+    /// counts while nobody is attached (see `Missed`).
+    detector: Box<dyn StreamScanner>,
+    /// Whether the detector should count: true while detached.
+    counting: Arc<AtomicBool>,
+    missed: Arc<Mutex<Missed>>,
+}
+
+/// Notifications raised while no client was attached: reported in the next
+/// `HolderHello`, then reset.
+#[derive(Default)]
+struct Missed {
+    count: u32,
+    last: Option<String>,
+}
+
+fn missed_detector(counting: Arc<AtomicBool>, missed: Arc<Mutex<Missed>>) -> Box<dyn StreamScanner> {
+    Box::new(OscScanner::new(move |event| {
+        if let OscEvent::Notification { title, body } = event {
+            if counting.load(Ordering::SeqCst) {
+                let mut m = missed.lock().unwrap();
+                m.count = m.count.saturating_add(1);
+                m.last = Some(match title {
+                    Some(title) if !title.is_empty() => format!("{title}: {body}"),
+                    _ => body,
+                });
+            }
+        }
+    }))
 }
 
 enum Event {
@@ -80,10 +109,15 @@ enum Event {
 pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
     let listener = bind(&config.socket)?;
     let pty = PtyManager::unthrottled();
+    let counting = Arc::new(AtomicBool::new(true));
+    let missed = Arc::new(Mutex::new(Missed::default()));
     let shared = Arc::new(Mutex::new(Shared {
         replay: ReplayBuffer::new(config.replay_bytes),
         client: None,
         exited: None,
+        detector: missed_detector(Arc::clone(&counting), Arc::clone(&missed)),
+        counting,
+        missed,
     }));
     let (events, events_rx) = mpsc::channel::<Event>();
 
@@ -97,7 +131,9 @@ pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
         move |bytes: &[u8]| {
             let mut s = shared.lock().unwrap();
             s.replay.push(bytes);
+            let _ = s.detector.scan(bytes);
             send_to_client(&mut s, &Frame::Output(bytes.to_vec()));
+            s.counting.store(s.client.is_none(), Ordering::SeqCst);
         }
     };
     let on_exit = {
@@ -274,15 +310,19 @@ fn serve_client(
         }
         let mut stream = stream;
         let pid = pty.pids().first().map(|(_, pid)| *pid);
+        let missed = std::mem::take(&mut *s.missed.lock().unwrap());
         write_frame(
             &mut stream,
             &Frame::HolderHello {
                 version: VERSION,
                 pid,
                 exit_code: s.exited.flatten(),
+                missed: missed.count,
+                last_missed: missed.last,
             },
         )?;
         write_frame(&mut stream, &Frame::Replay(s.replay.snapshot()))?;
+        s.counting.store(false, Ordering::SeqCst);
         if let Some(code) = s.exited {
             write_frame(&mut stream, &Frame::Exited(code))?;
             s.client = Some(Client { id, stream });
@@ -312,6 +352,7 @@ fn serve_client(
     let mut s = shared.lock().unwrap();
     if s.client.as_ref().is_some_and(|c| c.id == id) {
         s.client = None;
+        s.counting.store(true, Ordering::SeqCst);
     }
     Ok(())
 }

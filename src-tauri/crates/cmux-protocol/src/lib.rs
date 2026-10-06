@@ -178,6 +178,13 @@ pub enum Request {
         #[serde(default)]
         job: Option<String>,
     },
+    /// Quits the app. With `end_sessions`, every terminal session is ended
+    /// first, held ones included; without it, held sessions keep running
+    /// for the next launch (as with Cmd+Q).
+    Quit {
+        #[serde(default)]
+        end_sessions: bool,
+    },
     /// Records the agent session running in a pane (for resume-on-restore).
     AgentSession {
         #[serde(default)]

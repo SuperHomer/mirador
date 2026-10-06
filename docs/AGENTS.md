@@ -153,6 +153,8 @@ mira new-tab --command "htop"
 mira split --dir column --command "npm run dev"
 mira focus <pane>
 mira close-pane <pane>
+mira quit                      # with persistSessions, terminals keep running
+mira quit --end-sessions       # ...or end every one of them first
 ```
 
 ## 7. Remote workspaces (SSH)

@@ -455,7 +455,10 @@ fn attach_pane_blocking(
             make_sink(),
             pane_exit_hook(app),
         ) {
-            Ok(()) => return Ok("resumed".into()),
+            Ok((missed, last)) => {
+                summarize_missed(app, &pane_id, missed, last);
+                return Ok("resumed".into());
+            }
             // It died since launch: open the pane as if it had none.
             Err(e) => eprintln!("mirador: reattaching {pane_id}: {e}"),
         }
@@ -630,6 +633,7 @@ fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
         let result = cmux_core::hold::launch(&mira, pane_id, &socket, cwd, cols, rows, &held)
             .map_err(|e| e.to_string())
             .and_then(|()| {
+                // A holder this new has had no time to miss anything.
                 state.pty.attach_held(
                     pane_id,
                     &socket,
@@ -639,7 +643,8 @@ fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
                     make_sink(),
                     pane_exit_hook(app),
                 )
-            });
+            })
+            .map(|_| ());
         match result {
             Ok(()) => true,
             Err(e) => {
@@ -653,6 +658,41 @@ fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
         let _ = (app, pane_id, cwd, cols, rows, program, make_sink);
         false
     }
+}
+
+/// One notification for everything a held pane raised while Mirador was
+/// closed: replaying them one by one would be noise, and dropping them
+/// would hide a finished agent.
+#[cfg(unix)]
+fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<String>) {
+    if count == 0 {
+        return;
+    }
+    let last = last.unwrap_or_default();
+    let body = if count == 1 {
+        last
+    } else {
+        format!("{count} notifications — the last: {last}")
+    };
+    notify::handle_notification(app, pane_id, Some("While Mirador was closed".into()), body);
+}
+
+/// Ends every terminal session — including ones still waiting in their
+/// holders — then quits. Cmd+Q leaves them running; this is the way to
+/// mean "everything".
+#[tauri::command]
+pub async fn quit_ending_sessions(app: AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(unix)]
+        {
+            let left = cmux_core::hold::end_all(std::time::Duration::from_secs(3));
+            if !left.is_empty() {
+                eprintln!("mirador: holders still running at quit: {left:?}");
+            }
+        }
+    })
+    .await;
+    app.exit(0);
 }
 
 /// The bundled `mira` CLI, which doubles as the session holder. It sits
