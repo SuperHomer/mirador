@@ -139,6 +139,27 @@ enum Command {
     /// Put `mira` on your PATH: a symlink in ~/.local/bin on macOS and
     /// Linux; on Windows, the install directory joins your user PATH.
     Install,
+    /// Session holder: owns one pane's terminal so it outlives the app.
+    /// Started by Mirador, not by hand — see docs/design/session-persistence.md.
+    #[command(name = "__hold", hide = true)]
+    Hold {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        socket: std::path::PathBuf,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long, default_value_t = 80)]
+        cols: u16,
+        #[arg(long, default_value_t = 24)]
+        rows: u16,
+        /// Run this command line instead of an interactive shell.
+        #[arg(long, conflicts_with = "ssh")]
+        command: Option<String>,
+        /// Run `ssh -tt <HOST>` instead of an interactive shell.
+        #[arg(long)]
+        ssh: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -399,6 +420,15 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::ClaudeHook { event } => return claude_hook(&event),
         Command::Hooks { action } => return hooks(&action),
         Command::Install => return install(),
+        Command::Hold {
+            pane,
+            socket,
+            cwd,
+            cols,
+            rows,
+            command,
+            ssh,
+        } => return hold(pane, socket, cwd, cols, rows, command, ssh),
     };
 
     let response = send_request(req)?;
@@ -662,6 +692,55 @@ fn own_tty() -> Option<String> {
 #[cfg(not(unix))]
 fn own_tty() -> Option<String> {
     None
+}
+
+#[cfg(unix)]
+fn hold(
+    pane: String,
+    socket: std::path::PathBuf,
+    cwd: Option<String>,
+    cols: u16,
+    rows: u16,
+    command: Option<String>,
+    ssh: Option<String>,
+) -> Result<(), String> {
+    use cmux_core::hold::server::{serve, HoldConfig, Program};
+    // A session of its own: no controlling terminal to hang it up, and out
+    // of the app's process group, so neither the app quitting nor a signal
+    // to its group reaches the shell this holds.
+    unsafe {
+        libc::setsid();
+    }
+    let program = match (command, ssh) {
+        (Some(cmd), _) => Program::Command(cmd),
+        (None, Some(host)) => Program::Ssh(host),
+        (None, None) => Program::Shell,
+    };
+    let code = serve(HoldConfig {
+        pane,
+        socket,
+        cwd,
+        cols,
+        rows,
+        program,
+        replay_bytes: HoldConfig::DEFAULT_REPLAY_BYTES,
+        exited_grace: HoldConfig::DEFAULT_EXITED_GRACE,
+    })
+    .map_err(|e| e.to_string())?;
+    std::process::exit(code.unwrap_or(1));
+}
+
+#[cfg(not(unix))]
+fn hold(
+    _pane: String,
+    _socket: std::path::PathBuf,
+    _cwd: Option<String>,
+    _cols: u16,
+    _rows: u16,
+    _command: Option<String>,
+    _ssh: Option<String>,
+) -> Result<(), String> {
+    Err("session holders are not supported on this platform yet".into())
 }
 
 /// The Claude Code daemon job this process runs under, if any. A session
