@@ -198,6 +198,8 @@ pub fn run() {
             server::spawn(app.handle().clone());
             update::spawn_check_loop(app.handle().clone());
             whatsnew::announce_on_launch(app.handle().clone());
+            // Off the startup path: it reads (and may write) ~/.claude.
+            std::thread::spawn(commands::repair_claude_hooks);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -206,6 +208,9 @@ pub fn run() {
             commands::new_tab,
             commands::close_tab,
             commands::quit_ending_sessions,
+            commands::claude_integration_offer,
+            commands::setup_claude_integration,
+            commands::dismiss_claude_integration,
             commands::set_active_tab,
             commands::rename_tab,
             commands::move_tab,

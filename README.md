@@ -36,9 +36,11 @@ downloads, the feature tour and the keybinding reference.
   survive restarts and crashes
 - **Config**: `~/.config/mirador/mirador.json` (hot-reloaded), Ghostty/wezterm
   theme import, configurable keybindings, command palette (`mod+K`)
-- **Claude Code integration**: `mira hooks setup` lights up tabs when your
-  agent needs you, enables per-pane session resume, and adds a `/mira-diff`
-  skill for reviewing the turn's work
+- **Claude Code integration**: lights up tabs when your agent needs you,
+  enables per-pane session resume, and adds a `/mira-diff` skill for
+  reviewing the turn's work. Mirador offers to set it up on first launch
+  when it finds Claude Code (or: palette → *Set Up Claude Code
+  Integration*, or `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself
@@ -55,8 +57,10 @@ npm install
 npm run tauri build          # builds Mirador.app + .dmg (and the mira CLI)
 ```
 
-The bundle lands in `src-tauri/target/release/bundle/`. Either way, put the
-CLI on your PATH afterwards — it ships inside the app:
+The bundle lands in `src-tauri/target/release/bundle/`. If you use Claude
+Code, the first launch offers to set up the integration — `mira` on your
+PATH, the hooks and `/mira-diff` — in one click. To do it by hand instead
+(the CLI ships inside the app):
 
 ```bash
 /Applications/Mirador.app/Contents/MacOS/mira install   # → ~/.local/bin/mira
@@ -81,9 +85,10 @@ Building needs Rust (MSVC toolchain), the **Desktop development with C++**
 workload from the Visual Studio Build Tools, and Node 20+. WebView2 ships
 with Windows 11; on Windows 10 the installer fetches it.
 
-`mira.exe` sits next to `mirador.exe` in the install directory. Put it on
-your PATH (this adds the directory to your *user* PATH — open a new
-terminal afterwards):
+`mira.exe` sits next to `mirador.exe` in the install directory. With Claude
+Code installed, the first launch offers to set everything up; by hand, this
+puts it on your PATH (adding the directory to your *user* PATH — open a new
+terminal afterwards) and installs the hooks:
 
 ```powershell
 & "$env:LOCALAPPDATA\Mirador\mira.exe" install

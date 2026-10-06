@@ -9,6 +9,7 @@ import {
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { UpdateBanner } from "../update/UpdateBanner";
+import { ClaudeBanner } from "../claude/ClaudeBanner";
 
 export function Sidebar() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
@@ -30,6 +31,7 @@ export function Sidebar() {
       <button className="sidebar-new-tab" onClick={() => void newTab()}>
         + New Tab
       </button>
+      <ClaudeBanner />
       <UpdateBanner />
     </div>
   );

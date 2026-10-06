@@ -813,229 +813,36 @@ fn claude_hook(event: &str) -> Result<(), String> {
     Ok(())
 }
 
-const HOOK_EVENTS: &[(&str, &str)] = &[
-    ("Notification", "notification"),
-    ("Stop", "stop"),
-    ("SessionStart", "session-start"),
-];
-
-/// True if a hook matcher entry is one we installed. Matches both the
-/// current `mira claude-hook` and the legacy `cmux claude-hook` command so
-/// setup can migrate and remove can clean up either.
-fn is_our_hook(matcher: &serde_json::Value) -> bool {
-    matcher["hooks"]
-        .as_array()
-        .map(|hs| {
-            hs.iter()
-                .any(|h| h["command"].as_str().unwrap_or("").contains("claude-hook"))
-        })
-        .unwrap_or(false)
-}
-
-/// The `/mira-diff` skill `mira hooks setup` installs. Agents already
-/// reach the diff pane through `mira diff`; this is the human's
-/// affordance, which is why it opts out of model invocation.
-///
-/// A skill rather than a `commands/mira-diff.md` file: Claude Code merged
-/// custom commands into skills, both spellings still produce `/mira-diff`,
-/// and skills are where new work is supposed to go. The `!` line needs
-/// Claude Code 2.1.228 or newer to run; on anything older the skill still
-/// loads, it just hands Claude the literal line instead of the output.
-const SKILL_DIR: &str = "mira-diff";
-const SKILL_FILE: &str = "SKILL.md";
-
-/// Marks the file as ours. `setup` only overwrites a file carrying it and
-/// `remove` only deletes one, so a hand-written skill of the same name
-/// survives both — and deleting the line opts a file out of management.
-const SKILL_MARKER: &str = "Installed by `mira hooks setup`";
-
-const SKILL_BODY: &str = r#"---
-name: mira-diff
-description: Open a Mirador diff pane for the work in this pane
-argument-hint: [commit | range | --staged | --tab]
-allowed-tools: Bash(mira diff) Bash(mira diff:*)
-disable-model-invocation: true
----
-<!-- Installed by `mira hooks setup`, removed by `mira hooks remove`.
-     Delete the line above and Mirador stops touching this file. -->
-
-!`mira diff $ARGUMENTS`
-
-If the command printed an error, relay it in one line. Otherwise a diff pane
-is now open for review: acknowledge in one short line, and do not describe or
-summarize the diff — the pane already shows it.
-"#;
-
-/// Installs (or removes) the `/mira-diff` skill under a Claude Code skills
-/// directory. A file rather than a settings key, but the same rule as the
-/// hooks: only ever touch what we put there.
-fn skill_at(skills_dir: &std::path::Path, action: &str) -> Result<(), String> {
-    let dir = skills_dir.join(SKILL_DIR);
-    let path = dir.join(SKILL_FILE);
-    // None = no file, Some(false) = someone else's, Some(true) = ours.
-    let ours = std::fs::read_to_string(&path)
-        .ok()
-        .map(|text| text.contains(SKILL_MARKER));
-
-    match action {
-        "setup" => {
-            if ours == Some(false) {
-                println!("kept your own {} (not installed by Mirador)", path.display());
-                return Ok(());
-            }
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            std::fs::write(&path, SKILL_BODY).map_err(|e| e.to_string())?;
-            println!("installed /mira-diff ({})", path.display());
-        }
-        "remove" => match ours {
-            Some(true) => {
-                std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-                // A skill is a directory; leaving an empty one behind
-                // would show up as a broken `/mira-diff`. Only ours, and
-                // only if nothing else was put in it.
-                let _ = std::fs::remove_dir(&dir);
-                println!("removed /mira-diff");
-            }
-            Some(false) => {
-                println!("kept your own {} (not installed by Mirador)", path.display())
-            }
-            None => {}
-        },
-        other => return Err(format!("unknown hooks action `{other}` (setup|remove)")),
-    }
-    Ok(())
+/// This binary's real path, through any symlink — `~/.local/bin/mira`
+/// resolves to the app's own copy, which is what a hook should call.
+fn own_path() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(std::fs::canonicalize(&exe).unwrap_or(exe))
 }
 
 /// Idempotently installs (or removes) the Mirador hooks in
 /// ~/.claude/settings.json and the `/mira-diff` skill beside them.
 fn hooks(action: &str) -> Result<(), String> {
-    let home = cmux_core::config::home_dir().ok_or("could not find your home directory")?;
-    let claude = std::path::PathBuf::from(home).join(".claude");
-    // The skill first so the PATH note that ends the settings edit stays last.
-    skill_at(&claude.join("skills"), action)?;
-    hooks_at(&claude.join("settings.json"), action)
-}
-
-/// The same, against an explicit settings file — so the edit can be tested
-/// without a test writing into the developer's own Claude Code config.
-fn hooks_at(path: &std::path::Path, action: &str) -> Result<(), String> {
-    let mut settings: serde_json::Value = match std::fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
-        Err(_) => serde_json::json!({}),
-    };
-    let hooks_obj = settings
-        .as_object_mut()
-        .ok_or("settings.json is not an object")?
-        .entry("hooks")
-        .or_insert(serde_json::json!({}));
-
-    match action {
-        "setup" => {
-            for (hook_event, cli_event) in HOOK_EVENTS {
-                let command = format!("mira claude-hook {cli_event}");
-                let entries = hooks_obj
-                    .as_object_mut()
-                    .ok_or("hooks is not an object")?
-                    .entry(*hook_event)
-                    .or_insert(serde_json::json!([]));
-                let list = entries.as_array_mut().ok_or("hook entry is not an array")?;
-                // Drop any prior hook of ours (matches the old `cmux
-                // claude-hook` too), then add the fresh one: idempotent and
-                // migrates an earlier install to the new command name.
-                list.retain(|matcher| !is_our_hook(matcher));
-                list.push(serde_json::json!({
-                    "hooks": [{ "type": "command", "command": command }]
-                }));
-                println!("installed {hook_event} hook");
-            }
-        }
-        "remove" => {
-            if let Some(obj) = hooks_obj.as_object_mut() {
-                for (hook_event, _) in HOOK_EVENTS {
-                    if let Some(list) = obj.get_mut(*hook_event).and_then(|v| v.as_array_mut()) {
-                        list.retain(|matcher| !is_our_hook(matcher));
-                    }
-                }
-                println!("removed Mirador hooks");
-            }
-        }
+    use cmux_core::claude_integration::{self, Action};
+    let action = match action {
+        "setup" => Action::Setup,
+        "remove" => Action::Remove,
         other => return Err(format!("unknown hooks action `{other}` (setup|remove)")),
+    };
+    for line in claude_integration::hooks(action, &own_path()?)? {
+        println!("{line}");
     }
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    if action == Action::Setup {
+        println!("note: agents and /mira-diff call `mira` by name; `mira install` puts it on PATH");
     }
-    std::fs::write(
-        path,
-        serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    println!("updated {}", path.display());
-    println!("note: make sure `mira` is on PATH for Claude Code (mira install)");
     Ok(())
 }
 
-/// Puts `mira` on PATH: a symlink in ~/.local/bin on unix, and on Windows
-/// the install directory itself joins the user's PATH — so `mira` keeps
-/// pointing at the installed app after an upgrade, and no copy goes stale.
-#[cfg(unix)]
+/// Puts `mira` on PATH (see `claude_integration::install_on_path`).
 fn install() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let home = cmux_core::config::home_dir().ok_or("could not find your home directory")?;
-    let bin_dir = std::path::PathBuf::from(home).join(".local/bin");
-    std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
-    let target = bin_dir.join("mira");
-    let _ = std::fs::remove_file(&target);
-    std::os::unix::fs::symlink(&exe, &target).map_err(|e| e.to_string())?;
-    println!("installed: {} -> {}", target.display(), exe.display());
-    println!("make sure ~/.local/bin is on your PATH");
-    Ok(())
-}
-
-#[cfg(windows)]
-fn install() -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dir = exe
-        .parent()
-        .ok_or("could not determine the install directory")?
-        .to_string_lossy()
-        .into_owned();
-
-    // Read/modify/write the *user* PATH through PowerShell: `setx` truncates
-    // at 1024 characters, which would quietly destroy a long PATH.
-    let script = format!(
-        "$dir = '{}'; \
-         $path = [Environment]::GetEnvironmentVariable('Path', 'User'); \
-         if ($null -eq $path) {{ $path = '' }} \
-         if (($path -split ';') -contains $dir) {{ 'already' }} \
-         else {{ \
-           $new = if ($path.TrimEnd(';')) {{ $path.TrimEnd(';') + ';' + $dir }} else {{ $dir }}; \
-           [Environment]::SetEnvironmentVariable('Path', $new, 'User'); 'added' \
-         }}",
-        dir.replace('\'', "''")
-    );
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("could not update PATH: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "could not update PATH: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    for line in cmux_core::claude_integration::install_on_path(&own_path()?)? {
+        println!("{line}");
     }
-
-    if String::from_utf8_lossy(&output.stdout).trim() == "already" {
-        println!("{dir} is already on your PATH");
-    } else {
-        println!("added to your user PATH: {dir}");
-        println!("open a new terminal (or sign out and back in) to pick it up");
-    }
-    println!("mira: {}", exe.display());
     Ok(())
 }
 
@@ -1046,168 +853,6 @@ fn install() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn temp_settings(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("mira-hooks-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir.join("settings.json")
-    }
-
-    fn read(path: &std::path::Path) -> serde_json::Value {
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    }
-
-    #[test]
-    fn setup_installs_one_hook_per_event() {
-        let path = temp_settings("setup");
-        hooks_at(&path, "setup").unwrap();
-
-        let settings = read(&path);
-        for (hook_event, cli_event) in HOOK_EVENTS {
-            let entries = settings["hooks"][hook_event].as_array().unwrap();
-            assert_eq!(entries.len(), 1, "{hook_event} should have exactly one hook");
-            assert_eq!(
-                entries[0]["hooks"][0]["command"],
-                serde_json::json!(format!("mira claude-hook {cli_event}"))
-            );
-        }
-    }
-
-    #[test]
-    fn setup_is_idempotent_and_leaves_other_hooks_alone() {
-        let path = temp_settings("idempotent");
-        std::fs::write(
-            &path,
-            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"someone-elses-tool"}]}]}}"#,
-        )
-        .unwrap();
-
-        hooks_at(&path, "setup").unwrap();
-        hooks_at(&path, "setup").unwrap();
-
-        let settings = read(&path);
-        let stop = settings["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 2, "running setup twice must not duplicate ours");
-        assert!(
-            stop.iter().any(|m| m["hooks"][0]["command"] == "someone-elses-tool"),
-            "another tool's hook must survive"
-        );
-    }
-
-    #[test]
-    fn remove_takes_only_our_hooks_back_out() {
-        let path = temp_settings("remove");
-        std::fs::write(
-            &path,
-            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"someone-elses-tool"}]}]}}"#,
-        )
-        .unwrap();
-
-        hooks_at(&path, "setup").unwrap();
-        hooks_at(&path, "remove").unwrap();
-
-        let settings = read(&path);
-        let stop = settings["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 1);
-        assert_eq!(stop[0]["hooks"][0]["command"], "someone-elses-tool");
-    }
-
-    #[test]
-    fn a_legacy_cmux_hook_is_migrated_not_duplicated() {
-        let path = temp_settings("legacy");
-        std::fs::write(
-            &path,
-            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"cmux claude-hook stop"}]}]}}"#,
-        )
-        .unwrap();
-
-        hooks_at(&path, "setup").unwrap();
-
-        let settings = read(&path);
-        let stop = settings["hooks"]["Stop"].as_array().unwrap();
-        assert_eq!(stop.len(), 1, "the old cmux hook should be replaced");
-        assert_eq!(stop[0]["hooks"][0]["command"], "mira claude-hook stop");
-    }
-
-    /// A throwaway `skills/` directory (the parent the skill goes under).
-    fn temp_skills(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("mira-skills-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
-    fn skill_path(skills: &std::path::Path) -> std::path::PathBuf {
-        skills.join(SKILL_DIR).join(SKILL_FILE)
-    }
-
-    /// `mira hooks setup` writes the slash command, re-running leaves one
-    /// copy, and `remove` takes it away again — the same contract the hooks
-    /// edit keeps, so an install can be repeated or undone safely.
-    #[test]
-    fn setup_installs_the_skill_and_remove_takes_it_back() {
-        let skills = temp_skills("roundtrip");
-        let path = skill_path(&skills);
-
-        skill_at(&skills, "setup").unwrap();
-        let first = std::fs::read_to_string(&path).unwrap();
-        assert!(first.contains("mira diff $ARGUMENTS"), "should call mira diff");
-        assert!(
-            first.contains("disable-model-invocation: true"),
-            "the human types this one; agents already have `mira diff`"
-        );
-
-        skill_at(&skills, "setup").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), first, "not idempotent");
-
-        skill_at(&skills, "remove").unwrap();
-        assert!(!path.exists(), "remove should delete our file");
-        // A skill is a directory: an empty one left behind reads as a
-        // broken /mira-diff in Claude Code.
-        assert!(!skills.join(SKILL_DIR).exists(), "the skill dir should go too");
-    }
-
-    /// The directory cleanup must not take anything that isn't ours.
-    #[test]
-    fn remove_keeps_a_skill_directory_that_holds_other_files() {
-        let skills = temp_skills("companion");
-        skill_at(&skills, "setup").unwrap();
-        let theirs = skills.join(SKILL_DIR).join("notes.md");
-        std::fs::write(&theirs, "mine").unwrap();
-
-        skill_at(&skills, "remove").unwrap();
-
-        assert!(!skill_path(&skills).exists(), "ours should go");
-        assert!(theirs.exists(), "a file someone else put there must survive");
-    }
-
-    /// A user's own `/mira-diff` must survive both actions. Without the
-    /// marker check, `hooks setup` would silently overwrite a command
-    /// someone wrote themselves — and `remove` would delete it.
-    #[test]
-    fn a_hand_written_skill_of_the_same_name_is_never_touched() {
-        let skills = temp_skills("foreign");
-        let path = skill_path(&skills);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let mine = "---\ndescription: my own thing\n---\n!`echo hi`\n";
-        std::fs::write(&path, mine).unwrap();
-
-        skill_at(&skills, "setup").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "setup clobbered it");
-
-        skill_at(&skills, "remove").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "remove deleted it");
-    }
-
-    /// Removing from a directory that never had the command is a no-op,
-    /// not an error — `hooks remove` runs on machines that never ran setup.
-    #[test]
-    fn remove_without_an_install_is_quiet() {
-        let skills = temp_skills("absent");
-        skill_at(&skills, "remove").unwrap();
-        assert!(!skill_path(&skills).exists());
-    }
 
     /// How a hook knows which pane its agent runs in. The tty fallback is
     /// unix-only, so on Windows this environment variable is the only
