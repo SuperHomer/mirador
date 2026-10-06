@@ -95,11 +95,9 @@ State is all environment-derived: session + scrollback under
 `$HOME/Library/Application Support/Mirador` (macOS), socket in
 `$XDG_RUNTIME_DIR`, config and `socket.json` under `$XDG_CONFIG_HOME/mirador`.
 
-**Don't seed the sandbox with the real `session.json`.** A pane that ran
-Claude restores by typing `claude --resume <id>` (or `claude attach <job>`)
-into its shell *with no keypress*, so the sandbox would start a second
-process writing the live conversation the moment it launched. If a test
-needs a restored agent pane, give it a stale session id.
+**Don't seed the sandbox with the real `session.json`.** It recreates your
+real panes in the sandbox, and some restored panes act on launch — the
+sandbox would be working on your live state, not a copy.
 
 **Drive it with the same environment.** `mira` finds its socket through
 `$XDG_CONFIG_HOME/mirador/socket.json`, so a bare `mira` from your own shell
@@ -175,17 +173,8 @@ inconsistency reviewers will notice.
   in-place update the disk and the process disagree about the version.
 - **Restored panes must not act on their own.** Command panes and SSH panes
   come back *idle*; relaunching must never re-run `npm test` or silently
-  reopen an SSH session. A keypress does it. The one exception is a pane
-  that ran Claude Code: it comes back as a shell with the resume typed in,
-  because resuming a conversation runs nothing until you type into it. Not
-  on Windows: forgetting an exited session needs the process table, which
-  only unix reads, and without it auto-resume would revive closed
-  conversations forever (`agents::AUTO_RESUME`).
-- **`MIRA_PANE` is inherited, so it can lie.** Claude Code's background
-  daemon inherits it from whichever pane started it and passes it to every
-  session it hosts. Hooks are matched to a pane by their tty, or by the
-  pane running `claude attach <job>` (`cmux_core::agents`); the inherited
-  id only counts where there are no ttys (Windows).
+  reopen an SSH session. A keypress does it. (Agent panes are the
+  exception — see `agents::restore_pane`.)
 - **React StrictMode double-mounts in dev** and has twice broken the terminal
   by swapping the output sink out from under a pending attach.
 - **A flex row's only shrinkable item absorbs all overflow** and collapses to
