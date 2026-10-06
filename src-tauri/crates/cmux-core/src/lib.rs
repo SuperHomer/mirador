@@ -4,6 +4,7 @@ pub mod cwd;
 pub mod diff;
 pub mod git;
 pub mod graph;
+pub mod hold;
 pub mod ipc;
 pub mod layout;
 pub mod ports;

@@ -25,6 +25,10 @@ const LOW_WATERMARK: u64 = 512 * 1024;
 struct FlowState {
     unacked: u64,
     closed: bool,
+    /// Never pause: the consumer applies its own backpressure (a holder
+    /// writing to a blocking socket) or must never stop reading (a holder
+    /// with nobody attached).
+    unthrottled: bool,
 }
 
 /// Byte-accounting backpressure between the PTY reader thread and the UI.
@@ -42,6 +46,9 @@ impl FlowControl {
     /// the high watermark is exceeded. Returns false if the pane was closed.
     fn add_and_wait(&self, n: u64) -> bool {
         let mut s = self.state.lock().unwrap();
+        if s.unthrottled {
+            return !s.closed;
+        }
         s.unacked += n;
         while s.unacked >= HIGH_WATERMARK && !s.closed {
             s = self.cond.wait(s).unwrap();
@@ -101,11 +108,23 @@ struct Inner {
 #[derive(Default, Clone)]
 pub struct PtyManager {
     inner: Arc<Inner>,
+    /// See `FlowState::unthrottled`; set for every pane this manager spawns.
+    unthrottled: bool,
 }
 
 impl PtyManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A manager whose panes never wait for `ack`: for a session holder,
+    /// whose output goes to a socket (backpressure enough) or, detached, to
+    /// a buffer that must keep up with the child.
+    pub fn unthrottled() -> Self {
+        Self {
+            unthrottled: true,
+            ..Self::default()
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -164,6 +183,7 @@ impl PtyManager {
 
         let pid = child.process_id();
         let flow = Arc::new(FlowControl::default());
+        flow.state.lock().unwrap().unthrottled = self.unthrottled;
         let sink: Sink = Arc::new(Mutex::new(Box::new(on_data)));
         let hook: ExitHook = Arc::new(Mutex::new(Some(Box::new(on_exit))));
 

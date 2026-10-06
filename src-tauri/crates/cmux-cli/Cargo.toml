@@ -14,3 +14,6 @@ cmux-core = { path = "../cmux-core" }
 cmux-protocol = { path = "../cmux-protocol" }
 clap = { version = "4", features = ["derive"] }
 serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
