@@ -102,8 +102,7 @@ enum Backend {
     },
     /// In a session holder (`crate::hold`): resize, kill and detach are
     /// frames for its writer thread.
-    #[cfg(unix)]
-    Held {
+        Held {
         control: std::sync::mpsc::Sender<crate::hold::wire::Frame>,
     },
 }
@@ -113,8 +112,7 @@ impl Backend {
     fn child_mut(&mut self) -> Option<&mut Box<dyn Child + Send + Sync>> {
         match self {
             Backend::Local { child, .. } => Some(child),
-            #[cfg(unix)]
-            Backend::Held { .. } => None,
+                        Backend::Held { .. } => None,
         }
     }
 }
@@ -346,8 +344,7 @@ impl PtyManager {
                     pixel_height: 0,
                 })
                 .map_err(|e| e.to_string()),
-            #[cfg(unix)]
-            Backend::Held { control } => control
+                        Backend::Held { control } => control
                 .send(crate::hold::wire::Frame::Resize { cols, rows })
                 .map_err(|_| format!("pane {id} is closing")),
         }
@@ -371,8 +368,7 @@ impl PtyManager {
             pane.flow.close();
             // A holder ends its own child's process group, which it leads
             // and we cannot see from here.
-            #[cfg(unix)]
-            if let Backend::Held { control } = &pane.backend {
+                        if let Backend::Held { control } = &pane.backend {
                 let _ = control.send(crate::hold::wire::Frame::Kill);
                 return Ok(());
             }
@@ -437,7 +433,6 @@ impl PtyManager {
     }
 }
 
-#[cfg(unix)]
 impl PtyManager {
     /// Attaches a pane to its session holder instead of spawning a child:
     /// the holder's replay is scanned once with events suppressed (they

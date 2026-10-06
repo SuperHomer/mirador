@@ -443,7 +443,6 @@ fn attach_pane_blocking(
     // A pane whose holder outlived the last quit: its process never
     // stopped, so it is reattached rather than restored — and none of the
     // idle-until-keypress rules apply, because nothing is being started.
-    #[cfg(unix)]
     if state.pending_reattach.lock().unwrap().remove(&pane_id) {
         let socket = cmux_core::hold::socket_path(&pane_id);
         match state.pty.attach_held(
@@ -591,9 +590,7 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
     }
 }
 
-/// Where a terminal pane's process runs. Read only by the holder path,
-/// which is unix-only for now.
-#[cfg_attr(not(unix), allow(dead_code))]
+/// Where a terminal pane's process runs.
 enum Program {
     Shell,
     Command(String),
@@ -602,8 +599,8 @@ enum Program {
 
 /// With `persistSessions` on, runs the pane in a session holder so it
 /// outlives the app. Returns false — and the caller spawns locally — when
-/// it is off, unsupported here, or anything about the holder fails: a
-/// broken holder must never cost the user a terminal.
+/// it is off, or anything about the holder fails: a broken holder must
+/// never cost the user a terminal.
 fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
     app: &AppHandle,
     pane_id: &str,
@@ -613,57 +610,48 @@ fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
     program: &Program,
     make_sink: &impl Fn() -> S,
 ) -> bool {
-    #[cfg(unix)]
-    {
-        use cmux_core::hold::server::Program as Held;
-        if !cmux_core::config::persist_sessions() {
-            return false;
-        }
-        let Some(mira) = mira_binary() else {
-            eprintln!("mirador: persistSessions is on but the mira binary is missing");
-            return false;
-        };
-        let socket = cmux_core::hold::socket_path(pane_id);
-        let held = match program {
-            Program::Shell => Held::Shell,
-            Program::Command(cmd) => Held::Command(cmd.clone()),
-            Program::Ssh(host) => Held::Ssh(host.clone()),
-        };
-        let state = app.state::<AppState>();
-        let result = cmux_core::hold::launch(&mira, pane_id, &socket, cwd, cols, rows, &held)
-            .map_err(|e| e.to_string())
-            .and_then(|()| {
-                // A holder this new has had no time to miss anything.
-                state.pty.attach_held(
-                    pane_id,
-                    &socket,
-                    cols,
-                    rows,
-                    pane_scanner(app, pane_id),
-                    make_sink(),
-                    pane_exit_hook(app),
-                )
-            })
-            .map(|_| ());
-        match result {
-            Ok(()) => true,
-            Err(e) => {
-                eprintln!("mirador: session holder for {pane_id} failed, running it locally: {e}");
-                false
-            }
-        }
+    use cmux_core::hold::server::Program as Held;
+    if !cmux_core::config::persist_sessions() {
+        return false;
     }
-    #[cfg(not(unix))]
-    {
-        let _ = (app, pane_id, cwd, cols, rows, program, make_sink);
-        false
+    let Some(mira) = mira_binary() else {
+        eprintln!("mirador: persistSessions is on but the mira binary is missing");
+        return false;
+    };
+    let socket = cmux_core::hold::socket_path(pane_id);
+    let held = match program {
+        Program::Shell => Held::Shell,
+        Program::Command(cmd) => Held::Command(cmd.clone()),
+        Program::Ssh(host) => Held::Ssh(host.clone()),
+    };
+    let state = app.state::<AppState>();
+    let result = cmux_core::hold::launch(&mira, pane_id, &socket, cwd, cols, rows, &held)
+        .map_err(|e| e.to_string())
+        .and_then(|()| {
+            // A holder this new has had no time to miss anything.
+            state.pty.attach_held(
+                pane_id,
+                &socket,
+                cols,
+                rows,
+                pane_scanner(app, pane_id),
+                make_sink(),
+                pane_exit_hook(app),
+            )
+        })
+        .map(|_| ());
+    match result {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("mirador: session holder for {pane_id} failed, running it locally: {e}");
+            false
+        }
     }
 }
 
 /// One notification for everything a held pane raised while Mirador was
 /// closed: replaying them one by one would be noise, and dropping them
 /// would hide a finished agent.
-#[cfg(unix)]
 fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<String>) {
     if count == 0 {
         return;
@@ -683,12 +671,9 @@ fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<Str
 #[tauri::command]
 pub async fn quit_ending_sessions(app: AppHandle) {
     let _ = tauri::async_runtime::spawn_blocking(|| {
-        #[cfg(unix)]
-        {
-            let left = cmux_core::hold::end_all(std::time::Duration::from_secs(3));
-            if !left.is_empty() {
-                eprintln!("mirador: holders still running at quit: {left:?}");
-            }
+        let left = cmux_core::hold::end_all(std::time::Duration::from_secs(3));
+        if !left.is_empty() {
+            eprintln!("mirador: holders still running at quit: {left:?}");
         }
     })
     .await;
@@ -698,9 +683,9 @@ pub async fn quit_ending_sessions(app: AppHandle) {
 /// The bundled `mira` CLI, which doubles as the session holder. It sits
 /// next to the app binary — in the bundle, and in `target/<profile>` when
 /// the workspace has been built.
-#[cfg(unix)]
 fn mira_binary() -> Option<std::path::PathBuf> {
-    let path = std::env::current_exe().ok()?.parent()?.join("mira");
+    let name = if cfg!(windows) { "mira.exe" } else { "mira" };
+    let path = std::env::current_exe().ok()?.parent()?.join(name);
     path.is_file().then_some(path)
 }
 

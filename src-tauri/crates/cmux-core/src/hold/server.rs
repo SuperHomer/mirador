@@ -8,9 +8,7 @@
 //! under one lock, so nothing printed in between is lost or sent twice.
 
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -19,6 +17,7 @@ use std::time::Duration;
 use crate::osc::{OscEvent, OscScanner, PassthroughScanner, StreamScanner};
 use crate::pty::PtyManager;
 
+use super::conn::{self, Conn, Listener};
 use super::replay::ReplayBuffer;
 use super::wire::{read_frame, write_frame, Frame, VERSION};
 
@@ -55,7 +54,7 @@ impl HoldConfig {
 
 struct Client {
     id: u64,
-    stream: UnixStream,
+    stream: Conn,
 }
 
 struct Shared {
@@ -107,7 +106,7 @@ enum Event {
 /// Blocks the calling thread; `mira __hold` calls it after `setsid` so the
 /// holder belongs to no terminal and survives whoever started it.
 pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
-    let listener = bind(&config.socket)?;
+    let listener = conn::bind(&config.socket)?;
     let pty = PtyManager::unthrottled();
     let counting = Arc::new(AtomicBool::new(true));
     let missed = Arc::new(Mutex::new(Missed::default()));
@@ -128,9 +127,19 @@ pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
     };
     let on_data = {
         let shared = Arc::clone(&shared);
+        let pty = pty.clone();
+        let pane = config.pane.clone();
         move |bytes: &[u8]| {
             let mut s = shared.lock().unwrap();
             s.replay.push(bytes);
+            // With nobody attached there is no terminal to answer "where is
+            // the cursor?", and Windows' ConPTY asks it before it starts
+            // the shell at all: an unattached holder would hang forever.
+            // Answer as a terminal at the top-left would; a client that
+            // attaches redraws anyway.
+            if s.client.is_none() && contains(bytes, b"\x1b[6n") {
+                answer_cursor_query(&pty, &pane);
+            }
             let _ = s.detector.scan(bytes);
             send_to_client(&mut s, &Frame::Output(bytes.to_vec()));
             s.counting.store(s.client.is_none(), Ordering::SeqCst);
@@ -160,6 +169,7 @@ pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
         on_data,
         on_exit,
     ) {
+        #[cfg(unix)]
         let _ = std::fs::remove_file(&config.socket);
         return Err(io::Error::other(e));
     }
@@ -193,56 +203,34 @@ pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
     // Stop accepting: flag it, then wake the blocked `accept` with a
     // connection of our own so the thread sees the flag.
     stopping.store(true, Ordering::SeqCst);
-    let _ = UnixStream::connect(&config.socket);
+    let _ = conn::connect(&config.socket);
+    // A socket file outlives its listener; a pipe does not.
+    #[cfg(unix)]
     let _ = std::fs::remove_file(&config.socket);
     let code = shared.lock().unwrap().exited.flatten();
     if let Some(client) = shared.lock().unwrap().client.take() {
-        let _ = client.stream.shutdown(std::net::Shutdown::Both);
+        client.stream.shutdown();
     }
     Ok(code)
 }
 
-/// Binds the holder's socket in a directory only this user can enter — the
-/// directory, not the socket, is what keeps other users out, so one that
-/// exists already must be ours and private. A socket file left by a holder
-/// that died is replaced; one with a live holder behind it is an error,
-/// never a takeover.
-fn bind(path: &Path) -> io::Result<UnixListener> {
-    use std::os::unix::fs::MetadataExt;
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
 
-    // sockaddr_un's path is 104 bytes on macOS, 108 on Linux.
-    if path.as_os_str().len() >= 104 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("socket path too long for a Unix socket: {}", path.display()),
-        ));
-    }
-    if let Some(dir) = path.parent() {
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)?;
-        let meta = std::fs::symlink_metadata(dir)?;
-        let uid = unsafe { libc::geteuid() };
-        if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!("{} must be a directory owned by you with mode 0700", dir.display()),
-            ));
+/// Answers a cursor-position query on the child's input. The query can be
+/// the child's very first output, before the pane is in the manager's map,
+/// so the write is retried briefly off this thread.
+fn answer_cursor_query(pty: &PtyManager, pane: &str) {
+    let (pty, pane) = (pty.clone(), pane.to_string());
+    std::thread::spawn(move || {
+        for _ in 0..200 {
+            if pty.write(&pane, b"\x1b[1;1R").is_ok() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
-    }
-    if path.exists() {
-        if UnixStream::connect(path).is_ok() {
-            return Err(io::Error::new(
-                io::ErrorKind::AddrInUse,
-                format!("a holder is already serving {}", path.display()),
-            ));
-        }
-        std::fs::remove_file(path)?;
-    }
-    let listener = UnixListener::bind(path)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(listener)
+    });
 }
 
 /// Writes to the attached client, dropping it if the write fails. Returns
@@ -260,7 +248,7 @@ fn send_to_client(s: &mut Shared, frame: &Frame) -> bool {
 }
 
 fn accept_loop(
-    listener: UnixListener,
+    listener: Listener,
     pty: PtyManager,
     pane: String,
     shared: Arc<Mutex<Shared>>,
@@ -268,7 +256,8 @@ fn accept_loop(
     stopping: Arc<AtomicBool>,
 ) {
     let next_id = AtomicU64::new(1);
-    for stream in listener.incoming() {
+    loop {
+        let stream = listener.accept();
         if stopping.load(Ordering::SeqCst) {
             return;
         }
@@ -286,7 +275,7 @@ fn accept_loop(
 
 fn serve_client(
     id: u64,
-    stream: UnixStream,
+    stream: Conn,
     pty: &PtyManager,
     pane: &str,
     shared: &Mutex<Shared>,
@@ -306,7 +295,7 @@ fn serve_client(
         // One client at a time, and the newest wins: a crashed app's
         // connection must not lock the pane away from its next launch.
         if let Some(old) = s.client.take() {
-            let _ = old.stream.shutdown(std::net::Shutdown::Both);
+            old.stream.shutdown();
         }
         let mut stream = stream;
         let pid = pty.pids().first().map(|(_, pid)| *pid);

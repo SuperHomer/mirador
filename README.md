@@ -255,7 +255,7 @@ restored session keeps each pane's own saved directory.
 
 ## Terminals that keep running when you quit
 
-*Experimental, macOS and Linux.* Turn it on and quitting Mirador no longer
+*Experimental.* Turn it on and quitting Mirador no longer
 ends what runs in it: shells, builds, dev servers and agents keep going, and
 the next launch reattaches to them — same processes, with what they printed
 while Mirador was closed.
