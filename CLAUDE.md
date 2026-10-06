@@ -104,12 +104,15 @@ State is all environment-derived: session + scrollback under
 `$HOME/Library/Application Support/Mirador` (macOS), socket in
 `$XDG_RUNTIME_DIR`, config and `socket.json` under `$XDG_CONFIG_HOME/mirador`.
 
-**Sandbox holders outlive the sandbox.** With `persistSessions` on, each
-pane is a `mira __hold` process that keeps running after the instance quits
-— that is the feature. Holders live under `$XDG_RUNTIME_DIR`, so a sandbox
-never sees the real app's; clean them up by that path
-(`pkill -f "mira __hold .*--socket /tmp/msbx/"`), never with a bare
-`pkill -f "mira __hold"`, which would end the user's own sessions.
+**Sandbox holders outlive the sandbox.** `persistSessions` is on by
+default, so every sandbox pane is a `mira __hold` process that keeps running
+after the instance quits — that is the feature. Unless persistence is what
+you are testing, turn it off in the sandbox's own config
+(`$SBX/.config-sbx/mirador/mirador.json`: `{ "persistSessions": false }`).
+Holders live under `$XDG_RUNTIME_DIR`, so a sandbox never sees the real
+app's; end them with `mira quit --end-sessions` against the sandbox, or by
+that path (`pkill -f "mira __hold .*--socket /tmp/msbx/"`) — never with a
+bare `pkill -f "mira __hold"`, which would end the user's own sessions.
 
 **Don't seed the sandbox with the real `session.json`.** It recreates your
 real panes in the sandbox, and some restored panes act on launch — the
