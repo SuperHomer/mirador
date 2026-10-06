@@ -63,7 +63,8 @@ hosts, so trusting it put every tab's session on the same pane.
 Mirador brings each agent pane back as the shell it was, with `claude
 --resume <id>` (or `claude attach <job>`) typed in for you — no keypress,
 and `/exit` leaves you at a prompt. A session you exited before quitting is
-forgotten, so it does not come back.
+forgotten, so it does not come back. On Windows, which cannot yet see Claude
+exit, the pane waits for a keypress instead.
 
 ## 3. Run commands the human can watch (and interrupt)
 

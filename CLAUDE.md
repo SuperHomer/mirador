@@ -177,7 +177,10 @@ inconsistency reviewers will notice.
   come back *idle*; relaunching must never re-run `npm test` or silently
   reopen an SSH session. A keypress does it. The one exception is a pane
   that ran Claude Code: it comes back as a shell with the resume typed in,
-  because resuming a conversation runs nothing until you type into it.
+  because resuming a conversation runs nothing until you type into it. Not
+  on Windows: forgetting an exited session needs the process table, which
+  only unix reads, and without it auto-resume would revive closed
+  conversations forever (`agents::AUTO_RESUME`).
 - **`MIRA_PANE` is inherited, so it can lie.** Claude Code's background
   daemon inherits it from whichever pane started it and passes it to every
   session it hosts. Hooks are matched to a pane by their tty, or by the
