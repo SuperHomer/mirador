@@ -201,6 +201,23 @@ fn output_input_and_exit_reach_the_client() {
     assert!(!conn::is_alive(&path), "still listening after its child exited");
 }
 
+/// The holder's last word must survive its closing the connection. On
+/// Windows a disconnect discards whatever the client hasn't read, so this
+/// client reads nothing until well after the holder is gone: the `Exited`
+/// frame has to be waiting for it anyway.
+#[test]
+fn the_exit_frame_outlives_the_holder_closing() {
+    let (path, holder) = start(&sh("echo ready; sleep 30", "echo ready; Start-Sleep 30"), PATIENCE);
+    let mut a = connect(&path);
+    let replay = std::mem::take(&mut a.replay);
+    read_until(&mut a, replay, "ready");
+    send(&mut a, Frame::Kill);
+    // Not reading: let the holder write `Exited`, close, and finish first.
+    holder.join().unwrap().unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    wait_exit(&mut a);
+}
+
 #[test]
 fn reattach_replays_what_was_printed_while_detached() {
     let printed = marker("two");

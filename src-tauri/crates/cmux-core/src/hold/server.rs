@@ -208,8 +208,9 @@ pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
     #[cfg(unix)]
     let _ = std::fs::remove_file(&config.socket);
     let code = shared.lock().unwrap().exited.flatten();
+    // Gracefully: the client may not have read the `Exited` frame yet.
     if let Some(client) = shared.lock().unwrap().client.take() {
-        client.stream.shutdown();
+        client.stream.close();
     }
     Ok(code)
 }
