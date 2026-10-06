@@ -14,6 +14,14 @@
 //!   screen 4 MB ago would replay onto the wrong screen. The modes that
 //!   matter are tracked over the bytes as they are trimmed away, and
 //!   re-asserted at the front.
+//! - **Questions already answered.** Programs ask the terminal things —
+//!   where is the cursor, what are you, what colour is the background —
+//!   and the terminal answers by typing into their input. Replayed, the
+//!   question is asked again and xterm answers again, so a shell at its
+//!   prompt receives `^[[1;1R` as if typed. Windows' ConPTY asks for the
+//!   cursor at the start of every session, so there it would be every
+//!   reattach. Queries are removed from the replay; they were answered the
+//!   first time.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -194,7 +202,8 @@ impl ReplayBuffer {
     /// The modes at the front, then the kept bytes.
     pub fn snapshot(&self) -> Vec<u8> {
         let mut out = self.head.as_sequences();
-        out.extend(self.bytes.iter());
+        let kept: Vec<u8> = self.bytes.iter().copied().collect();
+        out.extend(strip_queries(&kept));
         out
     }
 
@@ -204,6 +213,102 @@ impl ReplayBuffer {
 
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
+    }
+}
+
+/// Removes the sequences a program sends to *ask* the terminal something,
+/// leaving everything that draws or sets state. An unterminated sequence at
+/// the end is kept as is: it may be the start of something still arriving.
+pub fn strip_queries(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        if input[i] != 0x1b || i + 1 >= input.len() {
+            out.push(input[i]);
+            i += 1;
+            continue;
+        }
+        let end = match input[i + 1] {
+            b'[' => csi_end(input, i + 2),
+            b']' | b'P' => string_end(input, i + 2),
+            _ => None,
+        };
+        let Some(end) = end else {
+            out.push(input[i]);
+            i += 1;
+            continue;
+        };
+        let seq = &input[i..end];
+        if !is_query(seq) {
+            out.extend_from_slice(seq);
+        }
+        i = end;
+    }
+    out
+}
+
+/// One past a CSI sequence's final byte, if it is complete.
+fn csi_end(input: &[u8], from: usize) -> Option<usize> {
+    input[from..]
+        .iter()
+        .position(|b| (0x40..=0x7e).contains(b))
+        .map(|p| from + p + 1)
+}
+
+/// One past an OSC/DCS string's terminator (BEL or ESC \), if complete.
+fn string_end(input: &[u8], from: usize) -> Option<usize> {
+    let mut j = from;
+    while j < input.len() {
+        match input[j] {
+            0x07 => return Some(j + 1),
+            0x1b if input.get(j + 1) == Some(&b'\\') => return Some(j + 2),
+            _ => j += 1,
+        }
+    }
+    None
+}
+
+fn is_query(seq: &[u8]) -> bool {
+    match seq[1] {
+        b'[' => {
+            let body = &seq[2..seq.len() - 1];
+            let fin = seq[seq.len() - 1];
+            let params: Vec<u8> = body.iter().copied().filter(|b| (0x30..=0x3f).contains(b)).collect();
+            let inter: Vec<u8> = body.iter().copied().filter(|b| (0x20..=0x2f).contains(b)).collect();
+            let first: u32 = params
+                .iter()
+                .skip_while(|b| !b.is_ascii_digit())
+                .take_while(|b| b.is_ascii_digit())
+                .fold(0, |n, b| n.saturating_mul(10).saturating_add((b - b'0') as u32));
+            match fin {
+                // Device status report: cursor position, ok-ness, ...
+                b'n' => true,
+                // Device attributes; `CSI ? ... c` is a terminal's *reply*.
+                b'c' => !params.starts_with(b"?"),
+                // XTVERSION.
+                b'q' => params.starts_with(b">"),
+                // Kitty keyboard protocol query (push and pop are `>u`, `<u`).
+                b'u' => params.starts_with(b"?"),
+                // DECRQM: is this mode set?
+                b'p' => inter.contains(&b'$'),
+                // Window reports: size in pixels or cells, position, title.
+                b't' => matches!(first, 11 | 13 | 14 | 15 | 16 | 18 | 19 | 20 | 21),
+                _ => false,
+            }
+        }
+        b']' => {
+            // OSC: a query's last field is `?` — colours (4, 10, 11, 12 ...)
+            // and, importantly, a clipboard read (52).
+            let body = &seq[2..];
+            let body = body
+                .strip_suffix(b"\x07")
+                .or_else(|| body.strip_suffix(b"\x1b\\"))
+                .unwrap_or(body);
+            body.ends_with(b";?")
+        }
+        // DCS: DECRQSS (`$q`) and XTGETTCAP (`+q`) ask; the rest set.
+        b'P' => seq[2..].starts_with(b"$q") || seq[2..].starts_with(b"+q"),
+        _ => false,
     }
 }
 
@@ -239,6 +344,65 @@ mod tests {
     fn an_interrupted_sequence_does_not_leak_into_the_next() {
         // ESC inside a CSI starts over; the digits before it must not stick.
         assert_eq!(modes(b"\x1b[?20\x1b[?25l"), b"\x1b[?25l");
+    }
+
+    #[test]
+    fn queries_are_stripped_and_everything_else_kept() {
+        let q = |s: &[u8]| strip_queries(s);
+        // Each of these asks the terminal something.
+        for query in [
+            &b"\x1b[6n"[..],
+            b"\x1b[5n",
+            b"\x1b[?6n",
+            b"\x1b[c",
+            b"\x1b[0c",
+            b"\x1b[>c",
+            b"\x1b[=c",
+            b"\x1b[>q",
+            b"\x1b[>0q",
+            b"\x1b[?u",
+            b"\x1b[?2004$p",
+            b"\x1b[14t",
+            b"\x1b[18t",
+            b"\x1b]11;?\x07",
+            b"\x1b]10;?\x1b\\",
+            b"\x1b]4;1;?\x07",
+            b"\x1b]52;c;?\x07",
+            b"\x1bP$qm\x1b\\",
+            b"\x1bP+q544e\x1b\\",
+        ] {
+            assert_eq!(q(&[b"a", query, b"b"].concat()), b"ab", "{:?}", String::from_utf8_lossy(query));
+        }
+        // These draw or set state, and must survive untouched.
+        for keep in [
+            &b"\x1b[31m"[..],
+            b"\x1b[2J",
+            b"\x1b[?1049h",
+            b"\x1b[>1u",
+            b"\x1b[<u",
+            b"\x1b[2 q",
+            b"\x1b[22;0t",
+            b"\x1b[?62;22c",
+            b"\x1b]0;title\x07",
+            b"\x1b]11;#1e1e2e\x07",
+            b"\x1b]52;c;aGk=\x07",
+            b"\x1b]777;notify;T;done\x07",
+            b"\x1bPq#0;2;0;0;0\x1b\\",
+            "plain text, é".as_bytes(),
+        ] {
+            assert_eq!(q(keep), keep, "{:?}", String::from_utf8_lossy(keep));
+        }
+        // An unterminated sequence at the very end is left alone.
+        assert_eq!(q(b"ok\x1b[6"), b"ok\x1b[6");
+        assert_eq!(q(b"ok\x1b]11;?"), b"ok\x1b]11;?");
+    }
+
+    #[test]
+    fn a_snapshot_never_asks_the_terminal_anything() {
+        // ConPTY's opening question, then a shell prompt.
+        let mut r = ReplayBuffer::new(1024);
+        r.push(b"\x1b[6n\x1b[?25lPS C:\\> ");
+        assert_eq!(r.snapshot(), b"\x1b[?25lPS C:\\> ");
     }
 
     #[test]
