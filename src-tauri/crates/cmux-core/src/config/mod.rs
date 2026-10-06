@@ -53,7 +53,7 @@ pub struct Config {
     /// to inherit. Unset → the home directory, as before.
     pub default_cwd: Option<String>,
     /// Keep terminals running when Mirador quits, and reattach to them on
-    /// the next launch (macOS and Linux). Off by default while it is new;
+    /// the next launch. Off by default while it is new;
     /// read when a pane opens, so turning it on applies to new panes.
     pub persist_sessions: Option<bool>,
     pub keybindings: HashMap<String, String>,
@@ -104,9 +104,8 @@ pub fn home_dir() -> Option<String> {
 }
 
 /// The `persistSessions` key: whether new panes run in a session holder.
-/// Always false where holders don't exist yet.
 pub fn persist_sessions() -> bool {
-    cfg!(unix) && load().0.persist_sessions.unwrap_or(false)
+    load().0.persist_sessions.unwrap_or(false)
 }
 
 /// Where a new tab's first pane starts, from the `defaultCwd` config key.

@@ -196,14 +196,23 @@ the last one ride in `HolderHello` as trailing fields.
   attach. A reattach that replays must be idempotent the same way: replay once
   per app run, not once per mount.
 
-## Windows (phase 2)
+## Windows
 
-The design carries over: the holder owns the ConPTY, the socket becomes a
-named pipe, and the holder is spawned with `DETACHED_PROCESS` and outside
-any job object the app is in, so it isn't killed with the app. What needs
-work before it is worth promising is the process side: Windows has no process
-groups, so `Kill` needs the tree walk `PtyManager::close` already does, and
-the holder must be reachable after the app that created it is gone.
+The design carries over: the holder owns the ConPTY, the socket is a named
+pipe (`\\.\pipe\mirador-hold-<user>-<pane>`), and the app starts the holder
+detached — no console, its own process group, and outside the app's job
+object where the job allows breakaway — so it isn't killed with the app.
+Three things differ from unix:
+
+- **Overlapped pipe I/O.** A holder connection is full duplex, and Windows
+  serializes all I/O on a synchronous handle, so a blocked read would hold
+  every write behind it. Holder pipes are opened overlapped; each read and
+  write waits on its own event. (`hold::conn`.)
+- **Live holders are listed from the pipe namespace** by their prefix. A
+  pipe disappears with its holder, so there are no stale files to sweep.
+- **ConPTY asks for the cursor position before it starts the shell.** An
+  attached client answers like any terminal; with nobody attached, the
+  holder answers itself, or an unattached holder's shell would never start.
 
 ## Build order
 
@@ -219,7 +228,8 @@ Each step is a PR that leaves `main` releasable.
 3. ***Quit and end all sessions*** (palette, and `mira quit --end-sessions`),
    orphans reopened in tabs, the notification summary.
 4. **The default flipped to on**, after a release of real use.
-5. **Windows.**
+5. **Windows** — overlapped named pipes, detached holders, and the holder
+   test suite running on Windows CI.
 
 ## Decisions
 

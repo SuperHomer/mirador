@@ -2,57 +2,72 @@
 //! terminals keep running when the app quits and a relaunch reattaches to
 //! them. Design and rationale: docs/design/session-persistence.md.
 //!
-//! The protocol and the replay buffer are platform-neutral; the holder and
-//! its client are unix-only until Windows gets named pipes (phase 2).
+//! A holder listens on a Unix socket (macOS, Linux) or a named pipe
+//! (Windows) — see [`conn`]. Where those live is a *location*: a directory
+//! of sockets, or a pipe-name prefix.
 
-pub mod replay;
-pub mod wire;
-
-#[cfg(unix)]
 pub mod client;
-#[cfg(unix)]
+pub mod conn;
+pub mod replay;
 pub mod server;
-#[cfg(all(unix, test))]
+pub mod wire;
+#[cfg(test)]
 mod tests;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Where holder sockets live. Under `$XDG_RUNTIME_DIR` when it is set, so a
+/// Where this user's holders live.
+///
+/// On unix, a directory: under `$XDG_RUNTIME_DIR` when it is set, so a
 /// sandbox instance with its own runtime dir can never see — let alone
 /// attach — the real app's live shells. Otherwise `~/.mirador/holders`:
 /// the data directory (`~/Library/Application Support/Mirador` on macOS)
 /// puts a socket path at ~100 bytes, against a 104-byte limit, and the temp
 /// directory is swept of files untouched for days, which would cut a
 /// long-lived session off from its socket.
-pub fn holders_dir() -> PathBuf {
-    match std::env::var("XDG_RUNTIME_DIR") {
-        Ok(dir) if !dir.is_empty() => PathBuf::from(dir).join("mirador").join("holders"),
-        _ => PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
-            .join(".mirador")
-            .join("holders"),
+///
+/// On Windows, a pipe-name prefix carrying the user name, like the
+/// automation pipe's: named pipes live in one machine-wide namespace.
+pub fn location() -> PathBuf {
+    #[cfg(unix)]
+    {
+        match std::env::var("XDG_RUNTIME_DIR") {
+            Ok(dir) if !dir.is_empty() => PathBuf::from(dir).join("mirador").join("holders"),
+            _ => PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+                .join(".mirador")
+                .join("holders"),
+        }
+    }
+    #[cfg(windows)]
+    {
+        let user: String = std::env::var("USERNAME")
+            .unwrap_or_default()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        PathBuf::from(format!(r"\\.\pipe\mirador-hold-{user}"))
     }
 }
 
-/// A pane's holder socket. Pane ids are uuids we generate; still, never
+/// A pane's holder endpoint. Pane ids are uuids we generate; still, never
 /// trust one as a path component.
 pub fn socket_path(pane_id: &str) -> PathBuf {
-    let safe: String = pane_id
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .collect();
-    holders_dir().join(format!("{safe}.sock"))
+    conn::endpoint(&location(), &safe_id(pane_id))
 }
 
-/// Starts `mira __hold` for a pane and returns once its socket accepts
+fn safe_id(pane_id: &str) -> String {
+    pane_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect()
+}
+
+/// Starts `mira __hold` for a pane and returns once it accepts
 /// connections. `mira` is the bundled CLI next to the app binary.
-///
-/// The holder is our child until we exit, so a thread waits on it: a
-/// holder that ends while the app runs would otherwise linger as a zombie.
-#[cfg(unix)]
 pub fn launch(
-    mira: &std::path::Path,
+    mira: &Path,
     pane: &str,
-    socket: &std::path::Path,
+    socket: &Path,
     cwd: Option<&str>,
     cols: u16,
     rows: u16,
@@ -79,26 +94,27 @@ pub fn launch(
             cmd.args(["--ssh", host]);
         }
     }
-    let mut child = cmd
-        .stdin(Stdio::null())
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let pid = child.id();
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
+        .stderr(Stdio::null());
+    let mut child = spawn_detached(&mut cmd)?;
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if std::os::unix::net::UnixStream::connect(socket).is_ok() {
+        if conn::is_alive(socket) {
+            // The holder is our child until we exit: on unix a thread
+            // waits on it, or one that ends while the app runs would linger
+            // as a zombie. Windows has no zombies; the handle just closes.
+            #[cfg(unix)]
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
             return Ok(());
         }
-        if Instant::now() >= deadline {
+        if Instant::now() >= deadline || matches!(child.try_wait(), Ok(Some(_))) {
             // Never leave a holder behind that nobody can reach.
-            unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
-            }
+            let _ = child.kill();
+            let _ = child.wait();
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 format!("holder for {pane} never opened {}", socket.display()),
@@ -108,43 +124,41 @@ pub fn launch(
     }
 }
 
-/// Whether a live holder answers on this pane's socket.
-#[cfg(unix)]
-pub fn is_alive(pane_id: &str) -> bool {
-    std::os::unix::net::UnixStream::connect(socket_path(pane_id)).is_ok()
-}
-
-/// Pane ids with a live holder in `holders_dir()`. Socket files whose
-/// holder is gone are removed on the way, so the directory doesn't
-/// accumulate them.
-#[cfg(unix)]
-pub fn live_panes() -> Vec<String> {
-    live_panes_in(&holders_dir())
-}
-
-#[cfg(unix)]
-fn live_panes_in(dir: &std::path::Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut panes = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(pane) = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .and_then(|n| n.strip_suffix(".sock"))
-        else {
-            continue;
+/// On unix the holder detaches itself (`setsid` in `mira __hold`). On
+/// Windows it has to be started detached: no console, its own process
+/// group, and — where the job the app runs in allows it — outside that
+/// job, so closing the app's job cannot take the holders with it.
+fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::{
+            CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
         };
-        if std::os::unix::net::UnixStream::connect(&path).is_ok() {
-            panes.push(pane.to_string());
-        } else {
-            let _ = std::fs::remove_file(&path);
+        let detached = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+        match cmd.creation_flags(detached | CREATE_BREAKAWAY_FROM_JOB).spawn() {
+            Ok(child) => return Ok(child),
+            // A job that forbids breakaway refuses the flag outright; stay
+            // in it rather than not start at all.
+            Err(e) if e.raw_os_error() == Some(5) => {}
+            Err(e) => return Err(e),
         }
+        cmd.creation_flags(detached).spawn()
     }
-    panes.sort();
-    panes
+    #[cfg(not(windows))]
+    {
+        cmd.spawn()
+    }
+}
+
+/// Whether a live holder answers for this pane.
+pub fn is_alive(pane_id: &str) -> bool {
+    conn::is_alive(&socket_path(pane_id))
+}
+
+/// Pane ids with a live holder at this user's location.
+pub fn live_panes() -> Vec<String> {
+    conn::live_panes(&location())
 }
 
 /// Live holders no pane in the session names: what is left when the app
@@ -158,29 +172,25 @@ pub fn orphans(live: &[String], session_panes: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Ends every holder in `holders_dir()` — attached or not, orphaned or not
-/// — and waits up to `patience` for them to go. For "Quit and end all
-/// sessions". Returns the panes whose holder was still answering at the
+/// Ends every holder at this user's location — attached or not, orphaned
+/// or not — and waits up to `patience` for them to go. For "Quit and end
+/// all sessions". Returns the panes whose holder was still answering at the
 /// deadline.
-///
+pub fn end_all(patience: std::time::Duration) -> Vec<String> {
+    end_all_in(&location(), patience)
+}
+
 /// Each connection stays open until its holder reports the exit: a holder
 /// whose child dies with nobody attached waits a day for someone to
 /// collect it, so hanging up straight after `Kill` would leave it there.
-#[cfg(unix)]
-pub fn end_all(patience: std::time::Duration) -> Vec<String> {
-    end_all_in(&holders_dir(), patience)
-}
-
-#[cfg(unix)]
-fn end_all_in(dir: &std::path::Path, patience: std::time::Duration) -> Vec<String> {
+fn end_all_in(location: &Path, patience: std::time::Duration) -> Vec<String> {
     use std::time::Instant;
     let deadline = Instant::now() + patience;
-    let panes = live_panes_in(dir);
-    let sock = |pane: &str| dir.join(format!("{pane}.sock"));
+    let panes = conn::live_panes(location);
     let mut attached = Vec::new();
     for pane in &panes {
         // Attaching takes the pane over from the app, which is quitting.
-        if let Ok(mut a) = client::attach(&sock(pane), 80, 24) {
+        if let Ok(mut a) = client::attach(&conn::endpoint(location, pane), 80, 24) {
             if wire::write_frame(&mut a.stream, &wire::Frame::Kill).is_ok() {
                 attached.push(a);
             }
@@ -198,11 +208,11 @@ fn end_all_in(dir: &std::path::Path, patience: std::time::Duration) -> Vec<Strin
             }
         }
     }
-    // The holder removes its socket as it exits; give the last ones a moment.
+    // A holder goes away as it exits; give the last ones a moment.
     loop {
         let left: Vec<String> = panes
             .iter()
-            .filter(|p| std::os::unix::net::UnixStream::connect(sock(p)).is_ok())
+            .filter(|p| conn::is_alive(&conn::endpoint(location, p)))
             .cloned()
             .collect();
         if left.is_empty() || Instant::now() >= deadline {

@@ -1,9 +1,9 @@
 //! Attaching to a holder: what the app (and the tests) use to talk to one.
 
 use std::io;
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 
+use super::conn::{self, Conn};
 use super::wire::{read_frame, write_frame, Frame, VERSION};
 
 /// A live attachment, after the handshake and the replay.
@@ -20,11 +20,11 @@ pub struct Attached {
     pub replay: Vec<u8>,
     /// Further frames: `Output`, then `Exited`. Write `Input`, `Resize`,
     /// `Kill` or `Detach` to it.
-    pub stream: UnixStream,
+    pub stream: Conn,
 }
 
 pub fn attach(socket: &Path, cols: u16, rows: u16) -> io::Result<Attached> {
-    let mut stream = UnixStream::connect(socket)?;
+    let mut stream = conn::connect(socket)?;
     write_frame(
         &mut stream,
         &Frame::ClientHello {

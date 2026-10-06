@@ -701,7 +701,6 @@ fn own_tty() -> Option<String> {
     None
 }
 
-#[cfg(unix)]
 fn hold(
     pane: String,
     socket: std::path::PathBuf,
@@ -718,10 +717,14 @@ fn hold(
     // living for days, keep it open after the app quits, so that holder
     // thinks a client is still reading and its child blocks on a full
     // socket. Nothing above stderr is ours yet, so all of it goes.
+    #[cfg(unix)]
     close_inherited_fds();
     // A session of its own: no controlling terminal to hang it up, and out
     // of the app's process group, so neither the app quitting nor a signal
-    // to its group reaches the shell this holds.
+    // to its group reaches the shell this holds. (On Windows the app starts
+    // the holder detached instead — see `hold::launch` — and handles are
+    // not inherited unless marked so, which none of the app's are.)
+    #[cfg(unix)]
     unsafe {
         libc::setsid();
     }
@@ -757,19 +760,6 @@ fn close_inherited_fds() {
             libc::close(fd);
         }
     }
-}
-
-#[cfg(not(unix))]
-fn hold(
-    _pane: String,
-    _socket: std::path::PathBuf,
-    _cwd: Option<String>,
-    _cols: u16,
-    _rows: u16,
-    _command: Option<String>,
-    _ssh: Option<String>,
-) -> Result<(), String> {
-    Err("session holders are not supported on this platform yet".into())
 }
 
 /// The Claude Code daemon job this process runs under, if any. A session

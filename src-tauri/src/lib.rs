@@ -70,19 +70,11 @@ pub fn save_session(state: &AppState) {
 /// it had just opened — are given tabs of their own at the end rather than
 /// killed: those are the times their work matters most.
 fn live_holders(workspace: &mut Workspace) -> HashSet<String> {
-    #[cfg(unix)]
-    {
-        let live = cmux_core::hold::live_panes();
-        for orphan in cmux_core::hold::orphans(&live, &workspace.all_pane_ids()) {
-            workspace.adopt_pane(&orphan);
-        }
-        live.into_iter().collect()
+    let live = cmux_core::hold::live_panes();
+    for orphan in cmux_core::hold::orphans(&live, &workspace.all_pane_ids()) {
+        workspace.adopt_pane(&orphan);
     }
-    #[cfg(not(unix))]
-    {
-        let _ = workspace;
-        HashSet::new()
-    }
+    live.into_iter().collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
