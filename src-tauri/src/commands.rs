@@ -588,7 +588,9 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
     }
 }
 
-/// Where a terminal pane's process runs.
+/// Where a terminal pane's process runs. Read only by the holder path,
+/// which is unix-only for now.
+#[cfg_attr(not(unix), allow(dead_code))]
 enum Program {
     Shell,
     Command(String),
