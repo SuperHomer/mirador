@@ -2,9 +2,10 @@ import CopyButton from "./CopyButton";
 import { DOWNLOAD_MACOS, DOWNLOAD_WINDOWS } from "../config";
 
 // The path for someone who clicked a download button — not the source build,
-// which lives in <Contribute>. Both platforms need step 2: the mira CLI ships
-// inside the app bundle, so without `mira install` every command elsewhere on
-// this page is unrunnable.
+// which lives in <Contribute>. The mira CLI ships inside the app bundle, so it
+// has to reach PATH or every command elsewhere on this page is unrunnable: the
+// first-launch Claude Code offer does that along with the hooks, and the last
+// step covers everyone who has no Claude Code or said "Not now".
 type Step = { text: string; code?: string; note?: string };
 
 const MACOS: Step[] = [
@@ -14,14 +15,13 @@ const MACOS: Step[] = [
     note: "The build is unsigned (no Developer ID), so a double-click gets stopped by Gatekeeper. macOS remembers the choice — you only do this once.",
   },
   {
-    text: "Put the mira CLI on your PATH — it ships inside the app.",
-    code: "/Applications/Mirador.app/Contents/MacOS/mira install",
-    note: "Installs to ~/.local/bin/mira.",
+    text: "Using Claude Code? Click Set up when Mirador offers it.",
+    note: "One click puts the mira CLI on your PATH and wires the hooks: tabs light up when your agent needs you, and panes resume their session.",
   },
   {
-    text: "Wire up the Claude Code integration.",
-    code: "mira hooks setup",
-    note: "Tabs light up when your agent needs you, and panes resume their session.",
+    text: "No Claude Code, or said Not now? Put the mira CLI on your PATH.",
+    code: "/Applications/Mirador.app/Contents/MacOS/mira install",
+    note: "Installs to ~/.local/bin/mira. The palette's “Set Up Claude Code Integration” does the rest later.",
   },
 ];
 
@@ -31,14 +31,13 @@ const WINDOWS: Step[] = [
     note: "It installs per user, so there is no admin prompt.",
   },
   {
-    text: "Put mira.exe on your PATH — it sits next to mirador.exe.",
-    code: '& "$env:LOCALAPPDATA\\Mirador\\mira.exe" install',
-    note: "This edits your user PATH, so open a new terminal afterwards.",
+    text: "Using Claude Code? Click Set up when Mirador offers it.",
+    note: "One click puts mira.exe on your PATH and wires the hooks: tabs light up when your agent needs you, and panes resume their session.",
   },
   {
-    text: "Wire up the Claude Code integration.",
-    code: "mira hooks setup",
-    note: "Tabs light up when your agent needs you, and panes resume their session.",
+    text: "No Claude Code, or said Not now? Put mira.exe on your PATH.",
+    code: '& "$env:LOCALAPPDATA\\Mirador\\mira.exe" install',
+    note: "This edits your user PATH, so open a new terminal afterwards. The palette's “Set Up Claude Code Integration” does the rest later.",
   },
 ];
 

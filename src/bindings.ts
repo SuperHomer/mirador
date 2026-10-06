@@ -221,6 +221,12 @@ export const installUpdate = () => invoke<void>("install_update");
 export const workspaceSnapshot = () =>
   invoke<WorkspaceSnapshot>("workspace_snapshot");
 export const getConfig = () => invoke<ResolvedConfig>("get_config");
+/** Whether to offer the Claude Code integration (decided in Rust). */
+export const claudeIntegrationOffer = () => invoke<boolean>("claude_integration_offer");
+/** `mira` on PATH, then the hooks and `/mira-diff`. Lines of what was done. */
+export const setupClaudeIntegration = () => invoke<string[]>("setup_claude_integration");
+/** "Not now": the offer is not made again. */
+export const dismissClaudeIntegration = () => invoke<void>("dismiss_claude_integration");
 /** Ends every terminal session, held ones included, then quits. */
 export const quitEndingSessions = () => invoke<void>("quit_ending_sessions");
 export const newTab = (command?: string) =>

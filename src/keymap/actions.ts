@@ -18,6 +18,7 @@ import {
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
+import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal } from "../terminal/registry";
 
 export interface ActionDef {
@@ -146,6 +147,13 @@ export const actions: ActionDef[] = [
       const pane = activeTab(snapshot)?.focusedPane;
       if (pane) void openGraph(pane, false);
     },
+  },
+  {
+    id: "setup_claude_integration",
+    title: "Set Up Claude Code Integration",
+    // Hooks that light up tabs, /mira-diff, and mira on PATH. The answer
+    // shows at the foot of the sidebar, where the first-launch offer was.
+    run: () => void useClaudeStore.getState().run(),
   },
   {
     id: "quit_ending_sessions",

@@ -665,6 +665,56 @@ fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<Str
     notify::handle_notification(app, pane_id, Some("While Mirador was closed".into()), body);
 }
 
+/// Whether to offer the Claude Code integration: Claude Code is used here,
+/// none of our hooks are installed, nobody has answered the offer, and this
+/// build has a `mira` for the hooks to call.
+#[tauri::command]
+pub fn claude_integration_offer() -> bool {
+    use cmux_core::claude_integration as ci;
+    mira_binary().is_some() && ci::should_offer(&ci::status(), ci::offer_answered())
+}
+
+/// Sets the integration up: `mira` on PATH (agents and `/mira-diff` call it
+/// by name), then the hooks and the skill (which call it by path). Answers
+/// the offer either way, so a failure is not offered again unasked — the
+/// palette entry is how to retry. Returns what was done, line by line.
+#[tauri::command]
+pub async fn setup_claude_integration() -> Result<Vec<String>, String> {
+    use cmux_core::claude_integration as ci;
+    tauri::async_runtime::spawn_blocking(|| {
+        ci::mark_offer_answered();
+        let mira = mira_binary().ok_or("this build has no mira binary beside it")?;
+        let mut done = ci::install_on_path(&mira)?;
+        done.extend(ci::hooks(ci::Action::Setup, &mira)?);
+        Ok(done)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// "Not now": the offer is not made again. The palette entry remains.
+#[tauri::command]
+pub fn dismiss_claude_integration() {
+    cmux_core::claude_integration::mark_offer_answered();
+}
+
+/// Points hooks at this `mira` again when the one they call is gone — the
+/// app was moved, or reinstalled elsewhere. Only then: a hook calling some
+/// other `mira` that still exists (a release build, while this is a dev
+/// one) is left alone, and so is the older form that calls `mira` by name.
+/// Repairing is not a new decision — the hooks are already ours.
+pub fn repair_claude_hooks() {
+    use cmux_core::claude_integration as ci;
+    if ci::status().hooks != ci::HookState::Broken {
+        return;
+    }
+    let Some(mira) = mira_binary() else { return };
+    match ci::hooks(ci::Action::Setup, &mira) {
+        Ok(_) => eprintln!("mirador: Claude Code hooks pointed at a missing mira; now {}", mira.display()),
+        Err(e) => eprintln!("mirador: could not repair the Claude Code hooks: {e}"),
+    }
+}
+
 /// Ends every terminal session — including ones still waiting in their
 /// holders — then quits. Cmd+Q leaves them running; this is the way to
 /// mean "everything".
@@ -683,7 +733,7 @@ pub async fn quit_ending_sessions(app: AppHandle) {
 /// The bundled `mira` CLI, which doubles as the session holder. It sits
 /// next to the app binary — in the bundle, and in `target/<profile>` when
 /// the workspace has been built.
-fn mira_binary() -> Option<std::path::PathBuf> {
+pub(crate) fn mira_binary() -> Option<std::path::PathBuf> {
     let name = if cfg!(windows) { "mira.exe" } else { "mira" };
     let path = std::env::current_exe().ok()?.parent()?.join(name);
     path.is_file().then_some(path)

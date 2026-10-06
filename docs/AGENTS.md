@@ -30,6 +30,12 @@ mira hooks setup      # idempotent; edits ~/.claude/settings.json
 mira hooks remove     # uninstall
 ```
 
+Mirador offers this on first launch when it finds `~/.claude` (once — "Not
+now" is remembered; the palette's *Set Up Claude Code Integration* runs it
+later). The hooks call `mira` by its absolute path, so they work whether or
+not `mira` is on PATH; if the app moves, the next launch points them at the
+new location.
+
 This wires three hooks, all calling `mira claude-hook`, and installs the
 `/mira-diff` skill in `~/.claude/skills/mira-diff/`:
 
