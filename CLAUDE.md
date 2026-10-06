@@ -248,6 +248,18 @@ of place.
 should argue with, and a verification section separating what tests prove
 from what a running app proved.
 
+**Big features reach the site.** `web/` is how people find out what
+Mirador does, and it goes stale silently: nothing fails when a feature
+ships without it. A feature a user would notice — a new pane type, a new
+`mira` command, a change to what quitting or restoring does — updates the
+site in the same PR or the one right after: its card in
+`web/src/components/Features.tsx`, `CliShowcase.tsx` for a new command,
+and a showcase section of its own when it is a headline (as the diff pane
+and the commit graph have). A changed feature corrects its card — the
+"Session persistence" card described the old restore for two releases
+after processes started surviving the quit. Check the rendered page, not
+the bundle (see *Verifying a change*).
+
 **Releases** go straight to `main` as a `Release vX.Y.Z` commit touching four
 files — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
 and the lockfile. Then a *draft* release with its notes, then the tag:
