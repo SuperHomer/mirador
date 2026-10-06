@@ -50,6 +50,11 @@ mod imp {
         pub fn shutdown(&self) {
             let _ = self.0.shutdown(std::net::Shutdown::Both);
         }
+        /// Ends it gracefully. On a socket that is the same thing: what was
+        /// already sent stays readable by the peer.
+        pub fn close(&self) {
+            self.shutdown();
+        }
     }
 
     impl Read for Conn {
@@ -229,8 +234,10 @@ mod imp {
             Ok(())
         }
 
-        /// Ends the connection: pending reads and writes on every clone,
-        /// in any thread, return at once, and the peer sees the end.
+        /// Ends the connection abruptly: pending reads and writes on every
+        /// clone, in any thread, return at once, and the server end is
+        /// disconnected — which *discards* whatever the peer has not read
+        /// yet. Right for a client being displaced; wrong for a last word.
         pub fn shutdown(&self) {
             self.closed.store(true, Ordering::SeqCst);
             unsafe {
@@ -238,6 +245,18 @@ mod imp {
                 if self.server {
                     DisconnectNamedPipe(self.handle.0);
                 }
+            }
+        }
+
+        /// Ends the connection after everything already written: our own
+        /// pending reads return, so the threads holding clones let go, and
+        /// the handle closes when the last one does. The peer reads what
+        /// was sent — an `Exited` frame, say — and only then sees the end.
+        /// `DisconnectNamedPipe` would throw that frame away.
+        pub fn close(&self) {
+            self.closed.store(true, Ordering::SeqCst);
+            unsafe {
+                CancelIoEx(self.handle.0, std::ptr::null());
             }
         }
     }
