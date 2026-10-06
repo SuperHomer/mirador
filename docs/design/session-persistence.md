@@ -1,7 +1,7 @@
 # Session persistence: terminals that outlive the app
 
-Status: **proposal**. Nothing here is built yet. This is the document to
-argue with before a week of code goes into it.
+Status: **agreed**, not yet built. The open questions were settled on
+2026-10-06 (see *Decisions* at the end); build order below.
 
 ## The problem
 
@@ -69,7 +69,7 @@ and the user's own `~/.tmux.conf` would leak into Mirador's behavior.
   app's half-open connection must not lock a pane out forever).
 - **Exit:** when the child exits, the holder keeps the exit code and its
   buffer until a client has collected them, then exits. If no client comes
-  within a grace period (proposal: 24h), it exits anyway.
+  within 24 hours, it exits anyway.
 
 ## The wire protocol
 
@@ -98,7 +98,7 @@ This is the hardest part and the one most worth arguing about. Two ways to
 do it:
 
 **A. Raw replay.** The holder keeps a ring buffer of the last N bytes of
-output (proposal: 4 MB). On attach, the app clears the pane, writes the
+output (4 MB). On attach, the app clears the pane, writes the
 buffer into xterm, then resizes the PTY so full-screen programs redraw.
 
 - Cheap: no parsing in the holder, near-zero CPU.
@@ -117,7 +117,7 @@ on attach, sends a serialized snapshot: scrollback, screen, cursor, modes.
 - Costs a real dependency, CPU on every byte of output in every pane, and a
   serializer whose output xterm.js has to agree with.
 
-**Proposal: ship A, with the two holes patched.** The holder trims the ring
+**Decided: ship A, with the two holes patched.** The holder trims the ring
 at a safe boundary (never inside an escape sequence), and tracks a short list
 of mode flags itself — alternate screen, mouse modes, bracketed paste,
 application cursor keys — by watching for their set/reset sequences, which is
@@ -199,12 +199,17 @@ Each step is a PR that leaves `main` releasable.
    and the default flipped to on.
 4. **Windows.**
 
-## Questions for review
+## Decisions
 
-1. Raw replay with mode tracking (A) first, or go straight to a headless
-   emulator (B)?
-2. Is 4 MB of replay per pane the right size? It is what comes back after a
-   long absence; the saved scrollback still covers older history.
-3. Should exited holders really wait 24h for a client? Shorter means a
-   finished build's output can be gone before you reopen the app.
-4. Ship step 2 off by default for one release, or on from the start?
+Settled on 2026-10-06:
+
+1. **Reattach shows raw replay with mode tracking (A).** It gets measured
+   against Claude Code, `vim`, `htop` and a long build. A headless emulator
+   (B) is the escalation if they come back wrong, with no protocol change.
+2. **4 MB of replay per pane.** History older than that comes from the saved
+   scrollback.
+3. **An exited holder waits 24 hours** for the app to collect its output and
+   exit code, then exits.
+4. **Step 2 ships off by default** (`persistSessions: false`) for one
+   release, so it is tried in a real app before it changes Cmd+Q for
+   everyone.
