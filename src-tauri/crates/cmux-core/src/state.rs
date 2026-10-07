@@ -49,6 +49,9 @@ pub struct PaneMeta {
     pub diff_spec: Option<String>,
     /// What's New pane: the version whose release notes it shows.
     pub whats_new: Option<String>,
+    /// What's New pane: the version the user came from, when the pane
+    /// covers every release after it up to `whats_new` rather than one.
+    pub whats_new_since: Option<String>,
     /// Graph pane: the repository root whose commits it draws.
     pub graph_repo: Option<String>,
     /// Graph pane: the diff pane it opened, retargeted on the next click

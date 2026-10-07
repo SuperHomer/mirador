@@ -1264,6 +1264,33 @@ body,
   border-radius: 4px;
 }
 
+/* Several releases at once: each is a section under its own title, with a
+   rule between them so one release's last list does not run into the next
+   one's first heading. */
+.whatsnew-release + .whatsnew-release {
+  border-top: 1px solid var(--surface);
+  margin-top: 2.4em;
+  padding-top: 1.6em;
+}
+
+.whatsnew-release-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 0.5em;
+}
+
+.whatsnew-release-head h2 {
+  margin: 0;
+  /* The title wraps rather than shrinking the link away: a release title
+     is a sentence, and the link beside it does not shrink. */
+  min-width: 0;
+}
+
+.whatsnew-release > .whatsnew-release-head + * {
+  margin-top: 0;
+}
+
 .whatsnew-notes hr {
   border: none;
   border-top: 1px solid var(--surface);

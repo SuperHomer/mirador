@@ -1,5 +1,7 @@
 //! The "What's New" pane: the release notes for the running version, shown
-//! once after an update.
+//! once after an update — or, when the update skipped releases, the notes
+//! for every one of them, so a user who ignored five updates reads about
+//! all five rather than only the last.
 //!
 //! Notes are the GitHub release body for this build's tag, which is where
 //! they are already written — so nothing in the repository has to be kept
@@ -77,19 +79,17 @@ fn write_seen(version: &str) {
 }
 
 /// Decides whether this launch follows an update, and records the version
-/// either way so the question is only ever asked once per upgrade.
+/// either way so the question is only ever asked once per upgrade. Returns
+/// the version launched before this one: the start of what is news.
 ///
 /// A first install has nothing to compare against and shows nothing: the
 /// notes for a version you just chose to download are not news. A
 /// *downgrade* counts as a change too — whatever the user is now running
 /// is what they may want to read about.
-fn updated_version(current: &str) -> Option<String> {
+fn updated_from(current: &str) -> Option<String> {
     let seen = read_seen();
     write_seen(current);
-    match seen {
-        Some(seen) if seen != current => Some(current.to_string()),
-        _ => None,
-    }
+    seen.filter(|seen| seen != current)
 }
 
 /// Cached notes, else GitHub. Caching the fetch means the pane can be
@@ -131,18 +131,9 @@ fn ensure_crypto_provider() {
 /// a worker thread or an async command, and a blocking client keeps this
 /// module free of a runtime handle.
 fn fetch(version: &str) -> Result<ReleaseNotes, String> {
-    ensure_crypto_provider();
-    let url = format!("https://api.github.com/repos/{REPO}/releases/tags/v{version}");
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let response = client
-        .get(&url)
-        .header(reqwest::header::USER_AGENT, USER_AGENT)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .map_err(|e| format!("could not reach GitHub: {e}"))?;
+    let response = api_get(&format!(
+        "https://api.github.com/repos/{REPO}/releases/tags/v{version}"
+    ))?;
     if !response.status().is_success() {
         // A release that exists but has no notes, an unpublished tag, or a
         // rate limit all land here, and all mean the same thing to the
@@ -150,11 +141,30 @@ fn fetch(version: &str) -> Result<ReleaseNotes, String> {
         return Err(format!("no release notes for v{version} ({})", response.status()));
     }
     let json: serde_json::Value = response.json().map_err(|e| e.to_string())?;
+    release_from_json(&json, version).ok_or_else(|| format!("release v{version} has no notes"))
+}
+
+fn api_get(url: &str) -> Result<reqwest::blocking::Response, String> {
+    ensure_crypto_provider();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| e.to_string())?;
+    client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, USER_AGENT)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .map_err(|e| format!("could not reach GitHub: {e}"))
+}
+
+/// One release from the GitHub API's JSON, or `None` when it has no notes.
+fn release_from_json(json: &serde_json::Value, version: &str) -> Option<ReleaseNotes> {
     let body = json["body"].as_str().unwrap_or("").trim().to_string();
     if body.is_empty() {
-        return Err(format!("release v{version} has no notes"));
+        return None;
     }
-    Ok(ReleaseNotes {
+    Some(ReleaseNotes {
         version: version.to_string(),
         title: json["name"]
             .as_str()
@@ -167,6 +177,104 @@ fn fetch(version: &str) -> Result<ReleaseNotes, String> {
             .unwrap_or(&format!("https://github.com/{REPO}/releases/tag/v{version}"))
             .to_string(),
     })
+}
+
+/// A plain `X.Y.Z`, as an orderable key. Anything else — a pre-release
+/// suffix, a stray tag — is `None` and never part of a range: what a range
+/// answers is "which releases did this update bring", and Mirador's
+/// releases are all plain versions.
+fn version_key(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.strip_prefix('v').unwrap_or(version).split('.');
+    let key = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    parts.next().is_none().then_some(key)
+}
+
+/// The releases an update from `since` to `version` brought, newest first:
+/// everything after `since`, up to and including `version`. Empty for a
+/// downgrade or a relaunch, which bring nothing new.
+fn releases_between(all: &[ReleaseNotes], since: &str, version: &str) -> Vec<ReleaseNotes> {
+    let (Some(low), Some(high)) = (version_key(since), version_key(version)) else {
+        return Vec::new();
+    };
+    let mut range: Vec<ReleaseNotes> = all
+        .iter()
+        .filter(|n| version_key(&n.version).is_some_and(|k| k > low && k <= high))
+        .cloned()
+        .collect();
+    range.sort_by_key(|n| std::cmp::Reverse(version_key(&n.version)));
+    range
+}
+
+/// Every published release, newest first, in one file. Separate from the
+/// per-version cache: a range is answered from one list request rather
+/// than one request per release, which a rate limit of 60 an hour per IP
+/// would not survive for a user five releases behind.
+fn release_list_path() -> PathBuf {
+    cmux_core::session::data_dir().join("release-notes-all.json")
+}
+
+/// Every release with notes, from one API request. Drafts and pre-releases
+/// are not something an update installs, so they are not news either. One
+/// page of a hundred covers every release Mirador has made several times
+/// over; a jump across more than that shows the newest hundred.
+fn fetch_releases() -> Result<Vec<ReleaseNotes>, String> {
+    let response = api_get(&format!(
+        "https://api.github.com/repos/{REPO}/releases?per_page=100"
+    ))?;
+    if !response.status().is_success() {
+        return Err(format!("could not list releases ({})", response.status()));
+    }
+    let json: serde_json::Value = response.json().map_err(|e| e.to_string())?;
+    let releases = json.as_array().ok_or("unexpected release list")?;
+    Ok(releases
+        .iter()
+        .filter(|r| !r["draft"].as_bool().unwrap_or(false))
+        .filter(|r| !r["prerelease"].as_bool().unwrap_or(false))
+        .filter_map(|r| {
+            let tag = r["tag_name"].as_str()?;
+            // Re-rendered from the parsed key, so the version — which names
+            // nothing on disk here, but does in the per-version cache — is
+            // digits and dots whatever the tag said.
+            let (major, minor, patch) = version_key(tag)?;
+            release_from_json(r, &format!("{major}.{minor}.{patch}"))
+        })
+        .collect())
+}
+
+/// Notes for every release from `since` (exclusive) to `version`, newest
+/// first.
+///
+/// The cached list answers when it already holds `version`: releases older
+/// than one already listed do not appear later, so it is complete for any
+/// range ending there. Otherwise one request refreshes it. A range that
+/// does not reach `version` is an error, not a partial answer — the caller
+/// falls back to that one release, which is the part that must not be lost.
+pub fn notes_since(since: &str, version: &str) -> Result<Vec<ReleaseNotes>, String> {
+    let cached = std::fs::read_to_string(release_list_path())
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<ReleaseNotes>>(&t).ok());
+    let all = match cached {
+        Some(all) if all.iter().any(|n| n.version == version) => all,
+        _ => {
+            let all = fetch_releases()?;
+            if let Some(parent) = release_list_path().parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(json) = serde_json::to_string(&all) {
+                let _ = std::fs::write(release_list_path(), json);
+            }
+            all
+        }
+    };
+    let range = releases_between(&all, since, version);
+    match range.first() {
+        Some(newest) if newest.version == version => Ok(range),
+        _ => Err(format!("no releases listed between v{since} and v{version}")),
+    }
 }
 
 /// Hosts a release-note image may be fetched from.
@@ -315,42 +423,50 @@ fn image_bytes(url: &str) -> Result<Vec<u8>, String> {
 /// for the window to exist: a tab added during `setup()` is added to a
 /// workspace the frontend has not mounted yet.
 pub fn announce_on_launch(app: AppHandle) {
-    let current = app.package_info().version.to_string();
-    let Some(version) = updated_version(&current) else {
+    let version = app.package_info().version.to_string();
+    let Some(previous) = updated_from(&version) else {
         return;
     };
     std::thread::spawn(move || {
-        let notes = match notes_for(&version) {
-            Ok(notes) => notes,
-            // Offline, rate-limited, or a release without notes. The user
-            // asked for a terminal, not an error about release notes.
-            Err(e) => {
-                eprintln!("mirador: no release notes for v{version}: {e}");
+        // Every release since the one last launched, when the update
+        // skipped some. One release in range is the ordinary case and gets
+        // the ordinary pane, titled for its version.
+        if let Ok(range) = notes_since(&previous, &version) {
+            if range.len() > 1 {
+                open_pane(&app, &version, Some(&previous), false);
                 return;
             }
-        };
-        open_pane(&app, &notes.version, false);
+        }
+        if let Err(e) = notes_for(&version) {
+            // Offline, rate-limited, or a release without notes. The user
+            // asked for a terminal, not an error about release notes.
+            eprintln!("mirador: no release notes for v{version}: {e}");
+            return;
+        }
+        open_pane(&app, &version, None, false);
     });
 }
 
 /// Adds a What's New pane in its own tab. `focus` is false for the launch
 /// announcement — the tab appears, lit, but the pane you were typing in
 /// keeps the cursor.
-fn open_pane(app: &AppHandle, version: &str, focus: bool) -> String {
+fn open_pane(app: &AppHandle, version: &str, since: Option<&str>, focus: bool) -> String {
     let state = app.state::<AppState>();
     let previous = state.workspace.lock().unwrap().active_tab().id.clone();
     let (tab_id, pane_id) = state.workspace.lock().unwrap().new_tab();
     {
         let mut meta = state.meta.lock().unwrap();
-        meta.entry(pane_id.clone()).or_default().whats_new = Some(version.to_string());
+        let entry = meta.entry(pane_id.clone()).or_default();
+        entry.whats_new = Some(version.to_string());
+        entry.whats_new_since = since.map(str::to_string);
     }
     // Titles otherwise come from a pane's cwd or its shell's OSC, and this
     // pane has neither — the tab would read "shell".
-    state
-        .workspace
-        .lock()
-        .unwrap()
-        .rename_tab(&tab_id, &format!("What's New in v{version}"));
+    let title = match since {
+        Some(since) => format!("What's New since v{since}"),
+        None => format!("What's New in v{version}"),
+    };
+    state.workspace.lock().unwrap().rename_tab(&tab_id, &title);
     if !focus {
         state.workspace.lock().unwrap().set_active_tab(&previous);
     }
@@ -397,47 +513,110 @@ fn notes_from_manifest(version: &str, body: &str) -> Option<ReleaseNotes> {
     })
 }
 
-/// The pane's own content request: the manifest's notes when this version is
-/// the one on offer, else the cache, else GitHub.
+/// The pane's content request, newest release first.
+///
+/// With `since`, every release after it up to `version`. Without it — or
+/// when that range cannot be had, offline or rate-limited — the one
+/// release: the manifest's notes when this version is the one on offer,
+/// else the cache, else GitHub. Falling back rather than failing keeps the
+/// newest notes on screen, which is all the pane showed before ranges.
 #[tauri::command]
-pub async fn whats_new(app: AppHandle, version: String) -> Result<ReleaseNotes, String> {
-    if let Some(notes) = offered_notes(&app, &version) {
-        return Ok(notes);
-    }
-    tauri::async_runtime::spawn_blocking(move || notes_for(&version))
-        .await
-        .map_err(|e| e.to_string())?
+pub async fn whats_new(
+    app: AppHandle,
+    version: String,
+    since: Option<String>,
+) -> Result<Vec<ReleaseNotes>, String> {
+    let offered = offered_notes(&app, &version);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(range) = since.and_then(|since| notes_since(&since, &version).ok()) {
+            return Ok(range);
+        }
+        match offered {
+            Some(notes) => Ok(vec![notes]),
+            None => notes_for(&version).map(|notes| vec![notes]),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Opens the notes pane in the foreground, because reaching this means the
 /// user asked: the palette's "What's New" (the running version) or the
-/// update banner's (the version on offer).
+/// update banner's (everything the update on offer would bring, `since` the
+/// running version).
 #[tauri::command]
-pub fn open_whats_new(app: AppHandle, version: Option<String>) -> String {
+pub fn open_whats_new(app: AppHandle, version: Option<String>, since: Option<String>) -> String {
     let version = version.unwrap_or_else(|| app.package_info().version.to_string());
-    open_pane(&app, &version, true)
+    open_pane(&app, &version, since.as_deref(), true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// `updated_version` writes to the real data directory, so the tests
+    /// `updated_from` writes to the real data directory, so the tests
     /// drive the comparison it performs rather than the file it touches.
     #[test]
     fn a_changed_version_is_news_and_a_first_install_is_not() {
-        // Equivalent to `updated_version`'s decision table.
+        // Equivalent to `updated_from`'s decision table.
         let decide = |seen: Option<&str>, current: &str| -> Option<String> {
-            match seen {
-                Some(seen) if seen != current => Some(current.to_string()),
-                _ => None,
-            }
+            seen.map(str::to_string).filter(|seen| seen != current)
         };
         assert_eq!(decide(None, "0.1.16"), None, "a first install is not news");
         assert_eq!(decide(Some("0.1.16"), "0.1.16"), None, "a relaunch is not news");
-        assert_eq!(decide(Some("0.1.15"), "0.1.16"), Some("0.1.16".into()));
+        assert_eq!(decide(Some("0.1.15"), "0.1.16"), Some("0.1.15".into()));
         // A downgrade is still a change of what you are running.
-        assert_eq!(decide(Some("0.1.16"), "0.1.15"), Some("0.1.15".into()));
+        assert_eq!(decide(Some("0.1.16"), "0.1.15"), Some("0.1.16".into()));
+    }
+
+    fn release(version: &str) -> ReleaseNotes {
+        ReleaseNotes {
+            version: version.into(),
+            title: format!("v{version}"),
+            blocks: Vec::new(),
+            url: String::new(),
+        }
+    }
+
+    fn versions(notes: &[ReleaseNotes]) -> Vec<&str> {
+        notes.iter().map(|n| n.version.as_str()).collect()
+    }
+
+    #[test]
+    fn versions_order_numerically_and_only_plain_ones_parse() {
+        assert!(version_key("0.1.10") > version_key("0.1.9"), "not by string");
+        assert!(version_key("1.0.0") > version_key("0.99.99"));
+        assert_eq!(version_key("v0.1.21"), Some((0, 1, 21)));
+        assert_eq!(version_key("0.1.21"), version_key("v0.1.21"));
+
+        assert_eq!(version_key("0.2.0-beta.1"), None);
+        assert_eq!(version_key("0.1"), None);
+        assert_eq!(version_key("0.1.2.3"), None);
+        assert_eq!(version_key("nightly"), None);
+        assert_eq!(version_key(""), None);
+    }
+
+    #[test]
+    fn a_skipped_range_is_every_release_after_since_up_to_version() {
+        // Out of order on purpose: the API's order is not what this trusts.
+        let all: Vec<_> = ["0.1.9", "0.1.12", "0.1.10", "0.1.11", "0.1.13", "0.1.8"]
+            .into_iter()
+            .map(release)
+            .collect();
+
+        assert_eq!(
+            versions(&releases_between(&all, "0.1.9", "0.1.12")),
+            ["0.1.12", "0.1.11", "0.1.10"],
+            "newest first; since excluded, version included"
+        );
+        // The ordinary update is a range of one.
+        assert_eq!(versions(&releases_between(&all, "0.1.12", "0.1.13")), ["0.1.13"]);
+        // A since that is not a plain version gives nothing rather than
+        // everything: the caller falls back to the one release.
+        assert!(releases_between(&all, "0.1.11-dev", "0.1.13").is_empty());
+        // A relaunch and a downgrade bring nothing new.
+        assert!(releases_between(&all, "0.1.12", "0.1.12").is_empty());
+        assert!(releases_between(&all, "0.1.13", "0.1.9").is_empty());
     }
 
     #[test]
