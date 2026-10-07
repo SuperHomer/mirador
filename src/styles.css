@@ -812,6 +812,10 @@ body,
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
+  /* overflow: hidden drops a flex item's min-height to 0, so without this
+     a tree taller than the pane squeezes every row instead of scrolling —
+     200 files drew as a smear of overlapping 4px rows. */
+  flex-shrink: 0;
 }
 
 .diff-tree-dir {
