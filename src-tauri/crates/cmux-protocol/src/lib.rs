@@ -531,6 +531,10 @@ pub enum NoteBlock {
 pub struct WhatsNewPane {
     pub pane_id: String,
     pub version: String,
+    /// Set when the pane covers every release after this version, up to
+    /// `version` — an update that skipped some.
+    #[serde(default)]
+    pub since: Option<String>,
 }
 
 /// One checkout of a repository, as `git worktree list` reports it.

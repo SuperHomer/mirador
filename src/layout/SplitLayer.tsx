@@ -150,6 +150,7 @@ export function SplitLayer({
               <WhatsNewPane
                 paneId={p.paneId}
                 version={news.version}
+                since={news.since}
                 focused={p.paneId === tab.focusedPane}
               />
             ) : diff ? (

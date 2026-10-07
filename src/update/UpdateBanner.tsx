@@ -122,12 +122,14 @@ export function UpdateBanner() {
               {installing ? installLabel(progress) : "Install and restart"}
             </button>
             {/* Deciding whether to restart a terminal mid-task is easier
-                having read what the update does. The notes come from the
-                update manifest, so this costs no request. */}
+                having read what the update does — all of it, when it is
+                several releases ahead of the running one. */}
             {update.notes && !installing && (
               <button
                 className="update-banner-notes"
-                onClick={() => void openWhatsNew(update.version)}
+                onClick={() =>
+                  void openWhatsNew(update.version, update.currentVersion)
+                }
                 title={`What's new in ${update.version}`}
               >
                 What's new

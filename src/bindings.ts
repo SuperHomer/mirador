@@ -114,6 +114,8 @@ export interface ReleaseNotes {
 export interface WhatsNewPaneInfo {
   paneId: string;
   version: string;
+  /** Set when the pane covers every release after this one up to `version`. */
+  since: string | null;
 }
 
 export interface GraphRef {
@@ -284,14 +286,17 @@ export const loadDiff = (paneId: string) =>
   invoke<DiffResult>("load_diff", { paneId });
 export const setDiffSpec = (paneId: string, spec: string) =>
   invoke<void>("set_diff_spec", { paneId, spec });
-export const whatsNew = (version: string) =>
-  invoke<ReleaseNotes>("whats_new", { version });
+/** Newest first: one release, or every release after `since`. */
+export const whatsNew = (version: string, since: string | null) =>
+  invoke<ReleaseNotes[]>("whats_new", { version, since });
 /** Omit `version` for the running build; pass one to preview an update's. */
 /** Raw image bytes, fetched and cached by the backend — never by the page. */
 export const releaseImage = (url: string) =>
   invoke<ArrayBuffer>("release_image", { url });
-export const openWhatsNew = (version: string | null = null) =>
-  invoke<string>("open_whats_new", { version });
+export const openWhatsNew = (
+  version: string | null = null,
+  since: string | null = null,
+) => invoke<string>("open_whats_new", { version, since });
 export const openGraph = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_graph", { paneId, tab });
 export const loadGraph = (paneId: string, limit: number | null = null) =>

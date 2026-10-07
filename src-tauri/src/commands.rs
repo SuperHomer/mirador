@@ -88,6 +88,7 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
                 m.whats_new.as_ref().map(|v| cmux_protocol::WhatsNewPane {
                     pane_id: pane.clone(),
                     version: v.clone(),
+                    since: m.whats_new_since.clone(),
                 })
             })
             .collect()

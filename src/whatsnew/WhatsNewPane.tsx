@@ -14,25 +14,28 @@ import { useConfigStore } from "../state/configStore";
 type Props = {
   paneId: string;
   version: string;
+  /** The version updated from, when the pane covers a skipped range. */
+  since: string | null;
   focused: boolean;
 };
 
 /**
- * Release notes for one version. The markdown is parsed in Rust (see
- * cmux-core/src/notes.rs) into blocks of plain text, so this component only
- * ever maps data to elements — remote note text is never interpreted as
- * markup in the webview that holds the IPC bridge.
+ * Release notes for one version, or for every release an update skipped,
+ * newest first. The markdown is parsed in Rust (see cmux-core/src/notes.rs)
+ * into blocks of plain text, so this component only ever maps data to
+ * elements — remote note text is never interpreted as markup in the
+ * webview that holds the IPC bridge.
  */
-export function WhatsNewPane({ paneId, version, focused }: Props) {
-  const [notes, setNotes] = useState<ReleaseNotes | null>(null);
+export function WhatsNewPane({ paneId, version, since, focused }: Props) {
+  const [releases, setReleases] = useState<ReleaseNotes[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const colors = useConfigStore((s) => s.config?.colors);
 
   useEffect(() => {
     let stale = false;
-    void whatsNew(version)
-      .then((n) => {
-        if (!stale) setNotes(n);
+    void whatsNew(version, since)
+      .then((r) => {
+        if (!stale) setReleases(r);
       })
       .catch((e: unknown) => {
         if (!stale) setError(String(e));
@@ -40,7 +43,16 @@ export function WhatsNewPane({ paneId, version, focused }: Props) {
     return () => {
       stale = true;
     };
-  }, [version]);
+  }, [version, since]);
+
+  // A range of one is the ordinary pane: the release is the header. Several
+  // get a header naming the span, and a section — title and link — each.
+  const single = releases?.length === 1 ? releases[0] : null;
+  const title = !releases
+    ? `v${version}`
+    : single
+      ? single.title
+      : `${releases.length} releases since v${since}`;
 
   return (
     <div
@@ -57,18 +69,10 @@ export function WhatsNewPane({ paneId, version, focused }: Props) {
     >
       <div className="whatsnew-chrome">
         <span className="whatsnew-badge">What's New</span>
-        <span className="whatsnew-title" title={notes?.title ?? ""}>
-          {notes?.title ?? `v${version}`}
+        <span className="whatsnew-title" title={title}>
+          {title}
         </span>
-        {notes && (
-          <button
-            className="whatsnew-link"
-            title="Open the release on GitHub"
-            onClick={() => void openUrl(notes.url)}
-          >
-            GitHub ↗
-          </button>
-        )}
+        {single && <GitHubLink url={single.url} />}
         <button
           className="whatsnew-close"
           title="Close"
@@ -83,12 +87,26 @@ export function WhatsNewPane({ paneId, version, focused }: Props) {
           <p className="whatsnew-error">
             Release notes for v{version} could not be loaded: {error}
           </p>
-        ) : !notes ? (
+        ) : !releases ? (
           <p className="whatsnew-loading">Loading release notes…</p>
+        ) : single ? (
+          <article className="whatsnew-notes">
+            {single.blocks.map((block, i) => (
+              <BlockView key={i} block={block} depth={1} />
+            ))}
+          </article>
         ) : (
           <article className="whatsnew-notes">
-            {notes.blocks.map((block, i) => (
-              <BlockView key={i} block={block} />
+            {releases.map((release) => (
+              <section className="whatsnew-release" key={release.version}>
+                <div className="whatsnew-release-head">
+                  <h2>{release.title}</h2>
+                  <GitHubLink url={release.url} />
+                </div>
+                {release.blocks.map((block, i) => (
+                  <BlockView key={i} block={block} depth={2} />
+                ))}
+              </section>
             ))}
           </article>
         )}
@@ -97,12 +115,26 @@ export function WhatsNewPane({ paneId, version, focused }: Props) {
   );
 }
 
-const BlockView = ({ block }: { block: NoteBlock }) => {
+const GitHubLink = ({ url }: { url: string }) => (
+  <button
+    className="whatsnew-link"
+    title="Open the release on GitHub"
+    onClick={() => void openUrl(url)}
+  >
+    GitHub ↗
+  </button>
+);
+
+/**
+ * `depth` is how many headings sit above the note: the pane's header alone
+ * for one release, a section title as well for several.
+ */
+const BlockView = ({ block, depth }: { block: NoteBlock; depth: number }) => {
   switch (block.kind) {
     case "heading": {
-      // The release title is already the pane's header, so a note's own
-      // top-level heading is rendered at the same weight as its sections.
-      const Tag = (`h${Math.min(block.level + 1, 4)}` as "h2" | "h3" | "h4");
+      // The release title is already a heading above this one, so a
+      // note's own top-level heading ranks below it.
+      const Tag = (`h${Math.min(block.level + depth, 4)}` as "h2" | "h3" | "h4");
       return (
         <Tag>
           <Spans spans={block.spans} />
