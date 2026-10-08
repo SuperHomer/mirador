@@ -82,12 +82,15 @@ pub fn spawn(handle: tauri::AppHandle) {
             // Agent sessions: once a pane's Claude has been seen running and
             // then is gone, it was exited — forget it, or the next launch
             // would type `claude --resume` into a pane you had moved on
-            // from. Only panes that recorded a session cost a `ps`. Windows
-            // lists no processes, so there nothing is ever seen or forgotten.
+            // from, and the wall would keep a tile for a shell. Only panes
+            // that recorded a session or were started with a role cost a
+            // `ps`. Windows lists no processes, so there nothing is ever seen
+            // or forgotten.
+            let is_agent = cmux_core::state::PaneMeta::is_agent;
             let has_agents = {
                 let meta = state.meta.lock().unwrap();
                 pids.iter()
-                    .any(|(pane, _)| meta.get(pane).is_some_and(|m| m.agent_session.is_some()))
+                    .any(|(pane, _)| meta.get(pane).is_some_and(is_agent))
             };
             if has_agents {
                 let procs = cmux_core::agents::process_table();
@@ -95,14 +98,28 @@ pub fn spawn(handle: tauri::AppHandle) {
                 let mut meta = state.meta.lock().unwrap();
                 for (pane, _) in &pids {
                     let Some(entry) = meta.get_mut(pane) else { continue };
-                    if entry.agent_session.is_none() {
+                    if !is_agent(entry) {
                         continue;
                     }
-                    if running.contains(pane) {
+                    if let Some(args) = running.get(pane) {
                         entry.agent_live = true;
+                        // The model it was started on; a role's is already
+                        // there, and agrees.
+                        let model = cmux_core::agents::model_flag(args);
+                        if model.is_some() && entry.agent_model != model {
+                            entry.agent_model = model;
+                            changed = true;
+                        }
                     } else if entry.agent_live && entry.startup_input.is_none() {
                         entry.agent_live = false;
                         entry.agent_session = None;
+                        entry.agent_role = None;
+                        entry.agent_launched = false;
+                        entry.agent_model = None;
+                        entry.agent_status = None;
+                        entry.agent_message = None;
+                        entry.agent_since_ms = None;
+                        changed = true;
                         state
                             .session_dirty
                             .store(true, std::sync::atomic::Ordering::Relaxed);

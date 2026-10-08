@@ -293,6 +293,32 @@ fn shell_integration_script() -> Option<String> {
     None
 }
 
+/// Quotes one argument for a command line typed into a pane's interactive
+/// shell — the shell [`interactive`] would start now — so it arrives as a
+/// single word whatever it holds.
+pub fn quote_arg(arg: &str) -> String {
+    let program = configured()
+        .map(|(shell, _)| shell)
+        .unwrap_or_else(platform_default);
+    quote_for(Kind::of(&program), arg)
+}
+
+fn quote_for(kind: Kind, arg: &str) -> String {
+    match kind {
+        // Inside single quotes nothing is special but the quote itself,
+        // which closes, is escaped bare, and reopens. fish reads `\'`
+        // outside quotes the same way; it does also unescape `\\` inside
+        // them, so there a doubled backslash arrives as one.
+        Kind::Posix => format!("'{}'", arg.replace('\'', r"'\''")),
+        // PowerShell's single-quoted strings are verbatim; a quote doubles.
+        Kind::PowerShell => format!("'{}'", arg.replace('\'', "''")),
+        // cmd has no escape inside double quotes, so a double quote cannot
+        // be carried at all; it becomes a single one rather than ending the
+        // argument early.
+        Kind::Cmd => format!("\"{}\"", arg.replace('"', "'")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +384,14 @@ mod tests {
             return; // no usable login shell on this machine
         };
         assert!(path.contains('/'), "got: {path:?}");
+    }
+
+    #[test]
+    fn quotes_arguments_per_shell() {
+        assert_eq!(quote_for(Kind::Posix, "plan; rm -rf ~"), "'plan; rm -rf ~'");
+        assert_eq!(quote_for(Kind::Posix, "it's $HOME"), r"'it'\''s $HOME'");
+        assert_eq!(quote_for(Kind::PowerShell, "it's $env:HOME"), "'it''s $env:HOME'");
+        assert_eq!(quote_for(Kind::Cmd, r#"say "hi""#), r#""say 'hi'""#);
+        assert_eq!(quote_for(Kind::Posix, ""), "''");
     }
 }

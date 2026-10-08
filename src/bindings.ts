@@ -27,6 +27,11 @@ export interface TabSnapshot {
   branch: string | null;
   pr: PrStatus | null;
   ports: number[];
+  /**
+   * Set when the tab runs a Claude Code agent: its roles, or "Claude" for
+   * one without a role. The wall's tab does not count.
+   */
+  agent: string | null;
 }
 
 export interface AgentPane {
@@ -153,6 +158,31 @@ export interface GraphPaneInfo {
   repo: string;
 }
 
+export type AgentStatus = "working" | "needsYou" | "idle";
+
+/** A pane running a Claude Code agent. */
+export interface AgentInfo {
+  paneId: string;
+  role: string | null;
+  model: string | null;
+  /** Null until its first hook arrives. */
+  status: AgentStatus | null;
+  message: string | null;
+  sinceMs: number | null;
+  cwd: string | null;
+  branch: string | null;
+}
+
+export interface AgentWallPaneInfo {
+  paneId: string;
+}
+
+export interface AgentRole {
+  name: string;
+  model: string | null;
+  prompt: string | null;
+}
+
 export interface RemotePaneInfo {
   paneId: string;
   host: string;
@@ -168,6 +198,8 @@ export interface WorkspaceSnapshot {
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
+  agentWallPanes: AgentWallPaneInfo[];
+  agents: AgentInfo[];
 }
 
 export interface NotificationDto {
@@ -203,6 +235,7 @@ export interface ResolvedConfig {
   colors: ResolvedColors;
   keybindings: Record<string, string>;
   customCommands: CustomCommand[];
+  agentRoles: AgentRole[];
 }
 
 export interface UpdateInfo {
@@ -299,6 +332,17 @@ export const openWhatsNew = (
 ) => invoke<string>("open_whats_new", { version, since });
 export const openGraph = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_graph", { paneId, tab });
+export const openAgent = (
+  role: string | null,
+  task: string | null,
+  paneId: string | null,
+  tab: boolean,
+  background = false,
+) => invoke<string>("open_agent", { role, task, paneId, tab, background });
+export const markPaneRead = (paneId: string) =>
+  invoke<void>("mark_pane_read", { paneId });
+export const openAgentWall = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_agent_wall", { paneId, tab });
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   TabSnapshot,
@@ -7,7 +7,7 @@ import {
   setActiveTab,
   renameTab,
 } from "../bindings";
-import { useWorkspaceStore } from "../state/workspaceStore";
+import { orderedTabs, useWorkspaceStore } from "../state/workspaceStore";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
@@ -19,13 +19,19 @@ export function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-tabs">
-        {snapshot.tabs.map((tab, i) => (
-          <TabRow
-            key={tab.id}
-            tab={tab}
-            index={i}
-            active={tab.id === snapshot.activeTab}
-          />
+        {/* Agents below the rest, under a heading of their own; numbered
+            in that order, which is the order the tab shortcuts use. */}
+        {orderedTabs(snapshot).map((tab, i, tabs) => (
+          <Fragment key={tab.id}>
+            {tab.agent && !tabs[i - 1]?.agent && (
+              <div className="sidebar-section">Agents</div>
+            )}
+            <TabRow
+              tab={tab}
+              index={i}
+              active={tab.id === snapshot.activeTab}
+            />
+          </Fragment>
         ))}
       </div>
       <button className="sidebar-new-tab" onClick={() => void newTab()}>
@@ -53,6 +59,28 @@ function TabRow({
     setEditing(false);
     if (draft !== tab.title) void renameTab(tab.id, draft);
   };
+
+  // An agent's tab is one line: the harness and the role. Its directory,
+  // branch and last message are what the agent wall is for.
+  if (tab.agent) {
+    return (
+      <div
+        className={`tab-row agent${active ? " active" : ""}`}
+        onClick={() => void setActiveTab(tab.id)}
+        title={tab.title}
+      >
+        <span className="tab-index">{index + 1}</span>
+        <span className="tab-harness" aria-label="Claude Code">
+          ✳
+        </span>
+        <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
+          {tab.agent}
+        </span>
+        {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
+        <CloseTab tabId={tab.id} />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -123,16 +151,22 @@ function TabRow({
         )}
       </div>
       {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
-      <button
-        className="tab-close"
-        title="Close tab"
-        onClick={(e) => {
-          e.stopPropagation();
-          void closeTab(tab.id);
-        }}
-      >
-        ×
-      </button>
+      <CloseTab tabId={tab.id} />
     </div>
+  );
+}
+
+function CloseTab({ tabId }: { tabId: string }) {
+  return (
+    <button
+      className="tab-close"
+      title="Close tab"
+      onClick={(e) => {
+        e.stopPropagation();
+        void closeTab(tabId);
+      }}
+    >
+      ×
+    </button>
   );
 }

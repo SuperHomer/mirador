@@ -111,6 +111,11 @@ enum Command {
         #[arg(long)]
         tab: bool,
     },
+    /// Claude Code agents: start one with a role, list them, watch them all.
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -165,6 +170,33 @@ enum Command {
         /// Run `ssh -tt <HOST>` instead of an interactive shell.
         #[arg(long)]
         ssh: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentAction {
+    /// Start Claude Code in a new tab, with a role's model and prompt from
+    /// `agentRoles` in mirador.json. TASK becomes its first message.
+    New {
+        /// A role name from `agentRoles` (`mira agent roles` lists them).
+        #[arg(short, long)]
+        role: Option<String>,
+        /// Split this pane instead of opening a tab.
+        #[arg(long)]
+        split: bool,
+        #[arg(trailing_var_arg = true)]
+        task: Vec<String>,
+    },
+    /// Every agent pane: role, model, and what it is doing.
+    List,
+    /// The roles `agent new --role` accepts.
+    Roles,
+    /// Open the agent wall — every agent's terminal in one grid. Goes to
+    /// the existing wall if there is one.
+    Wall {
+        /// Split this pane instead of opening (or going to) a tab.
+        #[arg(long)]
+        split: bool,
     },
 }
 
@@ -352,6 +384,20 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: Some(pane_id),
             }
         }
+        Command::Agent { action } => match action {
+            AgentAction::New { role, split, task } => Request::AgentNew {
+                role,
+                task: (!task.is_empty()).then(|| task.join(" ")),
+                target: split.then(|| "split".to_string()),
+                pane_id: own_pane(),
+            },
+            AgentAction::List => Request::AgentList,
+            AgentAction::Roles => return agent_roles(cli.json),
+            AgentAction::Wall { split } => Request::AgentWall {
+                target: split.then(|| "split".to_string()),
+                pane_id: own_pane(),
+            },
+        },
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab } => Request::SshOpen {
                 host,
@@ -510,6 +556,13 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 }
             } else if map.contains_key("runs") {
                 render_runs(&data);
+            } else if let Some(agents) = map
+                .get("agents")
+                .and_then(|v| v.as_array())
+                // A workspace snapshot carries its agents too.
+                .filter(|_| !map.contains_key("tabs"))
+            {
+                render_agents(agents);
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
@@ -529,6 +582,54 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
             render_worktrees(items);
         }
         other => println!("{}", serde_json::to_string_pretty(other).unwrap()),
+    }
+    Ok(())
+}
+
+/// Agents as a table, one per line: pane, status, role, model, and what it
+/// is blocked on when it is.
+fn render_agents(agents: &[serde_json::Value]) {
+    if agents.is_empty() {
+        println!("(no agents — `mira agent new` starts one)");
+        return;
+    }
+    for a in agents {
+        let status = match a["status"].as_str() {
+            Some("working") => "working",
+            Some("needsYou") => "needs-you",
+            Some("idle") => "idle",
+            _ => "-",
+        };
+        let mut line = format!(
+            "{}  {:<9}  {:<12}  {}",
+            a["paneId"].as_str().unwrap_or(""),
+            status,
+            a["role"].as_str().unwrap_or("-"),
+            a["model"].as_str().unwrap_or("default"),
+        );
+        if let Some(message) = a["message"].as_str() {
+            line.push_str(&format!("  — {message}"));
+        }
+        println!("{line}");
+    }
+}
+
+/// `mira agent roles`: read from the config file, as the app reads it — no
+/// running app needed.
+fn agent_roles(json: bool) -> Result<(), String> {
+    let roles = cmux_core::config::agent_roles();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&roles).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    if roles.is_empty() {
+        println!(
+            "(no roles — add \"agentRoles\" to {})",
+            cmux_core::config::config_path().display()
+        );
+    }
+    for r in roles {
+        println!("{:<12}  {}", r.name, r.model.as_deref().unwrap_or("default"));
     }
     Ok(())
 }
@@ -788,6 +889,9 @@ fn claude_hook(event: &str) -> Result<(), String> {
             agent: "claude".into(),
             session_id: session_id.to_string(),
             job: job.clone(),
+            event: Some(event.to_string()),
+            notification_type: payload["notification_type"].as_str().map(String::from),
+            message: payload["message"].as_str().map(String::from),
         });
     }
 
@@ -799,6 +903,12 @@ fn claude_hook(event: &str) -> Result<(), String> {
                 .to_string(),
         ),
         "stop" => Some("finished responding".to_string()),
+        // An API error ended the turn: it stopped as surely as with `stop`,
+        // and the human needs to know it did not finish.
+        "stop-failure" => Some(match payload["error"].as_str() {
+            Some(error) => format!("stopped on an error: {error}"),
+            None => "stopped on an error".to_string(),
+        }),
         _ => None, // session-start etc: session capture only
     };
     if let Some(body) = notify {

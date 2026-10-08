@@ -108,11 +108,22 @@ pub fn run() {
     // runs nothing until you type into it. Not on Windows, which cannot
     // see Claude exit and so would resume closed conversations forever —
     // see `cmux_core::agents::AUTO_RESUME`.
+    // A role's pane resumes on the role's model — looked up in the config,
+    // never taken from the session file, which only names the role.
+    let roles = cmux_core::config::agent_roles();
     for m in meta.values_mut() {
+        let role_model = m
+            .agent_role
+            .as_deref()
+            .and_then(|name| roles.iter().find(|r| r.name == name))
+            .and_then(|r| r.model.clone());
+        m.agent_model = role_model.clone();
+        let quoted_model = role_model.as_deref().map(cmux_core::pty::shell::quote_arg);
         let restored = cmux_core::agents::restore_pane(
             m.command.as_deref(),
             m.remote_host.is_some(),
             m.agent_session.as_deref(),
+            quoted_model.as_deref(),
             cmux_core::agents::AUTO_RESUME,
         );
         m.command = restored.command;
@@ -232,6 +243,9 @@ pub fn run() {
             commands::list_worktrees,
             commands::set_diff_worktree,
             commands::open_graph,
+            commands::open_agent,
+            commands::open_agent_wall,
+            commands::mark_pane_read,
             commands::load_graph,
             commands::graph_show_commit,
             whatsnew::whats_new,

@@ -15,7 +15,7 @@ This file is for what the code and those docs don't tell you.
 
 ```
 src/                        React frontend (the host webview)
-  terminal/ diff/ graph/ browser/ whatsnew/   one directory per pane type
+  terminal/ diff/ graph/ browser/ whatsnew/ agents/   one directory per pane type
   layout/SplitLayer.tsx     picks which pane component renders a pane id
   bindings.ts               every Tauri command + its DTOs, hand-written
   keymap/                   accelerators, the actions table, the palette's source
@@ -80,7 +80,7 @@ Anything touching a pane, the PTY, or startup needs a **second instance**:
 
 ```bash
 npm run build                                   # a debug binary embeds no frontend
-python3 -m http.server 1420 --directory dist &  # ...it loads this instead
+python3 scripts/serve-dist.py dist &            # ...it loads this instead
 SBX=/tmp/msbx-home   # sandbox $HOME, with the real dotfiles symlinked in
 env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh HOME=$SBX \
   XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx \
@@ -92,6 +92,11 @@ Why each part matters:
 - **A debug build with `build.devUrl` set embeds no assets** and loads
   `localhost:1420`. With nothing there the window is blank, React never
   mounts, no PTY spawns — and the log is empty, which makes it look mysterious.
+- **Serve `dist` uncached** — the script, not `python3 -m http.server`.
+  WebKit caches `index.html` from that server and goes on loading the
+  bundle it names after a rebuild, without a single request: a sandbox ran
+  a two-hour-old frontend while fixes were being measured against it. If
+  the server log shows no `GET /` at launch, the page did not reload.
 - **`SHELL=/bin/zsh` must be set** under `env -i`. A Finder-launched app has
   it; without it the shell falls back to bash and reads the wrong dotfiles.
 - **Keep `XDG_RUNTIME_DIR` short** (`/tmp/msbx`): a Unix socket path over
@@ -203,6 +208,13 @@ inconsistency reviewers will notice.
   come back *idle*; relaunching must never re-run `npm test` or silently
   reopen an SSH session. A keypress does it. (Agent panes are the
   exception — see `agents::restore_pane`.)
+- **A terminal is drawn in one place.** The agent wall shows agents by
+  *moving* each pane's xterm element into its tile (`lendTerminal` in
+  `terminal/registry.ts`) and back when the wall's tab is hidden — not a
+  second xterm on the same output. That is only sound because one tab is on
+  screen at a time, and the PTY has one size: whoever shows the terminal
+  sizes it. So the wall leaves out agents in its own tab, and anything new
+  that wants to draw a pane's terminal must borrow it the same way.
 - **React StrictMode double-mounts in dev** and has twice broken the terminal
   by swapping the output sink out from under a pending attach.
 - **A flex row's only shrinkable item absorbs all overflow** and collapses to

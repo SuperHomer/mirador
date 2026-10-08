@@ -104,6 +104,16 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    snapshot.agent_wall_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter(|(_, m)| m.agent_wall)
+            .map(|(pane, _)| cmux_protocol::AgentWallPane {
+                pane_id: pane.clone(),
+            })
+            .collect()
+    };
+    snapshot.agents = agent_infos(state);
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -116,6 +126,33 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .collect()
     };
     snapshot
+}
+
+/// Every pane running a Claude Code agent — one that recorded a session,
+/// or was started with a role and has not exited — in tab and layout
+/// order, which is the order the wall draws them in.
+pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
+    let panes = state.workspace.lock().unwrap().all_pane_ids();
+    let meta = state.meta.lock().unwrap();
+    panes
+        .into_iter()
+        .filter_map(|pane| {
+            let m = meta.get(&pane)?;
+            if !m.is_agent() {
+                return None;
+            }
+            Some(cmux_protocol::AgentInfo {
+                role: m.agent_role.clone(),
+                model: m.agent_model.clone(),
+                status: m.agent_status,
+                message: m.agent_message.clone(),
+                since_ms: m.agent_since_ms,
+                cwd: m.cwd.clone(),
+                branch: m.branch.clone(),
+                pane_id: pane,
+            })
+        })
+        .collect()
 }
 
 pub fn emit_workspace(app: &AppHandle) {
@@ -322,6 +359,16 @@ pub fn focus_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
     let focused = state.workspace.lock().unwrap().focus_pane(&pane_id);
     let read_changed = notify::mark_pane_read(&state, &pane_id);
     if focused || read_changed {
+        emit_workspace(&app);
+    }
+}
+
+/// Clears a pane's unread notifications without focusing it — the agent
+/// wall, where clicking into an agent's terminal reads what it said but
+/// must not switch to the agent's own tab.
+#[tauri::command]
+pub fn mark_pane_read(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
+    if notify::mark_pane_read(&state, &pane_id) {
         emit_workspace(&app);
     }
 }
@@ -704,14 +751,21 @@ pub fn dismiss_claude_integration() {
 /// other `mira` that still exists (a release build, while this is a dev
 /// one) is left alone, and so is the older form that calls `mira` by name.
 /// Repairing is not a new decision — the hooks are already ours.
+///
+/// Hooks from a version that installed fewer events get the rest, calling
+/// the `mira` they already call when it still exists: the agent wall's
+/// status needs `UserPromptSubmit` and `PostToolUse`, and an install from
+/// before it has neither.
 pub fn repair_claude_hooks() {
     use cmux_core::claude_integration as ci;
-    if ci::status().hooks != ci::HookState::Broken {
-        return;
-    }
-    let Some(mira) = mira_binary() else { return };
+    let mira = match ci::status().hooks {
+        ci::HookState::Broken => mira_binary(),
+        ci::HookState::Outdated => ci::installed_mira().or_else(mira_binary),
+        ci::HookState::Missing | ci::HookState::Installed => return,
+    };
+    let Some(mira) = mira else { return };
     match ci::hooks(ci::Action::Setup, &mira) {
-        Ok(_) => eprintln!("mirador: Claude Code hooks pointed at a missing mira; now {}", mira.display()),
+        Ok(_) => eprintln!("mirador: Claude Code hooks updated to call {}", mira.display()),
         Err(e) => eprintln!("mirador: could not repair the Claude Code hooks: {e}"),
     }
 }
@@ -1113,6 +1167,128 @@ pub fn graph_show_commit(
         .graph_diff_pane = Some(diff_pane.clone());
     emit_workspace(&app);
     Ok(diff_pane)
+}
+
+/// Starts a Claude Code agent: a shell pane (a new tab — behind the
+/// current one when `background` — or a split of `pane_id`) with `claude`
+/// typed into it, carrying the role's model and
+/// prompt and `task` as its first message. A shell rather than a command
+/// pane, as a restored agent is: `/exit` leaves a prompt, and the session
+/// it records resumes like any other.
+#[tauri::command]
+pub fn open_agent(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    role: Option<String>,
+    task: Option<String>,
+    pane_id: Option<String>,
+    tab: bool,
+    background: bool,
+) -> Result<String, String> {
+    let role = match role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        Some(name) => Some(
+            cmux_core::config::agent_role(name)
+                .ok_or_else(|| format!("no role `{name}` in agentRoles (mirador.json)"))?,
+        ),
+        None => None,
+    };
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let input = cmux_core::agents::launch_command(
+        role.as_ref(),
+        task.as_deref(),
+        cmux_core::pty::shell::quote_arg,
+    );
+
+    let new_pane = if tab {
+        let mut ws = state.workspace.lock().unwrap();
+        let (_, pane) = if background {
+            ws.new_background_tab()
+        } else {
+            ws.new_tab()
+        };
+        pane
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        // The agent works where it was asked from, whichever way it opens.
+        let cwd = meta
+            .get(&source)
+            .and_then(|m| m.cwd.clone())
+            .or_else(cmux_core::config::default_cwd);
+        let entry = meta.entry(new_pane.clone()).or_default();
+        entry.cwd = cwd;
+        entry.startup_input = Some(input);
+        entry.agent_launched = true;
+        if let Some(role) = role {
+            entry.agent_model = role.model;
+            entry.agent_role = Some(role.name);
+        }
+    }
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// Opens the agent wall: a split of `pane_id`, or a tab of its own. There
+/// is one wall worth having, so asking for a tab when one already exists
+/// goes to it instead of opening a second.
+///
+/// The wall keeps the directory of the pane it was opened from: agents
+/// started from the wall work there.
+#[tauri::command]
+pub fn open_agent_wall(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+) -> Result<String, String> {
+    if tab {
+        let existing = {
+            let ws = state.workspace.lock().unwrap();
+            let meta = state.meta.lock().unwrap();
+            ws.all_pane_ids()
+                .into_iter()
+                .find(|p| meta.get(p).is_some_and(|m| m.agent_wall))
+        };
+        if let Some(wall) = existing {
+            focus_pane(app, state, wall.clone());
+            return Ok(wall);
+        }
+    }
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let new_pane = if tab {
+        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        pane
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let cwd = meta
+            .get(&source)
+            .and_then(|m| m.cwd.clone())
+            .or_else(cmux_core::config::default_cwd);
+        let entry = meta.entry(new_pane.clone()).or_default();
+        entry.cwd = cwd;
+        entry.agent_wall = true;
+    }
+    emit_workspace(&app);
+    Ok(new_pane)
 }
 
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY

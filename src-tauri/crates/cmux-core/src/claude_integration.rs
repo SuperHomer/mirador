@@ -12,10 +12,22 @@
 use std::path::{Path, PathBuf};
 
 /// Claude Code hook event → the `mira claude-hook` event name.
+///
+/// The rest only feed the agent wall's status. `UserPromptSubmit`: Claude
+/// started working. `PostToolUse` and `PostToolUseFailure`: a tool ran, so
+/// it went back to work after a permission prompt. `StopFailure`: the turn
+/// ended on an API error, which `Stop` does not report — without it a
+/// failed turn would read as working forever. The tool hooks fire on every
+/// tool call, so the app answers them without looking anything up unless
+/// some pane is waiting on the human.
 const HOOK_EVENTS: &[(&str, &str)] = &[
     ("Notification", "notification"),
     ("Stop", "stop"),
     ("SessionStart", "session-start"),
+    ("UserPromptSubmit", "prompt-submit"),
+    ("PostToolUse", "post-tool"),
+    ("PostToolUseFailure", "post-tool"),
+    ("StopFailure", "stop-failure"),
 ];
 
 /// `~/.claude`, where Claude Code keeps its settings and skills.
@@ -72,6 +84,9 @@ pub enum HookState {
     Installed,
     /// Ours, but calling a `mira` that no longer exists: the app moved.
     Broken,
+    /// Ours and runnable, but from a version that installed fewer events
+    /// than this one does.
+    Outdated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -103,6 +118,8 @@ fn status_at(claude: &Path) -> Status {
         .any(|exe| !exe.exists())
     {
         HookState::Broken
+    } else if commands.len() < HOOK_EVENTS.len() {
+        HookState::Outdated
     } else {
         HookState::Installed
     };
@@ -110,6 +127,16 @@ fn status_at(claude: &Path) -> Status {
         claude_present: claude.is_dir(),
         hooks,
     }
+}
+
+/// The `mira` the installed hooks call by path, when that still exists:
+/// adding the events a newer version wants keeps them calling the same one.
+pub fn installed_mira() -> Option<PathBuf> {
+    let settings = read_settings(&claude_dir()?.join("settings.json")).ok()?;
+    our_commands(&settings)
+        .iter()
+        .filter_map(|c| quoted_executable(c))
+        .find(|exe| exe.exists())
 }
 
 fn read_settings(path: &Path) -> Result<serde_json::Value, String> {
@@ -467,17 +494,27 @@ mod tests {
         hooks_at(&claude.join("settings.json"), Action::Setup, &mira).unwrap();
         assert_eq!(status_at(&claude).hooks, HookState::Installed);
 
+        // An install from before the wall's events: still ours, but short.
+        let path = claude.join("settings.json");
+        let mut settings = read(&path);
+        settings["hooks"].as_object_mut().unwrap().remove("PostToolUse");
+        std::fs::write(&path, settings.to_string()).unwrap();
+        assert_eq!(status_at(&claude).hooks, HookState::Outdated);
+        hooks_at(&path, Action::Setup, &mira).unwrap();
+        assert_eq!(status_at(&claude).hooks, HookState::Installed);
+
         // The app moved: the path in the hooks is gone.
         std::fs::remove_file(&mira).unwrap();
         assert_eq!(status_at(&claude).hooks, HookState::Broken);
 
         // The by-name form is not ours to judge: it works if mira is on PATH.
+        // From before the wall, it is only short of events.
         std::fs::write(
             claude.join("settings.json"),
             r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"mira claude-hook stop"}]}]}}"#,
         )
         .unwrap();
-        assert_eq!(status_at(&claude).hooks, HookState::Installed);
+        assert_eq!(status_at(&claude).hooks, HookState::Outdated);
 
         let nowhere = std::env::temp_dir().join(format!("mira-claude-absent-{}", std::process::id()));
         assert!(!status_at(&nowhere).claude_present);
@@ -490,6 +527,7 @@ mod tests {
         assert!(!should_offer(&present(HookState::Missing), true), "answered already");
         assert!(!should_offer(&present(HookState::Installed), false), "already set up");
         assert!(!should_offer(&present(HookState::Broken), false), "repaired, not offered");
+        assert!(!should_offer(&present(HookState::Outdated), false), "upgraded, not offered");
         assert!(
             !should_offer(&Status { claude_present: false, hooks: HookState::Missing }, false),
             "no Claude Code here"

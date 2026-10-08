@@ -11,15 +11,21 @@ import {
   openDiff,
   checkUpdate,
   openGraph,
+  openAgent,
+  openAgentWall,
   openWhatsNew,
   installUpdate,
   quitEndingSessions,
 } from "../bindings";
-import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
+import {
+  useWorkspaceStore,
+  activeTab,
+  orderedTabs,
+} from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
-import { getTerminal } from "../terminal/registry";
+import { getTerminal, terminalWithFocus } from "../terminal/registry";
 
 export interface ActionDef {
   id: string;
@@ -34,10 +40,10 @@ function focusedPane(): string | undefined {
 
 function cycleTab(offset: number) {
   const { snapshot } = useWorkspaceStore.getState();
-  if (!snapshot || snapshot.tabs.length < 2) return;
-  const idx = snapshot.tabs.findIndex((t) => t.id === snapshot.activeTab);
-  const next =
-    snapshot.tabs[(idx + offset + snapshot.tabs.length) % snapshot.tabs.length];
+  const tabs = orderedTabs(snapshot);
+  if (!snapshot || tabs.length < 2) return;
+  const idx = tabs.findIndex((t) => t.id === snapshot.activeTab);
+  const next = tabs[(idx + offset + tabs.length) % tabs.length];
   void setActiveTab(next.id);
 }
 
@@ -119,8 +125,11 @@ export const actions: ActionDef[] = [
     id: "copy",
     title: "Copy Selection",
     run: () => {
+      // The terminal with keyboard focus first: in the agent wall that is
+      // an agent's, while the workspace's focused pane is the wall.
       const pane = focusedPane();
-      const selection = pane ? getTerminal(pane)?.getSelection() : undefined;
+      const term = terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
+      const selection = term?.getSelection();
       if (selection) void navigator.clipboard.writeText(selection);
     },
   },
@@ -129,13 +138,14 @@ export const actions: ActionDef[] = [
     title: "Paste",
     run: () => {
       const pane = focusedPane();
-      if (!pane) return;
+      const term = terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
+      if (!term) return;
       void navigator.clipboard.readText().then((text) => {
         // Through xterm, not straight to the PTY: it applies bracketed
         // paste (a multi-line paste must not run line by line) and newline
         // normalization, and its input path keeps the paste in order with
         // typing.
-        if (text) getTerminal(pane)?.paste(text);
+        if (text) term.paste(text);
       });
     },
   },
@@ -147,6 +157,18 @@ export const actions: ActionDef[] = [
       const pane = activeTab(snapshot)?.focusedPane;
       if (pane) void openGraph(pane, false);
     },
+  },
+  {
+    id: "agent_wall",
+    title: "Agent Wall",
+    // Every Claude Code agent's terminal in one grid; goes to the wall's
+    // tab when there already is one.
+    run: () => void openAgentWall(focusedPane() ?? null, true),
+  },
+  {
+    id: "new_agent",
+    title: "New Agent (Claude Code)",
+    run: () => void openAgent(null, null, focusedPane() ?? null, true),
   },
   {
     id: "setup_claude_integration",
@@ -232,7 +254,7 @@ export function runAction(id: string): boolean {
   const tabJump = id.match(/^tab_([1-9])$/);
   if (tabJump) {
     const { snapshot } = useWorkspaceStore.getState();
-    const target = snapshot?.tabs[Number(tabJump[1]) - 1];
+    const target = orderedTabs(snapshot)[Number(tabJump[1]) - 1];
     if (target) void setActiveTab(target.id);
     return true;
   }

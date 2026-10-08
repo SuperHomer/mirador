@@ -29,6 +29,7 @@ export default function Nav() {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 28, fontSize: 14, color: "var(--subtext)" }}>
         <a href="#features" className="nav-link" style={{ color: "var(--subtext)" }}>Features</a>
+        <a href="#agents" className="nav-link" style={{ color: "var(--subtext)" }}>Agents</a>
         <a href="#diff" className="nav-link" style={{ color: "var(--subtext)" }}>Review</a>
         <a href="#graph" className="nav-link" style={{ color: "var(--subtext)" }}>History</a>
         <a href="#sessions" className="nav-link" style={{ color: "var(--subtext)" }}>Sessions</a>

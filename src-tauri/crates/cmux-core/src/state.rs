@@ -40,6 +40,28 @@ pub struct PaneMeta {
     /// Typed into the pane's shell once it first prints, then cleared: how
     /// a restored pane resumes its agent session without a keypress.
     pub startup_input: Option<String>,
+    /// The `agentRoles` entry this pane's agent was started with. Kept
+    /// until the agent exits, and across restarts so a resume gets the
+    /// role's model back.
+    pub agent_role: Option<String>,
+    /// Started as an agent (`mira agent new`, the wall, the palette), with
+    /// or without a role. It makes the pane an agent from the moment it
+    /// opens, before Claude has started and a hook has recorded a session —
+    /// without it a role-less agent first appeared as a plain tab and moved
+    /// to the agents a second later. Cleared, like the role, once Claude
+    /// exits; not persisted, since a restart has the session to go by.
+    pub agent_launched: bool,
+    /// The `--model` the poller saw the pane's `claude` started with.
+    pub agent_model: Option<String>,
+    /// What the agent's hooks last said it is doing (not persisted: a
+    /// restarted app has not heard from it yet).
+    pub agent_status: Option<cmux_protocol::AgentStatus>,
+    /// The last Notification message from the agent's hooks.
+    pub agent_message: Option<String>,
+    /// Unix millis of the last `agent_status` change.
+    pub agent_since_ms: Option<u64>,
+    /// Agent-wall pane: draws every agent pane's terminal in a grid.
+    pub agent_wall: bool,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
@@ -57,6 +79,14 @@ pub struct PaneMeta {
     /// Graph pane: the diff pane it opened, retargeted on the next click
     /// rather than piling up a pane per commit.
     pub graph_diff_pane: Option<String>,
+}
+
+impl PaneMeta {
+    /// Runs a Claude Code agent: one that recorded a session, or was
+    /// started with a role and has not exited.
+    pub fn is_agent(&self) -> bool {
+        self.agent_session.is_some() || self.agent_role.is_some() || self.agent_launched
+    }
 }
 
 #[derive(Debug)]
@@ -125,6 +155,17 @@ impl Workspace {
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
+        (id, pane)
+    }
+
+    /// Like [`Self::new_tab`], placed the same way, but leaves the active
+    /// tab on screen: an agent started from the wall opens behind it, so the
+    /// wall never hides and hands every agent's terminal back for a moment.
+    pub fn new_background_tab(&mut self) -> (String, String) {
+        let (tab, pane) = Tab::new();
+        let id = tab.id.clone();
+        let at = (self.active + 1).min(self.tabs.len());
+        self.tabs.insert(at, tab);
         (id, pane)
     }
 
@@ -278,9 +319,14 @@ impl Workspace {
                     let pane_meta = meta.get(&t.focused);
                     let cwd = pane_meta.and_then(|m| m.cwd.clone());
                     let osc_title = pane_meta.and_then(|m| m.title.clone());
+                    // The wall runs no shell: nothing would ever title it.
+                    let wall_title = pane_meta
+                        .filter(|m| m.agent_wall)
+                        .map(|_| "Agents".to_string());
                     let title = t
                         .title
                         .clone()
+                        .or(wall_title)
                         .or(osc_title)
                         .unwrap_or_else(|| {
                             cwd.as_deref()
@@ -307,6 +353,12 @@ impl Workspace {
                             ports.dedup();
                             ports
                         },
+                        agent: agent_label(
+                            layout::pane_ids(&t.root)
+                                .iter()
+                                .filter_map(|p| meta.get(p))
+                                .filter(|m| m.is_agent()),
+                        ),
                     }
                 })
                 .collect(),
@@ -318,8 +370,24 @@ impl Workspace {
             diff_panes: Vec::new(),
             whats_new_panes: Vec::new(),
             graph_panes: Vec::new(),
+            agent_wall_panes: Vec::new(),
+            agents: Vec::new(),
         }
     }
+}
+
+/// What the sidebar calls a tab of agents: their roles in layout order,
+/// each once, with "Claude" standing for any started without a role. None
+/// when the tab runs no agent.
+fn agent_label<'a>(agents: impl Iterator<Item = &'a PaneMeta>) -> Option<String> {
+    let mut names: Vec<&str> = Vec::new();
+    for m in agents {
+        let name = m.agent_role.as_deref().unwrap_or("Claude");
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    (!names.is_empty()).then(|| names.join(", "))
 }
 
 /// ConPTY seeds a console's title with the shell's own image path
@@ -395,6 +463,67 @@ mod tests {
         let killed = ws.close_pane(&pane2);
         assert_eq!(killed, vec![pane2]);
         assert_eq!(ws.tabs.len(), 1);
+    }
+
+    #[test]
+    fn tabs_running_agents_are_marked() {
+        let mut ws = Workspace::default();
+        let plain = ws.focused_pane();
+        let (_, agent) = ws.new_tab();
+        let shell = ws.split_pane(&agent, SplitDir::Row).unwrap();
+        let (_, wall) = ws.new_tab();
+        let mut meta = HashMap::new();
+        meta.insert(plain.clone(), PaneMeta::default());
+        meta.insert(shell, PaneMeta::default());
+        // One agent pane is enough to make its whole tab an agent tab.
+        meta.insert(
+            agent,
+            PaneMeta { agent_role: Some("coder".into()), ..Default::default() },
+        );
+        meta.insert(wall, PaneMeta { agent_wall: true, ..Default::default() });
+        let labels = |ws: &Workspace, meta: &HashMap<String, PaneMeta>| -> Vec<Option<String>> {
+            ws.snapshot(meta).tabs.into_iter().map(|t| t.agent).collect()
+        };
+        // The wall is a way of looking at agents, not one: it stays with
+        // the other tabs.
+        assert_eq!(labels(&ws, &meta), [None, Some("coder".into()), None]);
+
+        // A session recorded by a hook counts as much as a role does, and
+        // without a role it is just Claude.
+        meta.insert(
+            plain.clone(),
+            PaneMeta { agent_session: Some("claude-fg:s1".into()), ..Default::default() },
+        );
+        assert_eq!(labels(&ws, &meta)[0].as_deref(), Some("Claude"));
+
+        // So does being started as an agent, before any hook has arrived.
+        meta.insert(plain, PaneMeta { agent_launched: true, ..Default::default() });
+        assert_eq!(labels(&ws, &meta)[0].as_deref(), Some("Claude"));
+    }
+
+    #[test]
+    fn a_tab_of_several_agents_names_each_role_once() {
+        let role = |r: Option<&str>| PaneMeta {
+            agent_role: r.map(String::from),
+            agent_session: Some("claude-fg:s".into()),
+            ..Default::default()
+        };
+        let metas = [role(Some("coder")), role(None), role(Some("coder")), role(Some("reviewer"))];
+        assert_eq!(agent_label(metas.iter()).as_deref(), Some("coder, Claude, reviewer"));
+        assert_eq!(agent_label([].iter()), None);
+    }
+
+    #[test]
+    fn background_tab_opens_beside_the_active_one_and_leaves_it_active() {
+        let mut ws = Workspace::default();
+        let (_, _) = ws.new_tab();
+        let (_, _) = ws.new_tab();
+        ws.active = 1;
+        let before = ws.tabs[1].id.clone();
+        let (id, pane) = ws.new_background_tab();
+        assert_eq!(ws.tabs[ws.active].id, before, "the active tab stays on screen");
+        assert_eq!(ws.tabs[2].id, id, "placed where new_tab would put it");
+        assert!(layout::contains(&ws.tabs[2].root, &pane));
     }
 
     #[test]
