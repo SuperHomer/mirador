@@ -138,7 +138,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
         .into_iter()
         .filter_map(|pane| {
             let m = meta.get(&pane)?;
-            if m.agent_session.is_none() && m.agent_role.is_none() {
+            if !m.is_agent() {
                 return None;
             }
             Some(cmux_protocol::AgentInfo {

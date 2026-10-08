@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   TabSnapshot,
@@ -7,7 +7,7 @@ import {
   setActiveTab,
   renameTab,
 } from "../bindings";
-import { useWorkspaceStore } from "../state/workspaceStore";
+import { orderedTabs, useWorkspaceStore } from "../state/workspaceStore";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
@@ -19,13 +19,19 @@ export function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-tabs">
-        {snapshot.tabs.map((tab, i) => (
-          <TabRow
-            key={tab.id}
-            tab={tab}
-            index={i}
-            active={tab.id === snapshot.activeTab}
-          />
+        {/* Agents below the rest, under a heading of their own; numbered
+            in that order, which is the order the tab shortcuts use. */}
+        {orderedTabs(snapshot).map((tab, i, tabs) => (
+          <Fragment key={tab.id}>
+            {tab.agent && !tabs[i - 1]?.agent && (
+              <div className="sidebar-section">Agents</div>
+            )}
+            <TabRow
+              tab={tab}
+              index={i}
+              active={tab.id === snapshot.activeTab}
+            />
+          </Fragment>
         ))}
       </div>
       <button className="sidebar-new-tab" onClick={() => void newTab()}>

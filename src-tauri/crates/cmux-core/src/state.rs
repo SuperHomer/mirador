@@ -74,6 +74,14 @@ pub struct PaneMeta {
     pub graph_diff_pane: Option<String>,
 }
 
+impl PaneMeta {
+    /// Runs a Claude Code agent: one that recorded a session, or was
+    /// started with a role and has not exited.
+    pub fn is_agent(&self) -> bool {
+        self.agent_session.is_some() || self.agent_role.is_some()
+    }
+}
+
 #[derive(Debug)]
 pub struct Tab {
     pub id: String,
@@ -327,6 +335,10 @@ impl Workspace {
                             ports.dedup();
                             ports
                         },
+                        agent: layout::pane_ids(&t.root)
+                            .iter()
+                            .filter_map(|p| meta.get(p))
+                            .any(|m| m.is_agent() || m.agent_wall),
                     }
                 })
                 .collect(),
@@ -417,6 +429,33 @@ mod tests {
         let killed = ws.close_pane(&pane2);
         assert_eq!(killed, vec![pane2]);
         assert_eq!(ws.tabs.len(), 1);
+    }
+
+    #[test]
+    fn tabs_running_agents_are_marked() {
+        let mut ws = Workspace::default();
+        let plain = ws.focused_pane();
+        let (_, agent) = ws.new_tab();
+        let shell = ws.split_pane(&agent, SplitDir::Row).unwrap();
+        let (_, wall) = ws.new_tab();
+        let mut meta = HashMap::new();
+        meta.insert(plain.clone(), PaneMeta::default());
+        meta.insert(shell, PaneMeta::default());
+        // One agent pane is enough to make its whole tab an agent tab.
+        meta.insert(
+            agent,
+            PaneMeta { agent_role: Some("coder".into()), ..Default::default() },
+        );
+        meta.insert(wall, PaneMeta { agent_wall: true, ..Default::default() });
+        let marks: Vec<bool> = ws.snapshot(&meta).tabs.iter().map(|t| t.agent).collect();
+        assert_eq!(marks, [false, true, true]);
+
+        // A session recorded by a hook counts as much as a role does.
+        meta.insert(
+            plain,
+            PaneMeta { agent_session: Some("claude-fg:s1".into()), ..Default::default() },
+        );
+        assert!(ws.snapshot(&meta).tabs[0].agent);
     }
 
     #[test]

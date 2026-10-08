@@ -21,3 +21,17 @@ export function activeTab(
   if (!snapshot) return null;
   return snapshot.tabs.find((t) => t.id === snapshot.activeTab) ?? null;
 }
+
+/**
+ * Tabs in the order the sidebar shows them: the rest first, then the tabs
+ * running agents, each group keeping its own order. Tab shortcuts (mod+1…9,
+ * next/previous) go by this order too, so the number beside a tab is the
+ * one that reaches it.
+ */
+export function orderedTabs(snapshot: WorkspaceSnapshot | null): TabSnapshot[] {
+  if (!snapshot) return [];
+  return [
+    ...snapshot.tabs.filter((t) => !t.agent),
+    ...snapshot.tabs.filter((t) => t.agent),
+  ];
+}

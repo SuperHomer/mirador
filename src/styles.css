@@ -85,6 +85,21 @@ body,
   gap: 2px;
 }
 
+/* Heads the tabs running agents. Auto top margin pushes it, and the agent
+   tabs after it, to the foot of the list; when the list overflows it is
+   simply the boundary between the two groups. */
+.sidebar-section {
+  margin-top: auto;
+  padding: 10px 8px 4px;
+  border-top: 1px solid var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
 .tab-row {
   display: flex;
   align-items: center;

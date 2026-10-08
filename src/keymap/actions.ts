@@ -17,7 +17,11 @@ import {
   installUpdate,
   quitEndingSessions,
 } from "../bindings";
-import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
+import {
+  useWorkspaceStore,
+  activeTab,
+  orderedTabs,
+} from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
@@ -36,10 +40,10 @@ function focusedPane(): string | undefined {
 
 function cycleTab(offset: number) {
   const { snapshot } = useWorkspaceStore.getState();
-  if (!snapshot || snapshot.tabs.length < 2) return;
-  const idx = snapshot.tabs.findIndex((t) => t.id === snapshot.activeTab);
-  const next =
-    snapshot.tabs[(idx + offset + snapshot.tabs.length) % snapshot.tabs.length];
+  const tabs = orderedTabs(snapshot);
+  if (!snapshot || tabs.length < 2) return;
+  const idx = tabs.findIndex((t) => t.id === snapshot.activeTab);
+  const next = tabs[(idx + offset + tabs.length) % tabs.length];
   void setActiveTab(next.id);
 }
 
@@ -250,7 +254,7 @@ export function runAction(id: string): boolean {
   const tabJump = id.match(/^tab_([1-9])$/);
   if (tabJump) {
     const { snapshot } = useWorkspaceStore.getState();
-    const target = snapshot?.tabs[Number(tabJump[1]) - 1];
+    const target = orderedTabs(snapshot)[Number(tabJump[1]) - 1];
     if (target) void setActiveTab(target.id);
     return true;
   }

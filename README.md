@@ -295,6 +295,10 @@ permission prompt without leaving the wall. Each tile shows the role, the
 model, and what the agent is doing: **working**, **needs you** (with what
 for), or **idle**. Click a tile's header to go to the agent's own tab.
 
+In the sidebar, tabs running an agent (and the wall's own) sit apart under
+an **Agents** heading at the bottom, and the tab shortcuts number them in
+that order. A tab moves there when Claude starts in it and back when it exits.
+
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).
 

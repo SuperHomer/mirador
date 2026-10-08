@@ -86,9 +86,7 @@ pub fn spawn(handle: tauri::AppHandle) {
             // that recorded a session or were started with a role cost a
             // `ps`. Windows lists no processes, so there nothing is ever seen
             // or forgotten.
-            let is_agent = |m: &cmux_core::state::PaneMeta| {
-                m.agent_session.is_some() || m.agent_role.is_some()
-            };
+            let is_agent = cmux_core::state::PaneMeta::is_agent;
             let has_agents = {
                 let meta = state.meta.lock().unwrap();
                 pids.iter()
