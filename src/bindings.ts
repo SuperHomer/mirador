@@ -27,8 +27,11 @@ export interface TabSnapshot {
   branch: string | null;
   pr: PrStatus | null;
   ports: number[];
-  /** Runs a Claude Code agent (the wall's tab does not count). */
-  agent: boolean;
+  /**
+   * Set when the tab runs a Claude Code agent: its roles, or "Claude" for
+   * one without a role. The wall's tab does not count.
+   */
+  agent: string | null;
 }
 
 export interface AgentPane {

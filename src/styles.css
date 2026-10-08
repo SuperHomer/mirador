@@ -152,6 +152,23 @@ body,
   text-align: left;
 }
 
+/* An agent's tab: a single line, so it does not keep the two-line height. */
+.tab-row.agent {
+  min-height: 0;
+}
+
+.tab-harness {
+  flex-shrink: 0;
+  color: #d97757;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.tab-row.agent .tab-title {
+  flex: 1;
+  min-width: 0;
+}
+
 .tab-title.has-unread {
   color: var(--accent);
 }

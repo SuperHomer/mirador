@@ -60,6 +60,28 @@ function TabRow({
     if (draft !== tab.title) void renameTab(tab.id, draft);
   };
 
+  // An agent's tab is one line: the harness and the role. Its directory,
+  // branch and last message are what the agent wall is for.
+  if (tab.agent) {
+    return (
+      <div
+        className={`tab-row agent${active ? " active" : ""}`}
+        onClick={() => void setActiveTab(tab.id)}
+        title={tab.title}
+      >
+        <span className="tab-index">{index + 1}</span>
+        <span className="tab-harness" aria-label="Claude Code">
+          ✳
+        </span>
+        <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
+          {tab.agent}
+        </span>
+        {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
+        <CloseTab tabId={tab.id} />
+      </div>
+    );
+  }
+
   return (
     <div
       className={`tab-row${active ? " active" : ""}`}
@@ -129,16 +151,22 @@ function TabRow({
         )}
       </div>
       {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
-      <button
-        className="tab-close"
-        title="Close tab"
-        onClick={(e) => {
-          e.stopPropagation();
-          void closeTab(tab.id);
-        }}
-      >
-        ×
-      </button>
+      <CloseTab tabId={tab.id} />
     </div>
+  );
+}
+
+function CloseTab({ tabId }: { tabId: string }) {
+  return (
+    <button
+      className="tab-close"
+      title="Close tab"
+      onClick={(e) => {
+        e.stopPropagation();
+        void closeTab(tabId);
+      }}
+    >
+      ×
+    </button>
   );
 }

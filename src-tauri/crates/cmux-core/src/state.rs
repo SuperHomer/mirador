@@ -335,10 +335,12 @@ impl Workspace {
                             ports.dedup();
                             ports
                         },
-                        agent: layout::pane_ids(&t.root)
-                            .iter()
-                            .filter_map(|p| meta.get(p))
-                            .any(PaneMeta::is_agent),
+                        agent: agent_label(
+                            layout::pane_ids(&t.root)
+                                .iter()
+                                .filter_map(|p| meta.get(p))
+                                .filter(|m| m.is_agent()),
+                        ),
                     }
                 })
                 .collect(),
@@ -354,6 +356,20 @@ impl Workspace {
             agents: Vec::new(),
         }
     }
+}
+
+/// What the sidebar calls a tab of agents: their roles in layout order,
+/// each once, with "Claude" standing for any started without a role. None
+/// when the tab runs no agent.
+fn agent_label<'a>(agents: impl Iterator<Item = &'a PaneMeta>) -> Option<String> {
+    let mut names: Vec<&str> = Vec::new();
+    for m in agents {
+        let name = m.agent_role.as_deref().unwrap_or("Claude");
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    (!names.is_empty()).then(|| names.join(", "))
 }
 
 /// ConPTY seeds a console's title with the shell's own image path
@@ -447,17 +463,32 @@ mod tests {
             PaneMeta { agent_role: Some("coder".into()), ..Default::default() },
         );
         meta.insert(wall, PaneMeta { agent_wall: true, ..Default::default() });
-        let marks: Vec<bool> = ws.snapshot(&meta).tabs.iter().map(|t| t.agent).collect();
+        let labels = |ws: &Workspace, meta: &HashMap<String, PaneMeta>| -> Vec<Option<String>> {
+            ws.snapshot(meta).tabs.into_iter().map(|t| t.agent).collect()
+        };
         // The wall is a way of looking at agents, not one: it stays with
         // the other tabs.
-        assert_eq!(marks, [false, true, false]);
+        assert_eq!(labels(&ws, &meta), [None, Some("coder".into()), None]);
 
-        // A session recorded by a hook counts as much as a role does.
+        // A session recorded by a hook counts as much as a role does, and
+        // without a role it is just Claude.
         meta.insert(
             plain,
             PaneMeta { agent_session: Some("claude-fg:s1".into()), ..Default::default() },
         );
-        assert!(ws.snapshot(&meta).tabs[0].agent);
+        assert_eq!(labels(&ws, &meta)[0].as_deref(), Some("Claude"));
+    }
+
+    #[test]
+    fn a_tab_of_several_agents_names_each_role_once() {
+        let role = |r: Option<&str>| PaneMeta {
+            agent_role: r.map(String::from),
+            agent_session: Some("claude-fg:s".into()),
+            ..Default::default()
+        };
+        let metas = [role(Some("coder")), role(None), role(Some("coder")), role(Some("reviewer"))];
+        assert_eq!(agent_label(metas.iter()).as_deref(), Some("coder, Claude, reviewer"));
+        assert_eq!(agent_label([].iter()), None);
     }
 
     #[test]
