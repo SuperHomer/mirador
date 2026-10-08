@@ -39,8 +39,8 @@ function focusedPane(): string | undefined {
 }
 
 function cycleTab(offset: number) {
-  const { snapshot } = useWorkspaceStore.getState();
-  const tabs = orderedTabs(snapshot);
+  const { snapshot, project } = useWorkspaceStore.getState();
+  const tabs = orderedTabs(snapshot, project);
   if (!snapshot || tabs.length < 2) return;
   const idx = tabs.findIndex((t) => t.id === snapshot.activeTab);
   const next = tabs[(idx + offset + tabs.length) % tabs.length];
@@ -253,8 +253,8 @@ export function runAction(id: string): boolean {
   // tab_1 .. tab_9
   const tabJump = id.match(/^tab_([1-9])$/);
   if (tabJump) {
-    const { snapshot } = useWorkspaceStore.getState();
-    const target = orderedTabs(snapshot)[Number(tabJump[1]) - 1];
+    const { snapshot, project } = useWorkspaceStore.getState();
+    const target = orderedTabs(snapshot, project)[Number(tabJump[1]) - 1];
     if (target) void setActiveTab(target.id);
     return true;
   }

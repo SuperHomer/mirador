@@ -149,6 +149,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 since_ms: m.agent_since_ms,
                 cwd: m.cwd.clone(),
                 branch: m.branch.clone(),
+                project: m.project(),
                 pane_id: pane,
             })
         })
@@ -1219,13 +1220,17 @@ pub fn open_agent(
     };
     {
         let mut meta = state.meta.lock().unwrap();
-        // The agent works where it was asked from, whichever way it opens.
-        let cwd = meta
-            .get(&source)
-            .and_then(|m| m.cwd.clone())
-            .or_else(cmux_core::config::default_cwd);
+        // The agent works where it was asked from, whichever way it opens —
+        // and belongs to that project from the start, not only once the
+        // poller has looked (it would list under the wrong project until
+        // then).
+        let (cwd, project_root) = match meta.get(&source) {
+            Some(m) if m.cwd.is_some() => (m.cwd.clone(), m.project_root.clone()),
+            _ => (cmux_core::config::default_cwd(), None),
+        };
         let entry = meta.entry(new_pane.clone()).or_default();
         entry.cwd = cwd;
+        entry.project_root = project_root;
         entry.startup_input = Some(input);
         entry.agent_launched = true;
         if let Some(role) = role {

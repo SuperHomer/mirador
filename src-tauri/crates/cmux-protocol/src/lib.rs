@@ -68,6 +68,12 @@ pub struct TabSnapshot {
     /// wall's tab does not count; it stays with the others.
     #[serde(default)]
     pub agent: Option<String>,
+    /// The project the tab works on: the main checkout of its git
+    /// repository (a linked worktree counts as its main checkout), or its
+    /// directory outside one. An agent tab's is its agent's. The sidebar
+    /// lists the agents of the project on screen.
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -405,6 +411,9 @@ pub struct AgentInfo {
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,
     pub branch: Option<String>,
+    /// See `TabSnapshot::project`.
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 /// A pane drawing the agent wall.

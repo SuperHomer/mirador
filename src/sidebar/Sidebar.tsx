@@ -7,29 +7,58 @@ import {
   setActiveTab,
   renameTab,
 } from "../bindings";
-import { orderedTabs, useWorkspaceStore } from "../state/workspaceStore";
+import {
+  orderedTabs,
+  projectName,
+  useWorkspaceStore,
+} from "../state/workspaceStore";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
 export function Sidebar() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
+  const project = useWorkspaceStore((s) => s.project);
   const visible = useWorkspaceStore((s) => s.sidebarVisible);
   if (!snapshot || !visible) return null;
+
+  // Agents of projects not on screen are not listed; their project's tabs
+  // say how many there are, and light up when one wants you.
+  const elsewhere = (tab: TabSnapshot): Elsewhere | undefined => {
+    if (tab.agent || !tab.project || tab.project === project) return undefined;
+    const agents = snapshot.agents.filter((a) => a.project === tab.project);
+    if (agents.length === 0) return undefined;
+    return {
+      count: agents.length,
+      attention: agents.some(
+        (a) =>
+          a.status === "needsYou" || snapshot.unreadPanes.includes(a.paneId),
+      ),
+    };
+  };
 
   return (
     <div className="sidebar">
       <div className="sidebar-tabs">
-        {/* Agents below the rest, under a heading of their own; numbered
-            in that order, which is the order the tab shortcuts use. */}
-        {orderedTabs(snapshot).map((tab, i, tabs) => (
+        {/* The project's agents below the rest, under a heading of their
+            own; numbered in that order, which the tab shortcuts use. */}
+        {orderedTabs(snapshot, project).map((tab, i, tabs) => (
           <Fragment key={tab.id}>
             {tab.agent && !tabs[i - 1]?.agent && (
-              <div className="sidebar-section">Agents</div>
+              <div className="sidebar-section" title={tab.project ?? undefined}>
+                Agents
+                {tab.project && (
+                  <span className="sidebar-section-project">
+                    {" · "}
+                    {projectName(tab.project)}
+                  </span>
+                )}
+              </div>
             )}
             <TabRow
               tab={tab}
               index={i}
               active={tab.id === snapshot.activeTab}
+              elsewhere={elsewhere(tab)}
             />
           </Fragment>
         ))}
@@ -43,14 +72,23 @@ export function Sidebar() {
   );
 }
 
+/** Agents of a tab's project that the sidebar is not listing. */
+interface Elsewhere {
+  count: number;
+  /** One of them needs you, or said something unread. */
+  attention: boolean;
+}
+
 function TabRow({
   tab,
   index,
   active,
+  elsewhere,
 }: {
   tab: TabSnapshot;
   index: number;
   active: boolean;
+  elsewhere?: Elsewhere;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(tab.title);
@@ -150,6 +188,14 @@ function TabRow({
           </span>
         )}
       </div>
+      {elsewhere && (
+        <span
+          className={`tab-agents${elsewhere.attention ? " attention" : ""}`}
+          title="Agents in this project — switch to the tab to list them"
+        >
+          ✳ {elsewhere.count}
+        </span>
+      )}
       {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
       <CloseTab tabId={tab.id} />
     </div>

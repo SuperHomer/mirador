@@ -1,6 +1,11 @@
 import { create } from "zustand";
 
+/** Which agents the wall draws: the project on screen's, or every one. */
+export type WallScope = "project" | "all";
+
 interface UiStore {
+  wallScope: WallScope;
+  setWallScope: (scope: WallScope) => void;
   paletteOpen: boolean;
   notificationsOpen: boolean;
   togglePalette: () => void;
@@ -10,6 +15,8 @@ interface UiStore {
 }
 
 export const useUiStore = create<UiStore>((set) => ({
+  wallScope: "project",
+  setWallScope: (wallScope) => set({ wallScope }),
   paletteOpen: false,
   notificationsOpen: false,
   togglePalette: () =>

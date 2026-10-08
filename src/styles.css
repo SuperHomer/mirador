@@ -100,6 +100,31 @@ body,
   flex-shrink: 0;
 }
 
+.sidebar-section-project {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  color: var(--subtext);
+}
+
+/* How many agents a project tab has that the sidebar is not listing. */
+.tab-agents {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: #d97757;
+  border: 1px solid color-mix(in srgb, #d97757 40%, transparent);
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.tab-agents.attention {
+  background: #d97757;
+  color: var(--bg-alt);
+  font-weight: 700;
+}
+
 .tab-row {
   display: flex;
   align-items: center;
@@ -1620,10 +1645,46 @@ body,
   color: var(--wall-working);
 }
 
+/* This project / All. Pushes itself and what follows to the right. */
+.wall-scope {
+  margin-left: auto;
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.wall-scope button {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 2px 9px;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.wall-scope button + button {
+  border-left: 1px solid var(--surface);
+}
+
+.wall-scope button.on {
+  background: var(--surface);
+  color: var(--text);
+}
+
 .wall-new {
   position: relative;
-  margin-left: auto;
   flex-shrink: 0;
+}
+
+/* Without the scope switch (no project yet), the button takes the gap. */
+.wall-counts + .wall-new {
+  margin-left: auto;
 }
 
 .wall-new-button {

@@ -295,10 +295,17 @@ permission prompt without leaving the wall. Each tile shows the role, the
 model, and what the agent is doing: **working**, **needs you** (with what
 for), or **idle**. Click a tile's header to go to the agent's own tab.
 
-In the sidebar, tabs running an agent sit apart under an **Agents** heading
-at the bottom, each on one line: ✳ and the role (or *Claude*, for one
-started without a role). The tab shortcuts number them in that order. The
-wall's own tab stays at the top with the rest. A tab moves there when Claude starts in it and back when it exits.
+In the sidebar, the agents of the project you are looking at sit apart
+under an **Agents** heading at the bottom, each on one line: ✳ and the role
+(or *Claude*, for one started without a role). A project is a git
+repository, worktrees included, or a directory outside one. Switch to a tab
+of another project and the section switches to its agents; the tabs of
+projects not on screen show how many agents they have (✳ 2), filled in when
+one of them needs you. The tab shortcuts number tabs in the order shown.
+The wall's own tab stays at the top with the rest.
+
+The wall shows the same project's agents, or all of them: the switch in
+its header picks. A tab moves there when Claude starts in it and back when it exits.
 
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).

@@ -32,6 +32,11 @@ export interface TabSnapshot {
    * one without a role. The wall's tab does not count.
    */
   agent: string | null;
+  /**
+   * The project the tab works on: its repository's main checkout (a
+   * worktree counts as its main checkout), or its directory outside one.
+   */
+  project: string | null;
 }
 
 export interface AgentPane {
@@ -171,6 +176,8 @@ export interface AgentInfo {
   sinceMs: number | null;
   cwd: string | null;
   branch: string | null;
+  /** See `TabSnapshot.project`. */
+  project: string | null;
 }
 
 export interface AgentWallPaneInfo {

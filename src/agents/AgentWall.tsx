@@ -9,7 +9,8 @@ import {
   openAgent,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
-import { useWorkspaceStore } from "../state/workspaceStore";
+import { projectName, useWorkspaceStore } from "../state/workspaceStore";
+import { useUiStore } from "../state/uiStore";
 import {
   fitTerminal,
   isLent,
@@ -58,6 +59,11 @@ function columns(n: number): number {
  */
 export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
+  // The project you came from: the wall's own tab has none to offer.
+  const project = useWorkspaceStore((s) => s.project);
+  const scope = useUiStore((s) => s.wallScope);
+  const setScope = useUiStore((s) => s.setWallScope);
+  const scoped = scope === "project" && project !== null;
   const roles = useConfigStore((s) => s.config?.agentRoles ?? []);
   const [menuOpen, setMenuOpen] = useState(false);
   const now = useNow(visible);
@@ -69,13 +75,15 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
     }
     const ownTab = tabOf.get(paneId)?.id;
     const tiles = (snapshot?.agents ?? []).filter(
-      (a) => tabOf.get(a.paneId)?.id !== ownTab,
+      (a) =>
+        tabOf.get(a.paneId)?.id !== ownTab &&
+        (!scoped || a.project === project),
     );
     return {
       tiles,
       tabTitle: (pane: string) => tabOf.get(pane)?.title ?? "",
     };
-  }, [snapshot, paneId]);
+  }, [snapshot, paneId, scoped, project]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
@@ -86,7 +94,14 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
     // A new agent opens in a tab of its own, behind the wall, and shows up
     // in it as a new tile. Switching to that tab and back would hide the
     // wall and resize every agent twice.
-    void openAgent(role, null, paneId, true, true);
+    // It works in the project the wall is showing: started from a tab of
+    // that project, whose directory it takes, rather than from the wall.
+    const from =
+      (project &&
+        snapshot?.tabs.find((t) => !t.agent && t.project === project)
+          ?.focusedPane) ||
+      paneId;
+    void openAgent(role, null, from, true, true);
   };
 
   return (
@@ -110,6 +125,23 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
             </>
           )}
         </span>
+        {project && (
+          <div className="wall-scope" role="group" aria-label="Agents shown">
+            <button
+              className={scope === "project" ? "on" : undefined}
+              title={project}
+              onClick={() => setScope("project")}
+            >
+              {projectName(project)}
+            </button>
+            <button
+              className={scope === "all" ? "on" : undefined}
+              onClick={() => setScope("all")}
+            >
+              All
+            </button>
+          </div>
+        )}
         <div className="wall-new">
           <button
             className="wall-new-button"
@@ -152,7 +184,11 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
 
       {tiles.length === 0 ? (
         <div className="wall-empty">
-          <p>No Claude Code agents running in other tabs.</p>
+          <p>
+            {scoped
+              ? `No Claude Code agents running in ${projectName(project)}.`
+              : "No Claude Code agents running in other tabs."}
+          </p>
           <p className="wall-empty-hint">
             Start one with <em>+ New agent</em>, or run <code>claude</code> in
             any pane — with the Claude Code integration set up, it appears
