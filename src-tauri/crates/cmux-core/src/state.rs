@@ -338,7 +338,7 @@ impl Workspace {
                         agent: layout::pane_ids(&t.root)
                             .iter()
                             .filter_map(|p| meta.get(p))
-                            .any(|m| m.is_agent() || m.agent_wall),
+                            .any(PaneMeta::is_agent),
                     }
                 })
                 .collect(),
@@ -448,7 +448,9 @@ mod tests {
         );
         meta.insert(wall, PaneMeta { agent_wall: true, ..Default::default() });
         let marks: Vec<bool> = ws.snapshot(&meta).tabs.iter().map(|t| t.agent).collect();
-        assert_eq!(marks, [false, true, true]);
+        // The wall is a way of looking at agents, not one: it stays with
+        // the other tabs.
+        assert_eq!(marks, [false, true, false]);
 
         // A session recorded by a hook counts as much as a role does.
         meta.insert(

@@ -62,8 +62,9 @@ pub struct TabSnapshot {
     /// TCP ports the tab's processes are listening on.
     #[serde(default)]
     pub ports: Vec<u16>,
-    /// The tab runs a Claude Code agent, or is the agent wall: the sidebar
-    /// lists these apart, below the rest.
+    /// The tab runs a Claude Code agent: the sidebar lists these apart,
+    /// below the rest. The agent wall's tab does not count; it stays with
+    /// the others.
     #[serde(default)]
     pub agent: bool,
 }
