@@ -169,6 +169,35 @@ pub fn panes_running_claude(procs: &[Proc], pane_pids: &[(String, u32)]) -> Hash
         .collect()
 }
 
+/// How long an agent pane may go without its `claude` appearing in the
+/// process table before it stops counting as an agent.
+pub const START_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Whether the poller should forget a pane's agent: everything that makes
+/// it one (session, role, the launch mark) and its status.
+///
+/// `running`: its `claude` is in the process table now. `seen`: it has been
+/// this run. `typing`: a resume is still to be typed in. `waited`: how long
+/// since it was started or resumed, when it was.
+///
+/// One that ran and stopped was exited. One that never showed up in the
+/// grace period was never going to: a role pane restored with no
+/// conversation to resume (nothing types `claude`), or a resume Claude
+/// refused ("No conversation found") and exited before the poller looked.
+/// Without this, such panes stayed agents for good — listed under Agents,
+/// counted on their project's tabs, with no Claude anywhere.
+pub fn forget_agent(
+    running: bool,
+    seen: bool,
+    typing: bool,
+    waited: Option<std::time::Duration>,
+) -> bool {
+    if running || typing {
+        return false;
+    }
+    seen || waited.is_some_and(|w| w >= START_GRACE)
+}
+
 /// The `--model` a Claude Code command line asks for.
 pub fn model_flag(args: &str) -> Option<String> {
     let mut words = args.split_whitespace();
@@ -598,5 +627,24 @@ mod tests {
         );
         let bare = AgentRole { name: "plain".into(), model: None, prompt: None };
         assert_eq!(launch_command(Some(&bare), Some("  "), q), "claude --name 'plain'");
+    }
+
+    #[test]
+    fn forgets_an_agent_that_exited_or_never_started() {
+        use std::time::Duration;
+        let long = Some(START_GRACE + Duration::from_secs(1));
+        let short = Some(Duration::from_secs(3));
+        // Running: never forgotten, however long ago it started.
+        assert!(!forget_agent(true, true, false, long));
+        // Ran, then stopped: exited.
+        assert!(forget_agent(false, true, false, None));
+        // A resume still to be typed: not yet.
+        assert!(!forget_agent(false, false, true, long));
+        // Never seen: given the grace period, then let go.
+        assert!(!forget_agent(false, false, false, short));
+        assert!(forget_agent(false, false, false, long));
+        // Never seen and never started by us (a hook-recorded session the
+        // poller has not caught yet): left alone.
+        assert!(!forget_agent(false, false, false, None));
     }
 }

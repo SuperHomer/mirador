@@ -1277,6 +1277,7 @@ pub fn open_agent(
         entry.project_root = project_root;
         entry.startup_input = Some(input);
         entry.agent_launched = true;
+        entry.agent_started_at = Some(std::time::Instant::now());
         if let Some(role) = role {
             entry.agent_model = role.model;
             entry.agent_role = Some(role.name);

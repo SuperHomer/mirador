@@ -54,6 +54,9 @@ pub struct PaneMeta {
     /// to the agents a second later. Cleared, like the role, once Claude
     /// exits; not persisted, since a restart has the session to go by.
     pub agent_launched: bool,
+    /// When this run started (or resumed) the pane's agent, until its
+    /// `claude` is first seen running; see `agents::forget_agent`.
+    pub agent_started_at: Option<std::time::Instant>,
     /// The `--model` the poller saw the pane's `claude` started with.
     pub agent_model: Option<String>,
     /// What the agent's hooks last said it is doing (not persisted: a

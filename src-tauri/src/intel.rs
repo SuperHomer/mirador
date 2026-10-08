@@ -113,6 +113,7 @@ pub fn spawn(handle: tauri::AppHandle) {
                     }
                     if let Some(args) = running.get(pane) {
                         entry.agent_live = true;
+                        entry.agent_started_at = None;
                         // The model it was started on; a role's is already
                         // there, and agrees.
                         let model = cmux_core::agents::model_flag(args);
@@ -120,8 +121,19 @@ pub fn spawn(handle: tauri::AppHandle) {
                             entry.agent_model = model;
                             changed = true;
                         }
-                    } else if entry.agent_live && entry.startup_input.is_none() {
+                    } else if cmux_core::agents::forget_agent(
+                        false,
+                        entry.agent_live,
+                        entry.startup_input.is_some(),
+                        // Windows lists no processes: there "never seen"
+                        // says nothing, and the grace period must not run.
+                        entry
+                            .agent_started_at
+                            .filter(|_| cmux_core::agents::AUTO_RESUME)
+                            .map(|t| t.elapsed()),
+                    ) {
                         entry.agent_live = false;
+                        entry.agent_started_at = None;
                         entry.agent_session = None;
                         entry.agent_role = None;
                         entry.agent_launched = false;
