@@ -21,10 +21,11 @@ export function Sidebar() {
   const visible = useWorkspaceStore((s) => s.sidebarVisible);
   if (!snapshot || !visible) return null;
 
-  // Agents of projects not on screen are not listed; their project's tabs
-  // say how many there are, and light up when one wants you.
-  const elsewhere = (tab: TabSnapshot): Elsewhere | undefined => {
-    if (tab.agent || !tab.project || tab.project === project) return undefined;
+  // Every project tab says how many agents its project has, and lights up
+  // when one wants you — the project on screen's too, so the count does not
+  // vanish the moment you switch to its tab.
+  const agentCount = (tab: TabSnapshot): AgentCount | undefined => {
+    if (tab.agent || !tab.project) return undefined;
     const agents = snapshot.agents.filter((a) => a.project === tab.project);
     if (agents.length === 0) return undefined;
     return {
@@ -58,7 +59,7 @@ export function Sidebar() {
               tab={tab}
               index={i}
               active={tab.id === snapshot.activeTab}
-              elsewhere={elsewhere(tab)}
+              agents={agentCount(tab)}
             />
           </Fragment>
         ))}
@@ -72,8 +73,8 @@ export function Sidebar() {
   );
 }
 
-/** Agents of a tab's project that the sidebar is not listing. */
-interface Elsewhere {
+/** The agents of a tab's project. */
+interface AgentCount {
   count: number;
   /** One of them needs you, or said something unread. */
   attention: boolean;
@@ -83,12 +84,12 @@ function TabRow({
   tab,
   index,
   active,
-  elsewhere,
+  agents,
 }: {
   tab: TabSnapshot;
   index: number;
   active: boolean;
-  elsewhere?: Elsewhere;
+  agents?: AgentCount;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(tab.title);
@@ -188,12 +189,12 @@ function TabRow({
           </span>
         )}
       </div>
-      {elsewhere && (
+      {agents && (
         <span
-          className={`tab-agents${elsewhere.attention ? " attention" : ""}`}
-          title="Agents in this project — switch to the tab to list them"
+          className={`tab-agents${agents.attention ? " attention" : ""}`}
+          title={`${agents.count} ${agents.count === 1 ? "agent" : "agents"} in this project`}
         >
-          ✳ {elsewhere.count}
+          ✳ {agents.count}
         </span>
       )}
       {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}

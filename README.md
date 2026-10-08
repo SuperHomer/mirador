@@ -300,8 +300,8 @@ under an **Agents** heading at the bottom, each on one line: ✳ and the role
 (or *Claude*, for one started without a role). A project is a git
 repository, worktrees included, or a directory outside one. Switch to a tab
 of another project and the section switches to its agents; the tabs of
-projects not on screen show how many agents they have (✳ 2), filled in when
-one of them needs you. The tab shortcuts number tabs in the order shown.
+every project show how many agents it has (✳ 2), filled in when one of
+them needs you. The tab shortcuts number tabs in the order shown.
 The wall's own tab stays at the top with the rest.
 
 The wall shows the same project's agents, or all of them: the switch in

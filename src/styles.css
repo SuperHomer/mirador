@@ -107,7 +107,7 @@ body,
   color: var(--subtext);
 }
 
-/* How many agents a project tab has that the sidebar is not listing. */
+/* How many agents a project tab's project has. */
 .tab-agents {
   flex-shrink: 0;
   font-size: 10.5px;
