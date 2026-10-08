@@ -1220,6 +1220,7 @@ pub fn open_agent(
         let entry = meta.entry(new_pane.clone()).or_default();
         entry.cwd = cwd;
         entry.startup_input = Some(input);
+        entry.agent_launched = true;
         if let Some(role) = role {
             entry.agent_model = role.model;
             entry.agent_role = Some(role.name);

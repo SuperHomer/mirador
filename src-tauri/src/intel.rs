@@ -114,6 +114,7 @@ pub fn spawn(handle: tauri::AppHandle) {
                         entry.agent_live = false;
                         entry.agent_session = None;
                         entry.agent_role = None;
+                        entry.agent_launched = false;
                         entry.agent_model = None;
                         entry.agent_status = None;
                         entry.agent_message = None;

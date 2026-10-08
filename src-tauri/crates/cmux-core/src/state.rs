@@ -44,6 +44,13 @@ pub struct PaneMeta {
     /// until the agent exits, and across restarts so a resume gets the
     /// role's model back.
     pub agent_role: Option<String>,
+    /// Started as an agent (`mira agent new`, the wall, the palette), with
+    /// or without a role. It makes the pane an agent from the moment it
+    /// opens, before Claude has started and a hook has recorded a session —
+    /// without it a role-less agent first appeared as a plain tab and moved
+    /// to the agents a second later. Cleared, like the role, once Claude
+    /// exits; not persisted, since a restart has the session to go by.
+    pub agent_launched: bool,
     /// The `--model` the poller saw the pane's `claude` started with.
     pub agent_model: Option<String>,
     /// What the agent's hooks last said it is doing (not persisted: a
@@ -78,7 +85,7 @@ impl PaneMeta {
     /// Runs a Claude Code agent: one that recorded a session, or was
     /// started with a role and has not exited.
     pub fn is_agent(&self) -> bool {
-        self.agent_session.is_some() || self.agent_role.is_some()
+        self.agent_session.is_some() || self.agent_role.is_some() || self.agent_launched
     }
 }
 
@@ -473,9 +480,13 @@ mod tests {
         // A session recorded by a hook counts as much as a role does, and
         // without a role it is just Claude.
         meta.insert(
-            plain,
+            plain.clone(),
             PaneMeta { agent_session: Some("claude-fg:s1".into()), ..Default::default() },
         );
+        assert_eq!(labels(&ws, &meta)[0].as_deref(), Some("Claude"));
+
+        // So does being started as an agent, before any hook has arrived.
+        meta.insert(plain, PaneMeta { agent_launched: true, ..Default::default() });
         assert_eq!(labels(&ws, &meta)[0].as_deref(), Some("Claude"));
     }
 
