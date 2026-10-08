@@ -337,7 +337,8 @@ export const openAgent = (
   task: string | null,
   paneId: string | null,
   tab: boolean,
-) => invoke<string>("open_agent", { role, task, paneId, tab });
+  background = false,
+) => invoke<string>("open_agent", { role, task, paneId, tab, background });
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
 export const openAgentWall = (paneId: string | null, tab: boolean) =>

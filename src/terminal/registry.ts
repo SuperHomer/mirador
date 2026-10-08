@@ -76,6 +76,10 @@ export function isLent(paneId: string): boolean {
   return !!terminals.get(paneId)?.borrower;
 }
 
+export function isLentTo(paneId: string, host: HTMLElement): boolean {
+  return terminals.get(paneId)?.borrower === host;
+}
+
 /**
  * Moves the pane's live terminal into `host` — the same xterm, buffer and
  * PTY, not a copy — and sizes it (and so the PTY) to fit there. Returns
@@ -85,6 +89,13 @@ export function isLent(paneId: string): boolean {
  * Lending works because only one tab is on screen at a time: a terminal
  * drawn in the wall is never also wanted in its own tab, and the PTY has
  * one size, which belongs to whichever place is showing it.
+ *
+ * A lent terminal stays lent while the wall is hidden, until its own tab
+ * is shown and takes it back (`reclaimTerminal`). Every move resizes the
+ * PTY, and Claude Code redraws on each resize; a narrowing one leaves
+ * rewrapped fragments and reprinted banners behind. Returning every
+ * agent whenever the wall hid resized all of them twice per visit to any
+ * one, which is what made tiles fill with debris.
  */
 export function lendTerminal(
   paneId: string,
@@ -106,6 +117,21 @@ export function lendTerminal(
     entry.fit.fit();
     changed(paneId);
   };
+}
+
+/**
+ * Brings a lent terminal back to its own pane: its tab is on screen now.
+ * The borrower's release then does nothing; the wall lends it again the
+ * next time it is shown.
+ */
+export function reclaimTerminal(paneId: string) {
+  const entry = terminals.get(paneId);
+  if (!entry?.borrower) return;
+  entry.borrower = null;
+  const el = entry.term.element;
+  if (el) entry.home.appendChild(el);
+  entry.fit.fit();
+  changed(paneId);
 }
 
 /** Refits the pane's terminal to wherever it is drawn now. */

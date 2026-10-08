@@ -237,6 +237,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 task,
                 pane_id,
                 target.as_deref() != Some("split"),
+                false,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }

@@ -80,7 +80,7 @@ Anything touching a pane, the PTY, or startup needs a **second instance**:
 
 ```bash
 npm run build                                   # a debug binary embeds no frontend
-python3 -m http.server 1420 --directory dist &  # ...it loads this instead
+python3 scripts/serve-dist.py dist &            # ...it loads this instead
 SBX=/tmp/msbx-home   # sandbox $HOME, with the real dotfiles symlinked in
 env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh HOME=$SBX \
   XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx \
@@ -92,6 +92,11 @@ Why each part matters:
 - **A debug build with `build.devUrl` set embeds no assets** and loads
   `localhost:1420`. With nothing there the window is blank, React never
   mounts, no PTY spawns — and the log is empty, which makes it look mysterious.
+- **Serve `dist` uncached** — the script, not `python3 -m http.server`.
+  WebKit caches `index.html` from that server and goes on loading the
+  bundle it names after a rebuild, without a single request: a sandbox ran
+  a two-hour-old frontend while fixes were being measured against it. If
+  the server log shows no `GET /` at launch, the page did not reload.
 - **`SHELL=/bin/zsh` must be set** under `env -i`. A Finder-launched app has
   it; without it the shell falls back to bash and reads the wrong dotfiles.
 - **Keep `XDG_RUNTIME_DIR` short** (`/tmp/msbx`): a Unix socket path over

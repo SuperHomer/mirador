@@ -158,6 +158,17 @@ impl Workspace {
         (id, pane)
     }
 
+    /// Like [`Self::new_tab`], placed the same way, but leaves the active
+    /// tab on screen: an agent started from the wall opens behind it, so the
+    /// wall never hides and hands every agent's terminal back for a moment.
+    pub fn new_background_tab(&mut self) -> (String, String) {
+        let (tab, pane) = Tab::new();
+        let id = tab.id.clone();
+        let at = (self.active + 1).min(self.tabs.len());
+        self.tabs.insert(at, tab);
+        (id, pane)
+    }
+
     /// Adds a tab at the end for an existing pane id, leaving the active tab
     /// alone: how a session holder no saved pane names gets a home.
     pub fn adopt_pane(&mut self, pane: &str) -> String {
@@ -500,6 +511,19 @@ mod tests {
         let metas = [role(Some("coder")), role(None), role(Some("coder")), role(Some("reviewer"))];
         assert_eq!(agent_label(metas.iter()).as_deref(), Some("coder, Claude, reviewer"));
         assert_eq!(agent_label([].iter()), None);
+    }
+
+    #[test]
+    fn background_tab_opens_beside_the_active_one_and_leaves_it_active() {
+        let mut ws = Workspace::default();
+        let (_, _) = ws.new_tab();
+        let (_, _) = ws.new_tab();
+        ws.active = 1;
+        let before = ws.tabs[1].id.clone();
+        let (id, pane) = ws.new_background_tab();
+        assert_eq!(ws.tabs[ws.active].id, before, "the active tab stays on screen");
+        assert_eq!(ws.tabs[2].id, id, "placed where new_tab would put it");
+        assert!(layout::contains(&ws.tabs[2].root, &pane));
     }
 
     #[test]

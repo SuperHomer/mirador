@@ -7,13 +7,13 @@ import {
   focusPane,
   markPaneRead,
   openAgent,
-  setActiveTab,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import {
   fitTerminal,
   isLent,
+  isLentTo,
   lendTerminal,
   watchTerminal,
 } from "../terminal/registry";
@@ -62,7 +62,7 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const now = useNow(visible);
 
-  const { ownTab, tiles, tabTitle } = useMemo(() => {
+  const { tiles, tabTitle } = useMemo(() => {
     const tabOf = new Map<string, { id: string; title: string }>();
     for (const t of snapshot?.tabs ?? []) {
       for (const p of paneIds(t.root)) tabOf.set(p, { id: t.id, title: t.title });
@@ -72,7 +72,6 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
       (a) => tabOf.get(a.paneId)?.id !== ownTab,
     );
     return {
-      ownTab,
       tiles,
       tabTitle: (pane: string) => tabOf.get(pane)?.title ?? "",
     };
@@ -84,11 +83,10 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
 
   const start = (role: string | null) => {
     setMenuOpen(false);
-    // A new agent opens in a tab of its own; the wall stays on screen and
-    // the agent shows up in it as a new tile.
-    void openAgent(role, null, paneId, true).then(() => {
-      if (ownTab) void setActiveTab(ownTab);
-    });
+    // A new agent opens in a tab of its own, behind the wall, and shows up
+    // in it as a new tile. Switching to that tab and back would hide the
+    // wall and resize every agent twice.
+    void openAgent(role, null, paneId, true, true);
   };
 
   return (
@@ -200,28 +198,49 @@ function WallTile({
   const [shown, setShown] = useState(true);
   const pane = agent.paneId;
 
-  // Borrow the pane's terminal while the wall is on screen. The pane may
-  // register after the wall mounts (tabs mount in order) or remount, so a
-  // terminal that is not lent anywhere is picked up whenever it appears.
+  // Give the terminal back only when the tile goes away: while the wall is
+  // merely hidden it stays here, until its own tab is shown and takes it
+  // (see `lendTerminal` for why every move counts).
+  const releaseRef = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      releaseRef.current?.();
+      releaseRef.current = null;
+    },
+    [pane],
+  );
+
+  // Borrow the pane's terminal whenever the wall is on screen. The pane may
+  // register after the wall mounts (tabs mount in order), remount, or have
+  // been taken back while the wall was hidden; a terminal lent nowhere is
+  // picked up whenever it appears.
   useEffect(() => {
     const host = hostRef.current;
     if (!visible || !host) return;
-    let release = lendTerminal(pane, host);
-    setShown(!!release);
-    const unwatch = watchTerminal(pane, () => {
-      if (!isLent(pane)) {
-        release = lendTerminal(pane, host);
-        setShown(!!release);
+    const borrow = () => {
+      if (isLentTo(pane, host)) {
+        setShown(true);
+        return;
       }
-    });
+      if (isLent(pane)) {
+        setShown(false);
+        return;
+      }
+      const release = lendTerminal(pane, host);
+      if (release) releaseRef.current = release;
+      setShown(!!release);
+    };
+    borrow();
+    // The tile may have changed size while the wall was hidden.
+    if (isLentTo(pane, host)) fitTerminal(pane);
+    const unwatch = watchTerminal(pane, borrow);
     const observer = new ResizeObserver(() => {
-      if (release) fitTerminal(pane);
+      if (isLentTo(pane, host)) fitTerminal(pane);
     });
     observer.observe(host);
     return () => {
       observer.disconnect();
       unwatch();
-      release?.();
     };
   }, [pane, visible]);
 

@@ -1169,8 +1169,9 @@ pub fn graph_show_commit(
     Ok(diff_pane)
 }
 
-/// Starts a Claude Code agent: a shell pane (a new tab, or a split of
-/// `pane_id`) with `claude` typed into it, carrying the role's model and
+/// Starts a Claude Code agent: a shell pane (a new tab — behind the
+/// current one when `background` — or a split of `pane_id`) with `claude`
+/// typed into it, carrying the role's model and
 /// prompt and `task` as its first message. A shell rather than a command
 /// pane, as a restored agent is: `/exit` leaves a prompt, and the session
 /// it records resumes like any other.
@@ -1182,6 +1183,7 @@ pub fn open_agent(
     task: Option<String>,
     pane_id: Option<String>,
     tab: bool,
+    background: bool,
 ) -> Result<String, String> {
     let role = match role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         Some(name) => Some(
@@ -1200,7 +1202,12 @@ pub fn open_agent(
     );
 
     let new_pane = if tab {
-        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        let mut ws = state.workspace.lock().unwrap();
+        let (_, pane) = if background {
+            ws.new_background_tab()
+        } else {
+            ws.new_tab()
+        };
         pane
     } else {
         state

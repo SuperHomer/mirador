@@ -7,6 +7,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
 import {
   isLent,
+  reclaimTerminal,
   registerTerminal,
   unregisterTerminal,
   watchTerminal,
@@ -96,6 +97,11 @@ export const TerminalPane = memo(function TerminalPane({
     setLent(isLent(paneId));
     return watchTerminal(paneId, () => setLent(isLent(paneId)));
   }, [paneId]);
+
+  // The wall keeps a terminal it borrowed until the pane's own tab shows.
+  useEffect(() => {
+    if (visible && lent) reclaimTerminal(paneId);
+  }, [visible, lent, paneId]);
 
   // Hot-reloaded config applies to the live terminal without recreating it.
   useEffect(() => {
