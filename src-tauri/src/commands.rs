@@ -1214,9 +1214,9 @@ pub fn graph_show_commit(
     Ok(diff_pane)
 }
 
-/// Starts a Claude Code agent: a shell pane (a new tab — behind the
-/// current one when `background` — or a split of `pane_id`) with `claude`
-/// typed into it, carrying the role's model and
+/// Starts a Claude Code agent: a shell pane (a split of `pane_id` — the
+/// usual way, so the agent works in the tab beside you — or a new tab,
+/// behind the current one when `background`) with `claude` typed into it, carrying the role's model and
 /// prompt and `task` as its first message. A shell rather than a command
 /// pane, as a restored agent is: `/exit` leaves a prompt, and the session
 /// it records resumes like any other.

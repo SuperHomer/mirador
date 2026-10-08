@@ -91,20 +91,20 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
 
   const start = (role: string | null) => {
     setMenuOpen(false);
-    // A new agent opens in a tab of its own, behind the wall, and shows up
-    // in it as a new tile. Switching to that tab and back would hide the
-    // wall and resize every agent twice.
-    // It works in the project the wall is showing: started from a tab of
-    // that project, whose directory it takes, rather than from the wall.
+    // Like everywhere else, the agent joins a tab rather than getting its
+    // own: it splits the focused pane of a tab in the project the wall is
+    // showing (the wall's own tab is no place to work). That tab is
+    // behind the wall, so the wall stays on screen and gains a tile. With
+    // no such tab, a tab of its own, also behind the wall.
     const isAgent = (pane: string) =>
       snapshot?.agents.some((a) => a.paneId === pane) ?? false;
-    const from =
-      (project &&
-        snapshot?.tabs.find(
+    const host = project
+      ? snapshot?.tabs.find(
           (t) => t.project === project && !isAgent(t.focusedPane),
-        )?.focusedPane) ||
-      paneId;
-    void openAgent(role, null, from, true, true);
+        )
+      : undefined;
+    if (host) void openAgent(role, null, host.focusedPane, false);
+    else void openAgent(role, null, paneId, true, true);
   };
 
   return (

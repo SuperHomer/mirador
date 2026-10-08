@@ -281,9 +281,11 @@ prompt appended to Claude Code's own:
 ```
 
 Each role becomes a *New Agent: <role>* palette entry and a `mira agent new
---role <role> [task…]` target. The agent opens in a tab of its own, as a
-shell with `claude --model … --append-system-prompt … --name <role>` typed
-into it, in the directory of the pane it was started from. Exiting Claude
+--role <role> [task…]` target. The agent opens in a pane beside the one you
+are in — it joins the tab you are working in, and its row appears under
+**Agents** — as a shell with `claude --model … --append-system-prompt …
+--name <role>` typed into it, in that pane's directory. (`mira agent new
+--tab` gives it a tab of its own instead.) Exiting Claude
 leaves the shell; restarting Mirador resumes the conversation on the
 role's model.
 

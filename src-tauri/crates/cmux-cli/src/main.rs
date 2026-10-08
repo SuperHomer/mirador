@@ -182,15 +182,16 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AgentAction {
-    /// Start Claude Code in a new tab, with a role's model and prompt from
-    /// `agentRoles` in mirador.json. TASK becomes its first message.
+    /// Start Claude Code in a pane beside this one, with a role's model and
+    /// prompt from `agentRoles` in mirador.json. TASK becomes its first
+    /// message.
     New {
         /// A role name from `agentRoles` (`mira agent roles` lists them).
         #[arg(short, long)]
         role: Option<String>,
-        /// Split this pane instead of opening a tab.
+        /// Open a new tab instead of splitting this pane.
         #[arg(long)]
-        split: bool,
+        tab: bool,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -396,10 +397,10 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Agent { action } => match action {
-            AgentAction::New { role, split, task } => Request::AgentNew {
+            AgentAction::New { role, tab, task } => Request::AgentNew {
                 role,
                 task: (!task.is_empty()).then(|| task.join(" ")),
-                target: split.then(|| "split".to_string()),
+                target: Some(if tab { "tab" } else { "split" }.to_string()),
                 pane_id: own_pane(),
             },
             AgentAction::List => Request::AgentList,

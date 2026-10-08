@@ -232,8 +232,8 @@ pub enum Request {
         #[serde(default)]
         message: Option<String>,
     },
-    /// Starts a Claude Code agent in a new pane (a new tab, or a split of
-    /// the calling pane), with a role's model and prompt from the config.
+    /// Starts a Claude Code agent in a new pane (a split of the calling
+    /// pane, or a new tab), with a role's model and prompt from the config.
     AgentNew {
         /// A role name from `agentRoles`; none starts plain `claude`.
         #[serde(default)]
@@ -241,7 +241,7 @@ pub enum Request {
         /// The first prompt, typed in as Claude's initial message.
         #[serde(default)]
         task: Option<String>,
-        /// "tab" (default) or "split".
+        /// "split" (default) or "tab".
         #[serde(default)]
         target: Option<String>,
         /// The pane a split comes from, and whose directory the agent

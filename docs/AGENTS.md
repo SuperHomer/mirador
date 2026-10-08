@@ -164,13 +164,14 @@ it takes the repository from the pane it ran in and refuses outside one.
 
 ```bash
 mira agent roles                              # agentRoles from mirador.json
-mira agent new --role reviewer "review the auth change"   # new tab
-mira agent new --split "fix the flaky test"   # plain claude, split of this pane
+mira agent new --role reviewer "review the auth change"   # a pane beside this one
+mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, role, model
 mira agent wall                               # the grid of every agent
 ```
 
-`agent new` opens a shell and types `claude` into it with the role's
+`agent new` splits the pane it runs in (the focused pane, from outside
+Mirador), opens a shell there and types `claude` into it with the role's
 `--model`, `--append-system-prompt` and `--name`, and the task as the first
 message — so `/exit` leaves a prompt, and the session resumes like any other
 (on the role's model). The arguments are quoted for the pane's shell and put

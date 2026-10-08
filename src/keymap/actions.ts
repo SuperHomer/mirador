@@ -185,7 +185,8 @@ export const actions: ActionDef[] = [
   {
     id: "new_agent",
     title: "New Agent (Claude Code)",
-    run: () => void openAgent(null, null, focusedPane() ?? null, true),
+    // Beside the focused pane, in the tab you are working in.
+    run: () => void openAgent(null, null, focusedPane() ?? null, false),
   },
   {
     id: "setup_claude_integration",
