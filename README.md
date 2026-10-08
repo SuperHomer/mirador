@@ -295,14 +295,20 @@ permission prompt without leaving the wall. Each tile shows the role, the
 model, and what the agent is doing: **working**, **needs you** (with what
 for), or **idle**. Click a tile's header to go to the agent's own tab.
 
-In the sidebar, the agents of the project you are looking at sit apart
-under an **Agents** heading at the bottom, each on one line: ✳ and the role
-(or *Claude*, for one started without a role). A project is a git
-repository, worktrees included, or a directory outside one. Switch to a tab
-of another project and the section switches to its agents; the tabs of
-every project show how many agents it has (✳ 2), filled in when one of
-them needs you. The tab shortcuts number tabs in the order shown.
-The wall's own tab stays at the top with the rest.
+In the sidebar, every tab is listed as usual, and below them, under an
+**Agents** heading, the agents of the project you are looking at, each on
+one line: ✳ and the role (or *Claude*, for one started without a role).
+Clicking a tab shows the whole tab — Claude beside your dev server, say;
+clicking an agent shows that agent's pane alone, filling its tab, while
+the other panes keep running untouched. Click the tab again for the split.
+A project is a git repository, worktrees included, or a directory outside
+one. Switch to a tab of another project and the section switches to its
+agents; every project's tabs show how many agents it has (✳ 2), filled in
+when one of them needs you. The tab shortcuts number rows in the order
+shown.
+
+Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
+or `mira zoom [pane]` (`--off` for the whole tab again).
 
 The wall shows the same project's agents, or all of them: the switch in
 its header picks. A tab moves there when Claude starts in it and back when it exits.

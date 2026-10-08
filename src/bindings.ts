@@ -28,15 +28,12 @@ export interface TabSnapshot {
   pr: PrStatus | null;
   ports: number[];
   /**
-   * Set when the tab runs a Claude Code agent: its roles, or "Claude" for
-   * one without a role. The wall's tab does not count.
-   */
-  agent: string | null;
-  /**
    * The project the tab works on: its repository's main checkout (a
    * worktree counts as its main checkout), or its directory outside one.
    */
   project: string | null;
+  /** The pane shown alone, filling the tab, when one is. */
+  zoomedPane: string | null;
 }
 
 export interface AgentPane {
@@ -168,6 +165,8 @@ export type AgentStatus = "working" | "needsYou" | "idle";
 /** A pane running a Claude Code agent. */
 export interface AgentInfo {
   paneId: string;
+  /** The tab holding it. */
+  tabId: string;
   role: string | null;
   model: string | null;
   /** Null until its first hook arrives. */
@@ -346,6 +345,9 @@ export const openAgent = (
   tab: boolean,
   background = false,
 ) => invoke<string>("open_agent", { role, task, paneId, tab, background });
+/** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
+export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
+  invoke<boolean>("zoom_pane", { paneId, zoom });
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
 export const openAgentWall = (paneId: string | null, tab: boolean) =>

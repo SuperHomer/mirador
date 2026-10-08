@@ -46,7 +46,13 @@ export default function App() {
   useEffect(() => {
     if (!snapshot) return;
     const activeTab = snapshot.tabs.find((t) => t.id === snapshot.activeTab);
-    const activePanes = activeTab ? collectPaneIds(activeTab.root) : [];
+    // A zoomed tab shows one pane; a browser pane zoomed out of view is
+    // hidden like one on another tab.
+    const activePanes = activeTab
+      ? activeTab.zoomedPane
+        ? [activeTab.zoomedPane]
+        : collectPaneIds(activeTab.root)
+      : [];
     const overlaysOpen = paletteOpen || notificationsOpen;
     for (const b of snapshot.browserPanes) {
       const visible = !overlaysOpen && activePanes.includes(b.paneId);

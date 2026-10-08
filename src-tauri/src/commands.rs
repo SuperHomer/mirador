@@ -132,16 +132,27 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
 /// or was started with a role and has not exited — in tab and layout
 /// order, which is the order the wall draws them in.
 pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
-    let panes = state.workspace.lock().unwrap().all_pane_ids();
+    let panes: Vec<(String, String)> = {
+        let ws = state.workspace.lock().unwrap();
+        ws.tabs
+            .iter()
+            .flat_map(|t| {
+                cmux_core::layout::pane_ids(&t.root)
+                    .into_iter()
+                    .map(move |p| (t.id.clone(), p))
+            })
+            .collect()
+    };
     let meta = state.meta.lock().unwrap();
     panes
         .into_iter()
-        .filter_map(|pane| {
+        .filter_map(|(tab_id, pane)| {
             let m = meta.get(&pane)?;
             if !m.is_agent() {
                 return None;
             }
             Some(cmux_protocol::AgentInfo {
+                tab_id,
                 role: m.agent_role.clone(),
                 model: m.agent_model.clone(),
                 status: m.agent_status,
@@ -372,6 +383,39 @@ pub fn mark_pane_read(app: AppHandle, state: State<'_, AppState>, pane_id: Strin
     if notify::mark_pane_read(&state, &pane_id) {
         emit_workspace(&app);
     }
+}
+
+/// Shows `pane` alone, filling its tab (activating it), or — with
+/// `zoom: false` — shows the whole tab again. With `zoom` absent it
+/// toggles. The sidebar's agent entries zoom to their agent.
+#[tauri::command]
+pub fn zoom_pane(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    zoom: Option<bool>,
+) -> Result<bool, String> {
+    let zoomed = {
+        let mut ws = state.workspace.lock().unwrap();
+        let is_zoomed = ws
+            .tabs
+            .iter()
+            .any(|t| t.zoomed.as_deref() == Some(pane_id.as_str()));
+        if zoom.unwrap_or(!is_zoomed) {
+            if !ws.zoom_pane(&pane_id) {
+                return Err(format!("no pane {pane_id}"));
+            }
+            true
+        } else {
+            ws.unzoom(&pane_id);
+            false
+        }
+    };
+    if zoomed {
+        notify::mark_pane_read(&state, &pane_id);
+    }
+    emit_workspace(&app);
+    Ok(zoomed)
 }
 
 #[tauri::command]

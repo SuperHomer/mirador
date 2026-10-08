@@ -135,6 +135,12 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::commands::focus_pane(app.clone(), app.state(), pane_id);
             Ok(Value::Null)
         }
+        Request::ZoomPane { pane_id, zoom } => {
+            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            let zoomed =
+                crate::commands::zoom_pane(app.clone(), app.state(), pane.clone(), zoom)?;
+            Ok(json!({ "paneId": pane, "zoomed": zoomed }))
+        }
         Request::SendInput { pane_id, data } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             state.pty.write(&pane, data.as_bytes())?;

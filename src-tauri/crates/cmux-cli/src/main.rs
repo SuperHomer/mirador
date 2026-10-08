@@ -39,6 +39,13 @@ enum Command {
     ClosePane { pane: String },
     /// Focus a pane (activates its tab).
     Focus { pane: String },
+    /// Show a pane alone, filling its tab (activates it); again, or with
+    /// --off, shows the whole tab. PANE defaults to the focused pane.
+    Zoom {
+        pane: Option<String>,
+        #[arg(long)]
+        off: bool,
+    },
     /// Type input into a pane's shell.
     SendInput {
         /// Text to send (use --enter to append a newline).
@@ -305,6 +312,10 @@ fn run(cli: Cli) -> Result<(), String> {
         },
         Command::ClosePane { pane } => Request::ClosePane { pane_id: pane },
         Command::Focus { pane } => Request::FocusPane { pane_id: pane },
+        Command::Zoom { pane, off } => Request::ZoomPane {
+            pane_id: pane,
+            zoom: off.then_some(false),
+        },
         Command::SendInput { data, pane, enter } => Request::SendInput {
             pane_id: pane,
             data: if enter { format!("{data}\n") } else { data },

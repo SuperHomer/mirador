@@ -246,6 +246,7 @@ pub fn run() {
             commands::open_agent,
             commands::open_agent_wall,
             commands::mark_pane_read,
+            commands::zoom_pane,
             commands::load_graph,
             commands::graph_show_commit,
             whatsnew::whats_new,

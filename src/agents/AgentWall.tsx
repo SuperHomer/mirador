@@ -4,9 +4,9 @@ import {
   AgentStatus,
   Node,
   closePane,
-  focusPane,
   markPaneRead,
   openAgent,
+  zoomPane,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
 import { projectName, useWorkspaceStore } from "../state/workspaceStore";
@@ -96,10 +96,13 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
     // wall and resize every agent twice.
     // It works in the project the wall is showing: started from a tab of
     // that project, whose directory it takes, rather than from the wall.
+    const isAgent = (pane: string) =>
+      snapshot?.agents.some((a) => a.paneId === pane) ?? false;
     const from =
       (project &&
-        snapshot?.tabs.find((t) => !t.agent && t.project === project)
-          ?.focusedPane) ||
+        snapshot?.tabs.find(
+          (t) => t.project === project && !isAgent(t.focusedPane),
+        )?.focusedPane) ||
       paneId;
     void openAgent(role, null, from, true, true);
   };
@@ -287,8 +290,8 @@ function WallTile({
     >
       <div
         className="wall-tile-head"
-        title="Go to this agent's tab"
-        onClick={() => void focusPane(pane)}
+        title="Show this agent in its tab"
+        onClick={() => void zoomPane(pane, true)}
       >
         <span className="wall-dot" />
         <span className="wall-role">{agent.role ?? "claude"}</span>

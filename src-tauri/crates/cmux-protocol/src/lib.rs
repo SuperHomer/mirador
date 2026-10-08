@@ -62,18 +62,15 @@ pub struct TabSnapshot {
     /// TCP ports the tab's processes are listening on.
     #[serde(default)]
     pub ports: Vec<u16>,
-    /// Set when the tab runs a Claude Code agent: what the sidebar calls
-    /// it — the agents' roles, or "Claude" for one started without a role.
-    /// The sidebar lists these tabs apart, below the rest. The agent
-    /// wall's tab does not count; it stays with the others.
-    #[serde(default)]
-    pub agent: Option<String>,
     /// The project the tab works on: the main checkout of its git
     /// repository (a linked worktree counts as its main checkout), or its
     /// directory outside one. An agent tab's is its agent's. The sidebar
     /// lists the agents of the project on screen.
     #[serde(default)]
     pub project: Option<String>,
+    /// The pane shown alone, filling the tab, when one is.
+    #[serde(default)]
+    pub zoomed_pane: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -168,6 +165,14 @@ pub enum Request {
     },
     FocusPane {
         pane_id: String,
+    },
+    /// Shows a pane alone, filling its tab; `zoom: false` shows the whole
+    /// tab again, and without `zoom` it toggles.
+    ZoomPane {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        zoom: Option<bool>,
     },
     SendInput {
         #[serde(default)]
@@ -398,6 +403,9 @@ pub enum AgentStatus {
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub pane_id: String,
+    /// The tab holding it.
+    #[serde(default)]
+    pub tab_id: String,
     /// The `agentRoles` entry it was started with.
     pub role: Option<String>,
     /// The role's model, or the `--model` its process was started with;

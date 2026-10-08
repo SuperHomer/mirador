@@ -92,8 +92,12 @@ impl PaneMeta {
     }
 
     /// The project the pane works on: its repository's main checkout, or
-    /// its directory outside a repository.
+    /// its directory outside a repository. The agent wall works on none —
+    /// its directory is only where it starts agents from.
     pub fn project(&self) -> Option<String> {
+        if self.agent_wall {
+            return None;
+        }
         self.project_root.clone().or_else(|| self.cwd.clone())
     }
 }
@@ -105,6 +109,10 @@ pub struct Tab {
     pub title: Option<String>,
     pub root: Node,
     pub focused: String,
+    /// One pane shown alone, filling the tab — how the sidebar shows an
+    /// agent by itself. Not persisted; cleared by anything that is about
+    /// the tab as a whole (see `zoom_pane`).
+    pub zoomed: Option<String>,
 }
 
 fn new_id() -> String {
@@ -122,6 +130,7 @@ impl Tab {
                     pane_id: pane.clone(),
                 },
                 focused: pane.clone(),
+                zoomed: None,
             },
             pane,
         )
@@ -188,6 +197,7 @@ impl Workspace {
                 pane_id: pane.to_string(),
             },
             focused: pane.to_string(),
+            zoomed: None,
         };
         let id = tab.id.clone();
         self.tabs.push(tab);
@@ -214,9 +224,12 @@ impl Workspace {
         panes
     }
 
+    /// Activates a tab, showing all of it: going to a tab, by its row or
+    /// a shortcut, is asking for the tab, so a zoomed pane is let go.
     pub fn set_active_tab(&mut self, tab_id: &str) -> bool {
         if let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) {
             self.active = idx;
+            self.tabs[idx].zoomed = None;
             true
         } else {
             false
@@ -254,6 +267,7 @@ impl Workspace {
         let new_pane = new_id();
         if layout::split(&mut tab.root, pane, dir, &new_pane) {
             tab.focused = new_pane.clone();
+            tab.zoomed = None;
             Some(new_pane)
         } else {
             None
@@ -270,6 +284,7 @@ impl Workspace {
         match layout::remove(&mut tab.root, pane) {
             layout::RemoveOutcome::BecameEmpty => self.close_tab(&tab_id),
             layout::RemoveOutcome::Removed => {
+                tab.zoomed = None;
                 if tab.focused == pane {
                     tab.focused = layout::pane_ids(&tab.root)
                         .first()
@@ -292,8 +307,36 @@ impl Workspace {
             return false;
         };
         self.active = idx;
-        self.tabs[idx].focused = pane.to_string();
+        let tab = &mut self.tabs[idx];
+        // Focus elsewhere in a zoomed tab shows the tab again; clicking the
+        // zoomed pane itself keeps it alone.
+        if tab.zoomed.as_deref().is_some_and(|z| z != pane) {
+            tab.zoomed = None;
+        }
+        tab.focused = pane.to_string();
         true
+    }
+
+    /// Shows `pane` alone, filling its tab, and focuses it (activating the
+    /// tab). The other panes keep running and keep their size; they are
+    /// only hidden.
+    pub fn zoom_pane(&mut self, pane: &str) -> bool {
+        if !self.focus_pane(pane) {
+            return false;
+        }
+        self.tabs[self.active].zoomed = Some(pane.to_string());
+        true
+    }
+
+    /// Shows the whole of the tab holding `pane` again.
+    pub fn unzoom(&mut self, pane: &str) -> bool {
+        match self.tab_of_pane_mut(pane) {
+            Some(tab) if tab.zoomed.is_some() => {
+                tab.zoomed = None;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Moves focus directionally within the active tab.
@@ -301,6 +344,7 @@ impl Workspace {
         let tab = &mut self.tabs[self.active];
         let next = layout::neighbor(&tab.root, &tab.focused, direction)?;
         tab.focused = next.clone();
+        tab.zoomed = None;
         Some(next)
     }
 
@@ -362,13 +406,8 @@ impl Workspace {
                             ports.dedup();
                             ports
                         },
-                        agent: agent_label(
-                            layout::pane_ids(&t.root)
-                                .iter()
-                                .filter_map(|p| meta.get(p))
-                                .filter(|m| m.is_agent()),
-                        ),
                         project: tab_project(&t.root, &t.focused, meta),
+                        zoomed_pane: t.zoomed.clone(),
                     }
                 })
                 .collect(),
@@ -396,20 +435,6 @@ fn tab_project(root: &Node, focused: &str, meta: &HashMap<String, PaneMeta>) -> 
         .find(|m| m.is_agent())
         .or_else(|| meta.get(focused))
         .and_then(PaneMeta::project)
-}
-
-/// What the sidebar calls a tab of agents: their roles in layout order,
-/// each once, with "Claude" standing for any started without a role. None
-/// when the tab runs no agent.
-fn agent_label<'a>(agents: impl Iterator<Item = &'a PaneMeta>) -> Option<String> {
-    let mut names: Vec<&str> = Vec::new();
-    for m in agents {
-        let name = m.agent_role.as_deref().unwrap_or("Claude");
-        if !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    (!names.is_empty()).then(|| names.join(", "))
 }
 
 /// ConPTY seeds a console's title with the shell's own image path
@@ -488,42 +513,6 @@ mod tests {
     }
 
     #[test]
-    fn tabs_running_agents_are_marked() {
-        let mut ws = Workspace::default();
-        let plain = ws.focused_pane();
-        let (_, agent) = ws.new_tab();
-        let shell = ws.split_pane(&agent, SplitDir::Row).unwrap();
-        let (_, wall) = ws.new_tab();
-        let mut meta = HashMap::new();
-        meta.insert(plain.clone(), PaneMeta::default());
-        meta.insert(shell, PaneMeta::default());
-        // One agent pane is enough to make its whole tab an agent tab.
-        meta.insert(
-            agent,
-            PaneMeta { agent_role: Some("coder".into()), ..Default::default() },
-        );
-        meta.insert(wall, PaneMeta { agent_wall: true, ..Default::default() });
-        let labels = |ws: &Workspace, meta: &HashMap<String, PaneMeta>| -> Vec<Option<String>> {
-            ws.snapshot(meta).tabs.into_iter().map(|t| t.agent).collect()
-        };
-        // The wall is a way of looking at agents, not one: it stays with
-        // the other tabs.
-        assert_eq!(labels(&ws, &meta), [None, Some("coder".into()), None]);
-
-        // A session recorded by a hook counts as much as a role does, and
-        // without a role it is just Claude.
-        meta.insert(
-            plain.clone(),
-            PaneMeta { agent_session: Some("claude-fg:s1".into()), ..Default::default() },
-        );
-        assert_eq!(labels(&ws, &meta)[0].as_deref(), Some("Claude"));
-
-        // So does being started as an agent, before any hook has arrived.
-        meta.insert(plain, PaneMeta { agent_launched: true, ..Default::default() });
-        assert_eq!(labels(&ws, &meta)[0].as_deref(), Some("Claude"));
-    }
-
-    #[test]
     fn a_tab_is_the_project_of_its_agent_or_its_focused_pane() {
         let mut ws = Workspace::default();
         let shell = ws.focused_pane();
@@ -552,24 +541,23 @@ mod tests {
         );
         // Outside a repository the directory is the project.
         meta.insert(loose, PaneMeta { cwd: Some("/Users/u/Documents".into()), ..Default::default() });
+        // The wall has a directory to start agents in, and no project.
+        let (_, wall) = ws.new_tab();
+        meta.insert(
+            wall,
+            PaneMeta { agent_wall: true, cwd: Some("/src/app".into()), ..Default::default() },
+        );
         let projects: Vec<Option<String>> =
             ws.snapshot(&meta).tabs.into_iter().map(|t| t.project).collect();
         assert_eq!(
             projects,
-            [Some("/src/app".into()), Some("/src/app".into()), Some("/Users/u/Documents".into())]
+            [
+                Some("/src/app".into()),
+                Some("/src/app".into()),
+                Some("/Users/u/Documents".into()),
+                None
+            ]
         );
-    }
-
-    #[test]
-    fn a_tab_of_several_agents_names_each_role_once() {
-        let role = |r: Option<&str>| PaneMeta {
-            agent_role: r.map(String::from),
-            agent_session: Some("claude-fg:s".into()),
-            ..Default::default()
-        };
-        let metas = [role(Some("coder")), role(None), role(Some("coder")), role(Some("reviewer"))];
-        assert_eq!(agent_label(metas.iter()).as_deref(), Some("coder, Claude, reviewer"));
-        assert_eq!(agent_label([].iter()), None);
     }
 
     #[test]
@@ -583,6 +571,46 @@ mod tests {
         assert_eq!(ws.tabs[ws.active].id, before, "the active tab stays on screen");
         assert_eq!(ws.tabs[2].id, id, "placed where new_tab would put it");
         assert!(layout::contains(&ws.tabs[2].root, &pane));
+    }
+
+    #[test]
+    fn a_zoomed_pane_shows_alone_until_the_tab_is_asked_for() {
+        let mut ws = Workspace::default();
+        let claude = ws.focused_pane();
+        let server = ws.split_pane(&claude, SplitDir::Row).unwrap();
+        let tab = ws.tabs[0].id.clone();
+        let (_, other) = ws.new_tab();
+
+        // Zooming activates the tab, focuses the pane, and shows it alone.
+        assert!(ws.zoom_pane(&claude));
+        assert_eq!(ws.active, 0);
+        assert_eq!(ws.focused_pane(), claude);
+        let zoomed = |ws: &Workspace| ws.snapshot(&HashMap::new()).tabs[0].zoomed_pane.clone();
+        assert_eq!(zoomed(&ws), Some(claude.clone()));
+
+        // Clicking the zoomed pane itself, or another tab, keeps it.
+        assert!(ws.focus_pane(&claude));
+        assert!(ws.focus_pane(&other));
+        assert_eq!(zoomed(&ws), Some(claude.clone()));
+
+        // Going to the tab shows all of it.
+        ws.set_active_tab(&tab);
+        assert_eq!(zoomed(&ws), None);
+
+        // So does focusing another of its panes, splitting, or closing one.
+        ws.zoom_pane(&claude);
+        ws.focus_pane(&server);
+        assert_eq!(zoomed(&ws), None);
+        ws.zoom_pane(&claude);
+        let third = ws.split_pane(&server, SplitDir::Column).unwrap();
+        assert_eq!(zoomed(&ws), None);
+        ws.zoom_pane(&claude);
+        ws.close_pane(&third);
+        assert_eq!(zoomed(&ws), None);
+        ws.zoom_pane(&claude);
+        assert!(ws.unzoom(&claude));
+        assert_eq!(zoomed(&ws), None);
+        assert!(!ws.unzoom(&claude), "nothing to let go of");
     }
 
     #[test]

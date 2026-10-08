@@ -1,15 +1,18 @@
 import { Fragment, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  AgentInfo,
   TabSnapshot,
   newTab,
+  zoomPane,
   closeTab,
   setActiveTab,
   renameTab,
 } from "../bindings";
 import {
-  orderedTabs,
+  isCurrentEntry,
   projectName,
+  sidebarEntries,
   useWorkspaceStore,
 } from "../state/workspaceStore";
 import { UpdateBanner } from "../update/UpdateBanner";
@@ -25,7 +28,7 @@ export function Sidebar() {
   // when one wants you — the project on screen's too, so the count does not
   // vanish the moment you switch to its tab.
   const agentCount = (tab: TabSnapshot): AgentCount | undefined => {
-    if (tab.agent || !tab.project) return undefined;
+    if (!tab.project) return undefined;
     const agents = snapshot.agents.filter((a) => a.project === tab.project);
     if (agents.length === 0) return undefined;
     return {
@@ -40,35 +43,84 @@ export function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-tabs">
-        {/* The project's agents below the rest, under a heading of their
-            own; numbered in that order, which the tab shortcuts use. */}
-        {orderedTabs(snapshot, project).map((tab, i, tabs) => (
-          <Fragment key={tab.id}>
-            {tab.agent && !tabs[i - 1]?.agent && (
-              <div className="sidebar-section" title={tab.project ?? undefined}>
-                Agents
-                {tab.project && (
-                  <span className="sidebar-section-project">
-                    {" · "}
-                    {projectName(tab.project)}
-                  </span>
-                )}
-              </div>
-            )}
+        {/* Tabs, whole; then the agents of the project on screen, each shown
+            alone when clicked. Numbered in that order, which the tab
+            shortcuts use. */}
+        {sidebarEntries(snapshot, project).map((entry, i, entries) =>
+          entry.kind === "tab" ? (
             <TabRow
-              tab={tab}
+              key={entry.tab.id}
+              tab={entry.tab}
               index={i}
-              active={tab.id === snapshot.activeTab}
-              agents={agentCount(tab)}
+              active={isCurrentEntry(snapshot, entry)}
+              agents={agentCount(entry.tab)}
             />
-          </Fragment>
-        ))}
+          ) : (
+            <Fragment key={entry.agent.paneId}>
+              {entries[i - 1]?.kind === "tab" && (
+                <div className="sidebar-section" title={project ?? undefined}>
+                  Agents
+                  {project && (
+                    <span className="sidebar-section-project">
+                      {" · "}
+                      {projectName(project)}
+                    </span>
+                  )}
+                </div>
+              )}
+              <AgentRow
+                agent={entry.agent}
+                index={i}
+                active={isCurrentEntry(snapshot, entry)}
+                unread={snapshot.unreadPanes.includes(entry.agent.paneId)}
+              />
+            </Fragment>
+          ),
+        )}
       </div>
       <button className="sidebar-new-tab" onClick={() => void newTab()}>
         + New Tab
       </button>
       <ClaudeBanner />
       <UpdateBanner />
+    </div>
+  );
+}
+
+/**
+ * One agent: the harness and its role, on one line. Clicking shows its
+ * pane alone, filling its tab; the tab's own row shows the whole tab.
+ */
+function AgentRow({
+  agent,
+  index,
+  active,
+  unread,
+}: {
+  agent: AgentInfo;
+  index: number;
+  active: boolean;
+  unread: boolean;
+}) {
+  return (
+    <div
+      className={`tab-row agent${active ? " active" : ""}`}
+      onClick={() => void zoomPane(agent.paneId, true)}
+      title={agent.cwd ?? undefined}
+    >
+      <span className="tab-index">{index + 1}</span>
+      <span className="tab-harness" aria-label="Claude Code">
+        ✳
+      </span>
+      <span className={`tab-title${unread ? " has-unread" : ""}`}>
+        {agent.role ?? "Claude"}
+      </span>
+      {agent.status === "needsYou" && (
+        <span className="tab-agent-needs" title={agent.message ?? "Needs you"}>
+          needs you
+        </span>
+      )}
+      {unread && <span className="tab-badge">•</span>}
     </div>
   );
 }
@@ -98,28 +150,6 @@ function TabRow({
     setEditing(false);
     if (draft !== tab.title) void renameTab(tab.id, draft);
   };
-
-  // An agent's tab is one line: the harness and the role. Its directory,
-  // branch and last message are what the agent wall is for.
-  if (tab.agent) {
-    return (
-      <div
-        className={`tab-row agent${active ? " active" : ""}`}
-        onClick={() => void setActiveTab(tab.id)}
-        title={tab.title}
-      >
-        <span className="tab-index">{index + 1}</span>
-        <span className="tab-harness" aria-label="Claude Code">
-          ✳
-        </span>
-        <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
-          {tab.agent}
-        </span>
-        {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
-        <CloseTab tabId={tab.id} />
-      </div>
-    );
-  }
 
   return (
     <div

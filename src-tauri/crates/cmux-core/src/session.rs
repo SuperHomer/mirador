@@ -170,6 +170,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             title: t.title,
             root: t.root,
             focused,
+            zoomed: None,
         });
     }
     if tabs.is_empty() {

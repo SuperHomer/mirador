@@ -187,6 +187,8 @@ mira list-tabs                 # tabs + panes, focus markers (--json for data)
 mira new-tab --command "htop"
 mira split --dir column --command "npm run dev"
 mira focus <pane>
+mira zoom <pane>               # that pane alone, filling its tab
+mira zoom <pane> --off         # the whole tab again
 mira close-pane <pane>
 mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
@@ -228,7 +230,7 @@ Newline-delimited JSON on the socket named in the discovery file:
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session agent_new agent_list
-agent_wall browser_open
+agent_wall zoom_pane browser_open
 browser_navigate browser_snapshot browser_click browser_fill browser_eval
 browser_history ssh_open ssh_hosts ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
