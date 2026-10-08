@@ -27,11 +27,6 @@ export interface TabSnapshot {
   branch: string | null;
   pr: PrStatus | null;
   ports: number[];
-  /**
-   * The project the tab works on: its repository's main checkout (a
-   * worktree counts as its main checkout), or its directory outside one.
-   */
-  project: string | null;
   /** The pane shown alone, filling the tab, when one is. */
   zoomedPane: string | null;
 }
@@ -175,8 +170,6 @@ export interface AgentInfo {
   sinceMs: number | null;
   cwd: string | null;
   branch: string | null;
-  /** See `TabSnapshot.project`. */
-  project: string | null;
 }
 
 export interface AgentWallPaneInfo {

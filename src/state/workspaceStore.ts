@@ -4,12 +4,12 @@ import { AgentInfo, WorkspaceSnapshot, TabSnapshot, Node } from "../bindings";
 interface WorkspaceStore {
   snapshot: WorkspaceSnapshot | null;
   /**
-   * The project on screen: the active tab's. While the active tab has none
-   * of its own to offer — the agent wall, a pane with no directory — it
-   * stays the project of the tab before, so the wall and the sidebar keep
-   * showing the agents of the project you came from.
+   * The tab whose agents the sidebar lists: the active tab, or — while the
+   * active tab is the agent wall, which is a way of looking at agents
+   * rather than a place they work — the tab before it, so the wall and
+   * the sidebar keep to the tab you came from.
    */
-  project: string | null;
+  currentTab: string | null;
   sidebarVisible: boolean;
   setSnapshot: (s: WorkspaceSnapshot) => void;
   toggleSidebar: () => void;
@@ -17,13 +17,17 @@ interface WorkspaceStore {
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   snapshot: null,
-  project: null,
+  currentTab: null,
   sidebarVisible: true,
   setSnapshot: (snapshot) =>
     set((s) => {
       const tab = activeTab(snapshot);
-      const own = tab && !isWallTab(snapshot, tab) ? tab.project : null;
-      return { snapshot, project: own ?? s.project };
+      const own = tab && !isWallTab(snapshot, tab) ? tab.id : null;
+      // A remembered tab that has since closed is no tab to list.
+      const kept = snapshot.tabs.some((t) => t.id === s.currentTab)
+        ? s.currentTab
+        : null;
+      return { snapshot, currentTab: own ?? kept };
     }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
 }));
@@ -45,15 +49,13 @@ export function isWallTab(snapshot: WorkspaceSnapshot, tab: TabSnapshot) {
   return snapshot.agentWallPanes.some((w) => panes.includes(w.paneId));
 }
 
-/** The agents the sidebar lists: the project on screen's (all, with none known yet). */
+/** The agents the sidebar lists: the current tab's, and no other tab's. */
 export function shownAgents(
   snapshot: WorkspaceSnapshot | null,
-  project: string | null,
+  currentTab: string | null,
 ): AgentInfo[] {
-  if (!snapshot) return [];
-  return snapshot.agents.filter(
-    (a) => project === null || a.project === project,
-  );
+  if (!snapshot || !currentTab) return [];
+  return snapshot.agents.filter((a) => a.tabId === currentTab);
 }
 
 /** A sidebar row: a tab, or one agent in a tab. */
@@ -62,20 +64,19 @@ export type SidebarEntry =
   | { kind: "agent"; agent: AgentInfo };
 
 /**
- * The sidebar's rows in order: every tab, then the agents of the project on
- * screen. A tab shows all its panes; an agent's row shows that agent's pane
+ * The sidebar's rows in order: every tab, then the current tab's agents. A tab shows all its panes; an agent's row shows that agent's pane
  * alone (zoomed) in its tab — so a tab running Claude beside a dev server
  * is listed both ways. Tab shortcuts (mod+1…9, next/previous) go by this
  * order, so the number beside a row is the one that reaches it.
  */
 export function sidebarEntries(
   snapshot: WorkspaceSnapshot | null,
-  project: string | null,
+  currentTab: string | null,
 ): SidebarEntry[] {
   if (!snapshot) return [];
   return [
     ...snapshot.tabs.map((tab) => ({ kind: "tab" as const, tab })),
-    ...shownAgents(snapshot, project).map((agent) => ({
+    ...shownAgents(snapshot, currentTab).map((agent) => ({
       kind: "agent" as const,
       agent,
     })),
@@ -91,9 +92,4 @@ export function isCurrentEntry(
   if (!tab) return false;
   if (entry.kind === "agent") return tab.zoomedPane === entry.agent.paneId;
   return entry.tab.id === tab.id && !tab.zoomedPane;
-}
-
-/** The last path component, for naming a project in a heading. */
-export function projectName(project: string): string {
-  return project.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || project;
 }

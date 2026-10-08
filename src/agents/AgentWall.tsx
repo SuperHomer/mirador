@@ -9,7 +9,7 @@ import {
   zoomPane,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
-import { projectName, useWorkspaceStore } from "../state/workspaceStore";
+import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
 import {
   fitTerminal,
@@ -59,11 +59,12 @@ function columns(n: number): number {
  */
 export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
-  // The project you came from: the wall's own tab has none to offer.
-  const project = useWorkspaceStore((s) => s.project);
+  // The tab you came from: the wall's own tab is no place agents work.
+  const currentTab = useWorkspaceStore((s) => s.currentTab);
   const scope = useUiStore((s) => s.wallScope);
   const setScope = useUiStore((s) => s.setWallScope);
-  const scoped = scope === "project" && project !== null;
+  const scoped = scope === "tab" && currentTab !== null;
+  const current = snapshot?.tabs.find((t) => t.id === currentTab);
   const roles = useConfigStore((s) => s.config?.agentRoles ?? []);
   const [menuOpen, setMenuOpen] = useState(false);
   const now = useNow(visible);
@@ -77,13 +78,13 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
     const tiles = (snapshot?.agents ?? []).filter(
       (a) =>
         tabOf.get(a.paneId)?.id !== ownTab &&
-        (!scoped || a.project === project),
+        (!scoped || a.tabId === currentTab),
     );
     return {
       tiles,
       tabTitle: (pane: string) => tabOf.get(pane)?.title ?? "",
     };
-  }, [snapshot, paneId, scoped, project]);
+  }, [snapshot, paneId, scoped, currentTab]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
@@ -92,18 +93,11 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
   const start = (role: string | null) => {
     setMenuOpen(false);
     // Like everywhere else, the agent joins a tab rather than getting its
-    // own: it splits the focused pane of a tab in the project the wall is
-    // showing (the wall's own tab is no place to work). That tab is
-    // behind the wall, so the wall stays on screen and gains a tile. With
-    // no such tab, a tab of its own, also behind the wall.
-    const isAgent = (pane: string) =>
-      snapshot?.agents.some((a) => a.paneId === pane) ?? false;
-    const host = project
-      ? snapshot?.tabs.find(
-          (t) => t.project === project && !isAgent(t.focusedPane),
-        )
-      : undefined;
-    if (host) void openAgent(role, null, host.focusedPane, false);
+    // own: it splits the focused pane of the tab you came from (the wall's
+    // own tab is no place to work). That tab is behind the wall, so the
+    // wall stays on screen and gains a tile. With no such tab, a tab of
+    // its own, also behind the wall.
+    if (current) void openAgent(role, null, current.focusedPane, false);
     else void openAgent(role, null, paneId, true, true);
   };
 
@@ -128,14 +122,14 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
             </>
           )}
         </span>
-        {project && (
+        {current && (
           <div className="wall-scope" role="group" aria-label="Agents shown">
             <button
-              className={scope === "project" ? "on" : undefined}
-              title={project}
-              onClick={() => setScope("project")}
+              className={scope === "tab" ? "on" : undefined}
+              title="The agents of the tab you came from"
+              onClick={() => setScope("tab")}
             >
-              {projectName(project)}
+              {current.title}
             </button>
             <button
               className={scope === "all" ? "on" : undefined}
@@ -189,7 +183,7 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
         <div className="wall-empty">
           <p>
             {scoped
-              ? `No Claude Code agents running in ${projectName(project)}.`
+              ? `No Claude Code agents in ${current?.title ?? "this tab"}.`
               : "No Claude Code agents running in other tabs."}
           </p>
           <p className="wall-empty-hint">

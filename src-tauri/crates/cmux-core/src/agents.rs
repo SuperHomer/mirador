@@ -185,7 +185,7 @@ pub const START_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
 /// conversation to resume (nothing types `claude`), or a resume Claude
 /// refused ("No conversation found") and exited before the poller looked.
 /// Without this, such panes stayed agents for good — listed under Agents,
-/// counted on their project's tabs, with no Claude anywhere.
+/// counted on their tab, with no Claude anywhere.
 pub fn forget_agent(
     running: bool,
     seen: bool,

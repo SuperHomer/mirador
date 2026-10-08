@@ -11,7 +11,6 @@ import {
 } from "../bindings";
 import {
   isCurrentEntry,
-  projectName,
   sidebarEntries,
   useWorkspaceStore,
 } from "../state/workspaceStore";
@@ -20,16 +19,14 @@ import { ClaudeBanner } from "../claude/ClaudeBanner";
 
 export function Sidebar() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
-  const project = useWorkspaceStore((s) => s.project);
+  const currentTab = useWorkspaceStore((s) => s.currentTab);
   const visible = useWorkspaceStore((s) => s.sidebarVisible);
   if (!snapshot || !visible) return null;
 
-  // Every project tab says how many agents its project has, and lights up
-  // when one wants you — the project on screen's too, so the count does not
-  // vanish the moment you switch to its tab.
+  // Every tab says how many agents it holds, and lights up when one wants
+  // you — the current tab too, so the count stays put when you switch.
   const agentCount = (tab: TabSnapshot): AgentCount | undefined => {
-    if (!tab.project) return undefined;
-    const agents = snapshot.agents.filter((a) => a.project === tab.project);
+    const agents = snapshot.agents.filter((a) => a.tabId === tab.id);
     if (agents.length === 0) return undefined;
     return {
       count: agents.length,
@@ -43,10 +40,10 @@ export function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-tabs">
-        {/* Tabs, whole; then the agents of the project on screen, each shown
-            alone when clicked. Numbered in that order, which the tab
+        {/* Tabs, whole; then the current tab's agents, each shown alone
+            when clicked. Numbered in that order, which the tab
             shortcuts use. */}
-        {sidebarEntries(snapshot, project).map((entry, i, entries) =>
+        {sidebarEntries(snapshot, currentTab).map((entry, i, entries) =>
           entry.kind === "tab" ? (
             <TabRow
               key={entry.tab.id}
@@ -58,15 +55,7 @@ export function Sidebar() {
           ) : (
             <Fragment key={entry.agent.paneId}>
               {entries[i - 1]?.kind === "tab" && (
-                <div className="sidebar-section" title={project ?? undefined}>
-                  Agents
-                  {project && (
-                    <span className="sidebar-section-project">
-                      {" · "}
-                      {projectName(project)}
-                    </span>
-                  )}
-                </div>
+                <div className="sidebar-section">Agents</div>
               )}
               <AgentRow
                 agent={entry.agent}
@@ -125,7 +114,7 @@ function AgentRow({
   );
 }
 
-/** The agents of a tab's project. */
+/** The agents in a tab. */
 interface AgentCount {
   count: number;
   /** One of them needs you, or said something unread. */
@@ -222,7 +211,7 @@ function TabRow({
       {agents && (
         <span
           className={`tab-agents${agents.attention ? " attention" : ""}`}
-          title={`${agents.count} ${agents.count === 1 ? "agent" : "agents"} in this project`}
+          title={`${agents.count} ${agents.count === 1 ? "agent" : "agents"} in this tab`}
         >
           ✳ {agents.count}
         </span>

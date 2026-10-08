@@ -100,14 +100,7 @@ body,
   flex-shrink: 0;
 }
 
-.sidebar-section-project {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-  color: var(--subtext);
-}
-
-/* How many agents a project tab's project has. */
+/* How many agents a tab holds. */
 .tab-agents {
   flex-shrink: 0;
   font-size: 10.5px;
@@ -1652,7 +1645,7 @@ body,
   color: var(--wall-working);
 }
 
-/* This project / All. Pushes itself and what follows to the right. */
+/* This tab / All. Pushes itself and what follows to the right. */
 .wall-scope {
   margin-left: auto;
   display: flex;
@@ -1689,7 +1682,7 @@ body,
   flex-shrink: 0;
 }
 
-/* Without the scope switch (no project yet), the button takes the gap. */
+/* Without the scope switch (no tab to scope to), the button takes the gap. */
 .wall-counts + .wall-new {
   margin-left: auto;
 }

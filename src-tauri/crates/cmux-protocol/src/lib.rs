@@ -62,12 +62,6 @@ pub struct TabSnapshot {
     /// TCP ports the tab's processes are listening on.
     #[serde(default)]
     pub ports: Vec<u16>,
-    /// The project the tab works on: the main checkout of its git
-    /// repository (a linked worktree counts as its main checkout), or its
-    /// directory outside one. An agent tab's is its agent's. The sidebar
-    /// lists the agents of the project on screen.
-    #[serde(default)]
-    pub project: Option<String>,
     /// The pane shown alone, filling the tab, when one is.
     #[serde(default)]
     pub zoomed_pane: Option<String>,
@@ -419,9 +413,6 @@ pub struct AgentInfo {
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,
     pub branch: Option<String>,
-    /// See `TabSnapshot::project`.
-    #[serde(default)]
-    pub project: Option<String>,
 }
 
 /// A pane drawing the agent wall.

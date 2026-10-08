@@ -48,8 +48,8 @@ export function openEntry(entry: SidebarEntry) {
 }
 
 function cycleTab(offset: number) {
-  const { snapshot, project } = useWorkspaceStore.getState();
-  const entries = sidebarEntries(snapshot, project);
+  const { snapshot, currentTab } = useWorkspaceStore.getState();
+  const entries = sidebarEntries(snapshot, currentTab);
   if (!snapshot || entries.length < 2) return;
   const idx = entries.findIndex((e) => isCurrentEntry(snapshot, e));
   openEntry(entries[(idx + offset + entries.length) % entries.length]);
@@ -271,8 +271,8 @@ export function runAction(id: string): boolean {
   // tab_1 .. tab_9
   const tabJump = id.match(/^tab_([1-9])$/);
   if (tabJump) {
-    const { snapshot, project } = useWorkspaceStore.getState();
-    const target = sidebarEntries(snapshot, project)[Number(tabJump[1]) - 1];
+    const { snapshot, currentTab } = useWorkspaceStore.getState();
+    const target = sidebarEntries(snapshot, currentTab)[Number(tabJump[1]) - 1];
     if (target) openEntry(target);
     return true;
   }

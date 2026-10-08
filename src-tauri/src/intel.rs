@@ -58,12 +58,6 @@ pub fn spawn(handle: tauri::AppHandle) {
                     cmux_core::cwd::process_cwd(*pid).or(known_cwd)
                 };
                 let git = cwd.as_deref().and_then(cmux_core::git::branch_for_cwd);
-                // Like the branch, a couple of file reads, done before locking.
-                let project_root = git.as_ref().map(|(root, _)| {
-                    cmux_core::git::main_checkout(root)
-                        .to_string_lossy()
-                        .to_string()
-                });
                 let mut meta = state.meta.lock().unwrap();
                 let entry = meta.entry(pane.clone()).or_default();
                 if let Some(cwd) = cwd {
@@ -78,13 +72,9 @@ pub fn spawn(handle: tauri::AppHandle) {
                     }
                     None => (None, None),
                 };
-                if entry.branch != branch
-                    || entry.repo_root != root
-                    || entry.project_root != project_root
-                {
+                if entry.branch != branch || entry.repo_root != root {
                     entry.branch = branch;
                     entry.repo_root = root;
-                    entry.project_root = project_root;
                     changed = true;
                 }
             }

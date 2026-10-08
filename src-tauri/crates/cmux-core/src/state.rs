@@ -25,9 +25,6 @@ pub struct PaneMeta {
     /// Git branch + repo root of `cwd` (intel poller).
     pub branch: Option<String>,
     pub repo_root: Option<String>,
-    /// The main checkout `repo_root` belongs to — itself, unless it is a
-    /// linked worktree (intel poller, see `git::main_checkout`).
-    pub project_root: Option<String>,
     /// Listening TCP ports of the pane's process tree (intel poller).
     pub ports: Vec<u16>,
     /// Browser pane: current URL of its child webview.
@@ -92,16 +89,6 @@ impl PaneMeta {
     /// started with a role and has not exited.
     pub fn is_agent(&self) -> bool {
         self.agent_session.is_some() || self.agent_role.is_some() || self.agent_launched
-    }
-
-    /// The project the pane works on: its repository's main checkout, or
-    /// its directory outside a repository. The agent wall works on none —
-    /// its directory is only where it starts agents from.
-    pub fn project(&self) -> Option<String> {
-        if self.agent_wall {
-            return None;
-        }
-        self.project_root.clone().or_else(|| self.cwd.clone())
     }
 }
 
@@ -409,7 +396,6 @@ impl Workspace {
                             ports.dedup();
                             ports
                         },
-                        project: tab_project(&t.root, &t.focused, meta),
                         zoomed_pane: t.zoomed.clone(),
                     }
                 })
@@ -426,18 +412,6 @@ impl Workspace {
             agents: Vec::new(),
         }
     }
-}
-
-/// A tab's project: its first agent's, when it runs one — that is what
-/// the tab is listed for — else its focused pane's.
-fn tab_project(root: &Node, focused: &str, meta: &HashMap<String, PaneMeta>) -> Option<String> {
-    let panes = layout::pane_ids(root);
-    panes
-        .iter()
-        .filter_map(|p| meta.get(p))
-        .find(|m| m.is_agent())
-        .or_else(|| meta.get(focused))
-        .and_then(PaneMeta::project)
 }
 
 /// ConPTY seeds a console's title with the shell's own image path
@@ -513,54 +487,6 @@ mod tests {
         let killed = ws.close_pane(&pane2);
         assert_eq!(killed, vec![pane2]);
         assert_eq!(ws.tabs.len(), 1);
-    }
-
-    #[test]
-    fn a_tab_is_the_project_of_its_agent_or_its_focused_pane() {
-        let mut ws = Workspace::default();
-        let shell = ws.focused_pane();
-        let agent = ws.split_pane(&shell, SplitDir::Row).unwrap();
-        let (_, other) = ws.new_tab();
-        let (_, loose) = ws.new_tab();
-        let mut meta = HashMap::new();
-        // Focus is on the plain shell, but the tab is listed for its agent,
-        // which works in a worktree of /src/app.
-        meta.insert(
-            shell,
-            PaneMeta { project_root: Some("/src/shell".into()), cwd: Some("/src/shell".into()), ..Default::default() },
-        );
-        meta.insert(
-            agent,
-            PaneMeta {
-                agent_role: Some("coder".into()),
-                cwd: Some("/src/app-feature/web".into()),
-                project_root: Some("/src/app".into()),
-                ..Default::default()
-            },
-        );
-        meta.insert(
-            other,
-            PaneMeta { cwd: Some("/src/app/web".into()), project_root: Some("/src/app".into()), ..Default::default() },
-        );
-        // Outside a repository the directory is the project.
-        meta.insert(loose, PaneMeta { cwd: Some("/Users/u/Documents".into()), ..Default::default() });
-        // The wall has a directory to start agents in, and no project.
-        let (_, wall) = ws.new_tab();
-        meta.insert(
-            wall,
-            PaneMeta { agent_wall: true, cwd: Some("/src/app".into()), ..Default::default() },
-        );
-        let projects: Vec<Option<String>> =
-            ws.snapshot(&meta).tabs.into_iter().map(|t| t.project).collect();
-        assert_eq!(
-            projects,
-            [
-                Some("/src/app".into()),
-                Some("/src/app".into()),
-                Some("/Users/u/Documents".into()),
-                None
-            ]
-        );
     }
 
     #[test]
