@@ -3,7 +3,7 @@
  * is other programs' terminals, which no mock would draw faithfully.
  */
 
-import wallUrl from "../assets/agent-wall.png";
+import wallUrl from "../assets/agent-wall.webp";
 import { BothKeys } from "./Keys";
 
 export default function AgentShowcase() {
@@ -55,9 +55,9 @@ export default function AgentShowcase() {
 
       <img
         src={wallUrl}
-        alt="The agent wall: three Claude Code agents — claude, a reviewer on haiku and a planner on sonnet — in a grid, each tile headed by its role, model and status, with the agents listed apart at the foot of the sidebar."
+        alt="The agent wall: four Claude Code agents in a grid — a planner on opus and a reviewer on sonnet still working, two more idle — each tile headed by its role, model and status, with the agents listed apart at the foot of the sidebar."
         width={2000}
-        height={1326}
+        height={1189}
         loading="lazy"
         style={{
           display: "block",
