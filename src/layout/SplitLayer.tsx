@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  AgentWallPaneInfo,
   BrowserPaneInfo,
   DiffPaneInfo,
   Node,
@@ -14,6 +15,7 @@ import { BrowserPane } from "../browser/BrowserPane";
 import { DiffPane } from "../diff/DiffPane";
 import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
+import { AgentWall } from "../agents/AgentWall";
 
 interface Frac {
   x: number;
@@ -56,6 +58,7 @@ export function SplitLayer({
   diffPanes,
   whatsNewPanes,
   graphPanes,
+  agentWallPanes,
 }: {
   tab: TabSnapshot;
   /** This tab is the one on screen. */
@@ -67,6 +70,7 @@ export function SplitLayer({
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
+  agentWallPanes: AgentWallPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -132,9 +136,12 @@ export function SplitLayer({
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
+        const wall = agentWallPanes.some((w) => w.paneId === p.paneId);
         return (
           <div key={p.paneId} className="pane-slot" style={frac(p.rect)}>
-            {browser ? (
+            {wall ? (
+              <AgentWall paneId={p.paneId} visible={active} />
+            ) : browser ? (
               <BrowserPane
                 paneId={p.paneId}
                 url={browser.url}

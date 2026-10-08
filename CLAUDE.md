@@ -15,7 +15,7 @@ This file is for what the code and those docs don't tell you.
 
 ```
 src/                        React frontend (the host webview)
-  terminal/ diff/ graph/ browser/ whatsnew/   one directory per pane type
+  terminal/ diff/ graph/ browser/ whatsnew/ agents/   one directory per pane type
   layout/SplitLayer.tsx     picks which pane component renders a pane id
   bindings.ts               every Tauri command + its DTOs, hand-written
   keymap/                   accelerators, the actions table, the palette's source
@@ -203,6 +203,13 @@ inconsistency reviewers will notice.
   come back *idle*; relaunching must never re-run `npm test` or silently
   reopen an SSH session. A keypress does it. (Agent panes are the
   exception — see `agents::restore_pane`.)
+- **A terminal is drawn in one place.** The agent wall shows agents by
+  *moving* each pane's xterm element into its tile (`lendTerminal` in
+  `terminal/registry.ts`) and back when the wall's tab is hidden — not a
+  second xterm on the same output. That is only sound because one tab is on
+  screen at a time, and the PTY has one size: whoever shows the terminal
+  sizes it. So the wall leaves out agents in its own tab, and anything new
+  that wants to draw a pane's terminal must borrow it the same way.
 - **React StrictMode double-mounts in dev** and has twice broken the terminal
   by swapping the output sink out from under a pending attach.
 - **A flex row's only shrinkable item absorbs all overflow** and collapses to

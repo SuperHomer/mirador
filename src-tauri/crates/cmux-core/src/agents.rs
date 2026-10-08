@@ -12,7 +12,9 @@
 //! session, whose tty is the daemon's own — the pane whose tty runs
 //! `claude attach <job>`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+
+use cmux_protocol::{AgentRole, AgentStatus};
 
 /// One row of the process table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,18 +152,103 @@ pub fn hook_pane(
     claimed
 }
 
-/// Panes whose terminal is running a Claude Code session right now.
-pub fn panes_running_claude(procs: &[Proc], pane_pids: &[(String, u32)]) -> HashSet<String> {
-    let busy: HashSet<&str> = procs
-        .iter()
-        .filter(|p| classify(&p.args).is_some())
-        .filter_map(|p| p.tty.as_deref())
-        .collect();
+/// Panes whose terminal is running a Claude Code session right now, each
+/// with that process's command line (the oldest, when there are several).
+pub fn panes_running_claude(procs: &[Proc], pane_pids: &[(String, u32)]) -> HashMap<String, String> {
+    let mut by_tty: HashMap<&str, &Proc> = HashMap::new();
+    for p in procs.iter().filter(|p| classify(&p.args).is_some()) {
+        let Some(tty) = p.tty.as_deref() else { continue };
+        let slot = by_tty.entry(tty).or_insert(p);
+        if p.pid < slot.pid {
+            *slot = p;
+        }
+    }
     pane_ttys(procs, pane_pids)
         .into_iter()
-        .filter(|(_, tty)| busy.contains(tty.as_str()))
-        .map(|(pane, _)| pane)
+        .filter_map(|(pane, tty)| Some((pane, by_tty.get(tty.as_str())?.args.clone())))
         .collect()
+}
+
+/// The `--model` a Claude Code command line asks for.
+pub fn model_flag(args: &str) -> Option<String> {
+    let mut words = args.split_whitespace();
+    while let Some(word) = words.next() {
+        if word == "--model" {
+            return words.next().map(String::from);
+        }
+        if let Some(model) = word.strip_prefix("--model=") {
+            return Some(model.to_string());
+        }
+    }
+    None
+}
+
+/// What a `mira claude-hook` event says the agent is doing now; `None`
+/// leaves it as it was.
+///
+/// A Notification is either Claude blocked on the human (a permission
+/// prompt, a question) or the reminder that it has been idle a while, which
+/// changes nothing — it already stopped. Claude Code names the kind in
+/// `notification_type`; without it the message is all there is.
+pub fn hook_status(
+    event: &str,
+    notification_type: Option<&str>,
+    message: Option<&str>,
+) -> Option<AgentStatus> {
+    match event {
+        "prompt-submit" | "post-tool" => Some(AgentStatus::Working),
+        "stop" | "stop-failure" | "session-start" => Some(AgentStatus::Idle),
+        "notification" => match notification_type {
+            Some("permission_prompt" | "elicitation_dialog") => Some(AgentStatus::NeedsYou),
+            Some(_) => None,
+            None if message.is_some_and(|m| m.contains("waiting for your input")) => None,
+            None => Some(AgentStatus::NeedsYou),
+        },
+        _ => None,
+    }
+}
+
+/// The command line that starts an agent in a shell pane: `claude` with
+/// the role's model and prompt, named after the role, and the task as its
+/// first message. `quote` quotes one argument for the pane's shell.
+///
+/// It is typed in, so every argument is put on one line and loses its
+/// control characters: a newline would submit the line half-quoted, and a
+/// stray `^C` would be read as a keystroke before the shell ever saw quotes.
+pub fn launch_command(
+    role: Option<&AgentRole>,
+    task: Option<&str>,
+    quote: impl Fn(&str) -> String,
+) -> String {
+    let mut line = String::from("claude");
+    let mut arg = |flag: &str, value: &str| {
+        let value = one_line(value);
+        if value.is_empty() {
+            return;
+        }
+        if !flag.is_empty() {
+            line.push(' ');
+            line.push_str(flag);
+        }
+        line.push(' ');
+        line.push_str(&quote(&value));
+    };
+    if let Some(role) = role {
+        arg("--model", role.model.as_deref().unwrap_or(""));
+        arg("--append-system-prompt", role.prompt.as_deref().unwrap_or(""));
+        arg("--name", &role.name);
+    }
+    arg("", task.unwrap_or(""));
+    line
+}
+
+fn one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The `agent_session` value recorded for a hook: `claude-fg:<session>` for
@@ -184,13 +271,21 @@ pub fn session_record(session_id: &str, job: Option<&str>) -> Option<String> {
 /// What to type into a restored pane to bring its session back. The id is
 /// typed into a shell, so anything but a plain id is refused rather than
 /// quoted — the session file is not trusted to hold only what we wrote.
-pub fn restore_command(agent_session: &str) -> Option<String> {
+///
+/// `model` is a role's `--model`, already quoted for the shell: a resumed
+/// conversation keeps its system prompt but not its model, so a role's
+/// pane would otherwise come back on the default one. A daemon session
+/// keeps running on whatever it had, and attaching takes no model.
+pub fn restore_command(agent_session: &str, model: Option<&str>) -> Option<String> {
     let (agent, id) = agent_session.split_once(':')?;
     if !is_safe_id(id) {
         return None;
     }
     match agent {
-        "claude-fg" => Some(format!("claude --resume {id}")),
+        "claude-fg" => Some(match model {
+            Some(model) => format!("claude --resume {id} --model {model}"),
+            None => format!("claude --resume {id}"),
+        }),
         "claude-bg" => Some(format!("claude attach {id}")),
         _ => None,
     }
@@ -222,12 +317,14 @@ pub struct Restored {
 }
 
 /// Decides how a saved pane is restored, given its saved `command`, whether
-/// it is remote, its `agent_session`, and [`AUTO_RESUME`] (a parameter so
-/// both platforms' behavior is tested everywhere).
+/// it is remote, its `agent_session`, its role's quoted `model` (see
+/// [`restore_command`]), and [`AUTO_RESUME`] (a parameter so both
+/// platforms' behavior is tested everywhere).
 pub fn restore_pane(
     command: Option<&str>,
     remote: bool,
     agent_session: Option<&str>,
+    model: Option<&str>,
     auto_resume: bool,
 ) -> Restored {
     // A resume this app put there, saved back as a command pane — by an
@@ -244,7 +341,7 @@ pub fn restore_pane(
     let Some(session) = agent_session.filter(|_| command.is_none() && !remote) else {
         return keep;
     };
-    if let Some(input) = restore_command(session) {
+    if let Some(input) = restore_command(session, model) {
         if auto_resume {
             Restored { command: None, startup_input: Some(input) }
         } else {
@@ -363,7 +460,10 @@ mod tests {
         let mut panes4 = panes();
         panes4.push(("D".into(), 999)); // a pane whose shell is gone
         let running = panes_running_claude(&procs, &panes4);
-        assert_eq!(running, HashSet::from(["A".into(), "B".into(), "C".into()]));
+        let mut found: Vec<&str> = running.keys().map(String::as_str).collect();
+        found.sort();
+        assert_eq!(found, ["A", "B", "C"]);
+        assert_eq!(running["C"], "claude --resume 228fb346-0d12-4618-824c-a0bc432bc2ab");
 
         let idle = parse_ps("  101 ttys002  -/bin/zsh\n  200 ??  claude daemon run\n");
         assert!(panes_running_claude(&idle, &panes()).is_empty());
@@ -375,14 +475,23 @@ mod tests {
         assert_eq!(session_record("abc-1", Some("c5b63b09")).as_deref(), Some("claude-bg:c5b63b09"));
         assert_eq!(session_record("x y", None), None);
 
-        assert_eq!(restore_command("claude-fg:abc-1").as_deref(), Some("claude --resume abc-1"));
-        assert_eq!(restore_command("claude-bg:c5b63b09").as_deref(), Some("claude attach c5b63b09"));
-        assert_eq!(restore_command("claude-fg:abc; rm -rf ~"), None);
-        assert_eq!(restore_command("claude-bg:$(id)"), None);
-        assert_eq!(restore_command("other:abc"), None);
-        assert_eq!(restore_command("claude-fg:"), None);
+        assert_eq!(restore_command("claude-fg:abc-1", None).as_deref(), Some("claude --resume abc-1"));
+        assert_eq!(restore_command("claude-bg:c5b63b09", None).as_deref(), Some("claude attach c5b63b09"));
+        assert_eq!(restore_command("claude-fg:abc; rm -rf ~", None), None);
+        assert_eq!(restore_command("claude-bg:$(id)", None), None);
+        assert_eq!(restore_command("other:abc", None), None);
+        assert_eq!(restore_command("claude-fg:", None), None);
         // Older records are never auto-typed, only offered on a keypress.
-        assert_eq!(restore_command("claude:abc-1"), None);
+        assert_eq!(restore_command("claude:abc-1", None), None);
+        // A role's model comes back with its conversation; an attach has none.
+        assert_eq!(
+            restore_command("claude-fg:abc-1", Some("'opus'")).as_deref(),
+            Some("claude --resume abc-1 --model 'opus'")
+        );
+        assert_eq!(
+            restore_command("claude-bg:c5b63b09", Some("'opus'")).as_deref(),
+            Some("claude attach c5b63b09")
+        );
         assert_eq!(legacy_resume_command("claude:abc-1").as_deref(), Some("claude --resume abc-1"));
         assert_eq!(legacy_resume_command("claude:a;b"), None);
         assert_eq!(legacy_resume_command("claude-fg:abc-1"), None);
@@ -394,19 +503,19 @@ mod tests {
         let idle = |s: &str| Restored { command: Some(s.into()), startup_input: None };
 
         // unix: typed into the shell.
-        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), true), typed("claude --resume a1"));
-        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), true), typed("claude attach j9"));
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), None, true), typed("claude --resume a1"));
+        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), None, true), typed("claude attach j9"));
         // Windows: idle, a keypress resumes, as before.
-        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), false), idle("claude --resume a1"));
-        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), false), idle("claude attach j9"));
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), None, false), idle("claude --resume a1"));
+        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), None, false), idle("claude attach j9"));
         // The command Windows saved back is derived again, not kept: once the
         // session is gone the pane is a plain shell.
         assert_eq!(
-            restore_pane(Some("claude attach j9"), false, Some("claude-bg:j9"), false),
+            restore_pane(Some("claude attach j9"), false, Some("claude-bg:j9"), None, false),
             idle("claude attach j9")
         );
-        assert_eq!(restore_pane(Some("claude attach j9"), false, None, false), Restored::default());
-        assert_eq!(restore_pane(Some("claude --resume a1"), false, None, true), Restored::default());
+        assert_eq!(restore_pane(Some("claude attach j9"), false, None, None, false), Restored::default());
+        assert_eq!(restore_pane(Some("claude --resume a1"), false, None, None, true), Restored::default());
     }
 
     #[test]
@@ -414,19 +523,19 @@ mod tests {
         // Legacy records are offered on a keypress on every platform.
         for auto in [true, false] {
             assert_eq!(
-                restore_pane(Some("claude --resume old"), false, Some("claude:old"), auto),
+                restore_pane(Some("claude --resume old"), false, Some("claude:old"), None, auto),
                 Restored { command: Some("claude --resume old".into()), startup_input: None }
             );
         }
         // A real command pane and an SSH pane keep what they had.
         assert_eq!(
-            restore_pane(Some("npm test"), false, Some("claude-fg:a1"), true),
+            restore_pane(Some("npm test"), false, Some("claude-fg:a1"), None, true),
             Restored { command: Some("npm test".into()), startup_input: None }
         );
-        assert_eq!(restore_pane(None, true, Some("claude-fg:a1"), true), Restored::default());
+        assert_eq!(restore_pane(None, true, Some("claude-fg:a1"), None, true), Restored::default());
         // A plain shell, and a record that is not ours.
-        assert_eq!(restore_pane(None, false, None, true), Restored::default());
-        assert_eq!(restore_pane(None, false, Some("claude-fg:a;b"), true), Restored::default());
+        assert_eq!(restore_pane(None, false, None, None, true), Restored::default());
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a;b"), None, true), Restored::default());
     }
 
     #[test]
@@ -435,5 +544,59 @@ mod tests {
         assert_eq!(job_from_dir("/Users/u/.claude/jobs/c5b63b09/").as_deref(), Some("c5b63b09"));
         assert_eq!(job_from_dir("/tmp/jobs/a b"), None);
         assert_eq!(job_from_dir(""), None);
+    }
+
+    #[test]
+    fn restores_a_role_pane_on_its_model() {
+        assert_eq!(
+            restore_pane(None, false, Some("claude-fg:a1"), Some("'opus'"), true),
+            Restored { command: None, startup_input: Some("claude --resume a1 --model 'opus'".into()) }
+        );
+    }
+
+    #[test]
+    fn reads_the_model_flag() {
+        assert_eq!(model_flag("claude --model opus --resume x").as_deref(), Some("opus"));
+        assert_eq!(model_flag("node /a/claude --model=claude-sonnet-5-5").as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(model_flag("claude --resume x"), None);
+        assert_eq!(model_flag("claude --model"), None);
+    }
+
+    #[test]
+    fn hook_events_set_the_status() {
+        use AgentStatus::*;
+        assert_eq!(hook_status("prompt-submit", None, None), Some(Working));
+        assert_eq!(hook_status("post-tool", None, None), Some(Working));
+        assert_eq!(hook_status("stop", None, None), Some(Idle));
+        // A turn that ended on an API error is over too.
+        assert_eq!(hook_status("stop-failure", None, None), Some(Idle));
+        assert_eq!(hook_status("session-start", None, None), Some(Idle));
+        assert_eq!(hook_status("notification", Some("permission_prompt"), Some("Claude needs your permission to use Bash")), Some(NeedsYou));
+        assert_eq!(hook_status("notification", Some("elicitation_dialog"), None), Some(NeedsYou));
+        // Idle reminders and auth notices change nothing.
+        assert_eq!(hook_status("notification", Some("idle_prompt"), Some("Claude is waiting for your input")), None);
+        assert_eq!(hook_status("notification", Some("auth_success"), None), None);
+        // Without a type, the message decides.
+        assert_eq!(hook_status("notification", None, Some("Claude is waiting for your input")), None);
+        assert_eq!(hook_status("notification", None, Some("Claude needs your permission to use Edit")), Some(NeedsYou));
+        assert_eq!(hook_status("something-new", None, None), None);
+    }
+
+    #[test]
+    fn builds_the_launch_command() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        assert_eq!(launch_command(None, None, q), "claude");
+        assert_eq!(launch_command(None, Some("fix the flaky test"), q), "claude 'fix the flaky test'");
+        let role = AgentRole {
+            name: "reviewer".into(),
+            model: Some("opus".into()),
+            prompt: Some("You review.\nNever edit files; it's read-only.".into()),
+        };
+        assert_eq!(
+            launch_command(Some(&role), Some("look at\r\nmain\u{3}"), q),
+            r"claude --model 'opus' --append-system-prompt 'You review. Never edit files; it'\''s read-only.' --name 'reviewer' 'look at main'"
+        );
+        let bare = AgentRole { name: "plain".into(), model: None, prompt: None };
+        assert_eq!(launch_command(Some(&bare), Some("  "), q), "claude --name 'plain'");
     }
 }

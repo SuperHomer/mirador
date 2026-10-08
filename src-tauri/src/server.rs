@@ -176,22 +176,82 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             agent,
             session_id,
             job,
+            event,
+            notification_type,
+            message,
         } => {
             if agent != "claude" {
                 return Err(format!("unknown agent `{agent}`"));
             }
             let record = cmux_core::agents::session_record(&session_id, job.as_deref())
                 .ok_or("not a session id")?;
+            let status = event.as_deref().and_then(|e| {
+                cmux_core::agents::hook_status(e, notification_type.as_deref(), message.as_deref())
+            });
+            // `PostToolUse` fires on every tool call of every session, and
+            // matters only to a pane that is waiting on the human: with none
+            // waiting, answer before resolving anything (that takes a `ps`).
+            if event.as_deref() == Some("post-tool") {
+                let waiting = state.meta.lock().unwrap().values().any(|m| {
+                    m.agent_status == Some(cmux_protocol::AgentStatus::NeedsYou)
+                });
+                if !waiting {
+                    return Ok(Value::Null);
+                }
+            }
             let pane = resolve_pane(&state, pane_id, tty, job)
                 .ok_or("could not resolve the pane for this agent session")?;
             {
                 let mut meta = state.meta.lock().unwrap();
-                meta.entry(pane.clone()).or_default().agent_session = Some(record);
+                let entry = meta.entry(pane.clone()).or_default();
+                entry.agent_session = Some(record);
+                if let Some(status) = status {
+                    if entry.agent_status != Some(status) {
+                        entry.agent_status = Some(status);
+                        entry.agent_since_ms = Some(crate::runs::now_ms());
+                    }
+                    // A message describes what the agent is blocked on; once
+                    // it moves on, the message is stale.
+                    entry.agent_message = match status {
+                        cmux_protocol::AgentStatus::NeedsYou => message,
+                        _ => None,
+                    };
+                }
             }
             state
                 .session_dirty
                 .store(true, std::sync::atomic::Ordering::Relaxed);
+            crate::commands::request_workspace_emit(app);
             Ok(json!({ "paneId": pane }))
+        }
+        Request::AgentNew {
+            role,
+            task,
+            target,
+            pane_id,
+        } => {
+            let pane_id = crate::commands::open_agent(
+                app.clone(),
+                app.state(),
+                role,
+                task,
+                pane_id,
+                target.as_deref() != Some("split"),
+            )?;
+            Ok(json!({ "paneId": pane_id }))
+        }
+        Request::AgentList => {
+            let agents = crate::commands::agent_infos(&state);
+            Ok(json!({ "agents": agents }))
+        }
+        Request::AgentWall { target, pane_id } => {
+            let pane_id = crate::commands::open_agent_wall(
+                app.clone(),
+                app.state(),
+                pane_id,
+                target.as_deref() != Some("split"),
+            )?;
+            Ok(json!({ "paneId": pane_id }))
         }
         Request::Run {
             command,

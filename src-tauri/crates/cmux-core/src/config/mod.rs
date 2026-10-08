@@ -9,7 +9,7 @@ pub mod wezterm;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{CustomCommand, ResolvedColors, ResolvedConfig};
+use cmux_protocol::{AgentRole, CustomCommand, ResolvedColors, ResolvedConfig};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -58,6 +58,10 @@ pub struct Config {
     pub persist_sessions: Option<bool>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
+    /// Named ways to start a Claude Code agent, each with its own model
+    /// and system prompt: the palette's *New Agent* entries, `mira agent
+    /// new <role>`.
+    pub agent_roles: Vec<AgentRole>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -190,6 +194,7 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+d", "split_right"),
     ("mod+shift+d", "split_down"),
     ("mod+g", "new_diff_pane"),
+    ("mod+shift+a", "agent_wall"),
     ("mod+alt+left", "focus_left"),
     ("mod+alt+right", "focus_right"),
     ("mod+alt+up", "focus_up"),
@@ -229,6 +234,7 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+shift+d", "split_right"),
     ("ctrl+shift+e", "split_down"),
     ("ctrl+shift+g", "new_diff_pane"),
+    ("ctrl+shift+a", "agent_wall"),
     ("ctrl+alt+left", "focus_left"),
     ("ctrl+alt+right", "focus_right"),
     ("ctrl+alt+up", "focus_up"),
@@ -324,7 +330,37 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         colors,
         keybindings,
         custom_commands: cfg.custom_commands.clone(),
+        agent_roles: agent_roles_in(cfg),
     }
+}
+
+/// The usable roles: named, and the first of any repeated name, so a role
+/// name always means one thing to the palette, the CLI and a restore.
+fn agent_roles_in(cfg: &Config) -> Vec<AgentRole> {
+    let mut roles: Vec<AgentRole> = Vec::new();
+    for role in &cfg.agent_roles {
+        let name = role.name.trim();
+        if name.is_empty() || roles.iter().any(|r| r.name == name) {
+            continue;
+        }
+        let present = |v: &Option<String>| v.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(String::from);
+        roles.push(AgentRole {
+            name: name.to_string(),
+            model: present(&role.model),
+            prompt: present(&role.prompt),
+        });
+    }
+    roles
+}
+
+/// The usable `agentRoles`, read from the config on disk now.
+pub fn agent_roles() -> Vec<AgentRole> {
+    agent_roles_in(&load().0)
+}
+
+/// The `agentRoles` entry called `name`.
+pub fn agent_role(name: &str) -> Option<AgentRole> {
+    agent_roles().into_iter().find(|r| r.name == name)
 }
 
 fn import_theme(cfg: &Config) -> Option<ImportedTheme> {
@@ -413,6 +449,25 @@ mod tests {
         // `defaultCwd` is opt-in: with no key, new tabs keep the old
         // home-directory behavior.
         assert!(Config::default().default_cwd.is_none());
+    }
+
+    #[test]
+    fn agent_roles_drop_unnamed_and_repeated_entries() {
+        let cfg: Config = serde_json::from_str(
+            r#"{ "agentRoles": [
+                { "name": "planner", "model": "opus", "prompt": "Plan, never edit." },
+                { "name": " coder ", "model": " ", "prompt": "" },
+                { "name": "", "model": "haiku" },
+                { "name": "planner", "model": "haiku" }
+            ] }"#,
+        )
+        .unwrap();
+        let roles = agent_roles_in(&cfg);
+        assert_eq!(roles.len(), 2);
+        assert_eq!(roles[0].name, "planner");
+        assert_eq!(roles[0].model.as_deref(), Some("opus"));
+        assert_eq!(roles[1], AgentRole { name: "coder".into(), model: None, prompt: None });
+        assert!(agent_roles_in(&Config::default()).is_empty());
     }
 
     #[test]

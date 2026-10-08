@@ -1532,3 +1532,301 @@ body,
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ---------- Agent wall ---------- */
+
+.agent-wall {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: var(--bg-alt);
+  /* The status colours, named once. */
+  --wall-working: var(--accent);
+  --wall-needs-you: #fab387;
+  --wall-idle: #a6e3a1;
+}
+
+.wall-chrome {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--surface);
+  flex-shrink: 0;
+  min-height: 30px;
+}
+
+.wall-badge {
+  flex-shrink: 0;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.wall-counts {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.wall-count.needs-you {
+  color: var(--wall-needs-you);
+  font-weight: 600;
+}
+
+.wall-count.working {
+  color: var(--wall-working);
+}
+
+.wall-new {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.wall-new-button {
+  border: 1px solid var(--surface);
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.wall-new-button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.wall-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.wall-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wall-menu button:hover {
+  background: var(--surface);
+}
+
+.wall-menu-model {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.wall-menu-hint {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 6px 8px 4px;
+  line-height: 1.4;
+}
+
+.wall-close {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wall-close:hover {
+  color: var(--text);
+}
+
+.wall-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--subtext);
+  text-align: center;
+}
+
+.wall-empty-hint {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+.wall-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 6px;
+  padding: 6px;
+}
+
+.wall-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--term-bg, var(--bg));
+  --wall-status: var(--muted);
+}
+
+.wall-tile.working {
+  --wall-status: var(--wall-working);
+}
+
+.wall-tile.needsYou {
+  --wall-status: var(--wall-needs-you);
+  border-color: var(--wall-needs-you);
+}
+
+.wall-tile.idle {
+  --wall-status: var(--wall-idle);
+}
+
+/* The same attention ring a pane gets: an agent here said something. */
+.wall-tile.unread {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(137, 180, 250, 0.35);
+}
+
+.wall-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--surface);
+  font-size: 11px;
+  flex-shrink: 0;
+  cursor: pointer;
+  /* Every item but the location keeps its size; the location is the one
+     that may give way, and it has a floor so it never collapses to "…". */
+  min-width: 0;
+}
+
+.wall-tile-head:hover {
+  background: var(--surface);
+}
+
+.wall-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wall-status);
+  flex-shrink: 0;
+}
+
+.wall-tile.working .wall-dot {
+  animation: wall-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wall-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.wall-role {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wall-model {
+  color: var(--subtext);
+  background: var(--surface);
+  border-radius: 4px;
+  padding: 0 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wall-where {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 3em;
+  flex: 1 1 auto;
+}
+
+.wall-status {
+  color: var(--wall-status);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.wall-message {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--wall-needs-you);
+  background: color-mix(in srgb, var(--wall-needs-you) 12%, var(--bg-alt));
+  border-bottom: 1px solid var(--surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.wall-term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 3px;
+}
+
+.wall-term-host {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wall-term-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+}

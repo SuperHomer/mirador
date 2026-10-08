@@ -101,6 +101,12 @@ pub struct WorkspaceSnapshot {
     /// Commit-graph panes and the repository each one reads.
     #[serde(default)]
     pub graph_panes: Vec<GraphPane>,
+    /// Agent-wall panes: each draws every agent's terminal in a grid.
+    #[serde(default)]
+    pub agent_wall_panes: Vec<AgentWallPane>,
+    /// Every pane running a Claude Code agent, for the wall to draw.
+    #[serde(default)]
+    pub agents: Vec<AgentInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -185,7 +191,8 @@ pub enum Request {
         #[serde(default)]
         end_sessions: bool,
     },
-    /// Records the agent session running in a pane (for resume-on-restore).
+    /// Records the agent session running in a pane (for resume-on-restore),
+    /// and — from a CLI that sends them — what the hook says it is doing.
     AgentSession {
         #[serde(default)]
         pane_id: Option<String>,
@@ -196,6 +203,43 @@ pub enum Request {
         /// See `Notify::job`.
         #[serde(default)]
         job: Option<String>,
+        /// The `mira claude-hook` event ("stop", "prompt-submit", …).
+        /// Absent from older CLIs, which then only record the session.
+        #[serde(default)]
+        event: Option<String>,
+        /// A Notification hook's `notification_type` ("permission_prompt",
+        /// "idle_prompt", …), when Claude Code sends one.
+        #[serde(default)]
+        notification_type: Option<String>,
+        /// A Notification hook's message.
+        #[serde(default)]
+        message: Option<String>,
+    },
+    /// Starts a Claude Code agent in a new pane (a new tab, or a split of
+    /// the calling pane), with a role's model and prompt from the config.
+    AgentNew {
+        /// A role name from `agentRoles`; none starts plain `claude`.
+        #[serde(default)]
+        role: Option<String>,
+        /// The first prompt, typed in as Claude's initial message.
+        #[serde(default)]
+        task: Option<String>,
+        /// "tab" (default) or "split".
+        #[serde(default)]
+        target: Option<String>,
+        /// The pane a split comes from, and whose directory the agent
+        /// starts in; the focused pane when absent.
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Every agent pane and what it is doing.
+    AgentList,
+    /// Opens the agent wall (a new tab, or a split of the calling pane).
+    AgentWall {
+        #[serde(default)]
+        target: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
     },
     /// Agent-visible command execution: opens a command pane (split of the
     /// focused pane, or a new tab) whose PTY runs the command directly —
@@ -325,6 +369,56 @@ pub struct AgentPane {
     pub command: String,
 }
 
+/// What a Claude Code agent is doing, as its hooks last reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentStatus {
+    /// A prompt was submitted, or a tool ran: Claude is on it.
+    Working,
+    /// Blocked on the human: a permission prompt, a question.
+    NeedsYou,
+    /// Finished its turn, waiting for the next prompt.
+    Idle,
+}
+
+/// A pane running a Claude Code agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInfo {
+    pub pane_id: String,
+    /// The `agentRoles` entry it was started with.
+    pub role: Option<String>,
+    /// The role's model, or the `--model` its process was started with;
+    /// absent when it runs Claude Code's default.
+    pub model: Option<String>,
+    /// Absent until its first hook arrives (or with no hooks installed).
+    pub status: Option<AgentStatus>,
+    /// The last Notification message, e.g. what it needs permission for.
+    pub message: Option<String>,
+    /// Unix millis of the last status change.
+    pub since_ms: Option<u64>,
+    pub cwd: Option<String>,
+    pub branch: Option<String>,
+}
+
+/// A pane drawing the agent wall.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWallPane {
+    pub pane_id: String,
+}
+
+/// A named way to start a Claude Code agent: `agentRoles` in mirador.json.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentRole {
+    pub name: String,
+    /// `--model`: an alias ("opus", "sonnet") or a full model name.
+    pub model: Option<String>,
+    /// Appended to Claude Code's system prompt (`--append-system-prompt`).
+    pub prompt: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestEnvelope {
     #[serde(default)]
@@ -395,6 +489,7 @@ pub struct ResolvedConfig {
     /// accelerator ("mod+shift+d") → action id ("split_down")
     pub keybindings: std::collections::HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
+    pub agent_roles: Vec<AgentRole>,
 }
 
 /// One line of a diff hunk.

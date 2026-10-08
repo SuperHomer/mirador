@@ -24,6 +24,11 @@ downloads, the feature tour and the keybinding reference.
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,
   a commit, or a branch — file tree, hunks, and your terminal's own theme.
   A header picker switches between the repository's git worktrees
+- **Agent wall** (`mira agent wall`, `mod+shift+A`): every Claude Code
+  agent's live terminal in one grid, each with its role, model and whether
+  it is working, idle, or waiting on you — type into any of them from there.
+  **Agent roles** (`agentRoles` in the config) start Claude Code with their
+  own model and system prompt (`mira agent new --role reviewer "…"`)
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: agents open pages, snapshot the DOM, click,
@@ -218,6 +223,7 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘⇧W | Ctrl+Shift+Q | close tab |
 | ⌘D / ⌘⇧D | Ctrl+Shift+D / Ctrl+Shift+E | split right / down |
 | ⌘G | Ctrl+Shift+G | diff pane for this repo |
+| ⌘⇧A | Ctrl+Shift+A | agent wall |
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |
@@ -257,6 +263,40 @@ you split, which is almost always what you want. `defaultCwd` fills in only
 where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
+
+## Agent roles and the agent wall
+
+A role is a named way to start Claude Code — its own model, and a system
+prompt appended to Claude Code's own:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{
+  "agentRoles": [
+    { "name": "planner",  "model": "opus",   "prompt": "You plan. Never edit files." },
+    { "name": "coder",    "model": "sonnet" },
+    { "name": "reviewer", "model": "haiku",  "prompt": "Review the diff; be terse." }
+  ]
+}
+```
+
+Each role becomes a *New Agent: <role>* palette entry and a `mira agent new
+--role <role> [task…]` target. The agent opens in a tab of its own, as a
+shell with `claude --model … --append-system-prompt … --name <role>` typed
+into it, in the directory of the pane it was started from. Exiting Claude
+leaves the shell; restarting Mirador resumes the conversation on the
+role's model.
+
+The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, or `mira agent
+wall`) draws every Claude Code agent in a grid — roles, and any `claude`
+you started by hand. The tiles are the agents' real terminals, moved there
+while the wall is on screen, so you can type into one to answer a
+permission prompt without leaving the wall. Each tile shows the role, the
+model, and what the agent is doing: **working**, **needs you** (with what
+for), or **idle**. Click a tile's header to go to the agent's own tab.
+
+Status comes from the Claude Code hooks, so it needs the integration set up
+(an install from an earlier version gains the extra hooks on next launch).
 
 ## Terminals that keep running when you quit
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { newTab, splitPane, openSsh, sshHosts } from "../bindings";
+import { newTab, splitPane, openSsh, sshHosts, openAgent } from "../bindings";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { actions } from "../keymap/actions";
 import { useConfigStore } from "../state/configStore";
@@ -42,6 +42,7 @@ export function CommandPalette() {
     (s) => s.config?.customCommands ?? [],
   );
   const keybindings = useConfigStore((s) => s.config?.keybindings);
+  const agentRoles = useConfigStore((s) => s.config?.agentRoles);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [hosts, setHosts] = useState<string[]>([]);
@@ -83,8 +84,19 @@ export function CommandPalette() {
       hint: "open remote pane",
       run: () => void openSsh(null, false, host),
     }));
-    return [...custom, ...ssh, ...base];
-  }, [customCommands, hosts, keybindings]);
+    // `agentRoles` become "New Agent: <role>" entries, in a tab of their own.
+    const agents: Entry[] = (agentRoles ?? []).map((r) => ({
+      id: `agent:${r.name}`,
+      title: `New Agent: ${r.name}`,
+      hint: r.model ?? "default model",
+      run: () => {
+        const { snapshot } = useWorkspaceStore.getState();
+        const pane = activeTab(snapshot)?.focusedPane ?? null;
+        void openAgent(r.name, null, pane, true);
+      },
+    }));
+    return [...custom, ...agents, ...ssh, ...base];
+  }, [customCommands, agentRoles, hosts, keybindings]);
 
   const filtered = useMemo(() => {
     return entries

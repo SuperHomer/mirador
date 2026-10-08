@@ -1,11 +1,16 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
-import { registerTerminal, unregisterTerminal } from "./registry";
+import {
+  isLent,
+  registerTerminal,
+  unregisterTerminal,
+  watchTerminal,
+} from "./registry";
 import { useConfigStore } from "../state/configStore";
 import {
   attachPane,
@@ -83,6 +88,14 @@ export const TerminalPane = memo(function TerminalPane({
   const config = useConfigStore((s) => s.config);
   const fitRef = useRef<FitAddon | null>(null);
   const webglRef = useRef<WebglAddon | null>(null);
+  // Lent to the agent wall: drawn there while this tab is hidden, so it
+  // keeps its renderer as if it were on screen.
+  const [lent, setLent] = useState(false);
+
+  useEffect(() => {
+    setLent(isLent(paneId));
+    return watchTerminal(paneId, () => setLent(isLent(paneId)));
+  }, [paneId]);
 
   // Hot-reloaded config applies to the live terminal without recreating it.
   useEffect(() => {
@@ -112,11 +125,11 @@ export const TerminalPane = memo(function TerminalPane({
     termRef.current = term;
     const serialize = new SerializeAddon();
     term.loadAddon(serialize);
-    registerTerminal(paneId, term, serialize);
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
+    registerTerminal(paneId, term, serialize, fit, container);
     // The renderer is the visibility effect's job.
     fit.fit();
 
@@ -316,10 +329,11 @@ export const TerminalPane = memo(function TerminalPane({
     };
   }, [paneId]);
 
+  const onScreen = visible || lent;
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    if (visible) {
+    if (onScreen) {
       webglRef.current ??= attachRenderer(term, () => {
         webglRef.current = null;
       });
@@ -330,11 +344,13 @@ export const TerminalPane = memo(function TerminalPane({
       webglRef.current = null;
     }, WEBGL_RELEASE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [visible, paneId]);
+  }, [onScreen, paneId]);
 
+  // Also on becoming visible, and on coming back from the wall: going to
+  // an agent's tab from its tile means typing to it next.
   useEffect(() => {
-    if (focused) termRef.current?.focus();
-  }, [focused]);
+    if (focused && visible && !lent) termRef.current?.focus();
+  }, [focused, visible, lent]);
 
   return (
     <div

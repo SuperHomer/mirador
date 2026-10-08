@@ -36,13 +36,22 @@ later). The hooks call `mira` by its absolute path, so they work whether or
 not `mira` is on PATH; if the app moves, the next launch points them at the
 new location.
 
-This wires three hooks, all calling `mira claude-hook`, and installs the
+This wires these hooks, all calling `mira claude-hook`, and installs the
 `/mira-diff` skill in `~/.claude/skills/mira-diff/`:
 
 - **Notification** → the pane running that Claude session lights up with
   Claude's message (needs-permission, idle, …)
-- **Stop** → "finished responding" notification when a turn completes
+- **Stop** → "finished responding" notification when a turn completes;
+  **StopFailure** → "stopped on an error" when an API error ends it
 - **SessionStart** → records the Claude session id on the pane
+- **UserPromptSubmit**, **PostToolUse**, **PostToolUseFailure** → the
+  agent wall's status: working, or back to work after a permission prompt.
+  The tool hooks fire on every tool call; the app answers them without a
+  lookup unless some agent is waiting on you.
+
+A launch that finds hooks from an earlier version, which installed fewer
+events, adds the missing ones — calling the same `mira` the hooks already
+call.
 
 `/mira-diff` is the human's side of `mira diff`: typing it in a Claude Code
 pane opens the same review surface, with the same arguments. It sets
@@ -151,7 +160,27 @@ commit opens its diff — it keeps one diff pane and retargets it, so walking
 history does not bury the graph under a pane per commit. Like `mira diff`,
 it takes the repository from the pane it ran in and refuses outside one.
 
-## 6. Workspace control
+## 6. Agents with roles, and the wall
+
+```bash
+mira agent roles                              # agentRoles from mirador.json
+mira agent new --role reviewer "review the auth change"   # new tab
+mira agent new --split "fix the flaky test"   # plain claude, split of this pane
+mira agent list                               # pane, status, role, model
+mira agent wall                               # the grid of every agent
+```
+
+`agent new` opens a shell and types `claude` into it with the role's
+`--model`, `--append-system-prompt` and `--name`, and the task as the first
+message — so `/exit` leaves a prompt, and the session resumes like any other
+(on the role's model). The arguments are quoted for the pane's shell and put
+on one line: they are typed, so a newline would submit half a command.
+
+`agent list` reads what the hooks reported: `working`, `needs-you` (with the
+message, e.g. the tool awaiting permission), `idle`, or `-` before the first
+hook. `--json` adds the cwd, branch and when the status last changed.
+
+## 7. Workspace control
 
 ```bash
 mira list-tabs                 # tabs + panes, focus markers (--json for data)
@@ -163,7 +192,7 @@ mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
 ```
 
-## 7. Remote workspaces (SSH)
+## 8. Remote workspaces (SSH)
 
 ```bash
 mira ssh hosts                     # aliases from ~/.ssh/config
@@ -188,7 +217,7 @@ Disconnects leave the pane idle with `[press any key to reconnect]`;
 restarting Mirador restores remote panes idle too — it never re-opens an
 SSH session behind your back.
 
-## 8. Raw socket protocol
+## 9. Raw socket protocol
 
 Newline-delimited JSON on the socket named in the discovery file:
 
@@ -198,7 +227,8 @@ Newline-delimited JSON on the socket named in the discovery file:
 ```
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
-read_screen notify run list_runs agent_session browser_open
+read_screen notify run list_runs agent_session agent_new agent_list
+agent_wall browser_open
 browser_navigate browser_snapshot browser_click browser_fill browser_eval
 browser_history ssh_open ssh_hosts ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.

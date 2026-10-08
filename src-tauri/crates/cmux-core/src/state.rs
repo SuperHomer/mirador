@@ -40,6 +40,21 @@ pub struct PaneMeta {
     /// Typed into the pane's shell once it first prints, then cleared: how
     /// a restored pane resumes its agent session without a keypress.
     pub startup_input: Option<String>,
+    /// The `agentRoles` entry this pane's agent was started with. Kept
+    /// until the agent exits, and across restarts so a resume gets the
+    /// role's model back.
+    pub agent_role: Option<String>,
+    /// The `--model` the poller saw the pane's `claude` started with.
+    pub agent_model: Option<String>,
+    /// What the agent's hooks last said it is doing (not persisted: a
+    /// restarted app has not heard from it yet).
+    pub agent_status: Option<cmux_protocol::AgentStatus>,
+    /// The last Notification message from the agent's hooks.
+    pub agent_message: Option<String>,
+    /// Unix millis of the last `agent_status` change.
+    pub agent_since_ms: Option<u64>,
+    /// Agent-wall pane: draws every agent pane's terminal in a grid.
+    pub agent_wall: bool,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
@@ -278,9 +293,14 @@ impl Workspace {
                     let pane_meta = meta.get(&t.focused);
                     let cwd = pane_meta.and_then(|m| m.cwd.clone());
                     let osc_title = pane_meta.and_then(|m| m.title.clone());
+                    // The wall runs no shell: nothing would ever title it.
+                    let wall_title = pane_meta
+                        .filter(|m| m.agent_wall)
+                        .map(|_| "Agents".to_string());
                     let title = t
                         .title
                         .clone()
+                        .or(wall_title)
                         .or(osc_title)
                         .unwrap_or_else(|| {
                             cwd.as_deref()
@@ -318,6 +338,8 @@ impl Workspace {
             diff_panes: Vec::new(),
             whats_new_panes: Vec::new(),
             graph_panes: Vec::new(),
+            agent_wall_panes: Vec::new(),
+            agents: Vec::new(),
         }
     }
 }

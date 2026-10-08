@@ -14,7 +14,7 @@ const MAX_HISTORY: usize = 100;
 /// Keep the tail of the output — that's where test results live.
 const MAX_CAPTURE: usize = 1024 * 1024;
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)

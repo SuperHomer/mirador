@@ -35,6 +35,10 @@ pub struct SessionPane {
     pub diff_repo: Option<String>,
     #[serde(default)]
     pub diff_spec: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_role: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub agent_wall: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +127,8 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         remote_host: m.and_then(|m| m.remote_host.clone()),
                         diff_repo: m.and_then(|m| m.diff_repo.clone()),
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
+                        agent_role: m.and_then(|m| m.agent_role.clone()),
+                        agent_wall: m.is_some_and(|m| m.agent_wall),
                     },
                 )
             })
@@ -189,6 +195,8 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     remote_host: p.remote_host,
                     diff_repo: p.diff_repo,
                     diff_spec: p.diff_spec,
+                    agent_role: p.agent_role,
+                    agent_wall: p.agent_wall,
                     ..Default::default()
                 },
             )
@@ -253,6 +261,16 @@ mod tests {
                 ..Default::default()
             },
         );
+        meta.insert(
+            b.clone(),
+            PaneMeta {
+                agent_session: Some("claude-fg:s1".into()),
+                agent_role: Some("reviewer".into()),
+                agent_status: Some(cmux_protocol::AgentStatus::Working),
+                agent_wall: true,
+                ..Default::default()
+            },
+        );
 
         let file = capture(&ws, &meta);
         let json = serde_json::to_string(&file).unwrap();
@@ -265,6 +283,12 @@ mod tests {
         assert!(crate::layout::contains(&restored.tabs[0].root, &a));
         assert!(crate::layout::contains(&restored.tabs[0].root, &b));
         assert_eq!(rmeta[&a].cwd.as_deref(), Some("/tmp"));
+        // The role survives so a resume gets its model; the status is only
+        // ever what this run heard.
+        assert_eq!(rmeta[&b].agent_role.as_deref(), Some("reviewer"));
+        assert!(rmeta[&b].agent_wall);
+        assert_eq!(rmeta[&b].agent_status, None);
+        assert!(!rmeta[&a].agent_wall);
         assert_eq!(rmeta[&c].command.as_deref(), Some("npm test"));
     }
 
