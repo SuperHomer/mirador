@@ -125,17 +125,20 @@ pub fn launch(
 }
 
 /// On unix the holder detaches itself (`setsid` in `mira __hold`). On
-/// Windows it has to be started detached: no console, its own process
-/// group, and — where the job the app runs in allows it — outside that
-/// job, so closing the app's job cannot take the holders with it.
+/// Windows it has to be started detached: no console, and — where the job
+/// the app runs in allows it — outside that job, so closing the app's job
+/// cannot take the holders with it.
+///
+/// Not `CREATE_NEW_PROCESS_GROUP`: that starts the process ignoring Ctrl+C,
+/// which every descendant inherits, so Ctrl+C in a pane stopped nothing.
+/// A process with no console receives no console control events anyway,
+/// so the group bought nothing.
 fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<std::process::Child> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        use windows_sys::Win32::System::Threading::{
-            CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
-        };
-        let detached = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+        use windows_sys::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, DETACHED_PROCESS};
+        let detached = DETACHED_PROCESS;
         match cmd.creation_flags(detached | CREATE_BREAKAWAY_FROM_JOB).spawn() {
             Ok(child) => return Ok(child),
             // A job that forbids breakaway refuses the flag outright; stay

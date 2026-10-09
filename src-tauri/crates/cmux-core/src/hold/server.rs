@@ -106,6 +106,7 @@ enum Event {
 /// Blocks the calling thread; `mira __hold` calls it after `setsid` so the
 /// holder belongs to no terminal and survives whoever started it.
 pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
+    process_ctrl_c();
     let listener = conn::bind(&config.socket)?;
     let pty = PtyManager::unthrottled();
     let counting = Arc::new(AtomicBool::new(true));
@@ -213,6 +214,21 @@ pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
         client.stream.close();
     }
     Ok(code)
+}
+
+/// Makes Ctrl+C reach the holder's child. On Windows, "ignore Ctrl+C" is a
+/// per-process flag every child inherits, and a process started in a new
+/// process group — as the app used to start holders — begins with it set:
+/// a shell under such a holder, and the `npm run dev` under that shell,
+/// let ConPTY's CTRL_C_EVENT pass without stopping. Clearing it here, before
+/// the child exists, covers whoever started the holder and however.
+/// Unix has no such flag: `^C` becomes SIGINT for the foreground group.
+fn process_ctrl_c() {
+    #[cfg(windows)]
+    // SAFETY: a null handler only sets the calling process's flag.
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 0);
+    }
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
