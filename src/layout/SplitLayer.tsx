@@ -147,7 +147,7 @@ export function SplitLayer({
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
-        const wall = agentWallPanes.some((w) => w.paneId === p.paneId);
+        const wall = agentWallPanes.find((w) => w.paneId === p.paneId);
         return (
           <div
             key={p.paneId}
@@ -158,7 +158,7 @@ export function SplitLayer({
             }}
           >
             {wall ? (
-              <AgentWall paneId={p.paneId} visible={shown} />
+              <AgentWall paneId={p.paneId} tabId={wall.tabId} visible={shown} />
             ) : browser ? (
               <BrowserPane
                 paneId={p.paneId}

@@ -245,10 +245,10 @@ pub enum Request {
     },
     /// Every agent pane and what it is doing.
     AgentList,
-    /// Opens the agent wall (a new tab, or a split of the calling pane).
+    /// Opens the agent wall for the tab of `pane_id` (the focused pane
+    /// when absent): its own tab, reused if there is one, showing that
+    /// tab's agents.
     AgentWall {
-        #[serde(default)]
-        target: Option<String>,
         #[serde(default)]
         pane_id: Option<String>,
     },
@@ -420,6 +420,9 @@ pub struct AgentInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AgentWallPane {
     pub pane_id: String,
+    /// The tab whose agents it shows: the one it was opened from.
+    #[serde(default)]
+    pub tab_id: Option<String>,
 }
 
 /// A named way to start a Claude Code agent: `agentRoles` in mirador.json.

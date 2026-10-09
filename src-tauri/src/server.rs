@@ -253,13 +253,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let agents = crate::commands::agent_infos(&state);
             Ok(json!({ "agents": agents }))
         }
-        Request::AgentWall { target, pane_id } => {
-            let pane_id = crate::commands::open_agent_wall(
-                app.clone(),
-                app.state(),
-                pane_id,
-                target.as_deref() != Some("split"),
-            )?;
+        Request::AgentWall { pane_id } => {
+            let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;
             Ok(json!({ "paneId": pane_id }))
         }
         Request::Run {

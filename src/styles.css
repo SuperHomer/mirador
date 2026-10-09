@@ -89,6 +89,9 @@ body,
    tabs after it, to the foot of the list; when the list overflows it is
    simply the boundary between the two groups. */
 .sidebar-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-top: auto;
   padding: 10px 8px 4px;
   border-top: 1px solid var(--surface);
@@ -98,6 +101,25 @@ body,
   letter-spacing: 0.08em;
   text-transform: uppercase;
   flex-shrink: 0;
+}
+
+/* Opens the agent wall for the current tab, beside the Agents heading. */
+.sidebar-wall {
+  border: 1px solid var(--surface);
+  background: transparent;
+  color: var(--subtext);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 1px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.sidebar-wall:hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 /* How many agents a tab holds. */
@@ -1645,36 +1667,15 @@ body,
   color: var(--wall-working);
 }
 
-/* This tab / All. Pushes itself and what follows to the right. */
-.wall-scope {
-  margin-left: auto;
-  display: flex;
-  flex-shrink: 0;
-  border: 1px solid var(--surface);
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.wall-scope button {
-  border: none;
-  background: transparent;
-  color: var(--subtext);
-  font-size: 11px;
-  padding: 2px 9px;
-  max-width: 160px;
+/* The tab the wall shows. */
+.wall-tab {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.wall-scope button + button {
-  border-left: 1px solid var(--surface);
-}
-
-.wall-scope button.on {
-  background: var(--surface);
-  color: var(--text);
+  min-width: 3em;
 }
 
 .wall-new {
@@ -1682,8 +1683,7 @@ body,
   flex-shrink: 0;
 }
 
-/* Without the scope switch (no tab to scope to), the button takes the gap. */
-.wall-counts + .wall-new {
+.wall-new {
   margin-left: auto;
 }
 

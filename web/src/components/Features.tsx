@@ -3,7 +3,7 @@ type Feature = { icon: string; title: string; body: string; code?: string };
 const FEATURES: Feature[] = [
   { icon: "⧉", title: "Tabs & splits", body: "Horizontal and vertical splits, WebGL rendering with fallback, and flow-controlled PTY streaming — a runaway <cat> can’t freeze the UI." },
   { icon: "◎", title: "Agent notifications", body: "Panes get an attention ring and tabs light up on OSC 9/99/777 or <mira notify>. Native alerts when the window is unfocused." },
-  { icon: "▦", title: "Agent wall", body: "Every Claude Code agent’s live terminal in one grid, each tagged with its role, its model, and whether it is working, idle or waiting on you — answer a prompt right there. Roles start Claude with their own model and prompt: <mira agent new --role reviewer>." },
+  { icon: "▦", title: "Agent wall", body: "A tab’s Claude Code agents, their live terminals in one grid, each tagged with its role, its model, and whether it is working, idle or waiting on you — answer a prompt right there. Roles start Claude with their own model and prompt: <mira agent new --role reviewer>." },
   { icon: "▶", title: "Command panes", body: "Agent-launched commands run in a visible, interruptible pane. <--wait> returns clean output and an exit code to the caller." },
   { icon: "±", title: "Diff panes", body: "Review what changed without leaving the terminal: file tree, hunks, and your own theme. <mira diff> for uncommitted work, a commit, or a branch, in any git worktree — untracked files included." },
   { icon: "⑂", title: "Commit graph", body: "The branch structure across every ref, with lanes, tags and remotes. Click a commit and its diff opens beside it — <mira graph>, or the palette." },

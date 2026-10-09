@@ -167,7 +167,7 @@ mira agent roles                              # agentRoles from mirador.json
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, role, model
-mira agent wall                               # the grid of every agent
+mira agent wall                               # this tab's agents, in a grid
 ```
 
 `agent new` splits the pane it runs in (the focused pane, from outside

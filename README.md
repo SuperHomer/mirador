@@ -289,9 +289,11 @@ are in — it joins the tab you are working in, and its row appears under
 leaves the shell; restarting Mirador resumes the conversation on the
 role's model.
 
-The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, or `mira agent
-wall`) draws every Claude Code agent in a grid — roles, and any `claude`
-you started by hand. The tiles are the agents' real terminals, moved there
+The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, the **▦ Wall**
+button beside the sidebar's Agents heading, or `mira agent wall`) draws the
+agents of the tab you open it from in a grid, in a tab of its own — roles,
+and any `claude` you started by hand. For another tab's agents, go to that
+tab and open the wall again: the same wall switches to it. The tiles are the agents' real terminals, moved there
 while the wall is on screen, so you can type into one to answer a
 permission prompt without leaving the wall. Each tile shows the role, the
 model, and what the agent is doing: **working**, **needs you** (with what
@@ -310,8 +312,6 @@ one of them needs you. The tab shortcuts number rows in the order shown.
 Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).
 
-The wall shows the agents of the tab you came from, or all of them: the
-switch in its header picks.
 
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).

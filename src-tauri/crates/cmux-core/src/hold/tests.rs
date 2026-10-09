@@ -456,6 +456,34 @@ fn a_cursor_query_while_detached_is_answered() {
     kill_and_join(connect(&path), holder);
 }
 
+/// Ctrl+C in a pane stops what runs there. On Windows a holder can start
+/// with "ignore Ctrl+C" set — the app's `CREATE_NEW_PROCESS_GROUP` used to
+/// do that — and its children inherit it, so `npm run dev` ran on through
+/// every ^C. This sets the flag as that launch did, and needs the holder to
+/// clear it. (Another test's holder may clear it first, which can only make
+/// this pass when it shouldn't, never fail when it shouldn't.)
+#[test]
+fn ctrl_c_stops_the_command() {
+    #[cfg(windows)]
+    // SAFETY: a null handler only sets this process's flag.
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 1);
+    }
+    // Far longer than PATIENCE: only ^C ends it in time.
+    let (path, holder) = start(
+        &sh("echo ready; sleep 600", "echo ready; ping -n 600 127.0.0.1"),
+        PATIENCE,
+    );
+    let mut a = connect(&path);
+    let replay = std::mem::take(&mut a.replay);
+    read_until(&mut a, replay, "ready");
+    // Past `echo`, into the long command, before ^C.
+    std::thread::sleep(Duration::from_millis(500));
+    send(&mut a, Frame::Input(b"\x03".to_vec()));
+    wait_exit(&mut a);
+    holder.join().unwrap().unwrap();
+}
+
 #[test]
 fn orphans_are_live_holders_the_session_does_not_name() {
     let live = vec!["a".to_string(), "b".to_string(), "c".to_string()];

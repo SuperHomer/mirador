@@ -174,6 +174,8 @@ export interface AgentInfo {
 
 export interface AgentWallPaneInfo {
   paneId: string;
+  /** The tab whose agents it shows: the one it was opened from. */
+  tabId: string | null;
 }
 
 export interface AgentRole {
@@ -343,8 +345,9 @@ export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
-export const openAgentWall = (paneId: string | null, tab: boolean) =>
-  invoke<string>("open_agent_wall", { paneId, tab });
+/** The wall for the tab of `paneId` (the focused pane when null). */
+export const openAgentWall = (paneId: string | null) =>
+  invoke<string>("open_agent_wall", { paneId });
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

@@ -171,7 +171,7 @@ export const actions: ActionDef[] = [
     title: "Agent Wall",
     // Every Claude Code agent's terminal in one grid; goes to the wall's
     // tab when there already is one.
-    run: () => void openAgentWall(focusedPane() ?? null, true),
+    run: () => void openAgentWall(focusedPane() ?? null),
   },
   {
     id: "toggle_zoom",

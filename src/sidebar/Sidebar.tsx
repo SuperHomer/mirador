@@ -4,6 +4,7 @@ import {
   AgentInfo,
   TabSnapshot,
   newTab,
+  openAgentWall,
   zoomPane,
   closeTab,
   setActiveTab,
@@ -55,7 +56,16 @@ export function Sidebar() {
           ) : (
             <Fragment key={entry.agent.paneId}>
               {entries[i - 1]?.kind === "tab" && (
-                <div className="sidebar-section">Agents</div>
+                <div className="sidebar-section">
+                  <span>Agents</span>
+                  <button
+                    className="sidebar-wall"
+                    title="Agent wall for this tab (⌘⇧A / Ctrl+Shift+A)"
+                    onClick={() => void openAgentWall(entry.agent.paneId)}
+                  >
+                    ▦ Wall
+                  </button>
+                </div>
               )}
               <AgentRow
                 agent={entry.agent}

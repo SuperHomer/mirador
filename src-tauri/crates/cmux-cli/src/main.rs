@@ -199,13 +199,9 @@ enum AgentAction {
     List,
     /// The roles `agent new --role` accepts.
     Roles,
-    /// Open the agent wall — every agent's terminal in one grid. Goes to
-    /// the existing wall if there is one.
-    Wall {
-        /// Split this pane instead of opening (or going to) a tab.
-        #[arg(long)]
-        split: bool,
-    },
+    /// Open the agent wall for this tab: its agents' terminals in one
+    /// grid, in a tab of its own (the existing wall, if there is one).
+    Wall,
 }
 
 #[derive(Subcommand)]
@@ -405,8 +401,7 @@ fn run(cli: Cli) -> Result<(), String> {
             },
             AgentAction::List => Request::AgentList,
             AgentAction::Roles => return agent_roles(cli.json),
-            AgentAction::Wall { split } => Request::AgentWall {
-                target: split.then(|| "split".to_string()),
+            AgentAction::Wall => Request::AgentWall {
                 pane_id: own_pane(),
             },
         },

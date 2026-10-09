@@ -6,8 +6,7 @@ interface WorkspaceStore {
   /**
    * The tab whose agents the sidebar lists: the active tab, or — while the
    * active tab is the agent wall, which is a way of looking at agents
-   * rather than a place they work — the tab before it, so the wall and
-   * the sidebar keep to the tab you came from.
+   * rather than a place they work — the tab the wall shows.
    */
   currentTab: string | null;
   sidebarVisible: boolean;
@@ -19,16 +18,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   snapshot: null,
   currentTab: null,
   sidebarVisible: true,
-  setSnapshot: (snapshot) =>
-    set((s) => {
-      const tab = activeTab(snapshot);
-      const own = tab && !isWallTab(snapshot, tab) ? tab.id : null;
-      // A remembered tab that has since closed is no tab to list.
-      const kept = snapshot.tabs.some((t) => t.id === s.currentTab)
-        ? s.currentTab
-        : null;
-      return { snapshot, currentTab: own ?? kept };
-    }),
+  setSnapshot: (snapshot) => set({ snapshot, currentTab: currentTab(snapshot) }),
   toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
 }));
 
@@ -43,10 +33,12 @@ function paneIds(node: Node): string[] {
   return node.type === "leaf" ? [node.paneId] : node.children.flatMap(paneIds);
 }
 
-/** The tab holds the agent wall. */
-export function isWallTab(snapshot: WorkspaceSnapshot, tab: TabSnapshot) {
+function currentTab(snapshot: WorkspaceSnapshot): string | null {
+  const tab = activeTab(snapshot);
+  if (!tab) return null;
   const panes = paneIds(tab.root);
-  return snapshot.agentWallPanes.some((w) => panes.includes(w.paneId));
+  const wall = snapshot.agentWallPanes.find((w) => panes.includes(w.paneId));
+  return wall ? wall.tabId : tab.id;
 }
 
 /** The agents the sidebar lists: the current tab's, and no other tab's. */
