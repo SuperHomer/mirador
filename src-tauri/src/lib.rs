@@ -140,6 +140,15 @@ pub fn run() {
             m.startup_input = None;
         }
     }
+    // An agent pane coming back without its process has this long for a
+    // resume to bring Claude back, or for a role to be dropped when there
+    // is nothing to resume. A held one is still running: it gets none.
+    let now = std::time::Instant::now();
+    for (id, m) in meta.iter_mut() {
+        if m.is_agent() && !held_at_launch.contains(id) {
+            m.agent_started_at = Some(now);
+        }
+    }
     // Command panes AND remote (SSH) panes come back idle: relaunching the
     // app must never re-run a command or silently re-open an SSH session.
     let restored_panes: HashSet<String> = meta
@@ -246,6 +255,7 @@ pub fn run() {
             commands::open_agent,
             commands::open_agent_wall,
             commands::mark_pane_read,
+            commands::zoom_pane,
             commands::load_graph,
             commands::graph_show_commit,
             whatsnew::whats_new,

@@ -62,12 +62,9 @@ pub struct TabSnapshot {
     /// TCP ports the tab's processes are listening on.
     #[serde(default)]
     pub ports: Vec<u16>,
-    /// Set when the tab runs a Claude Code agent: what the sidebar calls
-    /// it — the agents' roles, or "Claude" for one started without a role.
-    /// The sidebar lists these tabs apart, below the rest. The agent
-    /// wall's tab does not count; it stays with the others.
+    /// The pane shown alone, filling the tab, when one is.
     #[serde(default)]
-    pub agent: Option<String>,
+    pub zoomed_pane: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +160,14 @@ pub enum Request {
     FocusPane {
         pane_id: String,
     },
+    /// Shows a pane alone, filling its tab; `zoom: false` shows the whole
+    /// tab again, and without `zoom` it toggles.
+    ZoomPane {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        zoom: Option<bool>,
+    },
     SendInput {
         #[serde(default)]
         pane_id: Option<String>,
@@ -221,8 +226,8 @@ pub enum Request {
         #[serde(default)]
         message: Option<String>,
     },
-    /// Starts a Claude Code agent in a new pane (a new tab, or a split of
-    /// the calling pane), with a role's model and prompt from the config.
+    /// Starts a Claude Code agent in a new pane (a split of the calling
+    /// pane, or a new tab), with a role's model and prompt from the config.
     AgentNew {
         /// A role name from `agentRoles`; none starts plain `claude`.
         #[serde(default)]
@@ -230,7 +235,7 @@ pub enum Request {
         /// The first prompt, typed in as Claude's initial message.
         #[serde(default)]
         task: Option<String>,
-        /// "tab" (default) or "split".
+        /// "split" (default) or "tab".
         #[serde(default)]
         target: Option<String>,
         /// The pane a split comes from, and whose directory the agent
@@ -240,10 +245,10 @@ pub enum Request {
     },
     /// Every agent pane and what it is doing.
     AgentList,
-    /// Opens the agent wall (a new tab, or a split of the calling pane).
+    /// Opens the agent wall for the tab of `pane_id` (the focused pane
+    /// when absent): its own tab, reused if there is one, showing that
+    /// tab's agents.
     AgentWall {
-        #[serde(default)]
-        target: Option<String>,
         #[serde(default)]
         pane_id: Option<String>,
     },
@@ -392,6 +397,9 @@ pub enum AgentStatus {
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub pane_id: String,
+    /// The tab holding it.
+    #[serde(default)]
+    pub tab_id: String,
     /// The `agentRoles` entry it was started with.
     pub role: Option<String>,
     /// The role's model, or the `--model` its process was started with;
@@ -401,6 +409,10 @@ pub struct AgentInfo {
     pub status: Option<AgentStatus>,
     /// The last Notification message, e.g. what it needs permission for.
     pub message: Option<String>,
+    /// What its own terminal title says it is on — the session's name or a
+    /// task summary — when that adds to the role (`agents::title_topic`).
+    #[serde(default)]
+    pub topic: Option<String>,
     /// Unix millis of the last status change.
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,
@@ -412,6 +424,9 @@ pub struct AgentInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AgentWallPane {
     pub pane_id: String,
+    /// The tab whose agents it shows: the one it was opened from.
+    #[serde(default)]
+    pub tab_id: Option<String>,
 }
 
 /// A named way to start a Claude Code agent: `agentRoles` in mirador.json.

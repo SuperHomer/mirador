@@ -84,7 +84,8 @@ export function CommandPalette() {
       hint: "open remote pane",
       run: () => void openSsh(null, false, host),
     }));
-    // `agentRoles` become "New Agent: <role>" entries, in a tab of their own.
+    // `agentRoles` become "New Agent: <role>" entries, each splitting the
+    // focused pane — the agent joins the tab you are working in.
     const agents: Entry[] = (agentRoles ?? []).map((r) => ({
       id: `agent:${r.name}`,
       title: `New Agent: ${r.name}`,
@@ -92,7 +93,7 @@ export function CommandPalette() {
       run: () => {
         const { snapshot } = useWorkspaceStore.getState();
         const pane = activeTab(snapshot)?.focusedPane ?? null;
-        void openAgent(r.name, null, pane, true);
+        void openAgent(r.name, null, pane, false);
       },
     }));
     return [...custom, ...agents, ...ssh, ...base];

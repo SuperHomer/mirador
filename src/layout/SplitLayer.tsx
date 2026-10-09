@@ -129,18 +129,36 @@ export function SplitLayer({
     window.addEventListener("pointerup", onUp);
   };
 
+  // One pane shown alone: it fills the layer, and the rest stay mounted at
+  // their own size but out of sight — hidden, not unmounted, so terminals
+  // keep their buffers, and not resized, so their PTYs are left alone.
+  const zoomed =
+    tab.zoomedPane && panes.some((p) => p.paneId === tab.zoomedPane)
+      ? tab.zoomedPane
+      : null;
+  const FULL: Frac = { x: 0, y: 0, w: 1, h: 1 };
+
   return (
     <div className="split-layer" ref={layerRef}>
       {panes.map((p) => {
+        const hidden = zoomed !== null && p.paneId !== zoomed;
+        const shown = active && !hidden;
         const browser = browserPanes.find((b) => b.paneId === p.paneId);
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
-        const wall = agentWallPanes.some((w) => w.paneId === p.paneId);
+        const wall = agentWallPanes.find((w) => w.paneId === p.paneId);
         return (
-          <div key={p.paneId} className="pane-slot" style={frac(p.rect)}>
+          <div
+            key={p.paneId}
+            className="pane-slot"
+            style={{
+              ...frac(p.paneId === zoomed ? FULL : p.rect),
+              ...(hidden ? { visibility: "hidden", pointerEvents: "none" } : {}),
+            }}
+          >
             {wall ? (
-              <AgentWall paneId={p.paneId} visible={active} />
+              <AgentWall paneId={p.paneId} tabId={wall.tabId} visible={shown} />
             ) : browser ? (
               <BrowserPane
                 paneId={p.paneId}
@@ -171,7 +189,7 @@ export function SplitLayer({
               <TerminalPane
                 paneId={p.paneId}
                 focused={p.paneId === tab.focusedPane}
-                visible={active}
+                visible={shown}
                 unread={unreadPanes.includes(p.paneId)}
                 agentCommand={
                   agentPanes.find((a) => a.paneId === p.paneId)?.command
@@ -184,7 +202,7 @@ export function SplitLayer({
           </div>
         );
       })}
-      {dividers.map((d) => (
+      {!zoomed && dividers.map((d) => (
         <div
           key={`${d.path.join(".")}:${d.index}`}
           className={`divider ${d.dir}`}

@@ -14,13 +14,16 @@ import {
   openAgent,
   openAgentWall,
   openWhatsNew,
+  zoomPane,
   installUpdate,
   quitEndingSessions,
 } from "../bindings";
 import {
   useWorkspaceStore,
   activeTab,
-  orderedTabs,
+  sidebarEntries,
+  isCurrentEntry,
+  SidebarEntry,
 } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
@@ -38,13 +41,18 @@ function focusedPane(): string | undefined {
   return activeTab(snapshot)?.focusedPane;
 }
 
+/** Shows a sidebar row: a whole tab, or an agent's pane alone. */
+export function openEntry(entry: SidebarEntry) {
+  if (entry.kind === "tab") void setActiveTab(entry.tab.id);
+  else void zoomPane(entry.agent.paneId, true);
+}
+
 function cycleTab(offset: number) {
-  const { snapshot } = useWorkspaceStore.getState();
-  const tabs = orderedTabs(snapshot);
-  if (!snapshot || tabs.length < 2) return;
-  const idx = tabs.findIndex((t) => t.id === snapshot.activeTab);
-  const next = tabs[(idx + offset + tabs.length) % tabs.length];
-  void setActiveTab(next.id);
+  const { snapshot, currentTab } = useWorkspaceStore.getState();
+  const entries = sidebarEntries(snapshot, currentTab);
+  if (!snapshot || entries.length < 2) return;
+  const idx = entries.findIndex((e) => isCurrentEntry(snapshot, e));
+  openEntry(entries[(idx + offset + entries.length) % entries.length]);
 }
 
 export const actions: ActionDef[] = [
@@ -163,12 +171,22 @@ export const actions: ActionDef[] = [
     title: "Agent Wall",
     // Every Claude Code agent's terminal in one grid; goes to the wall's
     // tab when there already is one.
-    run: () => void openAgentWall(focusedPane() ?? null, true),
+    run: () => void openAgentWall(focusedPane() ?? null),
+  },
+  {
+    id: "toggle_zoom",
+    title: "Toggle Pane Zoom",
+    // The focused pane alone, filling its tab — or the whole tab again.
+    run: () => {
+      const pane = focusedPane();
+      if (pane) void zoomPane(pane);
+    },
   },
   {
     id: "new_agent",
     title: "New Agent (Claude Code)",
-    run: () => void openAgent(null, null, focusedPane() ?? null, true),
+    // Beside the focused pane, in the tab you are working in.
+    run: () => void openAgent(null, null, focusedPane() ?? null, false),
   },
   {
     id: "setup_claude_integration",
@@ -253,9 +271,9 @@ export function runAction(id: string): boolean {
   // tab_1 .. tab_9
   const tabJump = id.match(/^tab_([1-9])$/);
   if (tabJump) {
-    const { snapshot } = useWorkspaceStore.getState();
-    const target = orderedTabs(snapshot)[Number(tabJump[1]) - 1];
-    if (target) void setActiveTab(target.id);
+    const { snapshot, currentTab } = useWorkspaceStore.getState();
+    const target = sidebarEntries(snapshot, currentTab)[Number(tabJump[1]) - 1];
+    if (target) openEntry(target);
     return true;
   }
   return false;

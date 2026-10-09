@@ -281,24 +281,37 @@ prompt appended to Claude Code's own:
 ```
 
 Each role becomes a *New Agent: <role>* palette entry and a `mira agent new
---role <role> [task…]` target. The agent opens in a tab of its own, as a
-shell with `claude --model … --append-system-prompt … --name <role>` typed
-into it, in the directory of the pane it was started from. Exiting Claude
+--role <role> [task…]` target. The agent opens in a pane beside the one you
+are in — it joins the tab you are working in, and its row appears under
+**Agents** — as a shell with `claude --model … --append-system-prompt …
+--name <role>` typed into it, in that pane's directory. (`mira agent new
+--tab` gives it a tab of its own instead.) Exiting Claude
 leaves the shell; restarting Mirador resumes the conversation on the
 role's model.
 
-The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, or `mira agent
-wall`) draws every Claude Code agent in a grid — roles, and any `claude`
-you started by hand. The tiles are the agents' real terminals, moved there
+The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, the **▦ Wall**
+button beside the sidebar's Agents heading, or `mira agent wall`) draws the
+agents of the tab you open it from in a grid, in a tab of its own — roles,
+and any `claude` you started by hand. For another tab's agents, go to that
+tab and open the wall again: the same wall switches to it. The tiles are the agents' real terminals, moved there
 while the wall is on screen, so you can type into one to answer a
 permission prompt without leaving the wall. Each tile shows the role, the
 model, and what the agent is doing: **working**, **needs you** (with what
-for), or **idle**. Click a tile's header to go to the agent's own tab.
+for), or **idle**. Click a tile's header to see that agent alone in its tab.
 
-In the sidebar, tabs running an agent sit apart under an **Agents** heading
-at the bottom, each on one line: ✳ and the role (or *Claude*, for one
-started without a role). The tab shortcuts number them in that order. The
-wall's own tab stays at the top with the rest. A tab moves there when Claude starts in it and back when it exits.
+In the sidebar, every tab is listed as usual, and below them, under an
+**Agents** heading, the agents running in the tab you are on, each on one
+line: ✳ and the role (or *Claude*, for one started without a role).
+Clicking a tab shows the whole tab — Claude beside your dev server, say;
+clicking an agent shows that agent's pane alone, filling its tab, while
+the other panes keep running untouched. Click the tab again for the split.
+Each tab's agents are its own: switch tabs and the section switches with
+you, and every tab shows how many agents it holds (✳ 2), filled in when
+one of them needs you. The tab shortcuts number rows in the order shown.
+
+Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
+or `mira zoom [pane]` (`--off` for the whole tab again).
+
 
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).

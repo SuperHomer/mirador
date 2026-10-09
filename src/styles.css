@@ -89,6 +89,9 @@ body,
    tabs after it, to the foot of the list; when the list overflows it is
    simply the boundary between the two groups. */
 .sidebar-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-top: auto;
   padding: 10px 8px 4px;
   border-top: 1px solid var(--surface);
@@ -98,6 +101,43 @@ body,
   letter-spacing: 0.08em;
   text-transform: uppercase;
   flex-shrink: 0;
+}
+
+/* Opens the agent wall for the current tab, beside the Agents heading. */
+.sidebar-wall {
+  border: 1px solid var(--surface);
+  background: transparent;
+  color: var(--subtext);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 1px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.sidebar-wall:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* How many agents a tab holds. */
+.tab-agents {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: #d97757;
+  border: 1px solid color-mix(in srgb, #d97757 40%, transparent);
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.tab-agents.attention {
+  background: #d97757;
+  color: var(--bg-alt);
+  font-weight: 700;
 }
 
 .tab-row {
@@ -152,7 +192,7 @@ body,
   text-align: left;
 }
 
-/* An agent's tab: a single line, so it does not keep the two-line height. */
+/* An agent's row: a single line, so it does not keep the two-line height. */
 .tab-row.agent {
   min-height: 0;
 }
@@ -167,6 +207,13 @@ body,
 .tab-row.agent .tab-title {
   flex: 1;
   min-width: 0;
+}
+
+.tab-agent-needs {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #fab387;
+  white-space: nowrap;
 }
 
 .tab-title.has-unread {
@@ -1620,10 +1667,24 @@ body,
   color: var(--wall-working);
 }
 
+/* The tab the wall shows. */
+.wall-tab {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 3em;
+}
+
 .wall-new {
   position: relative;
-  margin-left: auto;
   flex-shrink: 0;
+}
+
+.wall-new {
+  margin-left: auto;
 }
 
 .wall-new-button {

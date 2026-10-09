@@ -108,8 +108,9 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
         let meta = state.meta.lock().unwrap();
         meta.iter()
             .filter(|(_, m)| m.agent_wall)
-            .map(|(pane, _)| cmux_protocol::AgentWallPane {
+            .map(|(pane, m)| cmux_protocol::AgentWallPane {
                 pane_id: pane.clone(),
+                tab_id: m.agent_wall_tab.clone(),
             })
             .collect()
     };
@@ -132,20 +133,34 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
 /// or was started with a role and has not exited — in tab and layout
 /// order, which is the order the wall draws them in.
 pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
-    let panes = state.workspace.lock().unwrap().all_pane_ids();
+    let panes: Vec<(String, String)> = {
+        let ws = state.workspace.lock().unwrap();
+        ws.tabs
+            .iter()
+            .flat_map(|t| {
+                cmux_core::layout::pane_ids(&t.root)
+                    .into_iter()
+                    .map(move |p| (t.id.clone(), p))
+            })
+            .collect()
+    };
     let meta = state.meta.lock().unwrap();
     panes
         .into_iter()
-        .filter_map(|pane| {
+        .filter_map(|(tab_id, pane)| {
             let m = meta.get(&pane)?;
             if !m.is_agent() {
                 return None;
             }
             Some(cmux_protocol::AgentInfo {
+                tab_id,
                 role: m.agent_role.clone(),
                 model: m.agent_model.clone(),
                 status: m.agent_status,
                 message: m.agent_message.clone(),
+                topic: m.title.as_deref().and_then(|t| {
+                    cmux_core::agents::title_topic(t, m.agent_role.as_deref())
+                }),
                 since_ms: m.agent_since_ms,
                 cwd: m.cwd.clone(),
                 branch: m.branch.clone(),
@@ -371,6 +386,39 @@ pub fn mark_pane_read(app: AppHandle, state: State<'_, AppState>, pane_id: Strin
     if notify::mark_pane_read(&state, &pane_id) {
         emit_workspace(&app);
     }
+}
+
+/// Shows `pane` alone, filling its tab (activating it), or — with
+/// `zoom: false` — shows the whole tab again. With `zoom` absent it
+/// toggles. The sidebar's agent entries zoom to their agent.
+#[tauri::command]
+pub fn zoom_pane(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    zoom: Option<bool>,
+) -> Result<bool, String> {
+    let zoomed = {
+        let mut ws = state.workspace.lock().unwrap();
+        let is_zoomed = ws
+            .tabs
+            .iter()
+            .any(|t| t.zoomed.as_deref() == Some(pane_id.as_str()));
+        if zoom.unwrap_or(!is_zoomed) {
+            if !ws.zoom_pane(&pane_id) {
+                return Err(format!("no pane {pane_id}"));
+            }
+            true
+        } else {
+            ws.unzoom(&pane_id);
+            false
+        }
+    };
+    if zoomed {
+        notify::mark_pane_read(&state, &pane_id);
+    }
+    emit_workspace(&app);
+    Ok(zoomed)
 }
 
 #[tauri::command]
@@ -1169,9 +1217,9 @@ pub fn graph_show_commit(
     Ok(diff_pane)
 }
 
-/// Starts a Claude Code agent: a shell pane (a new tab — behind the
-/// current one when `background` — or a split of `pane_id`) with `claude`
-/// typed into it, carrying the role's model and
+/// Starts a Claude Code agent: a shell pane (a split of `pane_id` — the
+/// usual way, so the agent works in the tab beside you — or a new tab,
+/// behind the current one when `background`) with `claude` typed into it, carrying the role's model and
 /// prompt and `task` as its first message. A shell rather than a command
 /// pane, as a restored agent is: `/exit` leaves a prompt, and the session
 /// it records resumes like any other.
@@ -1228,6 +1276,7 @@ pub fn open_agent(
         entry.cwd = cwd;
         entry.startup_input = Some(input);
         entry.agent_launched = true;
+        entry.agent_started_at = Some(std::time::Instant::now());
         if let Some(role) = role {
             entry.agent_model = role.model;
             entry.agent_role = Some(role.name);
@@ -1237,58 +1286,55 @@ pub fn open_agent(
     Ok(new_pane)
 }
 
-/// Opens the agent wall: a split of `pane_id`, or a tab of its own. There
-/// is one wall worth having, so asking for a tab when one already exists
-/// goes to it instead of opening a second.
+/// Opens the agent wall for the tab of `pane_id` (the focused pane when
+/// absent): a tab of its own showing that tab's agents. There is one wall:
+/// opened again from another tab it is reused and shows that tab instead —
+/// to look at a tab's agents, go to the tab and open the wall. Never a
+/// split: a wall beside the agents it shows would have nothing to draw, a
+/// terminal being drawn in one place only.
 ///
-/// The wall keeps the directory of the pane it was opened from: agents
-/// started from the wall work there.
+/// The wall keeps the directory of the pane it was opened from.
 #[tauri::command]
 pub fn open_agent_wall(
     app: AppHandle,
     state: State<'_, AppState>,
     pane_id: Option<String>,
-    tab: bool,
 ) -> Result<String, String> {
-    if tab {
-        let existing = {
-            let ws = state.workspace.lock().unwrap();
-            let meta = state.meta.lock().unwrap();
-            ws.all_pane_ids()
-                .into_iter()
-                .find(|p| meta.get(p).is_some_and(|m| m.agent_wall))
-        };
-        if let Some(wall) = existing {
-            focus_pane(app, state, wall.clone());
-            return Ok(wall);
-        }
-    }
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    let new_pane = if tab {
-        let (_, pane) = state.workspace.lock().unwrap().new_tab();
-        pane
-    } else {
-        state
-            .workspace
-            .lock()
-            .unwrap()
-            .split_pane(&source, SplitDir::Row)
-            .ok_or_else(|| format!("no pane {source}"))?
-    };
-    {
+    let wall = {
+        let mut ws = state.workspace.lock().unwrap();
         let mut meta = state.meta.lock().unwrap();
-        let cwd = meta
-            .get(&source)
-            .and_then(|m| m.cwd.clone())
-            .or_else(cmux_core::config::default_cwd);
-        let entry = meta.entry(new_pane.clone()).or_default();
-        entry.cwd = cwd;
+        let existing = ws
+            .all_pane_ids()
+            .into_iter()
+            .find(|p| meta.get(p).is_some_and(|m| m.agent_wall));
+        let current = existing
+            .as_ref()
+            .and_then(|w| meta.get(w))
+            .and_then(|m| m.agent_wall_tab.clone());
+        let target = ws.wall_target(&source, &meta, current.as_deref());
+        let cwd = meta.get(&source).and_then(|m| m.cwd.clone());
+        let wall = match existing {
+            Some(wall) => {
+                ws.focus_pane(&wall);
+                wall
+            }
+            None => ws.new_tab().1,
+        };
+        let entry = meta.entry(wall.clone()).or_default();
         entry.agent_wall = true;
-    }
+        entry.agent_wall_tab = target;
+        if cwd.is_some() {
+            entry.cwd = cwd;
+        } else if entry.cwd.is_none() {
+            entry.cwd = cmux_core::config::default_cwd();
+        }
+        wall
+    };
     emit_workspace(&app);
-    Ok(new_pane)
+    Ok(wall)
 }
 
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY

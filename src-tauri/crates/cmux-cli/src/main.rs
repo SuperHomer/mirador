@@ -39,6 +39,13 @@ enum Command {
     ClosePane { pane: String },
     /// Focus a pane (activates its tab).
     Focus { pane: String },
+    /// Show a pane alone, filling its tab (activates it); again, or with
+    /// --off, shows the whole tab. PANE defaults to the focused pane.
+    Zoom {
+        pane: Option<String>,
+        #[arg(long)]
+        off: bool,
+    },
     /// Type input into a pane's shell.
     SendInput {
         /// Text to send (use --enter to append a newline).
@@ -175,15 +182,16 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AgentAction {
-    /// Start Claude Code in a new tab, with a role's model and prompt from
-    /// `agentRoles` in mirador.json. TASK becomes its first message.
+    /// Start Claude Code in a pane beside this one, with a role's model and
+    /// prompt from `agentRoles` in mirador.json. TASK becomes its first
+    /// message.
     New {
         /// A role name from `agentRoles` (`mira agent roles` lists them).
         #[arg(short, long)]
         role: Option<String>,
-        /// Split this pane instead of opening a tab.
+        /// Open a new tab instead of splitting this pane.
         #[arg(long)]
-        split: bool,
+        tab: bool,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -191,13 +199,9 @@ enum AgentAction {
     List,
     /// The roles `agent new --role` accepts.
     Roles,
-    /// Open the agent wall — every agent's terminal in one grid. Goes to
-    /// the existing wall if there is one.
-    Wall {
-        /// Split this pane instead of opening (or going to) a tab.
-        #[arg(long)]
-        split: bool,
-    },
+    /// Open the agent wall for this tab: its agents' terminals in one
+    /// grid, in a tab of its own (the existing wall, if there is one).
+    Wall,
 }
 
 #[derive(Subcommand)]
@@ -305,6 +309,10 @@ fn run(cli: Cli) -> Result<(), String> {
         },
         Command::ClosePane { pane } => Request::ClosePane { pane_id: pane },
         Command::Focus { pane } => Request::FocusPane { pane_id: pane },
+        Command::Zoom { pane, off } => Request::ZoomPane {
+            pane_id: pane,
+            zoom: off.then_some(false),
+        },
         Command::SendInput { data, pane, enter } => Request::SendInput {
             pane_id: pane,
             data: if enter { format!("{data}\n") } else { data },
@@ -385,16 +393,15 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Agent { action } => match action {
-            AgentAction::New { role, split, task } => Request::AgentNew {
+            AgentAction::New { role, tab, task } => Request::AgentNew {
                 role,
                 task: (!task.is_empty()).then(|| task.join(" ")),
-                target: split.then(|| "split".to_string()),
+                target: Some(if tab { "tab" } else { "split" }.to_string()),
                 pane_id: own_pane(),
             },
             AgentAction::List => Request::AgentList,
             AgentAction::Roles => return agent_roles(cli.json),
-            AgentAction::Wall { split } => Request::AgentWall {
-                target: split.then(|| "split".to_string()),
+            AgentAction::Wall => Request::AgentWall {
                 pane_id: own_pane(),
             },
         },

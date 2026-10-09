@@ -212,6 +212,13 @@ export const TerminalPane = memo(function TerminalPane({
         // silently dropped.
         exited = false;
         pendingAck = 0;
+        // Resizes while attaching were dropped (no PTY to take them), and
+        // the layout often settles in exactly that window — right after a
+        // split. A shell left at the old width redraws its line for a
+        // width the terminal is not drawing: typed text lands a column off
+        // and the prompt is overwritten. Say the real size once more; a
+        // resize to the size it already has signals nothing.
+        void resizePty(paneId, term.cols, term.rows);
         const buf = term.buffer.active;
         if (
           status === "reattached" &&

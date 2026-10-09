@@ -135,6 +135,12 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::commands::focus_pane(app.clone(), app.state(), pane_id);
             Ok(Value::Null)
         }
+        Request::ZoomPane { pane_id, zoom } => {
+            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            let zoomed =
+                crate::commands::zoom_pane(app.clone(), app.state(), pane.clone(), zoom)?;
+            Ok(json!({ "paneId": pane, "zoomed": zoomed }))
+        }
         Request::SendInput { pane_id, data } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             state.pty.write(&pane, data.as_bytes())?;
@@ -236,7 +242,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 role,
                 task,
                 pane_id,
-                target.as_deref() != Some("split"),
+                // Beside the pane it was asked from, in the tab you work in;
+                // a tab of its own only when asked for one.
+                target.as_deref() == Some("tab"),
                 false,
             )?;
             Ok(json!({ "paneId": pane_id }))
@@ -245,13 +253,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let agents = crate::commands::agent_infos(&state);
             Ok(json!({ "agents": agents }))
         }
-        Request::AgentWall { target, pane_id } => {
-            let pane_id = crate::commands::open_agent_wall(
-                app.clone(),
-                app.state(),
-                pane_id,
-                target.as_deref() != Some("split"),
-            )?;
+        Request::AgentWall { pane_id } => {
+            let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;
             Ok(json!({ "paneId": pane_id }))
         }
         Request::Run {

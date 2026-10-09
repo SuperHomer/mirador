@@ -27,11 +27,8 @@ export interface TabSnapshot {
   branch: string | null;
   pr: PrStatus | null;
   ports: number[];
-  /**
-   * Set when the tab runs a Claude Code agent: its roles, or "Claude" for
-   * one without a role. The wall's tab does not count.
-   */
-  agent: string | null;
+  /** The pane shown alone, filling the tab, when one is. */
+  zoomedPane: string | null;
 }
 
 export interface AgentPane {
@@ -163,11 +160,15 @@ export type AgentStatus = "working" | "needsYou" | "idle";
 /** A pane running a Claude Code agent. */
 export interface AgentInfo {
   paneId: string;
+  /** The tab holding it. */
+  tabId: string;
   role: string | null;
   model: string | null;
   /** Null until its first hook arrives. */
   status: AgentStatus | null;
   message: string | null;
+  /** What its own terminal title says it is on, when that adds to the role. */
+  topic: string | null;
   sinceMs: number | null;
   cwd: string | null;
   branch: string | null;
@@ -175,6 +176,8 @@ export interface AgentInfo {
 
 export interface AgentWallPaneInfo {
   paneId: string;
+  /** The tab whose agents it shows: the one it was opened from. */
+  tabId: string | null;
 }
 
 export interface AgentRole {
@@ -339,10 +342,14 @@ export const openAgent = (
   tab: boolean,
   background = false,
 ) => invoke<string>("open_agent", { role, task, paneId, tab, background });
+/** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
+export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
+  invoke<boolean>("zoom_pane", { paneId, zoom });
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
-export const openAgentWall = (paneId: string | null, tab: boolean) =>
-  invoke<string>("open_agent_wall", { paneId, tab });
+/** The wall for the tab of `paneId` (the focused pane when null). */
+export const openAgentWall = (paneId: string | null) =>
+  invoke<string>("open_agent_wall", { paneId });
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

@@ -39,6 +39,8 @@ pub struct SessionPane {
     pub agent_role: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub agent_wall: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_wall_tab: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +131,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
                         agent_wall: m.is_some_and(|m| m.agent_wall),
+                        agent_wall_tab: m.and_then(|m| m.agent_wall_tab.clone()),
                     },
                 )
             })
@@ -170,6 +173,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             title: t.title,
             root: t.root,
             focused,
+            zoomed: None,
         });
     }
     if tabs.is_empty() {
@@ -197,6 +201,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     diff_spec: p.diff_spec,
                     agent_role: p.agent_role,
                     agent_wall: p.agent_wall,
+                    agent_wall_tab: p.agent_wall_tab,
                     ..Default::default()
                 },
             )
@@ -268,6 +273,7 @@ mod tests {
                 agent_role: Some("reviewer".into()),
                 agent_status: Some(cmux_protocol::AgentStatus::Working),
                 agent_wall: true,
+                agent_wall_tab: Some("tab-1".into()),
                 ..Default::default()
             },
         );
@@ -287,6 +293,7 @@ mod tests {
         // ever what this run heard.
         assert_eq!(rmeta[&b].agent_role.as_deref(), Some("reviewer"));
         assert!(rmeta[&b].agent_wall);
+        assert_eq!(rmeta[&b].agent_wall_tab.as_deref(), Some("tab-1"));
         assert_eq!(rmeta[&b].agent_status, None);
         assert!(!rmeta[&a].agent_wall);
         assert_eq!(rmeta[&c].command.as_deref(), Some("npm test"));

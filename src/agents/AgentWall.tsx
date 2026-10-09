@@ -4,9 +4,9 @@ import {
   AgentStatus,
   Node,
   closePane,
-  focusPane,
   markPaneRead,
   openAgent,
+  zoomPane,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
@@ -20,6 +20,8 @@ import {
 
 type Props = {
   paneId: string;
+  /** The tab whose agents it shows: the one it was opened from. */
+  tabId: string | null;
   /** The wall's tab is the one on screen: only then does it borrow. */
   visible: boolean;
 };
@@ -56,26 +58,29 @@ function columns(n: number): number {
  * Agents in the wall's own tab are left out: they are already on screen,
  * and a terminal can only be drawn in one place.
  */
-export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
+export const AgentWall = memo(function AgentWall({
+  paneId,
+  tabId,
+  visible,
+}: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
+  // The tab it shows; gone if that tab has closed since.
+  const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const roles = useConfigStore((s) => s.config?.agentRoles ?? []);
   const [menuOpen, setMenuOpen] = useState(false);
   const now = useNow(visible);
 
-  const { tiles, tabTitle } = useMemo(() => {
+  const tiles = useMemo(() => {
     const tabOf = new Map<string, { id: string; title: string }>();
     for (const t of snapshot?.tabs ?? []) {
       for (const p of paneIds(t.root)) tabOf.set(p, { id: t.id, title: t.title });
     }
     const ownTab = tabOf.get(paneId)?.id;
     const tiles = (snapshot?.agents ?? []).filter(
-      (a) => tabOf.get(a.paneId)?.id !== ownTab,
+      (a) => a.tabId === tabId && tabOf.get(a.paneId)?.id !== ownTab,
     );
-    return {
-      tiles,
-      tabTitle: (pane: string) => tabOf.get(pane)?.title ?? "",
-    };
-  }, [snapshot, paneId]);
+    return tiles;
+  }, [snapshot, paneId, tabId]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
@@ -83,16 +88,24 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
 
   const start = (role: string | null) => {
     setMenuOpen(false);
-    // A new agent opens in a tab of its own, behind the wall, and shows up
-    // in it as a new tile. Switching to that tab and back would hide the
-    // wall and resize every agent twice.
-    void openAgent(role, null, paneId, true, true);
+    // Like everywhere else, the agent joins a tab rather than getting its
+    // own: it splits the focused pane of the tab the wall shows (the
+    // wall's own tab is no place to work). That tab is behind the wall, so
+    // the wall stays on screen and gains a tile. With that tab gone, a tab
+    // of its own, also behind the wall.
+    if (shown) void openAgent(role, null, shown.focusedPane, false);
+    else void openAgent(role, null, paneId, true, true);
   };
 
   return (
     <div className="pane agent-wall">
       <div className="wall-chrome">
         <span className="wall-badge">Agents</span>
+        {shown && (
+          <span className="wall-tab" title="The tab this wall shows the agents of">
+            {shown.title}
+          </span>
+        )}
         <span className="wall-counts">
           {tiles.length === 0 ? (
             "none running"
@@ -152,11 +165,15 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
 
       {tiles.length === 0 ? (
         <div className="wall-empty">
-          <p>No Claude Code agents running in other tabs.</p>
+          <p>
+            {shown
+              ? `No Claude Code agents in ${shown.title}.`
+              : "The tab this wall showed has closed."}
+          </p>
           <p className="wall-empty-hint">
             Start one with <em>+ New agent</em>, or run <code>claude</code> in
-            any pane — with the Claude Code integration set up, it appears
-            here.
+            a pane of that tab. For another tab's agents, go to the tab and
+            open the wall from there.
           </p>
         </div>
       ) : (
@@ -168,7 +185,6 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
             <WallTile
               key={a.paneId}
               agent={a}
-              where={tabTitle(a.paneId)}
               unread={unread.includes(a.paneId)}
               visible={visible}
               now={now}
@@ -182,13 +198,11 @@ export const AgentWall = memo(function AgentWall({ paneId, visible }: Props) {
 
 function WallTile({
   agent,
-  where,
   unread,
   visible,
   now,
 }: {
   agent: AgentInfo;
-  where: string;
   unread: boolean;
   visible: boolean;
   now: number;
@@ -251,15 +265,14 @@ function WallTile({
     >
       <div
         className="wall-tile-head"
-        title="Go to this agent's tab"
-        onClick={() => void focusPane(pane)}
+        title="Show this agent in its tab"
+        onClick={() => void zoomPane(pane, true)}
       >
         <span className="wall-dot" />
         <span className="wall-role">{agent.role ?? "claude"}</span>
         {agent.model && <span className="wall-model">{agent.model}</span>}
         <span className="wall-where">
-          {where}
-          {agent.branch && ` · ${agent.branch}`}
+          {[agent.topic, agent.branch].filter(Boolean).join(" · ")}
         </span>
         <span className="wall-status">
           {status ? STATUS_LABEL[status] : "—"}

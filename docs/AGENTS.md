@@ -164,13 +164,14 @@ it takes the repository from the pane it ran in and refuses outside one.
 
 ```bash
 mira agent roles                              # agentRoles from mirador.json
-mira agent new --role reviewer "review the auth change"   # new tab
-mira agent new --split "fix the flaky test"   # plain claude, split of this pane
+mira agent new --role reviewer "review the auth change"   # a pane beside this one
+mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, role, model
-mira agent wall                               # the grid of every agent
+mira agent wall                               # this tab's agents, in a grid
 ```
 
-`agent new` opens a shell and types `claude` into it with the role's
+`agent new` splits the pane it runs in (the focused pane, from outside
+Mirador), opens a shell there and types `claude` into it with the role's
 `--model`, `--append-system-prompt` and `--name`, and the task as the first
 message — so `/exit` leaves a prompt, and the session resumes like any other
 (on the role's model). The arguments are quoted for the pane's shell and put
@@ -187,6 +188,8 @@ mira list-tabs                 # tabs + panes, focus markers (--json for data)
 mira new-tab --command "htop"
 mira split --dir column --command "npm run dev"
 mira focus <pane>
+mira zoom <pane>               # that pane alone, filling its tab
+mira zoom <pane> --off         # the whole tab again
 mira close-pane <pane>
 mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
@@ -228,7 +231,7 @@ Newline-delimited JSON on the socket named in the discovery file:
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session agent_new agent_list
-agent_wall browser_open
+agent_wall zoom_pane browser_open
 browser_navigate browser_snapshot browser_click browser_fill browser_eval
 browser_history ssh_open ssh_hosts ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
