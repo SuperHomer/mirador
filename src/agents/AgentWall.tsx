@@ -70,7 +70,7 @@ export const AgentWall = memo(function AgentWall({
   const [menuOpen, setMenuOpen] = useState(false);
   const now = useNow(visible);
 
-  const { tiles, tabTitle } = useMemo(() => {
+  const tiles = useMemo(() => {
     const tabOf = new Map<string, { id: string; title: string }>();
     for (const t of snapshot?.tabs ?? []) {
       for (const p of paneIds(t.root)) tabOf.set(p, { id: t.id, title: t.title });
@@ -79,10 +79,7 @@ export const AgentWall = memo(function AgentWall({
     const tiles = (snapshot?.agents ?? []).filter(
       (a) => a.tabId === tabId && tabOf.get(a.paneId)?.id !== ownTab,
     );
-    return {
-      tiles,
-      tabTitle: (pane: string) => tabOf.get(pane)?.title ?? "",
-    };
+    return tiles;
   }, [snapshot, paneId, tabId]);
 
   const unread = snapshot?.unreadPanes ?? [];
@@ -188,7 +185,6 @@ export const AgentWall = memo(function AgentWall({
             <WallTile
               key={a.paneId}
               agent={a}
-              where={tabTitle(a.paneId)}
               unread={unread.includes(a.paneId)}
               visible={visible}
               now={now}
@@ -202,13 +198,11 @@ export const AgentWall = memo(function AgentWall({
 
 function WallTile({
   agent,
-  where,
   unread,
   visible,
   now,
 }: {
   agent: AgentInfo;
-  where: string;
   unread: boolean;
   visible: boolean;
   now: number;
@@ -278,8 +272,7 @@ function WallTile({
         <span className="wall-role">{agent.role ?? "claude"}</span>
         {agent.model && <span className="wall-model">{agent.model}</span>}
         <span className="wall-where">
-          {where}
-          {agent.branch && ` · ${agent.branch}`}
+          {[agent.topic, agent.branch].filter(Boolean).join(" · ")}
         </span>
         <span className="wall-status">
           {status ? STATUS_LABEL[status] : "—"}

@@ -167,6 +167,8 @@ export interface AgentInfo {
   /** Null until its first hook arrives. */
   status: AgentStatus | null;
   message: string | null;
+  /** What its own terminal title says it is on, when that adds to the role. */
+  topic: string | null;
   sinceMs: number | null;
   cwd: string | null;
   branch: string | null;

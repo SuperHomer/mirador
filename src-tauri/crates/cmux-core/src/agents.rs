@@ -198,6 +198,23 @@ pub fn forget_agent(
     seen || waited.is_some_and(|w| w >= START_GRACE)
 }
 
+/// What an agent's own terminal title says it is working on, for its tile:
+/// Claude Code titles its terminal with its session's name or a summary of
+/// the task, behind a status glyph it animates (`✳`, `✶`, `⠂`, …). The
+/// glyph is dropped, and so is a title that says nothing the tile does not
+/// already — empty, Claude Code's own name, or the agent's role.
+pub fn title_topic(title: &str, role: Option<&str>) -> Option<String> {
+    let topic = title
+        .trim()
+        .trim_start_matches(|c: char| !c.is_alphanumeric())
+        .trim();
+    let same = |other: &str| topic.eq_ignore_ascii_case(other);
+    if topic.is_empty() || same("Claude Code") || same("claude") || role.is_some_and(same) {
+        return None;
+    }
+    Some(topic.to_string())
+}
+
 /// The `--model` a Claude Code command line asks for.
 pub fn model_flag(args: &str) -> Option<String> {
     let mut words = args.split_whitespace();
@@ -646,5 +663,17 @@ mod tests {
         // Never seen and never started by us (a hook-recorded session the
         // poller has not caught yet): left alone.
         assert!(!forget_agent(false, false, false, None));
+    }
+
+    #[test]
+    fn a_title_names_what_the_agent_is_on() {
+        assert_eq!(title_topic("✳ Agent wall tile column logic", None).as_deref(), Some("Agent wall tile column logic"));
+        assert_eq!(title_topic("⠂ Fix the flaky test", Some("coder")).as_deref(), Some("Fix the flaky test"));
+        // The role's own name, Claude Code's, or nothing: no label.
+        assert_eq!(title_topic("✳ reviewer", Some("reviewer")), None);
+        assert_eq!(title_topic("✳ Claude Code", None), None);
+        assert_eq!(title_topic("  ✶  ", None), None);
+        // Another agent's name is not this one's role, and is kept.
+        assert_eq!(title_topic("✳ planner", Some("reviewer")).as_deref(), Some("planner"));
     }
 }

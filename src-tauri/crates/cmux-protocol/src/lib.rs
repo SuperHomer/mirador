@@ -409,6 +409,10 @@ pub struct AgentInfo {
     pub status: Option<AgentStatus>,
     /// The last Notification message, e.g. what it needs permission for.
     pub message: Option<String>,
+    /// What its own terminal title says it is on — the session's name or a
+    /// task summary — when that adds to the role (`agents::title_topic`).
+    #[serde(default)]
+    pub topic: Option<String>,
     /// Unix millis of the last status change.
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,

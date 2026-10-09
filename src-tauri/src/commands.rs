@@ -158,6 +158,9 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 model: m.agent_model.clone(),
                 status: m.agent_status,
                 message: m.agent_message.clone(),
+                topic: m.title.as_deref().and_then(|t| {
+                    cmux_core::agents::title_topic(t, m.agent_role.as_deref())
+                }),
                 since_ms: m.agent_since_ms,
                 cwd: m.cwd.clone(),
                 branch: m.branch.clone(),
