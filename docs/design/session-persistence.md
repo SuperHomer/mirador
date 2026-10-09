@@ -200,8 +200,10 @@ the last one ride in `HolderHello` as trailing fields.
 
 The design carries over: the holder owns the ConPTY, the socket is a named
 pipe (`\\.\pipe\mirador-hold-<user>-<pane>`), and the app starts the holder
-detached — no console, its own process group, and outside the app's job
-object where the job allows breakaway — so it isn't killed with the app.
+detached — no console, and outside the app's job object where the job
+allows breakaway — so it isn't killed with the app. Not in a new process
+group: that starts a process ignoring Ctrl+C, every descendant inherits
+it, and ^C in a pane stopped nothing (the holder also clears the flag).
 Three things differ from unix:
 
 - **Overlapped pipe I/O.** A holder connection is full duplex, and Windows
