@@ -189,6 +189,10 @@ the last one ride in `HolderHello` as trailing fields.
   the previous version. Holders started after the update get the new one. If
   a version is ever truly incompatible, the pane must say so rather than
   silently restoring over a live process.
+  On Windows a running `mira.exe` cannot be overwritten, so the installer
+  renames it aside first (`src-tauri/windows/hooks.nsh`); without that the
+  update stopped on "Error opening file for writing", and skipping the file
+  left new holders on the old binary.
 - **Restored panes must not act on their own** still holds. Reattaching is
   not acting: the process never stopped. The fallback restore keeps today's
   rules.
