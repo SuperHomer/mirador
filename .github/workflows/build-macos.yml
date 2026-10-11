@@ -92,7 +92,10 @@ jobs:
               --config '{"bundle":{"createUpdaterArtifacts":false}}'
           fi
 
-      # Unsigned (no Developer ID), so first launch needs right-click → Open.
+      # No Developer ID: the bundle is ad-hoc signed (tauri.conf.json's
+      # signingIdentity "-"), so first launch needs Open Anyway. Without that
+      # seal only the linker's per-binary signature exists, Info.plist and
+      # resources are unbound, and a downloaded copy is reported "damaged".
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mirador-macos

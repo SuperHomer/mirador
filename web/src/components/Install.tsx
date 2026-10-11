@@ -11,8 +11,8 @@ type Step = { text: string; code?: string; note?: string };
 const MACOS: Step[] = [
   { text: "Open the .dmg and drag Mirador.app to /Applications." },
   {
-    text: "First launch: right-click the app → Open.",
-    note: "The build is unsigned (no Developer ID), so a double-click gets stopped by Gatekeeper. macOS remembers the choice — you only do this once.",
+    text: "First launch: System Settings → Privacy & Security → Open Anyway.",
+    note: "The build has no Developer ID, so Gatekeeper stops the first launch. Before macOS 15, right-click the app → Open instead. macOS remembers the choice — you only do this once.",
   },
   {
     text: "Using Claude Code? Click Set up when Mirador offers it.",
