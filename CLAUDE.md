@@ -254,9 +254,10 @@ bridge. Anything remote that reaches it is untrusted:
   it that way). Automation results leave the page by navigating to a
   `mira-result://` URL that Rust intercepts and cancels. Don't give that
   bridge a shortcut back into Tauri commands.
-- Updater payloads are verified against the public key in `tauri.conf.json`.
-  There is no Apple signature; the minisign key is the only thing protecting
-  an install.
+- Updater payloads are verified against the public key in `tauri.conf.json`,
+  not against the Apple signature: the minisign key is what protects an
+  in-place update. Release builds also carry a Developer ID signature and
+  Apple's notarization, which is what lets a *download* past Gatekeeper.
 
 ## Conventions
 
@@ -301,7 +302,7 @@ reopens the window where `/releases/latest/` names a release with no
 which is what the old publish-then-build order did. A failed build leaves
 an invisible draft; re-run the failed jobs.
 
-Two things about that, both learned the hard way:
+Three things about that, all learned the hard way:
 
 - **The release body is user-facing UI.** The What's New pane renders it after
   an update, and the update manifests carry it verbatim — read from the
@@ -313,6 +314,18 @@ Two things about that, both learned the hard way:
   build path. Only Dependabot PRs and forks exercise the keyless one; to test
   that, run `env -u TAURI_SIGNING_PRIVATE_KEY npm run tauri build` locally.
   Broken, it fails hard: "A public key has been found, but no private key."
+- **Only tag builds are Developer ID signed and notarized.** The Apple
+  certificate and notary key reach `build-macos.yml` on a tag, or on a
+  manual run with `gh workflow run build-macos.yml --ref <branch> -f
+  notarize=true`, and nowhere else. PR builds are ad-hoc signed
+  (`signingIdentity: "-"`). So a PR's green build says nothing about
+  notarization; anything touching signing, entitlements or the bundle's
+  contents needs that manual run. Then download its DMG, set
+  `com.apple.quarantine` on it, and `spctl --assess`. A local build is
+  never quarantined, so Gatekeeper never looks at it: v0.1.25 shipped a
+  bundle nothing had sealed, every download was reported "damaged", and
+  every local launch worked. The workflow's verify step now fails such a
+  build.
 
 Gate a release on the sandbox checks under *Verifying a change*, run on the
 release commit, not on CI alone — a React/react-dom mismatch that rendered
