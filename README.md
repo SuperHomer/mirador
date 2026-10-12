@@ -72,15 +72,9 @@ PATH, the hooks and `/mira-diff` — in one click. To do it by hand instead
 mira hooks setup                                        # Claude Code integration
 ```
 
-The build has no Developer ID (it is ad-hoc signed, not notarized), so
-Gatekeeper stops the first launch. On macOS 15 and later, open **System
-Settings → Privacy & Security** and click **Open Anyway**; on earlier
-versions, right-click the app → **Open**. macOS remembers the choice. Or
-clear the quarantine flag from a terminal:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Mirador.app
-```
+Release builds are signed with a Developer ID and notarized by Apple, so
+they open with a double-click. A build you make yourself is only ad-hoc
+signed; macOS won't stop it, since a local build is never quarantined.
 
 ## Install (Windows)
 

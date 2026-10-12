@@ -11,10 +11,6 @@ type Step = { text: string; code?: string; note?: string };
 const MACOS: Step[] = [
   { text: "Open the .dmg and drag Mirador.app to /Applications." },
   {
-    text: "First launch: System Settings → Privacy & Security → Open Anyway.",
-    note: "The build has no Developer ID, so Gatekeeper stops the first launch. Before macOS 15, right-click the app → Open instead. macOS remembers the choice — you only do this once.",
-  },
-  {
     text: "Using Claude Code? Click Set up when Mirador offers it.",
     note: "One click puts the mira CLI on your PATH and wires the hooks: tabs light up when your agent needs you, and panes resume their session.",
   },
