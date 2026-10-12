@@ -24,6 +24,11 @@ on:
   # release.yml calls this on a tag push and does the attaching itself.
   workflow_call:
   workflow_dispatch:
+    inputs:
+      notarize:
+        description: Sign with the Developer ID and notarize, as a release does
+        type: boolean
+        default: false
 
 # The build runs `npm ci` and `cargo build`, i.e. dependency build scripts.
 # Those must never hold a token that can write to the repository; the jobs
@@ -72,10 +77,38 @@ jobs:
 
       # TAURI_SIGNING_PRIVATE_KEY makes the build emit the updater payload
       # (Mirador.app.tar.gz) plus a detached .sig.
+      #
+      # The Developer ID certificate and the notarization key reach only tag
+      # builds (release.yml) and a manual run that asks for them. This step
+      # runs cargo build scripts from the whole dependency graph, so every PR
+      # build holding the certificate would hand it to third-party code for
+      # nothing; and notarizing adds minutes to a build no one downloads.
+      # Everywhere else the bundle is ad-hoc signed — tauri.conf.json's
+      # signingIdentity "-", which APPLE_SIGNING_IDENTITY overrides.
       - name: Build app + .dmg
         env:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          DEVID_CERT: ${{ (github.ref_type == 'tag' || inputs.notarize) && secrets.APPLE_CERTIFICATE || '' }}
+          DEVID_CERT_PASSWORD: ${{ (github.ref_type == 'tag' || inputs.notarize) && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          DEVID_IDENTITY: ${{ (github.ref_type == 'tag' || inputs.notarize) && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          NOTARY_KEY_ID: ${{ (github.ref_type == 'tag' || inputs.notarize) && secrets.APPLE_API_KEY || '' }}
+          NOTARY_ISSUER: ${{ (github.ref_type == 'tag' || inputs.notarize) && secrets.APPLE_API_ISSUER || '' }}
+          NOTARY_KEY_P8: ${{ (github.ref_type == 'tag' || inputs.notarize) && secrets.APPLE_API_KEY_P8 || '' }}
         run: |
+          # Same rule as the updater key below: an empty APPLE_* variable is
+          # not the same as an absent one to tauri, so they are exported only
+          # when set. Tauri imports the certificate into a temporary keychain,
+          # signs mira, mirador and the .app with the hardened runtime, sends
+          # the .app to Apple's notary service, and staples the ticket.
+          if [ -n "$DEVID_CERT" ]; then
+            export APPLE_CERTIFICATE="$DEVID_CERT"
+            export APPLE_CERTIFICATE_PASSWORD="$DEVID_CERT_PASSWORD"
+            export APPLE_SIGNING_IDENTITY="$DEVID_IDENTITY"
+            export APPLE_API_KEY="$NOTARY_KEY_ID"
+            export APPLE_API_ISSUER="$NOTARY_ISSUER"
+            export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
+            printf '%s\n' "$NOTARY_KEY_P8" > "$APPLE_API_KEY_PATH"
+          fi
           # Dependabot runs read a separate secret store, so this is empty
           # for them; an empty TAURI_SIGNING_PRIVATE_KEY is worse than none,
           # tauri reads it as malformed ("Missing comment in secret key").
@@ -91,8 +124,42 @@ jobs:
             npm run tauri build -- \
               --config '{"bundle":{"createUpdaterArtifacts":false}}'
           fi
+          # Tauri notarizes the .app but only signs the .dmg around it, and
+          # Gatekeeper assesses a quarantined disk image on its own when it
+          # is opened: signed but unnotarized, it comes up "rejected", before
+          # anyone reaches the app. So the image goes to the notary too.
+          if [ -n "$DEVID_CERT" ]; then
+            for dmg in src-tauri/target/release/bundle/dmg/*.dmg; do
+              xcrun notarytool submit "$dmg" --wait \
+                --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
+                --issuer "$APPLE_API_ISSUER"
+              xcrun stapler staple "$dmg"
+            done
+          fi
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
 
-      # Unsigned (no Developer ID), so first launch needs right-click → Open.
+      # v0.1.25 shipped a bundle nothing had sealed — only the linker's
+      # per-binary signature, Info.plist and resources unbound — and macOS
+      # called every downloaded copy "damaged". Nothing caught it because
+      # nothing looked. Every build is checked now; a Developer ID build must
+      # also pass Gatekeeper as notarized, with the ticket stapled, since
+      # that is the only reason to sign it that way.
+      - name: Verify the signature
+        env:
+          DEVELOPER_ID: ${{ (github.ref_type == 'tag' || inputs.notarize) && 'yes' || '' }}
+        run: |
+          app=src-tauri/target/release/bundle/macos/Mirador.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Authority|TeamIdentifier|Signature|Info.plist|Sealed'
+          if [ -n "$DEVELOPER_ID" ]; then
+            spctl --assess --type execute --verbose=2 "$app"
+            xcrun stapler validate "$app"
+            for dmg in src-tauri/target/release/bundle/dmg/*.dmg; do
+              spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+              xcrun stapler validate "$dmg"
+            done
+          fi
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mirador-macos

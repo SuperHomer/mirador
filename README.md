@@ -72,8 +72,10 @@ PATH, the hooks and `/mira-diff` — in one click. To do it by hand instead
 mira hooks setup                                        # Claude Code integration
 ```
 
-The build is unsigned (no Developer ID), so the first launch needs
-right-click → **Open** to get past Gatekeeper. macOS remembers the choice.
+Release builds are signed with a Developer ID and notarized by Apple, so
+the first launch only asks to confirm opening an app downloaded from the
+internet — click **Open**. A build you make yourself is only ad-hoc
+signed; macOS won't stop it, since a local build is never quarantined.
 
 ## Install (Windows)
 
