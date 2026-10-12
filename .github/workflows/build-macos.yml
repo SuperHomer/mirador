@@ -124,6 +124,18 @@ jobs:
             npm run tauri build -- \
               --config '{"bundle":{"createUpdaterArtifacts":false}}'
           fi
+          # Tauri notarizes the .app but only signs the .dmg around it, and
+          # Gatekeeper assesses a quarantined disk image on its own when it
+          # is opened: signed but unnotarized, it comes up "rejected", before
+          # anyone reaches the app. So the image goes to the notary too.
+          if [ -n "$DEVID_CERT" ]; then
+            for dmg in src-tauri/target/release/bundle/dmg/*.dmg; do
+              xcrun notarytool submit "$dmg" --wait \
+                --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
+                --issuer "$APPLE_API_ISSUER"
+              xcrun stapler staple "$dmg"
+            done
+          fi
           rm -f "$RUNNER_TEMP"/AuthKey_*.p8
 
       # v0.1.25 shipped a bundle nothing had sealed — only the linker's
@@ -142,6 +154,10 @@ jobs:
           if [ -n "$DEVELOPER_ID" ]; then
             spctl --assess --type execute --verbose=2 "$app"
             xcrun stapler validate "$app"
+            for dmg in src-tauri/target/release/bundle/dmg/*.dmg; do
+              spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+              xcrun stapler validate "$dmg"
+            done
           fi
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
