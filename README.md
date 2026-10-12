@@ -73,7 +73,8 @@ mira hooks setup                                        # Claude Code integratio
 ```
 
 Release builds are signed with a Developer ID and notarized by Apple, so
-they open with a double-click. A build you make yourself is only ad-hoc
+the first launch only asks to confirm opening an app downloaded from the
+internet — click **Open**. A build you make yourself is only ad-hoc
 signed; macOS won't stop it, since a local build is never quarantined.
 
 ## Install (Windows)
