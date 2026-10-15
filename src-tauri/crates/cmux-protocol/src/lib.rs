@@ -459,6 +459,11 @@ pub struct AgentInfo {
     pub harness: Harness,
     /// The `agentRoles` entry it was started with.
     pub role: Option<String>,
+    /// Whether it has activity to show (`agent activity`, the panel, the
+    /// wall's list): a Claude Code agent whose hooks said where its
+    /// transcript is. The one place that rule lives.
+    #[serde(default)]
+    pub has_activity: bool,
     /// The session's name, as `claude agents` lists it: one given with
     /// `--name` or `/rename`, or one Claude Code made up.
     #[serde(default)]

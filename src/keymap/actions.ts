@@ -180,7 +180,10 @@ export const actions: ActionDef[] = [
     // the same as right-clicking the agent in the sidebar.
     run: () => {
       const pane = focusedPane();
-      if (pane) useUiStore.getState().openActivity(pane);
+      const agent = useWorkspaceStore
+        .getState()
+        .snapshot?.agents.find((a) => a.paneId === pane);
+      if (pane && agent?.hasActivity) useUiStore.getState().openActivity(pane);
     },
   },
   {

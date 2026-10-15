@@ -202,6 +202,8 @@ export interface AgentInfo {
   /** What it runs. Only Claude Code has hooks, and so a status. */
   harness: Harness;
   role: string | null;
+  /** A Claude Code agent whose transcript is known: activity to show. */
+  hasActivity: boolean;
   /** The Claude Code session's name, as `claude agents` lists it. */
   name: string | null;
   model: string | null;

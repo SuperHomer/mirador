@@ -210,6 +210,12 @@ impl PaneMeta {
         changed
     }
 
+    /// Whether its activity can be read: a Claude Code agent whose hooks
+    /// reported its transcript.
+    pub fn has_activity(&self) -> bool {
+        self.harness() == Some(cmux_protocol::Harness::Claude) && self.agent_transcript.is_some()
+    }
+
     /// What the agent is doing: what its hooks said, else what Claude
     /// Code's session file says.
     pub fn status(&self) -> Option<cmux_protocol::AgentStatus> {

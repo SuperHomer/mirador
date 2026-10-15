@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AgentActivity,
   agentLabel,
@@ -53,10 +53,11 @@ export function percent(tasks: TaskProgress): number {
 }
 
 /**
- * `pane`'s activity, read again every [`POLL_MS`] while `enabled`. Null
- * until the first read, and whenever the agent has none to report (not
- * Claude Code, or no hook has said where its transcript is): the error
- * says which.
+ * `pane`'s activity, read again [`POLL_MS`] after each read returns, while
+ * `enabled` — callers pass the agent's `hasActivity`. One read at a time,
+ * so a slow one is never overtaken and the bars never jump back; and a
+ * failed read keeps the last good one, so a view does not blink out and
+ * resize the terminal beside it. Null until the first read succeeds.
  */
 export function useAgentActivity(pane: string | null, enabled = true) {
   const [activity, setActivity] = useState<AgentActivity | null>(null);
@@ -71,25 +72,28 @@ export function useAgentActivity(pane: string | null, enabled = true) {
   useEffect(() => {
     if (!pane || !enabled) return;
     let cancelled = false;
-    const load = () =>
-      getAgentActivity(pane).then(
-        (a) => {
-          if (cancelled) return;
-          setActivity(a);
-          setError(null);
-          setNow(Date.now());
-        },
-        (e) => {
-          if (cancelled) return;
-          setActivity(null);
-          setError(String(e));
-        },
-      );
-    void load();
-    const timer = window.setInterval(load, POLL_MS);
+    let timer: number | undefined;
+    const load = () => {
+      void getAgentActivity(pane)
+        .then(
+          (a) => {
+            if (cancelled) return;
+            setActivity(a);
+            setError(null);
+            setNow(Date.now());
+          },
+          (e) => {
+            if (!cancelled) setError(String(e));
+          },
+        )
+        .finally(() => {
+          if (!cancelled) timer = window.setTimeout(load, POLL_MS);
+        });
+    };
+    load();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [pane, enabled]);
 
@@ -109,12 +113,22 @@ export function ActivityPanel() {
   const agent = useWorkspaceStore((s) =>
     s.snapshot?.agents.find((a) => a.paneId === pane),
   );
-  const { activity, error, now } = useAgentActivity(pane);
+  const { activity, error, now } = useAgentActivity(pane, !!agent?.hasActivity);
+  const panelRef = useRef<HTMLDivElement>(null);
 
+  // Esc closes the panel only when the panel has focus (it takes it on
+  // opening) or nothing does. With a terminal focused, Esc is the
+  // agent's: it interrupts Claude, and must not also close this.
   useEffect(() => {
     if (!pane) return;
+    panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      const focused = document.activeElement;
+      if (focused === document.body || panelRef.current?.contains(focused)) {
+        e.stopPropagation();
+        close();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -128,7 +142,7 @@ export function ActivityPanel() {
   const totalTokens =
     (session?.tokens ?? 0) + subagents.reduce((sum, s) => sum + s.tokens, 0);
   return (
-    <div className="activity-panel">
+    <div className="activity-panel" ref={panelRef} tabIndex={-1}>
       <div className="notif-header">
         <span>Activity</span>
         <div className="notif-header-actions">
@@ -147,10 +161,14 @@ export function ActivityPanel() {
         </div>
         {!agent ? (
           <div className="notif-empty">This agent has exited.</div>
-        ) : error ? (
-          <div className="notif-empty">{error}</div>
+        ) : !agent.hasActivity ? (
+          <div className="notif-empty">
+            Only a Claude Code agent has activity to show, once its hooks have
+            reported its transcript (the palette's Set Up Claude Code
+            Integration installs them).
+          </div>
         ) : !session ? (
-          <div className="notif-empty">Reading its transcripts…</div>
+          <div className="notif-empty">{error ?? "Reading its transcripts…"}</div>
         ) : (
           <>
             <div className="activity-stats">
@@ -234,11 +252,14 @@ function Section({
   compact: boolean;
   defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  // Follows `defaultOpen` (finished ones fold away while others run, and
+  // unfold once none do) until the section is clicked; then it is yours.
+  const [toggled, setToggled] = useState<boolean | null>(null);
+  const open = toggled ?? defaultOpen;
   if (items.length === 0) return null;
   return (
     <div className="activity-section">
-      <div className="activity-section-head" onClick={() => setOpen(!open)}>
+      <div className="activity-section-head" onClick={() => setToggled(!open)}>
         {open ? "▾" : "▸"} {title} · {items.length}
       </div>
       {open && items.map((s) => <SubagentRow key={s.id} agent={s} now={now} compact={compact} />)}

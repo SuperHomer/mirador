@@ -262,9 +262,9 @@ function WallTile({
     };
   }, [pane, visible]);
 
-  // Its subagents, read while the wall is on screen; only Claude Code
-  // has transcripts to read.
-  const { activity } = useAgentActivity(pane, visible && agent.harness === "claude");
+  // Its subagents, read while the wall is on screen, for an agent that
+  // has them to read (`hasActivity`, decided in Rust).
+  const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
   const tasks = activity?.session.tasks ?? null;
 
   const status = agent.status;
@@ -274,11 +274,15 @@ function WallTile({
     >
       <div
         className="wall-tile-head"
-        title="Show this agent in its tab — right-click for its subagents"
+        title={
+          agent.hasActivity
+            ? "Show this agent in its tab — right-click for its subagents"
+            : "Show this agent in its tab"
+        }
         onClick={() => void zoomPane(pane, true)}
         onContextMenu={(e) => {
           e.preventDefault();
-          useUiStore.getState().openActivity(pane);
+          if (agent.hasActivity) useUiStore.getState().openActivity(pane);
         }}
       >
         <span className="wall-dot" />

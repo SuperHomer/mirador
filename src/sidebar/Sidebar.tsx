@@ -111,9 +111,13 @@ function AgentRow({
       onClick={() => void zoomPane(agent.paneId, true)}
       onContextMenu={(e) => {
         e.preventDefault();
-        useUiStore.getState().openActivity(agent.paneId);
+        if (agent.hasActivity) useUiStore.getState().openActivity(agent.paneId);
       }}
-      title={agent.cwd ?? undefined}
+      title={
+        [agent.cwd, agent.hasActivity ? "Right-click for its subagents" : null]
+          .filter(Boolean)
+          .join(" — ") || undefined
+      }
     >
       <span className="tab-index">{index + 1}</span>
       <span

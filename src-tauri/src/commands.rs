@@ -156,6 +156,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 harness,
                 role: m.agent_role.clone(),
                 name: m.agent_name.clone(),
+                has_activity: m.has_activity(),
                 model: m.agent_model.clone(),
                 status: m.status(),
                 message: m.agent_message.clone(),

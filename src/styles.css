@@ -766,6 +766,11 @@ body,
   flex-direction: column;
 }
 
+/* It takes focus on opening, for Esc; no ring for that. */
+.activity-panel:focus {
+  outline: none;
+}
+
 .activity-body {
   flex: 1;
   min-height: 0;
