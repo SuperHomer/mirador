@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use cmux_protocol::{AgentRole, AgentStatus};
+use cmux_protocol::{AgentRole, AgentStatus, Harness};
 
 /// One row of the process table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,24 +71,82 @@ pub fn parse_ps(text: &str) -> Vec<Proc> {
         .collect()
 }
 
+/// The harness a command line runs, with the words after its program.
+///
+/// The program may sit behind its interpreter: an npm install runs as
+/// `node …/codex`, a pip one as `python3 …/aider` or `python -m aider`.
+/// Subcommands that serve rather than converse — `codex mcp-server`,
+/// `opencode serve`, Claude Code's own daemon — are not agents: they run
+/// for something else, and a pane holding one is not working on anything.
+pub fn harness_of(args: &str) -> Option<(Harness, Vec<&str>)> {
+    let mut words = args.split_whitespace().peekable();
+    let mut program = words.next()?;
+    let interpreter = program_name(program);
+    if matches!(interpreter, "node" | "bun" | "deno") || interpreter.starts_with("python") {
+        // Its own flags, then the script — or, for `python -m`, the module.
+        loop {
+            let word = words.next()?;
+            if word == "-m" {
+                program = words.next()?;
+                break;
+            }
+            if !word.starts_with('-') {
+                program = word;
+                break;
+            }
+        }
+    }
+    let name = program_name(program);
+    let (_, harness) = HARNESSES.iter().find(|(program, _)| *program == name)?;
+    let rest: Vec<&str> = words.collect();
+    let serving = rest.first().is_some_and(|sub| {
+        matches!(
+            *sub,
+            "daemon" | "mcp" | "mcp-server" | "app-server" | "serve" | "server" | "web" | "acp"
+        ) || sub.starts_with("bg-")
+    });
+    (!serving).then_some((*harness, rest))
+}
+
+/// Each harness by the name of the program that runs it.
+const HARNESSES: [(&str, Harness); 13] = [
+    ("claude", Harness::Claude),
+    ("codex", Harness::Codex),
+    ("opencode", Harness::OpenCode),
+    ("pi", Harness::Pi),
+    ("gemini", Harness::Gemini),
+    ("amp", Harness::Amp),
+    ("cursor-agent", Harness::CursorAgent),
+    ("copilot", Harness::Copilot),
+    ("aider", Harness::Aider),
+    ("goose", Harness::Goose),
+    ("qwen", Harness::Qwen),
+    ("crush", Harness::Crush),
+    ("droid", Harness::Droid),
+];
+
+/// A program's name without its directory or extension: `codex` for
+/// `…/bin/codex.js`, `claude` for `C:\…\claude.exe`.
+fn program_name(path: &str) -> &str {
+    let name = basename(path);
+    [".exe", ".cmd", ".js", ".cjs", ".mjs"]
+        .iter()
+        .find_map(|ext| name.strip_suffix(ext))
+        .unwrap_or(name)
+}
+
 /// Classifies a command line as a Claude Code session, if it is one. The
 /// daemon's own processes (`claude daemon`, `claude bg-*`) are not.
 pub fn classify(args: &str) -> Option<ClaudeProc> {
-    let mut words = args.split_whitespace();
-    let mut program = words.next()?;
-    // An npm install runs as `node …/claude`.
-    if basename(program) == "node" {
-        program = words.next()?;
-    }
-    if basename(program) != "claude" {
+    let (Harness::Claude, rest) = harness_of(args)? else {
         return None;
-    }
-    match words.next() {
-        Some("attach") => words
+    };
+    let mut rest = rest.into_iter();
+    match rest.next() {
+        Some("attach") => rest
             .next()
             .filter(|job| is_safe_id(job))
             .map(|job| ClaudeProc::Attach(job.to_string())),
-        Some(sub) if sub == "daemon" || sub.starts_with("bg-") => None,
         _ => Some(ClaudeProc::Foreground),
     }
 }
@@ -152,20 +210,36 @@ pub fn hook_pane(
     claimed
 }
 
-/// Panes whose terminal is running a Claude Code session right now, each
-/// with that process's command line (the oldest, when there are several).
-pub fn panes_running_claude(procs: &[Proc], pane_pids: &[(String, u32)]) -> HashMap<String, String> {
-    let mut by_tty: HashMap<&str, &Proc> = HashMap::new();
-    for p in procs.iter().filter(|p| classify(&p.args).is_some()) {
+/// An agent the process table shows in a pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningAgent {
+    pub harness: Harness,
+    /// Its command line.
+    pub args: String,
+}
+
+/// Panes whose terminal is running an agent right now, each with the
+/// oldest such process on it: the one that was typed in, not whatever it
+/// started since (Codex's npm wrapper runs a native `codex` beneath it).
+pub fn panes_running_agents(
+    procs: &[Proc],
+    pane_pids: &[(String, u32)],
+) -> HashMap<String, RunningAgent> {
+    let mut by_tty: HashMap<&str, (&Proc, Harness)> = HashMap::new();
+    for p in procs {
         let Some(tty) = p.tty.as_deref() else { continue };
-        let slot = by_tty.entry(tty).or_insert(p);
-        if p.pid < slot.pid {
-            *slot = p;
+        let Some((harness, _)) = harness_of(&p.args) else { continue };
+        let slot = by_tty.entry(tty).or_insert((p, harness));
+        if p.pid < slot.0.pid {
+            *slot = (p, harness);
         }
     }
     pane_ttys(procs, pane_pids)
         .into_iter()
-        .filter_map(|(pane, tty)| Some((pane, by_tty.get(tty.as_str())?.args.clone())))
+        .filter_map(|(pane, tty)| {
+            let (p, harness) = by_tty.get(tty.as_str())?;
+            Some((pane, RunningAgent { harness: *harness, args: p.args.clone() }))
+        })
         .collect()
 }
 
@@ -202,24 +276,32 @@ pub fn forget_agent(
 /// Claude Code titles its terminal with its session's name or a summary of
 /// the task, behind a status glyph it animates (`✳`, `✶`, `⠂`, …). The
 /// glyph is dropped, and so is a title that says nothing the tile does not
-/// already — empty, Claude Code's own name, or the agent's role.
-pub fn title_topic(title: &str, role: Option<&str>) -> Option<String> {
+/// already — empty, the harness's own name or program, or the agent's role.
+pub fn title_topic(title: &str, harness: Harness, role: Option<&str>) -> Option<String> {
     let topic = title
         .trim()
         .trim_start_matches(|c: char| !c.is_alphanumeric())
         .trim();
     let same = |other: &str| topic.eq_ignore_ascii_case(other);
-    if topic.is_empty() || same("Claude Code") || same("claude") || role.is_some_and(same) {
+    let program = HARNESSES.iter().find(|(_, h)| *h == harness).map(|(p, _)| *p);
+    if topic.is_empty()
+        || same(harness.label())
+        || program.is_some_and(same)
+        || role.is_some_and(same)
+    {
         return None;
     }
     Some(topic.to_string())
 }
 
-/// The `--model` a Claude Code command line asks for.
+/// The model an agent's command line asks for: `--model x`,
+/// `--model=x`, or `-m x` (Codex, Gemini CLI, OpenCode). Only the words
+/// after the program are read, so `python -m aider` names no model.
 pub fn model_flag(args: &str) -> Option<String> {
-    let mut words = args.split_whitespace();
+    let (_, rest) = harness_of(args)?;
+    let mut words = rest.into_iter();
     while let Some(word) = words.next() {
-        if word == "--model" {
+        if word == "--model" || word == "-m" {
             return words.next().map(String::from);
         }
         if let Some(model) = word.strip_prefix("--model=") {
@@ -501,18 +583,68 @@ mod tests {
     }
 
     #[test]
-    fn finds_panes_running_claude() {
+    fn finds_panes_running_agents() {
         let procs = parse_ps(PS);
         let mut panes4 = panes();
         panes4.push(("D".into(), 999)); // a pane whose shell is gone
-        let running = panes_running_claude(&procs, &panes4);
+        let running = panes_running_agents(&procs, &panes4);
         let mut found: Vec<&str> = running.keys().map(String::as_str).collect();
         found.sort();
         assert_eq!(found, ["A", "B", "C"]);
-        assert_eq!(running["C"], "claude --resume 228fb346-0d12-4618-824c-a0bc432bc2ab");
+        assert_eq!(running["C"].harness, Harness::Claude);
+        assert_eq!(running["C"].args, "claude --resume 228fb346-0d12-4618-824c-a0bc432bc2ab");
 
         let idle = parse_ps("  101 ttys002  -/bin/zsh\n  200 ??  claude daemon run\n");
-        assert!(panes_running_claude(&idle, &panes()).is_empty());
+        assert!(panes_running_agents(&idle, &panes()).is_empty());
+    }
+
+    #[test]
+    fn finds_other_harnesses_by_the_process_typed_in() {
+        // Codex's npm wrapper runs the native binary beneath it, on the same
+        // tty; the wrapper is the one that counts. OpenCode's server on
+        // its own is not an agent.
+        let procs = parse_ps(
+            "  101 ttys002  -/bin/zsh
+  102 ttys004  -/bin/zsh
+  103 ttys006  -/bin/zsh
+  300 ttys002  node /opt/homebrew/bin/codex -m gpt-5-codex
+  301 ttys002  /opt/homebrew/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/codex/codex -m gpt-5-codex
+  302 ttys004  node /Users/u/.npm/bin/pi --provider anthropic --model claude-opus-5-5
+  303 ttys006  opencode serve --port 4096
+",
+        );
+        let running = panes_running_agents(&procs, &panes());
+        assert_eq!(running["A"].harness, Harness::Codex);
+        assert!(running["A"].args.starts_with("node "));
+        assert_eq!(running["B"].harness, Harness::Pi);
+        assert!(!running.contains_key("C"));
+    }
+
+    #[test]
+    fn names_the_harness_of_a_command_line() {
+        let harness = |args: &str| harness_of(args).map(|(h, _)| h);
+        assert_eq!(harness("claude"), Some(Harness::Claude));
+        assert_eq!(harness("codex"), Some(Harness::Codex));
+        assert_eq!(harness("node --no-warnings /usr/local/bin/codex.js exec fix it"), Some(Harness::Codex));
+        assert_eq!(harness("/Users/u/.opencode/bin/opencode"), Some(Harness::OpenCode));
+        assert_eq!(harness("bun /x/opencode run hi"), Some(Harness::OpenCode));
+        assert_eq!(harness("pi"), Some(Harness::Pi));
+        assert_eq!(harness("node /opt/homebrew/bin/gemini -m gemini-2.5-pro"), Some(Harness::Gemini));
+        assert_eq!(harness("/Users/u/.local/pipx/venvs/aider-chat/bin/python /Users/u/.local/bin/aider"), Some(Harness::Aider));
+        assert_eq!(harness("python3.12 -m aider --model sonnet"), Some(Harness::Aider));
+        assert_eq!(harness("cursor-agent"), Some(Harness::CursorAgent));
+        assert_eq!(harness("C:\\Users\\u\\bin\\codex.exe"), Some(Harness::Codex));
+        // Serving something else, not working on anything.
+        assert_eq!(harness("codex mcp-server"), None);
+        assert_eq!(harness("codex app-server"), None);
+        assert_eq!(harness("opencode serve"), None);
+        assert_eq!(harness("claude mcp serve"), None);
+        // Not an agent, or an agent's name as an argument.
+        assert_eq!(harness("node /x/vite.js"), None);
+        assert_eq!(harness("vim codex"), None);
+        assert_eq!(harness("python3 -c print(1)"), None);
+        assert_eq!(harness("node"), None);
+        assert_eq!(harness("pip install aider"), None);
     }
 
     #[test]
@@ -606,6 +738,12 @@ mod tests {
         assert_eq!(model_flag("node /a/claude --model=claude-sonnet-5-5").as_deref(), Some("claude-sonnet-5-5"));
         assert_eq!(model_flag("claude --resume x"), None);
         assert_eq!(model_flag("claude --model"), None);
+        assert_eq!(model_flag("codex -m gpt-5-codex").as_deref(), Some("gpt-5-codex"));
+        assert_eq!(model_flag("opencode -m anthropic/claude-opus-5-5").as_deref(), Some("anthropic/claude-opus-5-5"));
+        // `python -m` names the program, not a model.
+        assert_eq!(model_flag("python3 -m aider"), None);
+        assert_eq!(model_flag("python3 -m aider --model sonnet").as_deref(), Some("sonnet"));
+        assert_eq!(model_flag("vim --model x"), None);
     }
 
     #[test]
@@ -667,13 +805,16 @@ mod tests {
 
     #[test]
     fn a_title_names_what_the_agent_is_on() {
-        assert_eq!(title_topic("✳ Agent wall tile column logic", None).as_deref(), Some("Agent wall tile column logic"));
-        assert_eq!(title_topic("⠂ Fix the flaky test", Some("coder")).as_deref(), Some("Fix the flaky test"));
-        // The role's own name, Claude Code's, or nothing: no label.
-        assert_eq!(title_topic("✳ reviewer", Some("reviewer")), None);
-        assert_eq!(title_topic("✳ Claude Code", None), None);
-        assert_eq!(title_topic("  ✶  ", None), None);
+        let claude = Harness::Claude;
+        assert_eq!(title_topic("✳ Agent wall tile column logic", claude, None).as_deref(), Some("Agent wall tile column logic"));
+        assert_eq!(title_topic("⠂ Fix the flaky test", claude, Some("coder")).as_deref(), Some("Fix the flaky test"));
+        // The role's own name, the harness's, or nothing: no label.
+        assert_eq!(title_topic("✳ reviewer", claude, Some("reviewer")), None);
+        assert_eq!(title_topic("✳ Claude Code", claude, None), None);
+        assert_eq!(title_topic("  ✶  ", claude, None), None);
+        assert_eq!(title_topic("OpenCode", Harness::OpenCode, None), None);
+        assert_eq!(title_topic("codex", Harness::Codex, None), None);
         // Another agent's name is not this one's role, and is kept.
-        assert_eq!(title_topic("✳ planner", Some("reviewer")).as_deref(), Some("planner"));
+        assert_eq!(title_topic("✳ planner", claude, Some("reviewer")).as_deref(), Some("planner"));
     }
 }

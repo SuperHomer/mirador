@@ -129,9 +129,10 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
     snapshot
 }
 
-/// Every pane running a Claude Code agent — one that recorded a session,
-/// or was started with a role and has not exited — in tab and layout
-/// order, which is the order the wall draws them in.
+/// Every pane running an agent — one seen in its process table, or a
+/// Claude Code one that recorded a session or was started and has not
+/// exited — in tab and layout order, which is the order the wall draws
+/// them in.
 pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
     let panes: Vec<(String, String)> = {
         let ws = state.workspace.lock().unwrap();
@@ -149,17 +150,16 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
         .into_iter()
         .filter_map(|(tab_id, pane)| {
             let m = meta.get(&pane)?;
-            if !m.is_agent() {
-                return None;
-            }
+            let harness = m.harness()?;
             Some(cmux_protocol::AgentInfo {
                 tab_id,
+                harness,
                 role: m.agent_role.clone(),
                 model: m.agent_model.clone(),
                 status: m.agent_status,
                 message: m.agent_message.clone(),
                 topic: m.title.as_deref().and_then(|t| {
-                    cmux_core::agents::title_topic(t, m.agent_role.as_deref())
+                    cmux_core::agents::title_topic(t, harness, m.agent_role.as_deref())
                 }),
                 since_ms: m.agent_since_ms,
                 cwd: m.cwd.clone(),

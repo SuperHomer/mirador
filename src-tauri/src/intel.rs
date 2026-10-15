@@ -79,62 +79,28 @@ pub fn spawn(handle: tauri::AppHandle) {
                 }
             }
 
-            // Agent sessions: once a pane's Claude has been seen running and
-            // then is gone, it was exited — forget it, or the next launch
-            // would type `claude --resume` into a pane you had moved on
-            // from, and the wall would keep a tile for a shell. Only panes
-            // that recorded a session or were started with a role cost a
-            // `ps`. Windows lists no processes, so there nothing is ever seen
-            // or forgotten.
-            let is_agent = cmux_core::state::PaneMeta::is_agent;
+            // Agents: any pane whose terminal runs one — Claude Code, Codex,
+            // OpenCode, … — counts as an agent pane while it does. Once a
+            // pane's agent has been seen running and then is gone, it was
+            // exited — forget it, or the next launch would type `claude
+            // --resume` into a pane you had moved on from, and the wall
+            // would keep a tile for a shell. Finding new agents waits for
+            // every other tick; panes that already are agents are checked
+            // on each. Windows lists no processes, so there only Claude's
+            // hooks make agents, and nothing is ever seen or forgotten.
             let has_agents = {
                 let meta = state.meta.lock().unwrap();
                 pids.iter()
-                    .any(|(pane, _)| meta.get(pane).is_some_and(is_agent))
+                    .any(|(pane, _)| meta.get(pane).is_some_and(|m| m.is_agent()))
             };
-            if has_agents {
+            if has_agents || tick.is_multiple_of(2) {
                 let procs = cmux_core::agents::process_table();
-                let running = cmux_core::agents::panes_running_claude(&procs, &pids);
+                let running = cmux_core::agents::panes_running_agents(&procs, &pids);
                 let mut meta = state.meta.lock().unwrap();
                 for (pane, _) in &pids {
                     let Some(entry) = meta.get_mut(pane) else { continue };
-                    if !is_agent(entry) {
-                        continue;
-                    }
-                    if let Some(args) = running.get(pane) {
-                        entry.agent_live = true;
-                        entry.agent_started_at = None;
-                        // The model it was started on; a role's is already
-                        // there, and agrees.
-                        let model = cmux_core::agents::model_flag(args);
-                        if model.is_some() && entry.agent_model != model {
-                            entry.agent_model = model;
-                            changed = true;
-                        }
-                    } else if cmux_core::agents::forget_agent(
-                        false,
-                        entry.agent_live,
-                        entry.startup_input.is_some(),
-                        // Windows lists no processes: there "never seen"
-                        // says nothing, and the grace period must not run.
-                        entry
-                            .agent_started_at
-                            .filter(|_| cmux_core::agents::AUTO_RESUME)
-                            .map(|t| t.elapsed()),
-                    ) {
-                        entry.agent_live = false;
-                        entry.agent_started_at = None;
-                        entry.agent_session = None;
-                        entry.agent_role = None;
-                        entry.agent_launched = false;
-                        entry.agent_model = None;
-                        entry.agent_status = None;
-                        entry.agent_message = None;
-                        entry.agent_since_ms = None;
+                    if entry.observe_agent(running.get(pane), cmux_core::agents::AUTO_RESUME) {
                         changed = true;
-                        state
-                            .session_dirty
-                            .store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }

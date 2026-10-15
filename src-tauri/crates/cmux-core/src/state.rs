@@ -54,7 +54,11 @@ pub struct PaneMeta {
     /// When this run started (or resumed) the pane's agent, until its
     /// `claude` is first seen running; see `agents::forget_agent`.
     pub agent_started_at: Option<std::time::Instant>,
-    /// The `--model` the poller saw the pane's `claude` started with.
+    /// The agent program the poller saw running in the pane — Claude Code,
+    /// Codex, OpenCode, …: what makes a pane whose agent has no hooks an
+    /// agent at all. Not persisted; a restart sees the process again.
+    pub agent_harness: Option<cmux_protocol::Harness>,
+    /// The `--model` the poller saw the pane's agent started with.
     pub agent_model: Option<String>,
     /// What the agent's hooks last said it is doing (not persisted: a
     /// restarted app has not heard from it yet).
@@ -88,10 +92,91 @@ pub struct PaneMeta {
 }
 
 impl PaneMeta {
-    /// Runs a Claude Code agent: one that recorded a session, or was
-    /// started with a role and has not exited.
+    /// Runs a coding agent: one seen in its process table, or a Claude Code
+    /// one that recorded a session or was started (with or without a role)
+    /// and has not exited.
     pub fn is_agent(&self) -> bool {
+        self.agent_harness.is_some() || self.claude_marked()
+    }
+
+    /// What it runs. The session, role and launch mark are all Claude
+    /// Code's, so an agent known only by them is a Claude Code one.
+    pub fn harness(&self) -> Option<cmux_protocol::Harness> {
+        self.agent_harness
+            .or_else(|| self.claude_marked().then_some(cmux_protocol::Harness::Claude))
+    }
+
+    fn claude_marked(&self) -> bool {
         self.agent_session.is_some() || self.agent_role.is_some() || self.agent_launched
+    }
+
+    /// Forgets everything that makes it an agent, and what it was doing.
+    pub fn clear_agent(&mut self) {
+        self.agent_live = false;
+        self.agent_started_at = None;
+        self.agent_session = None;
+        self.agent_role = None;
+        self.agent_launched = false;
+        self.agent_harness = None;
+        self.agent_model = None;
+        self.agent_status = None;
+        self.agent_message = None;
+        self.agent_since_ms = None;
+    }
+
+    /// Applies what the process table shows on the pane's terminal now —
+    /// `running` is its agent, if any — and says whether anything a
+    /// snapshot shows changed. `auto_resume` is
+    /// [`crate::agents::AUTO_RESUME`], a parameter so both platforms are
+    /// tested everywhere.
+    ///
+    /// An agent showing up makes the pane one, whatever started it. A
+    /// different agent than the pane had means the old one exited, and its
+    /// Claude session goes with it: left in place, the next launch would
+    /// type `claude --resume` into a pane you had moved on to Codex in.
+    /// No agent at all is [`crate::agents::forget_agent`]'s call.
+    pub fn observe_agent(
+        &mut self,
+        running: Option<&crate::agents::RunningAgent>,
+        auto_resume: bool,
+    ) -> bool {
+        let Some(run) = running else {
+            if !self.is_agent() {
+                return false;
+            }
+            let forget = crate::agents::forget_agent(
+                false,
+                self.agent_live,
+                self.startup_input.is_some(),
+                // Windows lists no processes: there "never seen" says
+                // nothing, and the grace period must not run.
+                self.agent_started_at
+                    .filter(|_| auto_resume)
+                    .map(|t| t.elapsed()),
+            );
+            if forget {
+                self.clear_agent();
+            }
+            return forget;
+        };
+        let mut changed = false;
+        if self.harness().is_some_and(|h| h != run.harness) {
+            self.clear_agent();
+            changed = true;
+        }
+        if self.agent_harness != Some(run.harness) {
+            self.agent_harness = Some(run.harness);
+            changed = true;
+        }
+        self.agent_live = true;
+        self.agent_started_at = None;
+        // The model it was started on; a role's is already there, and agrees.
+        let model = crate::agents::model_flag(&run.args);
+        if model.is_some() && self.agent_model != model {
+            self.agent_model = model;
+            changed = true;
+        }
+        changed
     }
 }
 
@@ -469,6 +554,57 @@ fn abbreviate_home(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
+        crate::agents::RunningAgent { harness, args: args.into() }
+    }
+
+    #[test]
+    fn any_harness_seen_running_makes_an_agent() {
+        use cmux_protocol::Harness;
+        let mut m = PaneMeta::default();
+        assert!(!m.observe_agent(None, true));
+        assert!(!m.is_agent());
+
+        assert!(m.observe_agent(Some(&running(Harness::Codex, "codex -m gpt-5-codex")), true));
+        assert!(m.is_agent());
+        assert_eq!(m.harness(), Some(Harness::Codex));
+        assert_eq!(m.agent_model.as_deref(), Some("gpt-5-codex"));
+        // Seen again: nothing new.
+        assert!(!m.observe_agent(Some(&running(Harness::Codex, "codex -m gpt-5-codex")), true));
+        // Exited: forgotten.
+        assert!(m.observe_agent(None, true));
+        assert!(!m.is_agent());
+        assert_eq!(m.agent_model, None);
+    }
+
+    #[test]
+    fn a_hooked_claude_pane_is_a_claude_agent_before_it_is_seen() {
+        use cmux_protocol::Harness;
+        let mut m = PaneMeta { agent_session: Some("claude-fg:s1".into()), ..Default::default() };
+        assert_eq!(m.harness(), Some(Harness::Claude));
+        m.observe_agent(Some(&running(Harness::Claude, "claude")), true);
+        assert_eq!(m.agent_session.as_deref(), Some("claude-fg:s1"));
+    }
+
+    #[test]
+    fn another_harness_replaces_the_claude_session() {
+        use cmux_protocol::Harness;
+        let mut m = PaneMeta {
+            agent_session: Some("claude-fg:s1".into()),
+            agent_role: Some("reviewer".into()),
+            agent_model: Some("opus".into()),
+            agent_status: Some(cmux_protocol::AgentStatus::Idle),
+            ..Default::default()
+        };
+        assert!(m.observe_agent(Some(&running(Harness::OpenCode, "opencode")), true));
+        assert_eq!(m.harness(), Some(Harness::OpenCode));
+        // Nothing of the Claude agent is left to resume or show.
+        assert_eq!(m.agent_session, None);
+        assert_eq!(m.agent_role, None);
+        assert_eq!(m.agent_model, None);
+        assert_eq!(m.agent_status, None);
+    }
 
     #[test]
     fn new_tab_inserts_after_active_and_activates() {

@@ -380,6 +380,49 @@ pub struct AgentPane {
     pub command: String,
 }
 
+/// A coding-agent program Mirador recognizes in a pane's process table.
+/// Claude Code is the one with hooks (status, resume on restart); the rest
+/// are counted and shown as agents from their process alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Harness {
+    #[default]
+    Claude,
+    Codex,
+    OpenCode,
+    Pi,
+    Gemini,
+    Amp,
+    CursorAgent,
+    Copilot,
+    Aider,
+    Goose,
+    Qwen,
+    Crush,
+    Droid,
+}
+
+impl Harness {
+    /// The name people know it by.
+    pub fn label(self) -> &'static str {
+        match self {
+            Harness::Claude => "Claude Code",
+            Harness::Codex => "Codex",
+            Harness::OpenCode => "OpenCode",
+            Harness::Pi => "Pi",
+            Harness::Gemini => "Gemini CLI",
+            Harness::Amp => "Amp",
+            Harness::CursorAgent => "Cursor Agent",
+            Harness::Copilot => "Copilot CLI",
+            Harness::Aider => "Aider",
+            Harness::Goose => "Goose",
+            Harness::Qwen => "Qwen Code",
+            Harness::Crush => "Crush",
+            Harness::Droid => "Droid",
+        }
+    }
+}
+
 /// What a Claude Code agent is doing, as its hooks last reported it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -392,7 +435,7 @@ pub enum AgentStatus {
     Idle,
 }
 
-/// A pane running a Claude Code agent.
+/// A pane running a coding agent: Claude Code, or another [`Harness`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
@@ -400,12 +443,17 @@ pub struct AgentInfo {
     /// The tab holding it.
     #[serde(default)]
     pub tab_id: String,
+    /// The program it runs; Claude Code for anything its hooks or a role
+    /// made an agent before the process was seen.
+    #[serde(default)]
+    pub harness: Harness,
     /// The `agentRoles` entry it was started with.
     pub role: Option<String>,
-    /// The role's model, or the `--model` its process was started with;
-    /// absent when it runs Claude Code's default.
+    /// The role's model, or the `--model` (`-m`) its process was started
+    /// with; absent when it runs the harness's default.
     pub model: Option<String>,
-    /// Absent until its first hook arrives (or with no hooks installed).
+    /// Absent until its first hook arrives (or with no hooks installed);
+    /// always absent for a harness other than Claude Code, which has none.
     pub status: Option<AgentStatus>,
     /// The last Notification message, e.g. what it needs permission for.
     pub message: Option<String>,

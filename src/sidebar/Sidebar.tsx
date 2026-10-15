@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AgentInfo,
+  HARNESS_LABEL,
   TabSnapshot,
   newTab,
   openAgentWall,
@@ -108,11 +109,14 @@ function AgentRow({
       title={agent.cwd ?? undefined}
     >
       <span className="tab-index">{index + 1}</span>
-      <span className="tab-harness" aria-label="Claude Code">
-        ✳
+      <span
+        className={`tab-harness ${agent.harness}`}
+        aria-label={HARNESS_LABEL[agent.harness]}
+      >
+        {agent.harness === "claude" ? "✳" : "◆"}
       </span>
       <span className={`tab-title${unread ? " has-unread" : ""}`}>
-        {agent.role ?? "Claude"}
+        {agent.role ?? HARNESS_LABEL[agent.harness]}
       </span>
       {agent.status === "needsYou" && (
         <span className="tab-agent-needs" title={agent.message ?? "Needs you"}>

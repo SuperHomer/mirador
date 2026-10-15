@@ -157,11 +157,46 @@ export interface GraphPaneInfo {
 
 export type AgentStatus = "working" | "needsYou" | "idle";
 
-/** A pane running a Claude Code agent. */
+/** The agent program a pane runs (`cmux_protocol::Harness`). */
+export type Harness =
+  | "claude"
+  | "codex"
+  | "openCode"
+  | "pi"
+  | "gemini"
+  | "amp"
+  | "cursorAgent"
+  | "copilot"
+  | "aider"
+  | "goose"
+  | "qwen"
+  | "crush"
+  | "droid";
+
+/** The name people know each harness by (`Harness::label`). */
+export const HARNESS_LABEL: Record<Harness, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  openCode: "OpenCode",
+  pi: "Pi",
+  gemini: "Gemini CLI",
+  amp: "Amp",
+  cursorAgent: "Cursor Agent",
+  copilot: "Copilot CLI",
+  aider: "Aider",
+  goose: "Goose",
+  qwen: "Qwen Code",
+  crush: "Crush",
+  droid: "Droid",
+};
+
+/** A pane running a coding agent: Claude Code, Codex, OpenCode, … */
 export interface AgentInfo {
   paneId: string;
   /** The tab holding it. */
   tabId: string;
+  /** What it runs. Only Claude Code has hooks, and so a status. */
+  harness: Harness;
   role: string | null;
   model: string | null;
   /** Null until its first hook arrives. */
