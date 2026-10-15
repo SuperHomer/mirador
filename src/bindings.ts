@@ -190,6 +190,10 @@ export const HARNESS_LABEL: Record<Harness, string> = {
   droid: "Droid",
 };
 
+/** What to call an agent: its session's name, its role, or its harness. */
+export const agentLabel = (a: AgentInfo): string =>
+  a.name ?? a.role ?? HARNESS_LABEL[a.harness];
+
 /** A pane running a coding agent: Claude Code, Codex, OpenCode, … */
 export interface AgentInfo {
   paneId: string;
@@ -198,8 +202,10 @@ export interface AgentInfo {
   /** What it runs. Only Claude Code has hooks, and so a status. */
   harness: Harness;
   role: string | null;
+  /** The Claude Code session's name, as `claude agents` lists it. */
+  name: string | null;
   model: string | null;
-  /** Null until its first hook arrives. */
+  /** Its hooks' status, or else busy/idle from Claude Code's session file. */
   status: AgentStatus | null;
   message: string | null;
   /** What its own terminal title says it is on, when that adds to the role. */

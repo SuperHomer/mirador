@@ -155,11 +155,12 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 tab_id,
                 harness,
                 role: m.agent_role.clone(),
+                name: m.agent_name.clone(),
                 model: m.agent_model.clone(),
-                status: m.agent_status,
+                status: m.status(),
                 message: m.agent_message.clone(),
                 topic: m.title.as_deref().and_then(|t| {
-                    cmux_core::agents::title_topic(t, harness, m.agent_role.as_deref())
+                    cmux_core::agents::title_topic(t, harness, &[m.agent_role.as_deref(), m.agent_name.as_deref()])
                 }),
                 since_ms: m.agent_since_ms,
                 cwd: m.cwd.clone(),

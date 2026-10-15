@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
-  HARNESS_LABEL,
+  agentLabel,
   AgentStatus,
   Node,
   closePane,
@@ -282,9 +282,10 @@ function WallTile({
         }}
       >
         <span className="wall-dot" />
-        <span className="wall-role">
-          {agent.role ?? HARNESS_LABEL[agent.harness]}
-        </span>
+        <span className="wall-role">{agentLabel(agent)}</span>
+        {agent.role && agent.name && agent.role !== agent.name && (
+          <span className="wall-model">{agent.role}</span>
+        )}
         {agent.model && <span className="wall-model">{agent.model}</span>}
         <span className="wall-where">
           {[agent.topic, agent.branch].filter(Boolean).join(" · ")}

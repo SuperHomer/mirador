@@ -214,6 +214,7 @@ pub fn hook_pane(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningAgent {
     pub harness: Harness,
+    pub pid: u32,
     /// Its command line.
     pub args: String,
 }
@@ -238,9 +239,99 @@ pub fn panes_running_agents(
         .into_iter()
         .filter_map(|(pane, tty)| {
             let (p, harness) = by_tty.get(tty.as_str())?;
-            Some((pane, RunningAgent { harness: *harness, args: p.args.clone() }))
+            Some((pane, RunningAgent { harness: *harness, pid: p.pid, args: p.args.clone() }))
         })
         .collect()
+}
+
+/// What Claude Code says about one of its running sessions, in
+/// `<config>/sessions/<pid>.json` — what `claude agents` lists.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClaudeSession {
+    pub pid: u32,
+    pub session_id: Option<String>,
+    /// A background session's job.
+    pub job_id: Option<String>,
+    /// Its name: one given with `--name` or `/rename`, or else one Claude
+    /// Code made up (from the folder at first, then from the conversation).
+    pub name: Option<String>,
+    /// `busy` or `idle`, as Claude Code last wrote it.
+    pub status: Option<AgentStatus>,
+}
+
+/// One session file. Not a documented format: every field is optional,
+/// and a name is put on one line, since it is drawn in a single row.
+pub fn parse_claude_session(json: &str) -> Option<ClaudeSession> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let text = |key: &str| {
+        v[key]
+            .as_str()
+            .map(one_line)
+            .filter(|s| !s.is_empty())
+    };
+    Some(ClaudeSession {
+        pid: u32::try_from(v["pid"].as_u64()?).ok()?,
+        session_id: text("sessionId"),
+        job_id: text("jobId"),
+        name: text("name"),
+        status: match v["status"].as_str() {
+            Some("busy") => Some(AgentStatus::Working),
+            Some("idle") => Some(AgentStatus::Idle),
+            _ => None,
+        },
+    })
+}
+
+/// Every session file in `dir`.
+pub fn claude_sessions(dir: &std::path::Path) -> Vec<ClaudeSession> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .filter_map(|e| parse_claude_session(&std::fs::read_to_string(e.path()).ok()?))
+        .collect()
+}
+
+/// Where Claude Code keeps its session files. The transcript the hooks
+/// reported (`<config>/projects/<project>/<session>.jsonl`) says which
+/// config directory the session uses, whatever this app's own home is;
+/// without one, the default `~/.claude`.
+pub fn sessions_dir(transcript: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    let from_transcript = transcript.and_then(|t| {
+        let mut up = t.ancestors().skip(2);
+        let projects = up.next()?;
+        (projects.file_name()? == "projects").then(|| up.next())?
+    });
+    match from_transcript {
+        Some(config) => Some(config.join("sessions")),
+        None => crate::claude_integration::claude_dir().map(|d| d.join("sessions")),
+    }
+}
+
+/// The session a pane's Claude Code is: the one its process is (`pid`),
+/// else the one its hooks recorded (`agent_session`), else the background
+/// job it attaches (`args`, its command line).
+pub fn find_claude_session<'a>(
+    sessions: &'a [ClaudeSession],
+    pid: Option<u32>,
+    agent_session: Option<&str>,
+    args: Option<&str>,
+) -> Option<&'a ClaudeSession> {
+    if let Some(found) = pid.and_then(|pid| sessions.iter().find(|s| s.pid == pid)) {
+        return Some(found);
+    }
+    let attached = match args.and_then(classify) {
+        Some(ClaudeProc::Attach(job)) => Some(job),
+        _ => None,
+    };
+    let (kind, id) = agent_session.and_then(|s| s.split_once(':')).unzip();
+    let job = attached.as_deref().or(id.filter(|_| kind == Some("claude-bg")));
+    let session = id.filter(|_| kind == Some("claude-fg"));
+    sessions.iter().find(|s| {
+        (job.is_some() && s.job_id.as_deref() == job)
+            || (session.is_some() && s.session_id.as_deref() == session)
+    })
 }
 
 /// How long an agent pane may go without its `claude` appearing in the
@@ -276,8 +367,9 @@ pub fn forget_agent(
 /// Claude Code titles its terminal with its session's name or a summary of
 /// the task, behind a status glyph it animates (`✳`, `✶`, `⠂`, …). The
 /// glyph is dropped, and so is a title that says nothing the tile does not
-/// already — empty, the harness's own name or program, or the agent's role.
-pub fn title_topic(title: &str, harness: Harness, role: Option<&str>) -> Option<String> {
+/// already — empty, the harness's own name or program, or the agent's role
+/// or session name (`shown`).
+pub fn title_topic(title: &str, harness: Harness, shown: &[Option<&str>]) -> Option<String> {
     let topic = title
         .trim()
         .trim_start_matches(|c: char| !c.is_alphanumeric())
@@ -287,7 +379,7 @@ pub fn title_topic(title: &str, harness: Harness, role: Option<&str>) -> Option<
     if topic.is_empty()
         || same(harness.label())
         || program.is_some_and(same)
-        || role.is_some_and(same)
+        || shown.iter().flatten().any(|s| same(s))
     {
         return None;
     }
@@ -804,17 +896,66 @@ mod tests {
     }
 
     #[test]
+    fn reads_claude_code_session_files() {
+        let s = parse_claude_session(
+            r#"{"pid":79027,"sessionId":"c299bda0","name":"Default path\nfor panes","nameSource":"auto","jobId":"c5b63b09","status":"busy","kind":"bg"}"#,
+        )
+        .unwrap();
+        assert_eq!(s.pid, 79027);
+        assert_eq!(s.name.as_deref(), Some("Default path for panes"));
+        assert_eq!(s.job_id.as_deref(), Some("c5b63b09"));
+        assert_eq!(s.status, Some(AgentStatus::Working));
+        let idle = parse_claude_session(r#"{"pid":1,"status":"idle","name":"  "}"#).unwrap();
+        assert_eq!((idle.status, idle.name), (Some(AgentStatus::Idle), None));
+        assert_eq!(parse_claude_session(r#"{"pid":1,"status":"thinking"}"#).unwrap().status, None);
+        assert_eq!(parse_claude_session(r#"{"name":"no pid"}"#), None);
+        assert_eq!(parse_claude_session("not json"), None);
+    }
+
+    #[test]
+    fn finds_the_session_of_a_pane() {
+        let sessions = [
+            ClaudeSession { pid: 10, session_id: Some("s-fg".into()), name: Some("fg".into()), ..Default::default() },
+            ClaudeSession { pid: 20, session_id: Some("s-bg".into()), job_id: Some("job9".into()), name: Some("bg".into()), ..Default::default() },
+        ];
+        let name = |found: Option<&ClaudeSession>| found.and_then(|s| s.name.clone());
+        // Its own process decides first.
+        assert_eq!(name(find_claude_session(&sessions, Some(10), Some("claude-fg:s-bg"), None)).as_deref(), Some("fg"));
+        // Then what the hooks recorded.
+        assert_eq!(name(find_claude_session(&sessions, Some(99), Some("claude-fg:s-fg"), None)).as_deref(), Some("fg"));
+        assert_eq!(name(find_claude_session(&sessions, None, Some("claude-bg:job9"), None)).as_deref(), Some("bg"));
+        // An attach with no hooks, by its job.
+        assert_eq!(name(find_claude_session(&sessions, Some(99), None, Some("claude attach job9"))).as_deref(), Some("bg"));
+        // A job id is not a session id.
+        assert_eq!(find_claude_session(&sessions, None, Some("claude-fg:job9"), None), None);
+        assert_eq!(find_claude_session(&sessions, None, None, None), None);
+    }
+
+    #[test]
+    fn finds_the_sessions_directory() {
+        use std::path::Path;
+        let t = Path::new("/Users/u/.claude/projects/-Users-u-w/abc.jsonl");
+        assert_eq!(sessions_dir(Some(t)).as_deref(), Some(Path::new("/Users/u/.claude/sessions")));
+        let custom = Path::new("/cfg/projects/p/abc.jsonl");
+        assert_eq!(sessions_dir(Some(custom)).as_deref(), Some(Path::new("/cfg/sessions")));
+        // Not a transcript where Claude Code keeps them: the default.
+        let odd = sessions_dir(Some(Path::new("/tmp/abc.jsonl")));
+        assert_eq!(odd, crate::claude_integration::claude_dir().map(|d| d.join("sessions")));
+    }
+
+    #[test]
     fn a_title_names_what_the_agent_is_on() {
         let claude = Harness::Claude;
-        assert_eq!(title_topic("✳ Agent wall tile column logic", claude, None).as_deref(), Some("Agent wall tile column logic"));
-        assert_eq!(title_topic("⠂ Fix the flaky test", claude, Some("coder")).as_deref(), Some("Fix the flaky test"));
-        // The role's own name, the harness's, or nothing: no label.
-        assert_eq!(title_topic("✳ reviewer", claude, Some("reviewer")), None);
-        assert_eq!(title_topic("✳ Claude Code", claude, None), None);
-        assert_eq!(title_topic("  ✶  ", claude, None), None);
-        assert_eq!(title_topic("OpenCode", Harness::OpenCode, None), None);
-        assert_eq!(title_topic("codex", Harness::Codex, None), None);
+        assert_eq!(title_topic("✳ Agent wall tile column logic", claude, &[]).as_deref(), Some("Agent wall tile column logic"));
+        assert_eq!(title_topic("⠂ Fix the flaky test", claude, &[Some("coder")]).as_deref(), Some("Fix the flaky test"));
+        // The role, the session's name, the harness's, or nothing: no label.
+        assert_eq!(title_topic("✳ reviewer", claude, &[Some("reviewer")]), None);
+        assert_eq!(title_topic("✳ Fix login", claude, &[None, Some("fix login")]), None);
+        assert_eq!(title_topic("✳ Claude Code", claude, &[]), None);
+        assert_eq!(title_topic("  ✶  ", claude, &[]), None);
+        assert_eq!(title_topic("OpenCode", Harness::OpenCode, &[]), None);
+        assert_eq!(title_topic("codex", Harness::Codex, &[]), None);
         // Another agent's name is not this one's role, and is kept.
-        assert_eq!(title_topic("✳ planner", claude, Some("reviewer")).as_deref(), Some("planner"));
+        assert_eq!(title_topic("✳ planner", claude, &[Some("reviewer")]).as_deref(), Some("planner"));
     }
 }

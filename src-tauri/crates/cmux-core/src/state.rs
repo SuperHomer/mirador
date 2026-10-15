@@ -62,6 +62,15 @@ pub struct PaneMeta {
     /// Codex, OpenCode, …: what makes a pane whose agent has no hooks an
     /// agent at all. Not persisted; a restart sees the process again.
     pub agent_harness: Option<cmux_protocol::Harness>,
+    /// The pid of the agent process the poller saw on the pane's terminal.
+    pub agent_pid: Option<u32>,
+    /// The Claude Code session's name, from its session file (what
+    /// `claude agents` lists): one given with `--name` or `/rename`, or
+    /// one Claude Code made up.
+    pub agent_name: Option<String>,
+    /// Busy or idle, as that file says: the status of an agent whose hooks
+    /// have not reported one (or are not installed).
+    pub agent_session_status: Option<cmux_protocol::AgentStatus>,
     /// The `--model` the poller saw the pane's agent started with.
     pub agent_model: Option<String>,
     /// What the agent's hooks last said it is doing (not persisted: a
@@ -123,6 +132,9 @@ impl PaneMeta {
         self.agent_launched = false;
         self.agent_harness = None;
         self.agent_transcript = None;
+        self.agent_pid = None;
+        self.agent_name = None;
+        self.agent_session_status = None;
         self.agent_model = None;
         self.agent_status = None;
         self.agent_message = None;
@@ -175,6 +187,7 @@ impl PaneMeta {
         }
         self.agent_live = true;
         self.agent_started_at = None;
+        self.agent_pid = Some(run.pid);
         // The model it was started on; a role's is already there, and agrees.
         let model = crate::agents::model_flag(&run.args);
         if model.is_some() && self.agent_model != model {
@@ -182,6 +195,25 @@ impl PaneMeta {
             changed = true;
         }
         changed
+    }
+
+    /// Takes the name and status from the Claude Code session file found
+    /// for this pane (`agents::find_claude_session`), and says whether
+    /// either changed. None found leaves the last ones: a file being
+    /// rewritten can be missed for a tick.
+    pub fn apply_claude_session(&mut self, found: Option<&crate::agents::ClaudeSession>) -> bool {
+        let Some(found) = found else { return false };
+        let changed =
+            self.agent_name != found.name || self.agent_session_status != found.status;
+        self.agent_name = found.name.clone();
+        self.agent_session_status = found.status;
+        changed
+    }
+
+    /// What the agent is doing: what its hooks said, else what Claude
+    /// Code's session file says.
+    pub fn status(&self) -> Option<cmux_protocol::AgentStatus> {
+        self.agent_status.or(self.agent_session_status)
     }
 }
 
@@ -561,7 +593,33 @@ mod tests {
     use super::*;
 
     fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
-        crate::agents::RunningAgent { harness, args: args.into() }
+        crate::agents::RunningAgent { harness, pid: 42, args: args.into() }
+    }
+
+    #[test]
+    fn a_session_file_names_the_agent_and_stands_in_for_hooks() {
+        use cmux_protocol::{AgentStatus, Harness};
+        let mut m = PaneMeta::default();
+        m.observe_agent(Some(&running(Harness::Claude, "claude")), true);
+        assert_eq!(m.agent_pid, Some(42));
+        let file = crate::agents::ClaudeSession {
+            pid: 42,
+            name: Some("fix-login".into()),
+            status: Some(AgentStatus::Working),
+            ..Default::default()
+        };
+        assert!(m.apply_claude_session(Some(&file)));
+        assert!(!m.apply_claude_session(Some(&file)));
+        assert!(!m.apply_claude_session(None));
+        assert_eq!(m.agent_name.as_deref(), Some("fix-login"));
+        assert_eq!(m.status(), Some(AgentStatus::Working));
+        // A hook's status is more precise (it knows about permission
+        // prompts), and wins.
+        m.agent_status = Some(AgentStatus::NeedsYou);
+        assert_eq!(m.status(), Some(AgentStatus::NeedsYou));
+        // Gone with the agent.
+        m.clear_agent();
+        assert_eq!((m.agent_name, m.agent_session_status, m.agent_pid), (None, None, None));
     }
 
     #[test]

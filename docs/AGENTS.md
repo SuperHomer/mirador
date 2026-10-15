@@ -166,7 +166,7 @@ it takes the repository from the pane it ran in and refuses outside one.
 mira agent roles                              # agentRoles from mirador.json
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
-mira agent list                               # pane, status, harness, role, model
+mira agent list                               # pane, status, harness, name, model
 mira agent wall                               # this tab's agents, in a grid
 mira agent activity [--pane <id>]             # its tasks and subagents
 ```
@@ -186,6 +186,13 @@ as that process runs, with the `--model`/`-m` it was started with. Their
 subcommands that serve rather than converse (`codex mcp-server`, `opencode
 serve`, …) are not. Only Claude Code has hooks, so only its agents have a
 status and resume after a restart.
+
+A Claude Code agent goes by its session's name, as `claude agents` lists
+it: read from Claude Code's own session file (`~/.claude/sessions/<pid>.json`,
+matched by the process on the pane's terminal, the hooks' session, or the
+job a `claude attach` names), whether given with `--name` or `/rename` or
+made up by Claude Code. Without one it goes by its role. The same file's
+busy/idle is the status of an agent whose hooks have not reported one.
 
 `agent activity` (or right-clicking the agent in the app) reads a Claude
 Code agent's transcripts: the session's tokens, context and task list

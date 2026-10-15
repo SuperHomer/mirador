@@ -606,8 +606,8 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
     Ok(())
 }
 
-/// Agents as a table, one per line: pane, status, harness, role, model, and
-/// what it is blocked on when it is.
+/// Agents as a table, one per line: pane, status, harness, name (the
+/// session's, else the role), model, and what it is blocked on when it is.
 fn render_agents(agents: &[serde_json::Value]) {
     if agents.is_empty() {
         println!("(no agents — `mira agent new` starts one)");
@@ -625,7 +625,7 @@ fn render_agents(agents: &[serde_json::Value]) {
             a["paneId"].as_str().unwrap_or(""),
             status,
             a["harness"].as_str().unwrap_or("claude"),
-            a["role"].as_str().unwrap_or("-"),
+            a["name"].as_str().or(a["role"].as_str()).unwrap_or("-"),
             a["model"].as_str().unwrap_or("default"),
         );
         if let Some(message) = a["message"].as_str() {

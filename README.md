@@ -320,7 +320,9 @@ what the transcripts record, and a price would be an estimate.
 
 In the sidebar, every tab is listed as usual, and below them, under an
 **Agents** heading, the agents running in the tab you are on, each on one
-line: ✳ and the role (or *Claude*, for one started without a role).
+line: ✳ and its name — the Claude Code session's, as `claude agents`
+lists it (given with `--name` or `/rename`, or made up by Claude Code),
+else its role, else the harness.
 Clicking a tab shows the whole tab — Claude beside your dev server, say;
 clicking an agent shows that agent's pane alone, filling its tab, while
 the other panes keep running untouched. Click the tab again for the split.

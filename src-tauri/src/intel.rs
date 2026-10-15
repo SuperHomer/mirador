@@ -103,6 +103,42 @@ pub fn spawn(handle: tauri::AppHandle) {
                         changed = true;
                     }
                 }
+                // Claude Code's own record of each session — its name, and
+                // busy or idle — read once per sessions directory, with the
+                // lock released: the UI takes it too.
+                let wanted: Vec<(String, std::path::PathBuf, Option<u32>, Option<String>)> = pids
+                    .iter()
+                    .filter_map(|(pane, _)| {
+                        let m = meta.get(pane)?;
+                        if m.harness() != Some(cmux_protocol::Harness::Claude) {
+                            return None;
+                        }
+                        let dir = cmux_core::agents::sessions_dir(m.agent_transcript.as_deref())?;
+                        Some((pane.clone(), dir, m.agent_pid, m.agent_session.clone()))
+                    })
+                    .collect();
+                drop(meta);
+                let mut by_dir: std::collections::HashMap<
+                    std::path::PathBuf,
+                    Vec<cmux_core::agents::ClaudeSession>,
+                > = std::collections::HashMap::new();
+                for (_, dir, _, _) in &wanted {
+                    if !by_dir.contains_key(dir) {
+                        by_dir.insert(dir.clone(), cmux_core::agents::claude_sessions(dir));
+                    }
+                }
+                let mut meta = state.meta.lock().unwrap();
+                for (pane, dir, pid, session) in &wanted {
+                    let found = cmux_core::agents::find_claude_session(
+                        &by_dir[dir],
+                        *pid,
+                        session.as_deref(),
+                        running.get(pane).map(|r| r.args.as_str()),
+                    );
+                    if meta.get_mut(pane).is_some_and(|m| m.apply_claude_session(found)) {
+                        changed = true;
+                    }
+                }
             }
 
             // Ports every other tick (~4s).

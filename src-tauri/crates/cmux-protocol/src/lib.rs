@@ -459,11 +459,16 @@ pub struct AgentInfo {
     pub harness: Harness,
     /// The `agentRoles` entry it was started with.
     pub role: Option<String>,
+    /// The session's name, as `claude agents` lists it: one given with
+    /// `--name` or `/rename`, or one Claude Code made up.
+    #[serde(default)]
+    pub name: Option<String>,
     /// The role's model, or the `--model` (`-m`) its process was started
     /// with; absent when it runs the harness's default.
     pub model: Option<String>,
-    /// Absent until its first hook arrives (or with no hooks installed);
-    /// always absent for a harness other than Claude Code, which has none.
+    /// What its hooks last said, or else what Claude Code's session file
+    /// says (busy or idle); always absent for a harness other than Claude
+    /// Code.
     pub status: Option<AgentStatus>,
     /// The last Notification message, e.g. what it needs permission for.
     pub message: Option<String>,

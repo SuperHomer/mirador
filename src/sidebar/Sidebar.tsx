@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AgentInfo,
   HARNESS_LABEL,
+  agentLabel,
   TabSnapshot,
   newTab,
   openAgentWall,
@@ -122,7 +123,7 @@ function AgentRow({
         {agent.harness === "claude" ? "✳" : "◆"}
       </span>
       <span className={`tab-title${unread ? " has-unread" : ""}`}>
-        {agent.role ?? HARNESS_LABEL[agent.harness]}
+        {agentLabel(agent)}
       </span>
       {agent.status === "needsYou" && (
         <span className="tab-agent-needs" title={agent.message ?? "Needs you"}>

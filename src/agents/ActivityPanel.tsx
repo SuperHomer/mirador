@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   AgentActivity,
-  HARNESS_LABEL,
+  agentLabel,
   SubagentInfo,
   SubagentState,
   TaskProgress,
@@ -122,7 +122,7 @@ export function ActivityPanel() {
 
   if (!pane) return null;
 
-  const name = agent ? (agent.role ?? agent.topic ?? HARNESS_LABEL[agent.harness]) : "Agent";
+  const name = agent ? agentLabel(agent) : "Agent";
   const session = activity?.session;
   const subagents = activity?.subagents ?? [];
   const totalTokens =
