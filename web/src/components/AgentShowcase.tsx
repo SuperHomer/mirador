@@ -28,7 +28,8 @@ export default function AgentShowcase() {
         </h2>
         <p style={{ color: "var(--subtext)", fontSize: 15, lineHeight: 1.65, marginTop: 16 }}>
           Give each Claude Code agent a role, with its own model and its own brief, and
-          watch a tab’s agents at once. The tiles are the agents’ live terminals, not
+          watch a tab’s agents at once — Codex, OpenCode, Pi, Gemini CLI and the rest
+          count too, the moment they start in a pane. The tiles are the agents’ live terminals, not
           previews: each says what its agent is doing (working, idle, or waiting on
           you) and takes your keystrokes, so you answer a permission prompt without
           leaving the wall. In the sidebar, each tab lists its agents below the tabs,

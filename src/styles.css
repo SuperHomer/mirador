@@ -199,9 +199,14 @@ body,
 
 .tab-harness {
   flex-shrink: 0;
-  color: #d97757;
+  color: var(--subtext);
   font-size: 12px;
   line-height: 1;
+}
+
+/* Claude Code keeps its own mark and color; other harnesses share one. */
+.tab-harness.claude {
+  color: #d97757;
 }
 
 .tab-row.agent .tab-title {

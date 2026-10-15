@@ -166,7 +166,7 @@ it takes the repository from the pane it ran in and refuses outside one.
 mira agent roles                              # agentRoles from mirador.json
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
-mira agent list                               # pane, status, role, model
+mira agent list                               # pane, status, harness, role, model
 mira agent wall                               # this tab's agents, in a grid
 ```
 
@@ -177,7 +177,16 @@ message — so `/exit` leaves a prompt, and the session resumes like any other
 (on the role's model). The arguments are quoted for the pane's shell and put
 on one line: they are typed, so a newline would submit half a command.
 
-`agent list` reads what the hooks reported: `working`, `needs-you` (with the
+`agent list` and the wall cover every agent, not only Claude Code: on macOS
+and Linux a pane whose terminal runs `codex`, `opencode`, `pi`, `gemini`,
+`amp`, `cursor-agent`, `copilot`, `aider`, `goose`, `qwen`, `crush` or
+`droid` (directly, or under `node`/`bun`/`python`) is an agent for as long
+as that process runs, with the `--model`/`-m` it was started with. Their
+subcommands that serve rather than converse (`codex mcp-server`, `opencode
+serve`, …) are not. Only Claude Code has hooks, so only its agents have a
+status and resume after a restart.
+
+For Claude Code, `agent list` reads what the hooks reported: `working`, `needs-you` (with the
 message, e.g. the tool awaiting permission), `idle`, or `-` before the first
 hook. `--json` adds the cwd, branch and when the status last changed.
 
@@ -238,7 +247,8 @@ snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)
 
-Anything that can run a shell command integrates: call `mira notify` from
+They count as agents with no setup — see section 6. For notifications,
+anything that can run a shell command integrates: call `mira notify` from
 the agent's finished/attention hooks, and prefer `mira run` for commands
 worth watching. Wire their equivalents of Stop/Notification hooks to
 `mira notify --title "<agent>" "<message>"`.

@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
+  HARNESS_LABEL,
   AgentStatus,
   Node,
   closePane,
@@ -50,7 +51,7 @@ function columns(n: number): number {
 }
 
 /**
- * Every Claude Code agent's terminal in one grid. The terminals are the
+ * Every agent's terminal in one grid — Claude Code, Codex, OpenCode, …. The terminals are the
  * panes' own, lent for as long as the wall is on screen (see
  * `lendTerminal`), so a tile is live and takes input — answering a
  * permission prompt from here is the same as in the agent's tab.
@@ -167,12 +168,13 @@ export const AgentWall = memo(function AgentWall({
         <div className="wall-empty">
           <p>
             {shown
-              ? `No Claude Code agents in ${shown.title}.`
+              ? `No agents in ${shown.title}.`
               : "The tab this wall showed has closed."}
           </p>
           <p className="wall-empty-hint">
-            Start one with <em>+ New agent</em>, or run <code>claude</code> in
-            a pane of that tab. For another tab's agents, go to the tab and
+            Start one with <em>+ New agent</em>, or run <code>claude</code>,{" "}
+            <code>codex</code>, <code>opencode</code> or another agent in a pane
+            of that tab. For another tab's agents, go to the tab and
             open the wall from there.
           </p>
         </div>
@@ -269,7 +271,9 @@ function WallTile({
         onClick={() => void zoomPane(pane, true)}
       >
         <span className="wall-dot" />
-        <span className="wall-role">{agent.role ?? "claude"}</span>
+        <span className="wall-role">
+          {agent.role ?? HARNESS_LABEL[agent.harness]}
+        </span>
         {agent.model && <span className="wall-model">{agent.model}</span>}
         <span className="wall-where">
           {[agent.topic, agent.branch].filter(Boolean).join(" · ")}

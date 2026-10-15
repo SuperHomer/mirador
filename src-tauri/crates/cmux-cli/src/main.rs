@@ -118,7 +118,8 @@ enum Command {
         #[arg(long)]
         tab: bool,
     },
-    /// Claude Code agents: start one with a role, list them, watch them all.
+    /// Agents: start a Claude Code one with a role; list and watch every
+    /// agent, Codex, OpenCode and the rest included.
     Agent {
         #[command(subcommand)]
         action: AgentAction,
@@ -195,7 +196,7 @@ enum AgentAction {
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
-    /// Every agent pane: role, model, and what it is doing.
+    /// Every agent pane: harness, role, model, and what it is doing.
     List,
     /// The roles `agent new --role` accepts.
     Roles,
@@ -593,8 +594,8 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
     Ok(())
 }
 
-/// Agents as a table, one per line: pane, status, role, model, and what it
-/// is blocked on when it is.
+/// Agents as a table, one per line: pane, status, harness, role, model, and
+/// what it is blocked on when it is.
 fn render_agents(agents: &[serde_json::Value]) {
     if agents.is_empty() {
         println!("(no agents — `mira agent new` starts one)");
@@ -608,9 +609,10 @@ fn render_agents(agents: &[serde_json::Value]) {
             _ => "-",
         };
         let mut line = format!(
-            "{}  {:<9}  {:<12}  {}",
+            "{}  {:<9}  {:<11}  {:<12}  {}",
             a["paneId"].as_str().unwrap_or(""),
             status,
+            a["harness"].as_str().unwrap_or("claude"),
             a["role"].as_str().unwrap_or("-"),
             a["model"].as_str().unwrap_or("default"),
         );

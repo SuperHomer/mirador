@@ -24,9 +24,11 @@ downloads, the feature tour and the keybinding reference.
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,
   a commit, or a branch — file tree, hunks, and your terminal's own theme.
   A header picker switches between the repository's git worktrees
-- **Agent wall** (`mira agent wall`, `mod+shift+A`): every Claude Code
-  agent's live terminal in one grid, each with its role, model and whether
-  it is working, idle, or waiting on you — type into any of them from there.
+- **Agent wall** (`mira agent wall`, `mod+shift+A`): every agent's live
+  terminal in one grid — Claude Code, Codex, OpenCode, Pi, Gemini CLI, Amp,
+  Aider and more, found by their process — each with its role, model and
+  (Claude Code) whether it is working, idle, or waiting on you; type into
+  any of them from there.
   **Agent roles** (`agentRoles` in the config) start Claude Code with their
   own model and system prompt (`mira agent new --role reviewer "…"`)
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
@@ -294,7 +296,10 @@ role's model.
 The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, the **▦ Wall**
 button beside the sidebar's Agents heading, or `mira agent wall`) draws the
 agents of the tab you open it from in a grid, in a tab of its own — roles,
-and any `claude` you started by hand. For another tab's agents, go to that
+and any agent you started by hand: `claude`, `codex`, `opencode`, `pi`,
+`gemini`, `amp`, `cursor-agent`, `copilot`, `aider`, `goose`, `qwen`,
+`crush` or `droid`, found in the pane's process table (macOS and Linux;
+on Windows only Claude Code's hooks make an agent). For another tab's agents, go to that
 tab and open the wall again: the same wall switches to it. The tiles are the agents' real terminals, moved there
 while the wall is on screen, so you can type into one to answer a
 permission prompt without leaving the wall. Each tile shows the role, the
