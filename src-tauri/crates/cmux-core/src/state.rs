@@ -54,6 +54,10 @@ pub struct PaneMeta {
     /// When this run started (or resumed) the pane's agent, until its
     /// `claude` is first seen running; see `agents::forget_agent`.
     pub agent_started_at: Option<std::time::Instant>,
+    /// The Claude Code session's transcript, as its hooks report it: where
+    /// its progress and its subagents are read from. Not persisted; the
+    /// next hook reports it again.
+    pub agent_transcript: Option<std::path::PathBuf>,
     /// The agent program the poller saw running in the pane — Claude Code,
     /// Codex, OpenCode, …: what makes a pane whose agent has no hooks an
     /// agent at all. Not persisted; a restart sees the process again.
@@ -118,6 +122,7 @@ impl PaneMeta {
         self.agent_role = None;
         self.agent_launched = false;
         self.agent_harness = None;
+        self.agent_transcript = None;
         self.agent_model = None;
         self.agent_status = None;
         self.agent_message = None;

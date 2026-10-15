@@ -52,6 +52,8 @@ pub struct AppState {
     pub update: update::UpdateState,
     /// Throttles snapshots triggered by terminal output (titles, cwd).
     pub emit_coalescer: commands::EmitCoalescer,
+    /// Claude Code transcripts read so far, for agent activity.
+    pub transcripts: Mutex<cmux_core::transcript::Cache>,
 }
 
 pub fn save_session(state: &AppState) {
@@ -183,6 +185,7 @@ pub fn run() {
             held_at_launch,
             browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
+            transcripts: Mutex::new(Default::default()),
             update: update::UpdateState::default(),
             emit_coalescer: commands::EmitCoalescer::default(),
         })
@@ -254,6 +257,7 @@ pub fn run() {
             commands::open_graph,
             commands::open_agent,
             commands::open_agent_wall,
+            commands::get_agent_activity,
             commands::mark_pane_read,
             commands::zoom_pane,
             commands::load_graph,

@@ -170,6 +170,47 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
         .collect()
 }
 
+/// A Claude Code agent's progress and its subagents', read from its
+/// transcripts. Its hooks say where the session's transcript is; until one
+/// has, there is nothing to read.
+pub fn agent_activity(
+    state: &AppState,
+    pane_id: &str,
+) -> Result<cmux_protocol::AgentActivity, String> {
+    let (transcript, live) = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(pane_id).filter(|m| m.is_agent()).ok_or("not an agent pane")?;
+        if m.harness() != Some(cmux_protocol::Harness::Claude) {
+            return Err("only Claude Code agents report their subagents".into());
+        }
+        let transcript = m.agent_transcript.clone().ok_or(
+            "no transcript yet: Claude Code reports it with its hooks \
+             (the palette's Set Up Claude Code Integration installs them)",
+        )?;
+        // Where the process table is not read (Windows) a session is
+        // never seen running, and its subagents would all look stopped.
+        (transcript, m.agent_live || !cmux_core::agents::AUTO_RESUME)
+    };
+    let (session, subagents) = state.transcripts.lock().unwrap().activity(&transcript, live);
+    Ok(cmux_protocol::AgentActivity {
+        pane_id: pane_id.to_string(),
+        session,
+        subagents,
+    })
+}
+
+/// [`agent_activity`] for the panel, off the main thread: the first read
+/// of a long session's transcript takes a moment.
+#[tauri::command]
+pub async fn get_agent_activity(
+    app: AppHandle,
+    pane_id: String,
+) -> Result<cmux_protocol::AgentActivity, String> {
+    tauri::async_runtime::spawn_blocking(move || agent_activity(&app.state::<AppState>(), &pane_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 pub fn emit_workspace(app: &AppHandle) {
     let state = app.state::<AppState>();
     state

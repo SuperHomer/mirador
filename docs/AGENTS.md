@@ -168,6 +168,7 @@ mira agent new --role reviewer "review the auth change"   # a pane beside this o
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, harness, role, model
 mira agent wall                               # this tab's agents, in a grid
+mira agent activity [--pane <id>]             # its tasks and subagents
 ```
 
 `agent new` splits the pane it runs in (the focused pane, from outside
@@ -185,6 +186,14 @@ as that process runs, with the `--model`/`-m` it was started with. Their
 subcommands that serve rather than converse (`codex mcp-server`, `opencode
 serve`, …) are not. Only Claude Code has hooks, so only its agents have a
 status and resume after a restart.
+
+`agent activity` (or right-clicking the agent in the app) reads a Claude
+Code agent's transcripts: the session's tokens, context and task list
+(`TaskCreate`/`TaskUpdate`, or `TodoWrite`), then each subagent under
+`<session>/subagents/` with its state (`running`, `done`, or `stopped`
+when the Claude Code hosting it is gone), tasks done/total, tokens,
+context and run time. The hooks tell Mirador where the transcript is
+(`transcript_path`), and only a `<session_id>.jsonl` path is accepted.
 
 For Claude Code, `agent list` reads what the hooks reported: `working`, `needs-you` (with the
 message, e.g. the tool awaiting permission), `idle`, or `-` before the first

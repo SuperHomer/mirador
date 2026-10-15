@@ -16,6 +16,7 @@ import {
   sidebarEntries,
   useWorkspaceStore,
 } from "../state/workspaceStore";
+import { useUiStore } from "../state/uiStore";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
@@ -90,6 +91,7 @@ export function Sidebar() {
 /**
  * One agent: the harness and its role, on one line. Clicking shows its
  * pane alone, filling its tab; the tab's own row shows the whole tab.
+ * Right-clicking opens its activity: task progress and subagents.
  */
 function AgentRow({
   agent,
@@ -106,6 +108,10 @@ function AgentRow({
     <div
       className={`tab-row agent${active ? " active" : ""}`}
       onClick={() => void zoomPane(agent.paneId, true)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        useUiStore.getState().openActivity(agent.paneId);
+      }}
       title={agent.cwd ?? undefined}
     >
       <span className="tab-index">{index + 1}</span>
