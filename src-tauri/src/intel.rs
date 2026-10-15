@@ -57,24 +57,24 @@ pub fn spawn(handle: tauri::AppHandle) {
                 } else {
                     cmux_core::cwd::process_cwd(*pid).or(known_cwd)
                 };
-                let git = cwd.as_deref().and_then(cmux_core::git::branch_for_cwd);
+                let git = cwd
+                    .as_deref()
+                    .and_then(cmux_core::git::branch_for_cwd)
+                    .map(|(root, branch)| (root.to_string_lossy().to_string(), branch));
+                // A pane closed while the locks were released must not get
+                // its meta back: nothing would ever remove it again, and the
+                // PR refresh would go on running `gh` for its branch.
+                // Workspace then meta, the order everything else takes them.
+                let ws = state.workspace.lock().unwrap();
                 let mut meta = state.meta.lock().unwrap();
-                let entry = meta.entry(pane.clone()).or_default();
-                if let Some(cwd) = cwd {
-                    if entry.cwd.as_deref() != Some(cwd.as_str()) {
-                        entry.cwd = Some(cwd);
-                        changed = true;
-                    }
+                if !ws.has_pane(pane) {
+                    continue;
                 }
-                let (root, branch) = match git {
-                    Some((root, branch)) => {
-                        (Some(root.to_string_lossy().to_string()), Some(branch))
-                    }
-                    None => (None, None),
-                };
-                if entry.branch != branch || entry.repo_root != root {
-                    entry.branch = branch;
-                    entry.repo_root = root;
+                if meta
+                    .entry(pane.clone())
+                    .or_default()
+                    .observe_cwd(cwd, !from_shell, git)
+                {
                     changed = true;
                 }
             }
@@ -144,8 +144,13 @@ pub fn spawn(handle: tauri::AppHandle) {
             // Ports every other tick (~4s).
             if tick.is_multiple_of(2) {
                 let ports = cmux_core::ports::ports_for_panes(&pids);
+                let ws = state.workspace.lock().unwrap();
                 let mut meta = state.meta.lock().unwrap();
                 for (pane, _) in &pids {
+                    // As above: a closed pane stays closed.
+                    if !ws.has_pane(pane) {
+                        continue;
+                    }
                     let entry = meta.entry(pane.clone()).or_default();
                     let new_ports = ports.get(pane).cloned().unwrap_or_default();
                     if entry.ports != new_ports {

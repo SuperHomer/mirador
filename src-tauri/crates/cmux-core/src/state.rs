@@ -210,6 +210,38 @@ impl PaneMeta {
         changed
     }
 
+    /// Applies the poller's read of the pane's directory and its git
+    /// branch (`repo root`, `branch`), and says whether anything changed.
+    /// `from_os`: the directory was read from the OS, because the shell had
+    /// not reported one with OSC 7 when the poll began. If it has since,
+    /// the shell's stands, and so does the branch worked out for it: the
+    /// poll was made for a directory that no longer counts, and the next
+    /// one is made for the right one.
+    pub fn observe_cwd(
+        &mut self,
+        cwd: Option<String>,
+        from_os: bool,
+        git: Option<(String, String)>,
+    ) -> bool {
+        if from_os && self.cwd_from_shell {
+            return false;
+        }
+        let mut changed = false;
+        if let Some(cwd) = cwd {
+            if self.cwd.as_deref() != Some(cwd.as_str()) {
+                self.cwd = Some(cwd);
+                changed = true;
+            }
+        }
+        let (root, branch) = git.unzip();
+        if self.branch != branch || self.repo_root != root {
+            self.branch = branch;
+            self.repo_root = root;
+            changed = true;
+        }
+        changed
+    }
+
     /// Whether its activity can be read: a Claude Code agent whose hooks
     /// reported its transcript.
     pub fn has_activity(&self) -> bool {
@@ -497,6 +529,15 @@ impl Workspace {
         }
     }
 
+    /// Whether `pane` is still in a tab. A pane leaves its tab before its
+    /// `PaneMeta` is removed, so a writer that checks this under the
+    /// workspace lock never brings a closed pane's meta back.
+    pub fn has_pane(&self, pane: &str) -> bool {
+        self.tabs
+            .iter()
+            .any(|t| layout::pane_ids(&t.root).iter().any(|p| p == pane))
+    }
+
     pub fn all_pane_ids(&self) -> Vec<String> {
         self.tabs
             .iter()
@@ -600,6 +641,26 @@ mod tests {
 
     fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
         crate::agents::RunningAgent { harness, pid: 42, args: args.into() }
+    }
+
+    #[test]
+    fn a_directory_the_shell_reported_mid_poll_is_not_overwritten() {
+        let mut m = PaneMeta::default();
+        let git = || Some(("/repo".to_string(), "main".to_string()));
+        assert!(m.observe_cwd(Some("/repo".into()), true, git()));
+        assert!(!m.observe_cwd(Some("/repo".into()), true, git()));
+        // OSC 7 lands while the poll is reading the OS (on Windows, the
+        // launch directory): the shell's directory and branch stay.
+        m.cwd = Some("/elsewhere".into());
+        m.cwd_from_shell = true;
+        m.branch = None;
+        m.repo_root = None;
+        assert!(!m.observe_cwd(Some("/launch".into()), true, None));
+        assert_eq!(m.cwd.as_deref(), Some("/elsewhere"));
+        // A poll that began after it took the shell's directory, and works
+        // out its branch.
+        assert!(m.observe_cwd(Some("/elsewhere".into()), false, Some(("/elsewhere".into(), "dev".into()))));
+        assert_eq!(m.branch.as_deref(), Some("dev"));
     }
 
     #[test]
