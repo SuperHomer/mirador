@@ -32,8 +32,10 @@ export default function AgentShowcase() {
           count too, the moment they start in a pane. The tiles are the agents’ live terminals, not
           previews: each says what its agent is doing (working, idle, or waiting on
           you) and takes your keystrokes, so you answer a permission prompt without
-          leaving the wall. In the sidebar, each tab lists its agents below the tabs,
-          and a click shows one alone.
+          leaving the wall. Each goes by its Claude Code session’s name, and beside its
+          terminal sit the subagents it started, with how far each has got; right-click
+          one for the full list. In the sidebar, each tab lists its agents below the
+          tabs, and a click shows one alone.
         </p>
         <div
           style={{
@@ -57,9 +59,9 @@ export default function AgentShowcase() {
 
       <img
         src={wallUrl}
-        alt="The agent wall: four Claude Code agents in a grid — a planner on opus and a reviewer on sonnet still working, two more idle — each tile headed by its role, model and status, with the agents listed apart at the foot of the sidebar."
-        width={2000}
-        height={1189}
+        alt="The agent wall: four Claude Code sessions working on this repository as a team — an orchestrator directing dev-1 and dev-2 on Sonnet and a planner on Opus — each tile headed by its name, model, branch and status, the planner's two finished subagents listed beside its terminal, and the agents named at the foot of the sidebar."
+        width={1558}
+        height={1047}
         loading="lazy"
         style={{
           display: "block",
