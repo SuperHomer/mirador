@@ -68,6 +68,13 @@ field or helper read only under `#[cfg(unix)]` is dead code on Windows, and
 `#[cfg_attr(not(unix), allow(dead_code))]`, as `pty::Signal` does, and keep
 the logic itself in `cmux-core`, where the cross-check reaches.
 
+**A test path like `/u/x` is relative on Windows** — it has no drive.
+Anything that checks `is_absolute()` refuses it there, so the test
+passes on macOS and fails only in Windows CI (#108). Build test paths
+from `std::env::temp_dir()`. And the cross-check above lints tests but
+never runs them: only CI finds this, and cargo stops at the first
+failing crate, so the crates after it go untested until it is fixed.
+
 ## Verifying a change
 
 **CI compiles and unit-tests but never mounts the app.** `tsc`, `vite build`,
