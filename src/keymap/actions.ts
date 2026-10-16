@@ -169,9 +169,22 @@ export const actions: ActionDef[] = [
   {
     id: "agent_wall",
     title: "Agent Wall",
-    // Every Claude Code agent's terminal in one grid; goes to the wall's
+    // Every agent's terminal in one grid; goes to the wall's
     // tab when there already is one.
     run: () => void openAgentWall(focusedPane() ?? null),
+  },
+  {
+    id: "agent_activity",
+    title: "Agent Activity",
+    // The focused agent's task progress and its subagents, in a drawer —
+    // the same as right-clicking the agent in the sidebar.
+    run: () => {
+      const pane = focusedPane();
+      const agent = useWorkspaceStore
+        .getState()
+        .snapshot?.agents.find((a) => a.paneId === pane);
+      if (pane && agent?.hasActivity) useUiStore.getState().openActivity(pane);
+    },
   },
   {
     id: "toggle_zoom",

@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AgentInfo,
   HARNESS_LABEL,
+  agentLabel,
   TabSnapshot,
   newTab,
   openAgentWall,
@@ -16,6 +17,7 @@ import {
   sidebarEntries,
   useWorkspaceStore,
 } from "../state/workspaceStore";
+import { useUiStore } from "../state/uiStore";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
@@ -90,6 +92,7 @@ export function Sidebar() {
 /**
  * One agent: the harness and its role, on one line. Clicking shows its
  * pane alone, filling its tab; the tab's own row shows the whole tab.
+ * Right-clicking opens its activity: task progress and subagents.
  */
 function AgentRow({
   agent,
@@ -106,7 +109,15 @@ function AgentRow({
     <div
       className={`tab-row agent${active ? " active" : ""}`}
       onClick={() => void zoomPane(agent.paneId, true)}
-      title={agent.cwd ?? undefined}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (agent.hasActivity) useUiStore.getState().openActivity(agent.paneId);
+      }}
+      title={
+        [agent.cwd, agent.hasActivity ? "Right-click for its subagents" : null]
+          .filter(Boolean)
+          .join(" — ") || undefined
+      }
     >
       <span className="tab-index">{index + 1}</span>
       <span
@@ -116,7 +127,7 @@ function AgentRow({
         {agent.harness === "claude" ? "✳" : "◆"}
       </span>
       <span className={`tab-title${unread ? " has-unread" : ""}`}>
-        {agent.role ?? HARNESS_LABEL[agent.harness]}
+        {agentLabel(agent)}
       </span>
       {agent.status === "needsYou" && (
         <span className="tab-agent-needs" title={agent.message ?? "Needs you"}>

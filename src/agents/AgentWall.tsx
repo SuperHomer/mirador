@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
-  HARNESS_LABEL,
+  agentLabel,
   AgentStatus,
   Node,
   closePane,
@@ -9,7 +9,9 @@ import {
   openAgent,
   zoomPane,
 } from "../bindings";
+import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
 import { useConfigStore } from "../state/configStore";
+import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import {
   fitTerminal,
@@ -260,6 +262,11 @@ function WallTile({
     };
   }, [pane, visible]);
 
+  // Its subagents, read while the wall is on screen, for an agent that
+  // has them to read (`hasActivity`, decided in Rust).
+  const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
+  const tasks = activity?.session.tasks ?? null;
+
   const status = agent.status;
   return (
     <div
@@ -267,17 +274,31 @@ function WallTile({
     >
       <div
         className="wall-tile-head"
-        title="Show this agent in its tab"
+        title={
+          agent.hasActivity
+            ? "Show this agent in its tab — right-click for its subagents"
+            : "Show this agent in its tab"
+        }
         onClick={() => void zoomPane(pane, true)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (agent.hasActivity) useUiStore.getState().openActivity(pane);
+        }}
       >
         <span className="wall-dot" />
-        <span className="wall-role">
-          {agent.role ?? HARNESS_LABEL[agent.harness]}
-        </span>
+        <span className="wall-role">{agentLabel(agent)}</span>
+        {agent.role && agent.name && agent.role !== agent.name && (
+          <span className="wall-model">{agent.role}</span>
+        )}
         {agent.model && <span className="wall-model">{agent.model}</span>}
         <span className="wall-where">
           {[agent.topic, agent.branch].filter(Boolean).join(" · ")}
         </span>
+        {tasks && (
+          <span className="wall-tasks" title={tasks.current ?? "Its task list"}>
+            {tasks.done}/{tasks.total} · {percent(tasks)}%
+          </span>
+        )}
         <span className="wall-status">
           {status ? STATUS_LABEL[status] : "—"}
           {status && agent.sinceMs ? ` ${elapsed(agent.sinceMs, now)}` : ""}
@@ -288,16 +309,32 @@ function WallTile({
           {agent.message}
         </div>
       )}
-      <div
-        className="wall-term"
-        onMouseDown={() => {
-          if (unread) void markPaneRead(pane);
-        }}
-      >
-        {/* The terminal's element is appended here by `lendTerminal`, so
-            React must own nothing inside it. */}
-        <div className="wall-term-host" ref={hostRef} />
-        {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+      <div className="wall-body">
+        <div
+          className="wall-term"
+          onMouseDown={() => {
+            if (unread) void markPaneRead(pane);
+          }}
+        >
+          {/* The terminal's element is appended here by `lendTerminal`, so
+              React must own nothing inside it. */}
+          <div className="wall-term-host" ref={hostRef} />
+          {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+        </div>
+        {activity && (activity.subagents.length > 0 || tasks) && (
+          <aside className="wall-side">
+            <div className="wall-side-head">
+              <span>Subagents · {activity.subagents.length}</span>
+              <button
+                title="The full activity panel"
+                onClick={() => useUiStore.getState().openActivity(pane)}
+              >
+                ⤢
+              </button>
+            </div>
+            <SubagentList activity={activity} now={now} compact />
+          </aside>
+        )}
       </div>
     </div>
   );

@@ -54,10 +54,23 @@ pub struct PaneMeta {
     /// When this run started (or resumed) the pane's agent, until its
     /// `claude` is first seen running; see `agents::forget_agent`.
     pub agent_started_at: Option<std::time::Instant>,
+    /// The Claude Code session's transcript, as its hooks report it: where
+    /// its progress and its subagents are read from. Not persisted; the
+    /// next hook reports it again.
+    pub agent_transcript: Option<std::path::PathBuf>,
     /// The agent program the poller saw running in the pane — Claude Code,
     /// Codex, OpenCode, …: what makes a pane whose agent has no hooks an
     /// agent at all. Not persisted; a restart sees the process again.
     pub agent_harness: Option<cmux_protocol::Harness>,
+    /// The pid of the agent process the poller saw on the pane's terminal.
+    pub agent_pid: Option<u32>,
+    /// The Claude Code session's name, from its session file (what
+    /// `claude agents` lists): one given with `--name` or `/rename`, or
+    /// one Claude Code made up.
+    pub agent_name: Option<String>,
+    /// Busy or idle, as that file says: the status of an agent whose hooks
+    /// have not reported one (or are not installed).
+    pub agent_session_status: Option<cmux_protocol::AgentStatus>,
     /// The `--model` the poller saw the pane's agent started with.
     pub agent_model: Option<String>,
     /// What the agent's hooks last said it is doing (not persisted: a
@@ -118,6 +131,10 @@ impl PaneMeta {
         self.agent_role = None;
         self.agent_launched = false;
         self.agent_harness = None;
+        self.agent_transcript = None;
+        self.agent_pid = None;
+        self.agent_name = None;
+        self.agent_session_status = None;
         self.agent_model = None;
         self.agent_status = None;
         self.agent_message = None;
@@ -170,6 +187,7 @@ impl PaneMeta {
         }
         self.agent_live = true;
         self.agent_started_at = None;
+        self.agent_pid = Some(run.pid);
         // The model it was started on; a role's is already there, and agrees.
         let model = crate::agents::model_flag(&run.args);
         if model.is_some() && self.agent_model != model {
@@ -177,6 +195,63 @@ impl PaneMeta {
             changed = true;
         }
         changed
+    }
+
+    /// Takes the name and status from the Claude Code session file found
+    /// for this pane (`agents::find_claude_session`), and says whether
+    /// either changed. None found leaves the last ones: a file being
+    /// rewritten can be missed for a tick.
+    pub fn apply_claude_session(&mut self, found: Option<&crate::agents::ClaudeSession>) -> bool {
+        let Some(found) = found else { return false };
+        let changed =
+            self.agent_name != found.name || self.agent_session_status != found.status;
+        self.agent_name = found.name.clone();
+        self.agent_session_status = found.status;
+        changed
+    }
+
+    /// Applies the poller's read of the pane's directory and its git
+    /// branch (`repo root`, `branch`), and says whether anything changed.
+    /// `from_os`: the directory was read from the OS, because the shell had
+    /// not reported one with OSC 7 when the poll began. If it has since,
+    /// the shell's stands, and so does the branch worked out for it: the
+    /// poll was made for a directory that no longer counts, and the next
+    /// one is made for the right one.
+    pub fn observe_cwd(
+        &mut self,
+        cwd: Option<String>,
+        from_os: bool,
+        git: Option<(String, String)>,
+    ) -> bool {
+        if from_os && self.cwd_from_shell {
+            return false;
+        }
+        let mut changed = false;
+        if let Some(cwd) = cwd {
+            if self.cwd.as_deref() != Some(cwd.as_str()) {
+                self.cwd = Some(cwd);
+                changed = true;
+            }
+        }
+        let (root, branch) = git.unzip();
+        if self.branch != branch || self.repo_root != root {
+            self.branch = branch;
+            self.repo_root = root;
+            changed = true;
+        }
+        changed
+    }
+
+    /// Whether its activity can be read: a Claude Code agent whose hooks
+    /// reported its transcript.
+    pub fn has_activity(&self) -> bool {
+        self.harness() == Some(cmux_protocol::Harness::Claude) && self.agent_transcript.is_some()
+    }
+
+    /// What the agent is doing: what its hooks said, else what Claude
+    /// Code's session file says.
+    pub fn status(&self) -> Option<cmux_protocol::AgentStatus> {
+        self.agent_status.or(self.agent_session_status)
     }
 }
 
@@ -454,6 +529,15 @@ impl Workspace {
         }
     }
 
+    /// Whether `pane` is still in a tab. A pane leaves its tab before its
+    /// `PaneMeta` is removed, so a writer that checks this under the
+    /// workspace lock never brings a closed pane's meta back.
+    pub fn has_pane(&self, pane: &str) -> bool {
+        self.tabs
+            .iter()
+            .any(|t| layout::pane_ids(&t.root).iter().any(|p| p == pane))
+    }
+
     pub fn all_pane_ids(&self) -> Vec<String> {
         self.tabs
             .iter()
@@ -556,7 +640,53 @@ mod tests {
     use super::*;
 
     fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
-        crate::agents::RunningAgent { harness, args: args.into() }
+        crate::agents::RunningAgent { harness, pid: 42, args: args.into() }
+    }
+
+    #[test]
+    fn a_directory_the_shell_reported_mid_poll_is_not_overwritten() {
+        let mut m = PaneMeta::default();
+        let git = || Some(("/repo".to_string(), "main".to_string()));
+        assert!(m.observe_cwd(Some("/repo".into()), true, git()));
+        assert!(!m.observe_cwd(Some("/repo".into()), true, git()));
+        // OSC 7 lands while the poll is reading the OS (on Windows, the
+        // launch directory): the shell's directory and branch stay.
+        m.cwd = Some("/elsewhere".into());
+        m.cwd_from_shell = true;
+        m.branch = None;
+        m.repo_root = None;
+        assert!(!m.observe_cwd(Some("/launch".into()), true, None));
+        assert_eq!(m.cwd.as_deref(), Some("/elsewhere"));
+        // A poll that began after it took the shell's directory, and works
+        // out its branch.
+        assert!(m.observe_cwd(Some("/elsewhere".into()), false, Some(("/elsewhere".into(), "dev".into()))));
+        assert_eq!(m.branch.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn a_session_file_names_the_agent_and_stands_in_for_hooks() {
+        use cmux_protocol::{AgentStatus, Harness};
+        let mut m = PaneMeta::default();
+        m.observe_agent(Some(&running(Harness::Claude, "claude")), true);
+        assert_eq!(m.agent_pid, Some(42));
+        let file = crate::agents::ClaudeSession {
+            pid: 42,
+            name: Some("fix-login".into()),
+            status: Some(AgentStatus::Working),
+            ..Default::default()
+        };
+        assert!(m.apply_claude_session(Some(&file)));
+        assert!(!m.apply_claude_session(Some(&file)));
+        assert!(!m.apply_claude_session(None));
+        assert_eq!(m.agent_name.as_deref(), Some("fix-login"));
+        assert_eq!(m.status(), Some(AgentStatus::Working));
+        // A hook's status is more precise (it knows about permission
+        // prompts), and wins.
+        m.agent_status = Some(AgentStatus::NeedsYou);
+        assert_eq!(m.status(), Some(AgentStatus::NeedsYou));
+        // Gone with the agent.
+        m.clear_agent();
+        assert_eq!((m.agent_name, m.agent_session_status, m.agent_pid), (None, None, None));
     }
 
     #[test]

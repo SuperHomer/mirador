@@ -190,6 +190,10 @@ export const HARNESS_LABEL: Record<Harness, string> = {
   droid: "Droid",
 };
 
+/** What to call an agent: its session's name, its role, or its harness. */
+export const agentLabel = (a: AgentInfo): string =>
+  a.name ?? a.role ?? HARNESS_LABEL[a.harness];
+
 /** A pane running a coding agent: Claude Code, Codex, OpenCode, … */
 export interface AgentInfo {
   paneId: string;
@@ -198,8 +202,12 @@ export interface AgentInfo {
   /** What it runs. Only Claude Code has hooks, and so a status. */
   harness: Harness;
   role: string | null;
+  /** A Claude Code agent whose transcript is known: activity to show. */
+  hasActivity: boolean;
+  /** The Claude Code session's name, as `claude agents` lists it. */
+  name: string | null;
   model: string | null;
-  /** Null until its first hook arrives. */
+  /** Its hooks' status, or else busy/idle from Claude Code's session file. */
   status: AgentStatus | null;
   message: string | null;
   /** What its own terminal title says it is on, when that adds to the role. */
@@ -207,6 +215,46 @@ export interface AgentInfo {
   sinceMs: number | null;
   cwd: string | null;
   branch: string | null;
+}
+
+/** How far an agent is through its task list (`cmux_protocol::TaskProgress`). */
+export interface TaskProgress {
+  done: number;
+  total: number;
+  /** What the task in progress says it is doing. */
+  current: string | null;
+}
+
+export type SubagentState = "running" | "done" | "stopped";
+
+/** What one transcript adds up to (`cmux_protocol::TranscriptSummary`). */
+export interface TranscriptSummary {
+  model: string | null;
+  /** Fresh tokens: input not read from the cache, plus output. */
+  tokens: number;
+  /** Context size at the last reply. */
+  context: number;
+  toolCalls: number;
+  /** Null when it keeps no task list. */
+  tasks: TaskProgress | null;
+  startedMs: number | null;
+  lastMs: number | null;
+}
+
+export interface SubagentInfo extends TranscriptSummary {
+  id: string;
+  description: string | null;
+  agentType: string | null;
+  depth: number;
+  state: SubagentState;
+}
+
+/** A Claude Code agent's progress and its subagents. */
+export interface AgentActivity {
+  paneId: string;
+  session: TranscriptSummary;
+  /** Running ones first, then latest activity first. */
+  subagents: SubagentInfo[];
 }
 
 export interface AgentWallPaneInfo {
@@ -385,6 +433,8 @@ export const markPaneRead = (paneId: string) =>
 /** The wall for the tab of `paneId` (the focused pane when null). */
 export const openAgentWall = (paneId: string | null) =>
   invoke<string>("open_agent_wall", { paneId });
+export const getAgentActivity = (paneId: string) =>
+  invoke<AgentActivity>("get_agent_activity", { paneId });
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

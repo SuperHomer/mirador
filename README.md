@@ -306,9 +306,23 @@ permission prompt without leaving the wall. Each tile shows the role, the
 model, and what the agent is doing: **working**, **needs you** (with what
 for), or **idle**. Click a tile's header to see that agent alone in its tab.
 
+**Right-click an agent** (its sidebar row, or a wall tile's header; the
+palette's *Agent Activity* for the focused one) to open its activity: the
+tokens, context and time its Claude Code session has used, how far it is
+through its own task list, and every subagent it started, each with its
+type, model, tasks done (as `n/m` and a percentage), tokens and run time,
+running ones first. The wall shows the same list in every Claude Code
+tile, beside its terminal (under it, when the tile is narrow), with the
+task progress in the tile's header; its ⤢ opens the full panel. It is read from Claude Code's transcripts, which the
+hooks point Mirador to, so it needs the integration set up; the CLI
+equivalent is `mira agent activity`. There is no cost figure: tokens are
+what the transcripts record, and a price would be an estimate.
+
 In the sidebar, every tab is listed as usual, and below them, under an
 **Agents** heading, the agents running in the tab you are on, each on one
-line: ✳ and the role (or *Claude*, for one started without a role).
+line: ✳ and its name — the Claude Code session's, as `claude agents`
+lists it (given with `--name` or `/rename`, or made up by Claude Code),
+else its role, else the harness.
 Clicking a tab shows the whole tab — Claude beside your dev server, say;
 clicking an agent shows that agent's pane alone, filling its tab, while
 the other panes keep running untouched. Click the tab again for the split.

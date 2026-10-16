@@ -185,6 +185,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             event,
             notification_type,
             message,
+            transcript_path,
         } => {
             if agent != "claude" {
                 return Err(format!("unknown agent `{agent}`"));
@@ -211,6 +212,12 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 let mut meta = state.meta.lock().unwrap();
                 let entry = meta.entry(pane.clone()).or_default();
                 entry.agent_session = Some(record);
+                if let Some(path) = transcript_path
+                    .map(std::path::PathBuf::from)
+                    .filter(|p| cmux_core::transcript::is_transcript_of(p, &session_id))
+                {
+                    entry.agent_transcript = Some(path);
+                }
                 if let Some(status) = status {
                     if entry.agent_status != Some(status) {
                         entry.agent_status = Some(status);
@@ -252,6 +259,11 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::AgentList => {
             let agents = crate::commands::agent_infos(&state);
             Ok(json!({ "agents": agents }))
+        }
+        Request::AgentActivity { pane_id } => {
+            let pane = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+            let activity = crate::commands::agent_activity(&state, &pane)?;
+            Ok(serde_json::to_value(activity).map_err(|e| e.to_string())?)
         }
         Request::AgentWall { pane_id } => {
             let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;

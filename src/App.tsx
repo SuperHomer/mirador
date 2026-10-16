@@ -13,6 +13,7 @@ import { useKeymap } from "./keymap/useKeymap";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
 import { CommandPalette } from "./palette/CommandPalette";
+import { ActivityPanel } from "./agents/ActivityPanel";
 import { NotificationPanel } from "./notifications/NotificationPanel";
 import {
   NotificationDto,
@@ -145,6 +146,7 @@ export default function App() {
       </div>
       <CommandPalette />
       <NotificationPanel />
+      <ActivityPanel />
     </div>
   );
 }

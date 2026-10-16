@@ -218,6 +218,10 @@ pub enum Request {
         /// Absent from older CLIs, which then only record the session.
         #[serde(default)]
         event: Option<String>,
+        /// The session's transcript (`transcript_path` in the hook's
+        /// payload): where its subagents' transcripts are found.
+        #[serde(default)]
+        transcript_path: Option<String>,
         /// A Notification hook's `notification_type` ("permission_prompt",
         /// "idle_prompt", …), when Claude Code sends one.
         #[serde(default)]
@@ -245,6 +249,12 @@ pub enum Request {
     },
     /// Every agent pane and what it is doing.
     AgentList,
+    /// A Claude Code agent's progress and its subagents, from its
+    /// transcripts: `pane_id`'s agent, or the focused pane's.
+    AgentActivity {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Opens the agent wall for the tab of `pane_id` (the focused pane
     /// when absent): its own tab, reused if there is one, showing that
     /// tab's agents.
@@ -449,11 +459,21 @@ pub struct AgentInfo {
     pub harness: Harness,
     /// The `agentRoles` entry it was started with.
     pub role: Option<String>,
+    /// Whether it has activity to show (`agent activity`, the panel, the
+    /// wall's list): a Claude Code agent whose hooks said where its
+    /// transcript is. The one place that rule lives.
+    #[serde(default)]
+    pub has_activity: bool,
+    /// The session's name, as `claude agents` lists it: one given with
+    /// `--name` or `/rename`, or one Claude Code made up.
+    #[serde(default)]
+    pub name: Option<String>,
     /// The role's model, or the `--model` (`-m`) its process was started
     /// with; absent when it runs the harness's default.
     pub model: Option<String>,
-    /// Absent until its first hook arrives (or with no hooks installed);
-    /// always absent for a harness other than Claude Code, which has none.
+    /// What its hooks last said, or else what Claude Code's session file
+    /// says (busy or idle); always absent for a harness other than Claude
+    /// Code.
     pub status: Option<AgentStatus>,
     /// The last Notification message, e.g. what it needs permission for.
     pub message: Option<String>,
@@ -465,6 +485,76 @@ pub struct AgentInfo {
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,
     pub branch: Option<String>,
+}
+
+/// How far an agent is through the task list it keeps (`TaskCreate` /
+/// `TaskUpdate`, or an older `TodoWrite`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProgress {
+    pub done: u32,
+    pub total: u32,
+    /// What the task in progress says it is doing (its `activeForm`, or
+    /// its subject).
+    pub current: Option<String>,
+}
+
+/// Where a subagent is, as its transcript and its session's process say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubagentState {
+    Running,
+    /// Its last turn ended, or it handed back its report. It can be sent
+    /// a message and run again.
+    Done,
+    /// Was running when the Claude Code hosting it exited.
+    Stopped,
+}
+
+/// What one transcript adds up to: the model, the tokens, the tasks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSummary {
+    /// The model of its last reply.
+    pub model: Option<String>,
+    /// Tokens it processed afresh: input not read from the cache, plus
+    /// output, over every reply.
+    pub tokens: u64,
+    /// The size of its context at the last reply.
+    pub context: u64,
+    pub tool_calls: u32,
+    /// Absent when it keeps no task list.
+    pub tasks: Option<TaskProgress>,
+    /// Unix millis of its first and latest entries.
+    pub started_ms: Option<u64>,
+    pub last_ms: Option<u64>,
+}
+
+/// A subagent of a Claude Code session (`Agent` tool), from its transcript.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentInfo {
+    pub id: String,
+    /// What it was asked to do, as the `Agent` call described it.
+    pub description: Option<String>,
+    /// Its `subagent_type`, e.g. `Explore`.
+    pub agent_type: Option<String>,
+    /// 1 for a subagent of the session, 2 for one of those's, …
+    pub depth: u32,
+    pub state: SubagentState,
+    #[serde(flatten)]
+    pub summary: TranscriptSummary,
+}
+
+/// What an agent pane's Claude Code session and its subagents are doing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentActivity {
+    pub pane_id: String,
+    /// The session itself.
+    pub session: TranscriptSummary,
+    /// Running ones first, then the rest, latest activity first.
+    pub subagents: Vec<SubagentInfo>,
 }
 
 /// A pane drawing the agent wall.

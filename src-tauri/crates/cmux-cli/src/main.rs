@@ -198,6 +198,13 @@ enum AgentAction {
     },
     /// Every agent pane: harness, role, model, and what it is doing.
     List,
+    /// A Claude Code agent's task progress and its subagents (this pane's
+    /// agent, or the focused pane's).
+    Activity {
+        /// The agent's pane, instead of this one.
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// The roles `agent new --role` accepts.
     Roles,
     /// Open the agent wall for this tab: its agents' terminals in one
@@ -401,6 +408,9 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
             },
             AgentAction::List => Request::AgentList,
+            AgentAction::Activity { pane } => Request::AgentActivity {
+                pane_id: pane.or_else(own_pane),
+            },
             AgentAction::Roles => return agent_roles(cli.json),
             AgentAction::Wall => Request::AgentWall {
                 pane_id: own_pane(),
@@ -571,6 +581,8 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 .filter(|_| !map.contains_key("tabs"))
             {
                 render_agents(agents);
+            } else if map.contains_key("subagents") {
+                render_activity(&data);
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
@@ -594,8 +606,8 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
     Ok(())
 }
 
-/// Agents as a table, one per line: pane, status, harness, role, model, and
-/// what it is blocked on when it is.
+/// Agents as a table, one per line: pane, status, harness, name (the
+/// session's, else the role), model, and what it is blocked on when it is.
 fn render_agents(agents: &[serde_json::Value]) {
     if agents.is_empty() {
         println!("(no agents — `mira agent new` starts one)");
@@ -613,13 +625,63 @@ fn render_agents(agents: &[serde_json::Value]) {
             a["paneId"].as_str().unwrap_or(""),
             status,
             a["harness"].as_str().unwrap_or("claude"),
-            a["role"].as_str().unwrap_or("-"),
+            a["name"].as_str().or(a["role"].as_str()).unwrap_or("-"),
             a["model"].as_str().unwrap_or("default"),
         );
         if let Some(message) = a["message"].as_str() {
             line.push_str(&format!("  — {message}"));
         }
         println!("{line}");
+    }
+}
+
+/// An agent's activity: the session's line, then one per subagent with
+/// its state, progress, tokens and how long it ran.
+fn render_activity(data: &serde_json::Value) {
+    let tokens = |v: &serde_json::Value| {
+        let n = v.as_u64().unwrap_or(0);
+        match n {
+            0..=999 => n.to_string(),
+            1000..=999_999 => format!("{}k", n / 1000),
+            _ => format!("{:.1}M", n as f64 / 1e6),
+        }
+    };
+    let tasks = |s: &serde_json::Value| match s["tasks"].as_object() {
+        Some(t) => format!("{}/{}", t["done"], t["total"]),
+        None => "-".into(),
+    };
+    let s = &data["session"];
+    let mut line = format!(
+        "session   {:<5}  {:>6} tok  ctx {:>5}  {}",
+        tasks(s),
+        tokens(&s["tokens"]),
+        tokens(&s["context"]),
+        s["model"].as_str().unwrap_or("-"),
+    );
+    if let Some(current) = s["tasks"]["current"].as_str() {
+        line.push_str(&format!("  — {current}"));
+    }
+    println!("{line}");
+    let subagents = data["subagents"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    if subagents.is_empty() {
+        println!("(no subagents)");
+    }
+    for a in subagents {
+        let secs = match (a["startedMs"].as_u64(), a["lastMs"].as_u64()) {
+            (Some(start), Some(last)) => last.saturating_sub(start) / 1000,
+            _ => 0,
+        };
+        println!(
+            "{:<8}  {:<5}  {:>6} tok  ctx {:>5}  {:>2}:{:02}  {}  {}",
+            a["state"].as_str().unwrap_or("-"),
+            tasks(a),
+            tokens(&a["tokens"]),
+            tokens(&a["context"]),
+            secs / 60,
+            secs % 60,
+            a["agentType"].as_str().unwrap_or("agent"),
+            a["description"].as_str().unwrap_or(""),
+        );
     }
 }
 
@@ -899,6 +961,7 @@ fn claude_hook(event: &str) -> Result<(), String> {
             session_id: session_id.to_string(),
             job: job.clone(),
             event: Some(event.to_string()),
+            transcript_path: payload["transcript_path"].as_str().map(String::from),
             notification_type: payload["notification_type"].as_str().map(String::from),
             message: payload["message"].as_str().map(String::from),
         });
