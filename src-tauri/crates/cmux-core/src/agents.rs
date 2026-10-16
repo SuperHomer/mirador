@@ -428,19 +428,30 @@ pub fn hook_status(
     }
 }
 
-/// The command line that starts an agent in a shell pane: `claude` with
-/// the role's model and prompt, named after the role, and the task as its
-/// first message. `quote` quotes one argument for the pane's shell.
+/// The command line that starts an agent in a shell pane: Claude Code, or
+/// the role's harness, with the role's model and prompt, and the task as
+/// its first message. `quote` quotes one argument for the pane's shell.
+///
+/// The prompt is the role's whole prompt (its own, then its way of
+/// working's). Claude Code reads it from `prompt_file` when there is one —
+/// a prompt is paragraphs, and a file keeps them — and Codex takes it as
+/// its `developer_instructions`, a TOML string whose newlines are escapes.
 ///
 /// It is typed in, so every argument is put on one line and loses its
 /// control characters: a newline would submit the line half-quoted, and a
 /// stray `^C` would be read as a keystroke before the shell ever saw quotes.
 pub fn launch_command(
     role: Option<&AgentRole>,
+    prompt: Option<&str>,
+    prompt_file: Option<&std::path::Path>,
     task: Option<&str>,
     quote: impl Fn(&str) -> String,
 ) -> String {
-    let mut line = String::from("claude");
+    let harness = role.map_or(Harness::Claude, |r| r.harness);
+    let mut line = String::from(match harness {
+        Harness::Codex => "codex",
+        _ => "claude",
+    });
     let mut arg = |flag: &str, value: &str| {
         let value = one_line(value);
         if value.is_empty() {
@@ -453,13 +464,63 @@ pub fn launch_command(
         line.push(' ');
         line.push_str(&quote(&value));
     };
+    let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
     if let Some(role) = role {
         arg("--model", role.model.as_deref().unwrap_or(""));
-        arg("--append-system-prompt", role.prompt.as_deref().unwrap_or(""));
-        arg("--name", &role.name);
+        match harness {
+            Harness::Codex => {
+                if let Some(prompt) = prompt {
+                    arg("-c", &format!("developer_instructions={}", toml_string(prompt)));
+                }
+            }
+            _ => {
+                match (prompt, prompt_file) {
+                    (Some(_), Some(file)) => arg("--append-system-prompt-file", &file.to_string_lossy()),
+                    (Some(prompt), None) => arg("--append-system-prompt", prompt),
+                    (None, _) => {}
+                }
+                arg("--name", &role.name);
+            }
+        }
     }
     arg("", task.unwrap_or(""));
     line
+}
+
+/// `text` as a TOML basic string on one line: every control character an
+/// escape, so a multi-line prompt survives being typed into a shell.
+fn toml_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => {}
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The harness a role names, by its program (`codex`, `cursor-agent`) or
+/// as Mirador spells it (`openCode`, `cursorAgent`), in any case.
+pub fn harness_named(name: &str) -> Option<Harness> {
+    let name = name.trim().to_ascii_lowercase();
+    HARNESSES
+        .iter()
+        .find(|(program, harness)| {
+            *program == name
+                || serde_json::to_value(harness)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_ascii_lowercase))
+                    .is_some_and(|spelled| spelled == name)
+        })
+        .map(|(_, harness)| *harness)
 }
 
 fn one_line(text: &str) -> String {
@@ -861,19 +922,51 @@ mod tests {
     #[test]
     fn builds_the_launch_command() {
         let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
-        assert_eq!(launch_command(None, None, q), "claude");
-        assert_eq!(launch_command(None, Some("fix the flaky test"), q), "claude 'fix the flaky test'");
+        assert_eq!(launch_command(None, None, None, None, q), "claude");
+        assert_eq!(launch_command(None, None, None, Some("fix the flaky test"), q), "claude 'fix the flaky test'");
         let role = AgentRole {
             name: "reviewer".into(),
             model: Some("opus".into()),
-            prompt: Some("You review.\nNever edit files; it's read-only.".into()),
+            ..Default::default()
         };
+        let prompt = "You review.\nNever edit files; it's read-only.";
+        // A prompt file is what Claude Code gets, when there is one.
+        let file = std::path::Path::new("/data/prompts/p1.md");
         assert_eq!(
-            launch_command(Some(&role), Some("look at\r\nmain\u{3}"), q),
-            r"claude --model 'opus' --append-system-prompt 'You review. Never edit files; it'\''s read-only.' --name 'reviewer' 'look at main'"
+            launch_command(Some(&role), Some(prompt), Some(file), Some("look at\r\nmain\u{3}"), q),
+            r"claude --model 'opus' --append-system-prompt-file '/data/prompts/p1.md' --name 'reviewer' 'look at main'"
         );
-        let bare = AgentRole { name: "plain".into(), model: None, prompt: None };
-        assert_eq!(launch_command(Some(&bare), Some("  "), q), "claude --name 'plain'");
+        assert_eq!(
+            launch_command(Some(&role), Some(prompt), None, None, q),
+            r"claude --model 'opus' --append-system-prompt 'You review. Never edit files; it'\''s read-only.' --name 'reviewer'"
+        );
+        let bare = AgentRole { name: "plain".into(), ..Default::default() };
+        assert_eq!(launch_command(Some(&bare), Some("  "), Some(file), Some("  "), q), "claude --name 'plain'");
+    }
+
+    #[test]
+    fn starts_a_codex_role_with_its_prompt_as_instructions() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let role = AgentRole { name: "dev".into(), harness: Harness::Codex, model: Some("gpt-5".into()), ..Default::default() };
+        let file = std::path::Path::new("/data/prompts/p1.md");
+        assert_eq!(
+            launch_command(Some(&role), Some("Line \"one\"\r\n\tC:\\path"), Some(file), Some("go"), q),
+            r#"codex --model 'gpt-5' -c 'developer_instructions="Line \"one\"\n\tC:\\path"' 'go'"#
+        );
+        // The escapes are TOML's: the value reads back as the prompt.
+        let value: toml::Value = toml::from_str(&format!("v = {}", toml_string("a \"b\"\nc\\d\u{7}"))).unwrap();
+        assert_eq!(value["v"].as_str(), Some("a \"b\"\nc\\d\u{7}"));
+        assert_eq!(launch_command(Some(&role), None, None, None, q), "codex --model 'gpt-5'");
+    }
+
+    #[test]
+    fn names_a_harness_as_people_write_it() {
+        assert_eq!(harness_named("codex"), Some(Harness::Codex));
+        assert_eq!(harness_named(" Claude "), Some(Harness::Claude));
+        assert_eq!(harness_named("openCode"), Some(Harness::OpenCode));
+        assert_eq!(harness_named("cursor-agent"), Some(Harness::CursorAgent));
+        assert_eq!(harness_named("cursorAgent"), Some(Harness::CursorAgent));
+        assert_eq!(harness_named("vim"), None);
     }
 
     #[test]

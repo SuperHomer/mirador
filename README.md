@@ -29,8 +29,9 @@ downloads, the feature tour and the keybinding reference.
   Aider and more, found by their process — each with its role, model and
   (Claude Code) whether it is working, idle, or waiting on you; type into
   any of them from there.
-  **Agent roles** (`agentRoles` in the config) start Claude Code with their
-  own model and system prompt (`mira agent new --role reviewer "…"`)
+  **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
+  start Claude Code or Codex with their own model, prompt and shared way of
+  working (`mira agent new --role reviewer "…"`)
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: agents open pages, snapshot the DOM, click,
@@ -270,28 +271,68 @@ restored session keeps each pane's own saved directory.
 
 ## Agent roles and the agent wall
 
-A role is a named way to start Claude Code — its own model, and a system
-prompt appended to Claude Code's own:
+A role is a named way to start an agent — Claude Code or Codex, its own
+model, and its own instructions — written as a Markdown file: the
+frontmatter says how it starts, the body is its prompt.
 
-```jsonc
-// ~/.config/mirador/mirador.json
-{
-  "agentRoles": [
-    { "name": "planner",  "model": "opus",   "prompt": "You plan. Never edit files." },
-    { "name": "coder",    "model": "sonnet" },
-    { "name": "reviewer", "model": "haiku",  "prompt": "Review the diff; be terse." }
-  ]
-}
+```markdown
+<!-- .mirador/roles/reviewer.md -->
+---
+model: haiku
+way: our-way
+description: Reviews diffs, never edits
+---
+You review the diff. Never edit files; be terse.
 ```
 
-Each role becomes a *New Agent: <role>* palette entry and a `mira agent new
---role <role> [task…]` target. The agent opens in a pane beside the one you
-are in — it joins the tab you are working in, and its row appears under
-**Agents** — as a shell with `claude --model … --append-system-prompt …
---name <role>` typed into it, in that pane's directory. (`mira agent new
---tab` gives it a tab of its own instead.) Exiting Claude
-leaves the shell; restarting Mirador resumes the conversation on the
-role's model.
+```markdown
+<!-- .mirador/roles/coder.md -->
+---
+harness: codex
+model: gpt-5
+way: our-way
+---
+You implement what the plan says, one step at a time.
+```
+
+A **way of working** is a playbook any role can follow — how your team
+branches, tests, commits and hands off — written once in `ways/` and
+appended after the prompt of every role that names it:
+
+```markdown
+<!-- .mirador/ways/our-way.md -->
+---
+description: Small steps, tests first
+---
+1. Write the failing test first, then the code.
+2. One branch per task; never push — a human does.
+```
+
+Roles and ways live in two places, and the same name means the first:
+
+1. **The repository's** `.mirador/roles/` and `.mirador/ways/` — the
+   nearest `.mirador` at or above the pane's directory. Commit them and
+   everyone working on the project gets the same team.
+2. **Yours**: `roles/` and `ways/` beside mirador.json
+   (`~/.config/mirador/`, `%APPDATA%\mirador` on Windows), for every
+   project.
+
+`agentRoles` in mirador.json still works — `{ "name": "planner", "model":
+"opus", "prompt": "You plan." }` — below both. `mira agent roles` lists
+what the current directory sees and where each came from, and warns about
+anything it could not use: a file that does not parse, a field that is not
+one, a way nobody wrote.
+
+Each role becomes a *New Agent: <role>* palette entry, an entry in the
+wall's **+ New agent** menu, and a `mira agent new --role <role> [task…]`
+target — the roles of the directory you are in. The agent opens in a pane
+beside the one you are in — it joins the tab you are working in, and its
+row appears under **Agents** — as a shell with the agent typed into it, in
+that pane's directory: `claude --model … --append-system-prompt-file …
+--name <role>`, or `codex --model … -c developer_instructions=…`. (`mira
+agent new --tab` gives it a tab of its own instead.) Exiting the agent
+leaves the shell; restarting Mirador resumes a Claude conversation on the
+role's model, with its prompt.
 
 The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, the **▦ Wall**
 button beside the sidebar's Agents heading, or `mira agent wall`) draws the

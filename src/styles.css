@@ -1958,6 +1958,19 @@ body,
 .wall-menu-model {
   color: var(--muted);
   white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A role that cannot start: listed, with why in its title. */
+.wall-menu button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wall-menu button:disabled:hover {
+  background: transparent;
 }
 
 .wall-menu-hint {

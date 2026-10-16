@@ -82,6 +82,8 @@ fn live_holders(workspace: &mut Workspace) -> HashSet<String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cmux_core::config::write_default_if_missing();
+    // Launch prompts are read once, by a launch: none is pending now.
+    cmux_core::roles::clear_prompts();
     let (cfg, cfg_err) = cmux_core::config::load();
     if let Some(err) = &cfg_err {
         eprintln!("mirador: config error, using defaults: {err}");
@@ -110,15 +112,28 @@ pub fn run() {
     // runs nothing until you type into it. Not on Windows, which cannot
     // see Claude exit and so would resume closed conversations forever —
     // see `cmux_core::agents::AUTO_RESUME`.
-    // A role's pane resumes on the role's model — looked up in the config,
-    // never taken from the session file, which only names the role.
-    let roles = cmux_core::config::agent_roles();
-    for m in meta.values_mut() {
-        let role_model = m
-            .agent_role
-            .as_deref()
-            .and_then(|name| roles.iter().find(|r| r.name == name))
-            .and_then(|r| r.model.clone());
+    // A role's pane resumes on the role's model — looked up where the pane
+    // works, never taken from the session file, which only names the role.
+    // Its prompt is not given again: a resumed conversation keeps the one
+    // it started with.
+    let mut catalogs: HashMap<Option<String>, cmux_protocol::RoleCatalog> = HashMap::new();
+    let mut other_harness: HashMap<String, cmux_protocol::Harness> = HashMap::new();
+    for (id, m) in meta.iter_mut() {
+        let role = m.agent_role.as_deref().and_then(|name| {
+            catalogs
+                .entry(m.cwd.clone())
+                .or_insert_with(|| cmux_core::roles::catalog(m.cwd.as_deref().map(std::path::Path::new)))
+                .roles
+                .iter()
+                .find(|r| r.name == name)
+                .cloned()
+        });
+        if let Some(r) = role.as_ref().filter(|r| r.harness != cmux_protocol::Harness::Claude) {
+            other_harness.insert(id.clone(), r.harness);
+        }
+        let role_model = role
+            .filter(|r| r.harness == cmux_protocol::Harness::Claude)
+            .and_then(|r| r.model);
         m.agent_model = role_model.clone();
         let quoted_model = role_model.as_deref().map(cmux_core::pty::shell::quote_arg);
         let restored = cmux_core::agents::restore_pane(
@@ -140,6 +155,20 @@ pub fn run() {
     for id in &held_at_launch {
         if let Some(m) = meta.get_mut(id) {
             m.startup_input = None;
+        }
+    }
+    // A role that starts something other than Claude Code — Codex — has no
+    // session to resume. Held, its agent is still running, and is that
+    // harness from the start; otherwise the role no longer marks the pane,
+    // which would pass for a Claude agent until the poller said otherwise
+    // (and on Windows, which lists no processes, it never does).
+    for (id, harness) in other_harness {
+        if let Some(m) = meta.get_mut(&id) {
+            if held_at_launch.contains(&id) {
+                m.agent_harness = Some(harness);
+            } else {
+                m.agent_role = None;
+            }
         }
     }
     // An agent pane coming back without its process has this long for a
@@ -256,6 +285,7 @@ pub fn run() {
             commands::set_diff_worktree,
             commands::open_graph,
             commands::open_agent,
+            commands::agent_roles,
             commands::open_agent_wall,
             commands::get_agent_activity,
             commands::mark_pane_read,

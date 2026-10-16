@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { newTab, splitPane, openSsh, sshHosts, openAgent } from "../bindings";
+import {
+  AgentRole,
+  agentRoles,
+  newTab,
+  splitPane,
+  openSsh,
+  sshHosts,
+  openAgent,
+  roleHint,
+} from "../bindings";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { actions } from "../keymap/actions";
 import { useConfigStore } from "../state/configStore";
@@ -38,14 +47,12 @@ function fuzzyScore(query: string, text: string): number | null {
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
   const close = useUiStore((s) => s.closePalette);
-  const customCommands = useConfigStore(
-    (s) => s.config?.customCommands ?? [],
-  );
+  const customCommands = useConfigStore((s) => s.config?.customCommands ?? []);
   const keybindings = useConfigStore((s) => s.config?.keybindings);
-  const agentRoles = useConfigStore((s) => s.config?.agentRoles);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [hosts, setHosts] = useState<string[]>([]);
+  const [roles, setRoles] = useState<AgentRole[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const entries = useMemo<Entry[]>(() => {
@@ -84,20 +91,23 @@ export function CommandPalette() {
       hint: "open remote pane",
       run: () => void openSsh(null, false, host),
     }));
-    // `agentRoles` become "New Agent: <role>" entries, each splitting the
-    // focused pane — the agent joins the tab you are working in.
-    const agents: Entry[] = (agentRoles ?? []).map((r) => ({
+    // The roles the focused pane's directory sees — its repository's, then
+    // yours — become "New Agent: <role>" entries, each splitting the
+    // focused pane: the agent joins the tab you are working in.
+    const agents: Entry[] = roles.map((r) => ({
       id: `agent:${r.name}`,
       title: `New Agent: ${r.name}`,
-      hint: r.model ?? "default model",
+      hint: roleHint(r),
       run: () => {
         const { snapshot } = useWorkspaceStore.getState();
         const pane = activeTab(snapshot)?.focusedPane ?? null;
-        void openAgent(r.name, null, pane, false);
+        openAgent(r.name, null, pane, false).catch((e) =>
+          console.error(`mirador: role ${r.name}: ${e}`),
+        );
       },
     }));
     return [...custom, ...agents, ...ssh, ...base];
-  }, [customCommands, agentRoles, hosts, keybindings]);
+  }, [customCommands, roles, hosts, keybindings]);
 
   const filtered = useMemo(() => {
     return entries
@@ -110,6 +120,11 @@ export function CommandPalette() {
   useEffect(() => {
     if (open) {
       void sshHosts().then(setHosts);
+      const pane =
+        activeTab(useWorkspaceStore.getState().snapshot)?.focusedPane ?? null;
+      agentRoles(pane)
+        .then((c) => setRoles(c.roles))
+        .catch(() => setRoles([]));
       setQuery("");
       setSelected(0);
       // Focus after the overlay renders.
@@ -167,9 +182,7 @@ export function CommandPalette() {
               onClick={() => runEntry(entry)}
             >
               <span className="palette-title">{entry.title}</span>
-              {entry.hint && (
-                <span className="palette-hint">{entry.hint}</span>
-              )}
+              {entry.hint && <span className="palette-hint">{entry.hint}</span>}
               {entry.accel && (
                 <kbd className="palette-accel">{entry.accel}</kbd>
               )}
