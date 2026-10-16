@@ -150,6 +150,17 @@ an unquoted variable):
 smira() { XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx ./src-tauri/target/debug/mira "$@"; }
 ```
 
+**`target/debug/mira` can be an old build.** The app crate bundles `mira`
+as a sidecar (`externalBin`), and building it copies
+`src-tauri/binaries/mira-<triple>` over `target/debug/mira` — and that
+staged copy is refreshed only by `npm run build:cli`, which only
+`tauri build` runs. So after a plain `cargo build`, the debug CLI is the
+fresh one or the stale sidecar depending on which was written last: hooks
+pointed at it once sent a request without a field added days before, and
+the feature looked broken. Run `npm run build:cli` before
+`cargo build --workspace` when the CLI changed, and check the binary
+(`strings target/debug/mira | grep <new field>`) before blaming the code.
+
 Then check the three things only a running app shows (`smira list-tabs` gives
 pane ids):
 
