@@ -197,16 +197,26 @@ body,
   min-height: 0;
 }
 
+/* One width for every mark, so titles line up whatever their harness. */
 .tab-harness {
   flex-shrink: 0;
+  width: 14px;
+  text-align: center;
   color: var(--subtext);
   font-size: 12px;
   line-height: 1;
 }
 
-/* Claude Code keeps its own mark and color; other harnesses share one. */
+/* Claude Code keeps its own color; the others take the row's. */
 .tab-harness.claude {
   color: #d97757;
+}
+
+.tab-harness svg {
+  display: block;
+  width: 11px;
+  height: 11px;
+  margin: 0 auto;
 }
 
 .tab-row.agent .tab-title {

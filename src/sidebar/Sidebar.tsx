@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AgentInfo,
+  Harness,
   HARNESS_LABEL,
   agentLabel,
   TabSnapshot,
@@ -90,6 +91,52 @@ export function Sidebar() {
 }
 
 /**
+ * The mark each harness draws for itself, in the row's color: OpenCode's
+ * and Pi's logos (from their favicons), Codex's `>_` prompt — it has no
+ * logo of its own apart from OpenAI's. Claude Code keeps its spark; the
+ * rest share one.
+ */
+function HarnessMark({ harness }: { harness: Harness }) {
+  switch (harness) {
+    case "claude":
+      return <>✳</>;
+    case "codex":
+      return (
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M3 4l4 4-4 4M9 12h4" />
+        </svg>
+      );
+    case "openCode":
+      return (
+        <svg viewBox="96 96 320 320" fill="currentColor">
+          <path d="M320 224V352H192V224H320Z" opacity="0.45" />
+          <path
+            fillRule="evenodd"
+            d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z"
+          />
+        </svg>
+      );
+    case "pi":
+      return (
+        <svg viewBox="0 0 560 560" fill="currentColor">
+          <path d="M420 280H280V140H0V0H420V280Z" />
+          <path d="M560 560H420V280H560V560Z" />
+          <path d="M140 560H0V140H140V280H280V420H140V560Z" />
+        </svg>
+      );
+    default:
+      return <>◆</>;
+  }
+}
+
+/**
  * One agent: the harness and its role, on one line. Clicking shows its
  * pane alone, filling its tab; the tab's own row shows the whole tab.
  * Right-clicking opens its activity: task progress and subagents.
@@ -124,7 +171,7 @@ function AgentRow({
         className={`tab-harness ${agent.harness}`}
         aria-label={HARNESS_LABEL[agent.harness]}
       >
-        {agent.harness === "claude" ? "✳" : "◆"}
+        <HarnessMark harness={agent.harness} />
       </span>
       <span className={`tab-title${unread ? " has-unread" : ""}`}>
         {agentLabel(agent)}
