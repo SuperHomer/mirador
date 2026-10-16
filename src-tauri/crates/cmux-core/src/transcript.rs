@@ -476,12 +476,15 @@ mod tests {
 
     #[test]
     fn accepts_only_the_session_s_own_transcript() {
-        let p = Path::new("/u/.claude/projects/-u-w/abc-1.jsonl");
-        assert!(is_transcript_of(p, "abc-1"));
-        assert!(!is_transcript_of(p, "abc-2"));
-        assert!(!is_transcript_of(Path::new("/etc/passwd"), "passwd"));
+        // Absolute on every platform: `/u/…` has no drive, so on Windows
+        // it is relative, and rightly refused.
+        let root = std::env::temp_dir();
+        let p = root.join(".claude/projects/-u-w/abc-1.jsonl");
+        assert!(is_transcript_of(&p, "abc-1"));
+        assert!(!is_transcript_of(&p, "abc-2"));
+        assert!(!is_transcript_of(&root.join("passwd"), "passwd"));
         assert!(!is_transcript_of(Path::new("abc-1.jsonl"), "abc-1"));
-        assert_eq!(subagent_dir(p), Path::new("/u/.claude/projects/-u-w/abc-1/subagents"));
+        assert_eq!(subagent_dir(&p), root.join(".claude/projects/-u-w/abc-1/subagents"));
     }
 
     #[test]
