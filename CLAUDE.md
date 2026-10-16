@@ -68,6 +68,13 @@ field or helper read only under `#[cfg(unix)]` is dead code on Windows, and
 `#[cfg_attr(not(unix), allow(dead_code))]`, as `pty::Signal` does, and keep
 the logic itself in `cmux-core`, where the cross-check reaches.
 
+**A test path like `/u/x` is relative on Windows** — it has no drive.
+Anything that checks `is_absolute()` refuses it there, so the test
+passes on macOS and fails only in Windows CI (#108). Build test paths
+from `std::env::temp_dir()`. And the cross-check above lints tests but
+never runs them: only CI finds this, and cargo stops at the first
+failing crate, so the crates after it go untested until it is fixed.
+
 ## Verifying a change
 
 **CI compiles and unit-tests but never mounts the app.** `tsc`, `vite build`,
@@ -142,6 +149,17 @@ an unquoted variable):
 ```bash
 smira() { XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx ./src-tauri/target/debug/mira "$@"; }
 ```
+
+**`target/debug/mira` can be an old build.** The app crate bundles `mira`
+as a sidecar (`externalBin`), and building it copies
+`src-tauri/binaries/mira-<triple>` over `target/debug/mira` — and that
+staged copy is refreshed only by `npm run build:cli`, which only
+`tauri build` runs. So after a plain `cargo build`, the debug CLI is the
+fresh one or the stale sidecar depending on which was written last: hooks
+pointed at it once sent a request without a field added days before, and
+the feature looked broken. Run `npm run build:cli` before
+`cargo build --workspace` when the CLI changed, and check the binary
+(`strings target/debug/mira | grep <new field>`) before blaming the code.
 
 Then check the three things only a running app shows (`smira list-tabs` gives
 pane ids):
