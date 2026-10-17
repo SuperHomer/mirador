@@ -1,6 +1,7 @@
 mod browser;
 mod commands;
 mod config_watch;
+mod handoff;
 mod intel;
 mod notify;
 mod runs;

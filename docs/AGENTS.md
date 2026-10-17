@@ -273,6 +273,29 @@ terminal's processes; anything else on it is `busy`), and gives a closed
 member a new pane beside a teammate. `team add` and `team restart` act on
 the team of the calling pane's tab.
 
+### Handoffs
+
+```bash
+mira agent send <name|pane> <message…> [--force] [--wait [--timeout N]]
+mira agent wait <name|pane> [--timeout N]     # 0 idle, 2 needs you, 3 exited, 124 timeout
+```
+
+`send` resolves a name among the agents of the calling pane's tab — a
+team member's name first, then a Claude session's, then a role's; the
+first kind that matches must match exactly one pane — or takes any pane id.
+It writes the message as a bracketed paste (`ESC[200~ … ESC[201~`), every
+control character but newline and tab removed so nothing in it can end
+the paste, then Enter as a separate write. When the caller is an agent the
+message opens with `[message from <name>, via mira agent send]`. Refused:
+a pane that runs no agent, the caller's own pane, a pane whose terminal has
+not started, and an agent whose status is `needsYou` unless `--force`.
+
+`wait` polls `agent list` once a second and ends on a status that changed
+after it started, or after it saw the agent working — so a wait begun
+right after a `send` does not end on the idle from before the message. It
+reads status from Claude Code's hooks; an agent without them only ends a
+wait by exiting.
+
 ## 7. Workspace control
 
 ```bash

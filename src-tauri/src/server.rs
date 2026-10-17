@@ -265,6 +265,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let activity = crate::commands::agent_activity(&state, &pane)?;
             Ok(serde_json::to_value(activity).map_err(|e| e.to_string())?)
         }
+        Request::AgentSend { to, message, pane_id, force } => {
+            let pane = crate::handoff::send(&state, &to, &message, pane_id, force)?;
+            Ok(json!({ "paneId": pane }))
+        }
+        Request::AgentFind { name, pane_id } => {
+            let pane = crate::handoff::find(&state, &name, pane_id)?;
+            Ok(json!({ "paneId": pane }))
+        }
         Request::TeamStart { team, task, pane_id } => {
             let tab = crate::teams::start_team(app.clone(), app.state(), team, task, pane_id)?;
             Ok(json!({ "tabId": tab }))

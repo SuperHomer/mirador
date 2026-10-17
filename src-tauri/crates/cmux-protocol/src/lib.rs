@@ -266,6 +266,25 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// Types `message` into another agent's terminal as its next prompt:
+    /// `to` is a teammate's name in the caller's tab (`pane_id`'s) — a team
+    /// member's, a session's, a role's — or any pane's id. Refused for a
+    /// pane running no agent, and for one waiting on a person unless
+    /// `force`.
+    AgentSend {
+        to: String,
+        message: String,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        force: bool,
+    },
+    /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
+    AgentFind {
+        name: String,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Starts a team in a tab of its own: every member, laid out, each
     /// told who its teammates are. `task` goes to the lead. The team is
     /// the one `pane_id`'s directory sees.

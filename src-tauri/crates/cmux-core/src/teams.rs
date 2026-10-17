@@ -195,8 +195,11 @@ pub fn member_prompt(team: &AgentTeam, seat: &Seat, all: &[Seat], way: Option<&s
             out.push_str(&format!("- `{}` ({}{lead})\n", s.name, s.role));
         }
         out.push_str(&format!(
-            "\n`{mira} team list` shows each one's pane and what it is doing; \
-             `{mira} read-screen --pane <pane>` shows its screen.\n"
+            "\nTo hand a teammate work or tell it something, \
+             `{mira} agent send <name> \"<message>\"` types the message in as its next \
+             prompt, saying it is from you; add `--wait` to block until it has finished \
+             (or `{mira} agent wait <name>` later). `{mira} team list` shows each one's \
+             pane and what it is doing, and `{mira} read-screen --pane <pane>` its screen.\n"
         ));
     }
     if let Some(charter) = &team.prompt {
@@ -308,6 +311,7 @@ mod tests {
         assert!(p.contains("- `planner` (planner)\n- `dev-1` (dev, leads the team)\n- `dev-2` (dev)\n"));
         assert!(!p.contains("- `gate`"));
         assert!(p.contains("`/app/mira team list`"));
+        assert!(p.contains("`/app/mira agent send <name> \"<message>\"`"));
         assert!(p.contains("## The team's charter\n\nShip small.\n"));
         assert!(p.ends_with("## The team's way of working\n\nTests first.\n"));
         let lead = member_prompt(&t, &all[1], &all, None, "mira");

@@ -240,6 +240,33 @@ enum AgentAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Type a message into another agent's terminal, as its next prompt.
+    /// TO is a teammate's name in this tab — a team member's, a session's,
+    /// a role's — or a pane id. It says who it is from when this pane is
+    /// an agent. Refused for a pane running no agent, and for an agent
+    /// waiting on a person (a permission prompt) unless --force.
+    Send {
+        to: String,
+        #[arg(trailing_var_arg = true, required = true)]
+        message: Vec<String>,
+        /// Answer a prompt the agent is waiting on anyway.
+        #[arg(long)]
+        force: bool,
+        /// Then wait for it to finish, as `agent wait` does.
+        #[arg(long)]
+        wait: bool,
+        /// With --wait: give up after this many seconds.
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+    },
+    /// Wait until an agent has worked and stopped: exit 0 when it is idle,
+    /// 2 when it stopped to ask a person, 3 when it exited, 124 on timeout.
+    /// Needs Claude Code's hooks (`mira hooks setup`) to see it stop.
+    Wait {
+        name: String,
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+    },
     /// The roles `agent new --role` accepts here — this repository's
     /// `.mirador/roles`, then yours — and the ways of working they follow.
     Roles,
@@ -448,6 +475,29 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: pane.or_else(own_pane),
             },
             AgentAction::Roles => return agent_roles(cli.json),
+            AgentAction::Send { to, message, force, wait, timeout } => {
+                let started = now_ms();
+                let resp = send_request(Request::AgentSend {
+                    to: to.clone(),
+                    message: message.join(" "),
+                    pane_id: own_pane(),
+                    force,
+                })?;
+                if !wait || !resp.ok {
+                    return render(resp, cli.json, false);
+                }
+                let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
+                return agent_wait(&to, &pane, started, timeout);
+            }
+            AgentAction::Wait { name, timeout } => {
+                let started = now_ms();
+                let resp = send_request(Request::AgentFind { name: name.clone(), pane_id: own_pane() })?;
+                if !resp.ok {
+                    return render(resp, cli.json, false);
+                }
+                let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
+                return agent_wait(&name, &pane, started, timeout);
+            }
             AgentAction::Wall => Request::AgentWall {
                 pane_id: own_pane(),
             },
@@ -688,6 +738,43 @@ fn render_teams(teams: &[serde_json::Value]) {
                 m["pane"].as_str().unwrap_or(""),
             );
         }
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Polls `pane`'s agent until it has worked and stopped since `started`,
+/// then exits with what happened: 0 idle, 2 needs a person, 3 exited, 124
+/// timed out.
+fn agent_wait(name: &str, pane: &str, started: u64, timeout: u64) -> Result<(), String> {
+    use cmux_core::handoff::{Wait, WaitEnd};
+    let mut wait = Wait { started_ms: started, seen_working: false };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    loop {
+        let resp = send_request(Request::AgentList)?;
+        let agents = resp.data.as_ref().and_then(|d| d["agents"].as_array().cloned()).unwrap_or_default();
+        let me = agents.iter().find(|a| a["paneId"].as_str() == Some(pane));
+        let status = me.and_then(|a| serde_json::from_value(a["status"].clone()).ok());
+        let since = me.and_then(|a| a["sinceMs"].as_u64());
+        if let Some(end) = wait.observe(me.is_some(), status, since) {
+            let (code, what) = match end {
+                WaitEnd::Idle => (0, "finished"),
+                WaitEnd::NeedsYou => (2, "is waiting on a person"),
+                WaitEnd::Exited => (3, "exited"),
+            };
+            eprintln!("{name} {what}");
+            std::process::exit(code);
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!("{name}: still not done after {timeout}s");
+            std::process::exit(124);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1000));
     }
 }
 
