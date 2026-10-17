@@ -18,6 +18,7 @@ pub mod pty;
 pub mod role_limits;
 pub mod roles;
 pub mod state;
+pub mod teams;
 pub mod transcript;
 pub mod transport;
 pub mod worktree;

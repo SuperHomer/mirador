@@ -271,6 +271,9 @@ pub struct Tab {
     /// agent by itself. Not persisted; cleared by anything that is about
     /// the tab as a whole (see `zoom_pane`).
     pub zoomed: Option<String>,
+    /// The team running in this tab, if one was started here: who is in
+    /// which pane. Persisted, so a team is still a team after a restart.
+    pub team: Option<cmux_protocol::TeamRun>,
 }
 
 fn new_id() -> String {
@@ -289,6 +292,7 @@ impl Tab {
                 },
                 focused: pane.clone(),
                 zoomed: None,
+                team: None,
             },
             pane,
         )
@@ -345,6 +349,39 @@ impl Workspace {
         (id, pane)
     }
 
+    /// Opens a team's tab after the active one, its panes laid out as
+    /// `root`, the first focused. Returns the tab id.
+    pub fn new_team_tab(&mut self, root: Node, team: cmux_protocol::TeamRun, title: &str) -> String {
+        let focused = layout::pane_ids(&root).into_iter().next().unwrap_or_default();
+        let tab = Tab {
+            id: new_id(),
+            title: Some(title.to_string()),
+            root,
+            focused,
+            zoomed: None,
+            team: Some(team),
+        };
+        let id = tab.id.clone();
+        self.active = (self.active + 1).min(self.tabs.len());
+        self.tabs.insert(self.active, tab);
+        id
+    }
+
+    /// New pane ids, for a layout built before its tab exists.
+    pub fn fresh_pane_ids(n: usize) -> Vec<String> {
+        (0..n).map(|_| new_id()).collect()
+    }
+
+    /// The tab holding `pane`, for reading.
+    pub fn tab_of_pane(&self, pane: &str) -> Option<&Tab> {
+        self.tabs.iter().find(|t| layout::contains(&t.root, pane))
+    }
+
+    /// The tab with this id, for changing its team.
+    pub fn tab_mut(&mut self, id: &str) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|t| t.id == id)
+    }
+
     /// Adds a tab at the end for an existing pane id, leaving the active tab
     /// alone: how a session holder no saved pane names gets a home.
     pub fn adopt_pane(&mut self, pane: &str) -> String {
@@ -356,6 +393,7 @@ impl Workspace {
             },
             focused: pane.to_string(),
             zoomed: None,
+            team: None,
         };
         let id = tab.id.clone();
         self.tabs.push(tab);
@@ -581,6 +619,7 @@ impl Workspace {
                         focused_pane: t.focused.clone(),
                         unread: 0,
                         last_notification: None,
+                        team: t.team.clone(),
                         branch: meta.get(&t.focused).and_then(|m| m.branch.clone()),
                         pr: None,
                         ports: {

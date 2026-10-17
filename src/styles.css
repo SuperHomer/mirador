@@ -219,6 +219,13 @@ body,
   margin: 0 auto;
 }
 
+/* A team's tab: a mark before its title, the members in its tooltip. */
+.tab-team {
+  color: var(--accent);
+  margin-right: 5px;
+  font-size: 11px;
+}
+
 .tab-row.agent .tab-title {
   flex: 1;
   min-width: 0;

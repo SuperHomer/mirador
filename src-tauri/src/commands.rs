@@ -1290,14 +1290,76 @@ pub fn open_agent(
         .get(&source)
         .and_then(|m| m.cwd.clone())
         .or_else(cmux_core::config::default_cwd);
-    let (role, prompt) = match role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
-        Some(name) => {
-            let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
-            let (role, prompt) = cmux_core::roles::resolve(&catalog, name)?;
+    let launch = prepare_launch(role.as_deref(), None, cwd.as_deref(), None, None, task.as_deref())?;
+
+    let new_pane = if tab {
+        let mut ws = state.workspace.lock().unwrap();
+        let (_, pane) = if background {
+            ws.new_background_tab()
+        } else {
+            ws.new_tab()
+        };
+        pane
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        mark_launched(meta.entry(new_pane.clone()).or_default(), launch, cwd);
+    }
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// An agent ready to be typed into a pane: the command line, and what to
+/// remember about it on the pane.
+pub(crate) struct Launch {
+    pub input: String,
+    pub role: Option<cmux_protocol::AgentRole>,
+    pub settings: Option<String>,
+}
+
+/// Works out how to start an agent in `cwd`: plain Claude Code, or `role`
+/// (looked up in `catalog`, else in what `cwd` sees) with its prompt and
+/// limits. `extra` follows the role's prompt — a team member's roster —
+/// and `name` is the session's name instead of the role's. Every file it
+/// needs is written; nothing is opened, so a refusal changes nothing.
+pub(crate) fn prepare_launch(
+    role: Option<&str>,
+    catalog: Option<&cmux_protocol::RoleCatalog>,
+    cwd: Option<&str>,
+    extra: Option<&str>,
+    name: Option<&str>,
+    task: Option<&str>,
+) -> Result<Launch, String> {
+    let (role, prompt) = match role.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(role) => {
+            let read;
+            let catalog = match catalog {
+                Some(c) => c,
+                None => {
+                    read = cmux_core::roles::catalog(cwd.map(std::path::Path::new));
+                    &read
+                }
+            };
+            let (role, prompt) = cmux_core::roles::resolve(catalog, role)?;
             (Some(role), prompt)
         }
         None => (None, None),
     };
+    let prompt = [prompt.as_deref(), extra]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let prompt = (!prompt.is_empty()).then_some(prompt);
     // What a Claude Code role may use: its MCP servers, plugins, skills and
     // tools, as a settings file. A list of skills or plugins to keep needs
     // every name there is, which only Claude Code knows — asked in the
@@ -1312,7 +1374,7 @@ pub fn open_agent(
                 #[cfg(not(unix))]
                 let path: Option<&str> = None;
                 Some(
-                    cmux_core::role_limits::probe(cwd.as_deref().map(std::path::Path::new), path)
+                    cmux_core::role_limits::probe(cwd.map(std::path::Path::new), path)
                         .map_err(|e| format!("role `{}`: {e}", r.name))?,
                 )
             } else {
@@ -1331,57 +1393,47 @@ pub fn open_agent(
     // Written once the role is known to start, so a refused one leaves none.
     let prompt_file = match (&role, &prompt) {
         (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(
-            cmux_core::roles::write_prompt(&r.name, p)
+            cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p)
                 .map_err(|e| format!("could not write the role's prompt: {e}"))?,
         ),
         _ => None,
     };
-
-    let new_pane = if tab {
-        let mut ws = state.workspace.lock().unwrap();
-        let (_, pane) = if background {
-            ws.new_background_tab()
-        } else {
-            ws.new_tab()
-        };
-        pane
-    } else {
-        state
-            .workspace
-            .lock()
-            .unwrap()
-            .split_pane(&source, SplitDir::Row)
-            .ok_or_else(|| format!("no pane {source}"))?
-    };
+    // The session goes by the member's name; the pane keeps the role's, to
+    // find it again on a restore.
+    let named = role.clone().map(|r| cmux_protocol::AgentRole { name: name.unwrap_or(&r.name).to_string(), ..r });
     let input = cmux_core::agents::launch_command(
-        role.as_ref(),
+        named.as_ref(),
         prompt.as_deref(),
         prompt_file.as_deref(),
         settings_file.as_deref(),
-        task.as_deref(),
+        task,
         cmux_core::pty::shell::quote_arg,
     );
-    {
-        let mut meta = state.meta.lock().unwrap();
-        let entry = meta.entry(new_pane.clone()).or_default();
-        entry.cwd = cwd;
-        entry.startup_input = Some(input);
-        entry.agent_launched = true;
-        entry.agent_started_at = Some(std::time::Instant::now());
-        if let Some(role) = role {
-            // A Codex role is a Codex agent from the start, not a Claude
-            // one until the poller sees otherwise — and on Windows, which
-            // lists no processes, the poller never would.
-            if role.harness != cmux_protocol::Harness::Claude {
-                entry.agent_harness = Some(role.harness);
-            }
-            entry.agent_model = role.model;
-            entry.agent_role = Some(role.name);
-            entry.agent_settings = settings_file.map(|f| f.to_string_lossy().into_owned());
+    Ok(Launch {
+        input,
+        role,
+        settings: settings_file.map(|f| f.to_string_lossy().into_owned()),
+    })
+}
+
+/// Marks `entry` as the pane `launch` starts in: typed into its shell once
+/// it first prints, and an agent from now on.
+pub(crate) fn mark_launched(entry: &mut cmux_core::state::PaneMeta, launch: Launch, cwd: Option<String>) {
+    entry.cwd = cwd;
+    entry.startup_input = Some(launch.input);
+    entry.agent_launched = true;
+    entry.agent_started_at = Some(std::time::Instant::now());
+    if let Some(role) = launch.role {
+        // A Codex role is a Codex agent from the start, not a Claude one
+        // until the poller sees otherwise — and on Windows, which lists no
+        // processes, the poller never would.
+        if role.harness != cmux_protocol::Harness::Claude {
+            entry.agent_harness = Some(role.harness);
         }
+        entry.agent_model = role.model;
+        entry.agent_role = Some(role.name);
+        entry.agent_settings = launch.settings;
     }
-    emit_workspace(&app);
-    Ok(new_pane)
 }
 
 /// The roles and ways of working `pane_id`'s directory sees (the focused

@@ -53,6 +53,9 @@ pub struct TabSnapshot {
     /// Body of the tab's most recent notification.
     #[serde(default)]
     pub last_notification: Option<String>,
+    /// The team running in it, if it is a team's tab.
+    #[serde(default)]
+    pub team: Option<TeamRun>,
     /// Git branch of the focused pane's repository.
     #[serde(default)]
     pub branch: Option<String>,
@@ -260,6 +263,34 @@ pub enum Request {
     /// when absent): its own tab, reused if there is one, showing that
     /// tab's agents.
     AgentWall {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Starts a team in a tab of its own: every member, laid out, each
+    /// told who its teammates are. `task` goes to the lead. The team is
+    /// the one `pane_id`'s directory sees.
+    TeamStart {
+        team: String,
+        #[serde(default)]
+        task: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Every running team: its tab, and each member's pane and state.
+    TeamList,
+    /// Adds a member to the team of `pane_id`'s tab, beside the others.
+    TeamAdd {
+        role: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Starts again the members of `pane_id`'s team whose agent has exited
+    /// or whose pane was closed — `members` by name, or all of them.
+    TeamRestart {
+        #[serde(default)]
+        members: Vec<String>,
         #[serde(default)]
         pane_id: Option<String>,
     },
@@ -629,6 +660,97 @@ pub struct AgentWay {
     pub path: String,
 }
 
+/// A team: roles started together in one tab, from `teams/<name>.md`. Its
+/// body is the team's charter, given to every member after its role's own
+/// prompt, with the names of its teammates.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTeam {
+    pub name: String,
+    pub description: Option<String>,
+    /// A way of working every member follows, besides its role's own.
+    pub way: Option<String>,
+    pub members: Vec<TeamMember>,
+    /// How the members share the tab: "grid" (default), "columns", "rows".
+    pub layout: Option<String>,
+    pub prompt: Option<String>,
+    pub source: RoleSource,
+    pub path: String,
+    /// Why it cannot start, when it cannot.
+    pub problem: Option<String>,
+}
+
+/// One line of a team's `members`: a role, how many of it, and what to
+/// call them (`dev` twice is `dev-1` and `dev-2`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamMember {
+    pub role: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default = "one")]
+    pub count: u32,
+    /// The member a team's task goes to.
+    #[serde(default)]
+    pub lead: bool,
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// A team running in a tab: which pane each member is in. Kept with the
+/// tab, across restarts, so the team can be listed, restarted, and grown.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamRun {
+    pub name: String,
+    pub members: Vec<TeamSeat>,
+}
+
+/// A member of a running team: its name, its role, and its pane — which
+/// may since have been closed.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSeat {
+    pub name: String,
+    pub role: String,
+    pub pane: String,
+    #[serde(default)]
+    pub lead: bool,
+}
+
+/// A running team, as `mira team list` shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamInfo {
+    pub tab_id: String,
+    pub name: String,
+    pub members: Vec<TeamMemberInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamMemberInfo {
+    pub name: String,
+    pub role: String,
+    pub pane: String,
+    pub lead: bool,
+    pub state: SeatState,
+    /// What its hooks or session file say, while it runs.
+    pub status: Option<AgentStatus>,
+}
+
+/// Where a member is: its agent running, exited to a shell, or its pane
+/// closed. `team restart` brings back the last two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SeatState {
+    Running,
+    Exited,
+    Closed,
+}
+
 /// Where a role or a way of working was defined. A repository's wins over
 /// the user's, and a file over an `agentRoles` entry of the same name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -650,6 +772,8 @@ pub enum RoleSource {
 pub struct RoleCatalog {
     pub roles: Vec<AgentRole>,
     pub ways: Vec<AgentWay>,
+    #[serde(default)]
+    pub teams: Vec<AgentTeam>,
     /// `<file>: <what is wrong>`, one per problem.
     pub problems: Vec<String>,
 }

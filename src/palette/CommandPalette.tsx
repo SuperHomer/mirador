@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentRole,
+  AgentTeam,
   agentRoles,
+  startTeam,
   newTab,
   splitPane,
   openSsh,
@@ -53,6 +55,7 @@ export function CommandPalette() {
   const [selected, setSelected] = useState(0);
   const [hosts, setHosts] = useState<string[]>([]);
   const [roles, setRoles] = useState<AgentRole[]>([]);
+  const [teams, setTeams] = useState<AgentTeam[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const entries = useMemo<Entry[]>(() => {
@@ -106,8 +109,30 @@ export function CommandPalette() {
         );
       },
     }));
-    return [...custom, ...agents, ...ssh, ...base];
-  }, [customCommands, roles, hosts, keybindings]);
+    // Teams the same way: "Start Team: <team>", in a tab of its own.
+    const teamEntries: Entry[] = teams.map((t) => ({
+      id: `team:${t.name}`,
+      title: `Start Team: ${t.name}`,
+      hint: t.problem
+        ? `can't start: ${t.problem}`
+        : [
+            t.members
+              .map((m) => (m.count > 1 ? `${m.role}×${m.count}` : m.role))
+              .join(", "),
+            t.source === "repo" ? "repo" : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+      run: () => {
+        const { snapshot } = useWorkspaceStore.getState();
+        const pane = activeTab(snapshot)?.focusedPane ?? null;
+        startTeam(t.name, null, pane).catch((e) =>
+          console.error(`mirador: team ${t.name}: ${e}`),
+        );
+      },
+    }));
+    return [...custom, ...agents, ...teamEntries, ...ssh, ...base];
+  }, [customCommands, roles, teams, hosts, keybindings]);
 
   const filtered = useMemo(() => {
     return entries
@@ -123,8 +148,14 @@ export function CommandPalette() {
       const pane =
         activeTab(useWorkspaceStore.getState().snapshot)?.focusedPane ?? null;
       agentRoles(pane)
-        .then((c) => setRoles(c.roles))
-        .catch(() => setRoles([]));
+        .then((c) => {
+          setRoles(c.roles);
+          setTeams(c.teams);
+        })
+        .catch(() => {
+          setRoles([]);
+          setTeams([]);
+        });
       setQuery("");
       setSelected(0);
       // Focus after the overlay renders.
