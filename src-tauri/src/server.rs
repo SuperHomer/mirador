@@ -265,6 +265,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let activity = crate::commands::agent_activity(&state, &pane)?;
             Ok(serde_json::to_value(activity).map_err(|e| e.to_string())?)
         }
+        Request::AgentEditor { pane_id, target } => {
+            let pane = crate::agent_editor::open_agent_editor(
+                app.clone(),
+                app.state(),
+                pane_id,
+                target.as_deref() == Some("tab"),
+            )?;
+            Ok(json!({ "paneId": pane }))
+        }
         Request::AgentSend { to, message, pane_id, force } => {
             let pane = crate::handoff::send(&state, &to, &message, pane_id, force)?;
             Ok(json!({ "paneId": pane }))

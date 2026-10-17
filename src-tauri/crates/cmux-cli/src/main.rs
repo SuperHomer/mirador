@@ -267,6 +267,14 @@ enum AgentAction {
         #[arg(long, default_value_t = 1800)]
         timeout: u64,
     },
+    /// Open the editor for the role, way of working and team files this
+    /// directory sees — the repository's `.mirador`, and yours — beside
+    /// this pane.
+    Edit {
+        /// Open a new tab instead of splitting this pane.
+        #[arg(long)]
+        tab: bool,
+    },
     /// The roles `agent new --role` accepts here — this repository's
     /// `.mirador/roles`, then yours — and the ways of working they follow.
     Roles,
@@ -475,6 +483,10 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: pane.or_else(own_pane),
             },
             AgentAction::Roles => return agent_roles(cli.json),
+            AgentAction::Edit { tab } => Request::AgentEditor {
+                pane_id: own_pane(),
+                target: tab.then(|| "tab".to_string()),
+            },
             AgentAction::Send { to, message, force, wait, timeout } => {
                 let started = now_ms();
                 let resp = send_request(Request::AgentSend {

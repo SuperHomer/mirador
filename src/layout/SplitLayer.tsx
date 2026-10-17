@@ -6,6 +6,7 @@ import {
   Node,
   SplitDir,
   GraphPaneInfo,
+  AgentEditorPaneInfo,
   TabSnapshot,
   WhatsNewPaneInfo,
   setSplitRatios,
@@ -15,6 +16,7 @@ import { BrowserPane } from "../browser/BrowserPane";
 import { DiffPane } from "../diff/DiffPane";
 import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
+import { AgentEditor } from "../agents/AgentEditor";
 import { AgentWall } from "../agents/AgentWall";
 
 interface Frac {
@@ -59,6 +61,7 @@ export function SplitLayer({
   whatsNewPanes,
   graphPanes,
   agentWallPanes,
+  agentEditorPanes,
 }: {
   tab: TabSnapshot;
   /** This tab is the one on screen. */
@@ -71,6 +74,7 @@ export function SplitLayer({
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   agentWallPanes: AgentWallPaneInfo[];
+  agentEditorPanes: AgentEditorPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -79,14 +83,7 @@ export function SplitLayer({
   const { panes, dividers } = useMemo(() => {
     const panes: PaneBox[] = [];
     const dividers: DividerBox[] = [];
-    walk(
-      tab.root,
-      { x: 0, y: 0, w: 1, h: 1 },
-      [],
-      overrides,
-      panes,
-      dividers,
-    );
+    walk(tab.root, { x: 0, y: 0, w: 1, h: 1 }, [], overrides, panes, dividers);
     return { panes, dividers };
   }, [tab.root, overrides]);
 
@@ -94,10 +91,8 @@ export function SplitLayer({
     downEvent.preventDefault();
     const layer = layerRef.current;
     if (!layer) return;
-    const layerSize =
-      d.dir === "row" ? layer.clientWidth : layer.clientHeight;
-    const startCoord =
-      d.dir === "row" ? downEvent.clientX : downEvent.clientY;
+    const layerSize = d.dir === "row" ? layer.clientWidth : layer.clientHeight;
+    const startCoord = d.dir === "row" ? downEvent.clientX : downEvent.clientY;
     const key = d.path.join(".");
     const base = [...d.ratios];
 
@@ -148,17 +143,26 @@ export function SplitLayer({
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
         const wall = agentWallPanes.find((w) => w.paneId === p.paneId);
+        const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
         return (
           <div
             key={p.paneId}
             className="pane-slot"
             style={{
               ...frac(p.paneId === zoomed ? FULL : p.rect),
-              ...(hidden ? { visibility: "hidden", pointerEvents: "none" } : {}),
+              ...(hidden
+                ? { visibility: "hidden", pointerEvents: "none" }
+                : {}),
             }}
           >
             {wall ? (
               <AgentWall paneId={p.paneId} tabId={wall.tabId} visible={shown} />
+            ) : editor ? (
+              <AgentEditor
+                paneId={p.paneId}
+                cwd={editor.cwd}
+                focused={p.paneId === tab.focusedPane}
+              />
             ) : browser ? (
               <BrowserPane
                 paneId={p.paneId}
@@ -202,14 +206,15 @@ export function SplitLayer({
           </div>
         );
       })}
-      {!zoomed && dividers.map((d) => (
-        <div
-          key={`${d.path.join(".")}:${d.index}`}
-          className={`divider ${d.dir}`}
-          style={dividerStyle(d)}
-          onPointerDown={(e) => startDrag(d, e)}
-        />
-      ))}
+      {!zoomed &&
+        dividers.map((d) => (
+          <div
+            key={`${d.path.join(".")}:${d.index}`}
+            className={`divider ${d.dir}`}
+            style={dividerStyle(d)}
+            onPointerDown={(e) => startDrag(d, e)}
+          />
+        ))}
     </div>
   );
 }

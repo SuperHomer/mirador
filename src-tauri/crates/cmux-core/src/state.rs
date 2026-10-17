@@ -89,6 +89,9 @@ pub struct PaneMeta {
     /// The tab an agent-wall pane shows the agents of: the tab it was
     /// opened from (see `Workspace::wall_target`).
     pub agent_wall_tab: Option<String>,
+    /// Agent-editor pane: the role, way and team files its directory sees,
+    /// for editing.
+    pub agent_editor: bool,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
@@ -645,6 +648,7 @@ impl Workspace {
             whats_new_panes: Vec::new(),
             graph_panes: Vec::new(),
             agent_wall_panes: Vec::new(),
+            agent_editor_panes: Vec::new(),
             agents: Vec::new(),
         }
     }

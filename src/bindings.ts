@@ -343,6 +343,7 @@ export interface WorkspaceSnapshot {
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
+  agentEditorPanes: AgentEditorPaneInfo[];
   agentWallPanes: AgentWallPaneInfo[];
   agents: AgentInfo[];
 }
@@ -501,6 +502,55 @@ export const startTeam = (
   task: string | null,
   paneId: string | null,
 ) => invoke<string>("start_team", { team, task, paneId });
+
+/** An agent-editor pane, and the directory whose files it edits. */
+export interface AgentEditorPaneInfo {
+  paneId: string;
+  cwd: string | null;
+}
+
+/** What an editor pane shows (`agent_editor::EditorCatalog`). */
+export interface EditorCatalog {
+  catalog: RoleCatalog;
+  /** Where a repository file goes; null outside a repository. */
+  repoDir: string | null;
+  globalDir: string;
+}
+
+export type AgentFileKind = "role" | "way" | "team";
+
+export const openAgentEditor = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_agent_editor", { paneId, tab });
+export const agentEditorCatalog = (paneId: string) =>
+  invoke<EditorCatalog>("agent_editor_catalog", { paneId });
+export const agentFileRead = (paneId: string, path: string) =>
+  invoke<string>("agent_file_read", { paneId, path });
+/** Warnings for the text; rejects with why it cannot be saved. */
+export const agentFileCheck = (
+  kind: AgentFileKind,
+  name: string,
+  text: string,
+) => invoke<string[]>("agent_file_check", { kind, name, text });
+export const agentFileTemplate = (kind: AgentFileKind) =>
+  invoke<string>("agent_file_template", { kind });
+export const agentFileSave = (
+  paneId: string,
+  kind: AgentFileKind,
+  source: RoleSource,
+  name: string,
+  text: string,
+  create: boolean,
+) =>
+  invoke<EditorCatalog>("agent_file_save", {
+    paneId,
+    kind,
+    source,
+    name,
+    text,
+    create,
+  });
+export const agentFileDelete = (paneId: string, path: string) =>
+  invoke<EditorCatalog>("agent_file_delete", { paneId, path });
 
 /** The roles `paneId`'s directory sees: its repository's, then yours. */
 export const agentRoles = (paneId: string | null) =>

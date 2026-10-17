@@ -13,6 +13,7 @@ import {
   openGraph,
   openAgent,
   openAgentWall,
+  openAgentEditor,
   openWhatsNew,
   zoomPane,
   installUpdate,
@@ -136,7 +137,8 @@ export const actions: ActionDef[] = [
       // The terminal with keyboard focus first: in the agent wall that is
       // an agent's, while the workspace's focused pane is the wall.
       const pane = focusedPane();
-      const term = terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
+      const term =
+        terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
       const selection = term?.getSelection();
       if (selection) void navigator.clipboard.writeText(selection);
     },
@@ -146,7 +148,8 @@ export const actions: ActionDef[] = [
     title: "Paste",
     run: () => {
       const pane = focusedPane();
-      const term = terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
+      const term =
+        terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
       if (!term) return;
       void navigator.clipboard.readText().then((text) => {
         // Through xterm, not straight to the PTY: it applies bracketed
@@ -172,6 +175,13 @@ export const actions: ActionDef[] = [
     // Every agent's terminal in one grid; goes to the wall's
     // tab when there already is one.
     run: () => void openAgentWall(focusedPane() ?? null),
+  },
+  {
+    id: "agent_editor",
+    title: "Edit Roles, Ways & Teams",
+    // The role, way-of-working and team files the focused pane's
+    // directory sees, beside it.
+    run: () => void openAgentEditor(focusedPane() ?? null, false),
   },
   {
     id: "agent_activity",

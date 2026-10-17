@@ -1,3 +1,4 @@
+mod agent_editor;
 mod browser;
 mod commands;
 mod config_watch;
@@ -300,6 +301,13 @@ pub fn run() {
             commands::open_graph,
             commands::open_agent,
             commands::agent_roles,
+            agent_editor::open_agent_editor,
+            agent_editor::agent_editor_catalog,
+            agent_editor::agent_file_read,
+            agent_editor::agent_file_check,
+            agent_editor::agent_file_template,
+            agent_editor::agent_file_save,
+            agent_editor::agent_file_delete,
             teams::start_team,
             teams::list_teams,
             teams::team_add,
