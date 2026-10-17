@@ -37,6 +37,10 @@ pub struct SessionPane {
     pub diff_spec: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_role: Option<String>,
+    /// The settings file the role's Claude Code started with: a resume
+    /// passes it again, or the agent would come back without its limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_settings: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub agent_wall: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,6 +134,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         diff_repo: m.and_then(|m| m.diff_repo.clone()),
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
+                        agent_settings: m.and_then(|m| m.agent_settings.clone()),
                         agent_wall: m.is_some_and(|m| m.agent_wall),
                         agent_wall_tab: m.and_then(|m| m.agent_wall_tab.clone()),
                     },
@@ -200,6 +205,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     diff_repo: p.diff_repo,
                     diff_spec: p.diff_spec,
                     agent_role: p.agent_role,
+                    agent_settings: p.agent_settings,
                     agent_wall: p.agent_wall,
                     agent_wall_tab: p.agent_wall_tab,
                     ..Default::default()
@@ -271,6 +277,7 @@ mod tests {
             PaneMeta {
                 agent_session: Some("claude-fg:s1".into()),
                 agent_role: Some("reviewer".into()),
+                agent_settings: Some("/data/prompts/reviewer-1.settings.json".into()),
                 agent_status: Some(cmux_protocol::AgentStatus::Working),
                 agent_wall: true,
                 agent_wall_tab: Some("tab-1".into()),
@@ -292,6 +299,7 @@ mod tests {
         // The role survives so a resume gets its model; the status is only
         // ever what this run heard.
         assert_eq!(rmeta[&b].agent_role.as_deref(), Some("reviewer"));
+        assert_eq!(rmeta[&b].agent_settings.as_deref(), Some("/data/prompts/reviewer-1.settings.json"));
         assert!(rmeta[&b].agent_wall);
         assert_eq!(rmeta[&b].agent_wall_tab.as_deref(), Some("tab-1"));
         assert_eq!(rmeta[&b].agent_status, None);

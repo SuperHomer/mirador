@@ -718,6 +718,16 @@ fn agent_roles(json: bool) -> Result<(), String> {
         if let Some(way) = &r.way {
             line.push_str(&format!("  way: {way}"));
         }
+        // What it is held to, when anything: `mcp: github`, `skills: none`.
+        let list = |l: &Vec<String>| if l.is_empty() { "none".to_string() } else { l.join(",") };
+        for (field, value) in [("mcp", &r.mcp), ("plugins", &r.plugins), ("skills", &r.skills)] {
+            if let Some(v) = value {
+                line.push_str(&format!("  {field}: {}", list(v)));
+            }
+        }
+        if let Some(t) = &r.tools {
+            line.push_str(&format!("  tools: +{} -{}", t.allow.len(), t.deny.len()));
+        }
         if let Some(d) = &r.description {
             line.push_str(&format!("  — {d}"));
         }

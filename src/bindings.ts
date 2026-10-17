@@ -275,6 +275,11 @@ export interface AgentRole {
   /** The way of working it follows. */
   way: string | null;
   description: string | null;
+  /** Only these MCP servers, plugins, skills; absent is everything. */
+  mcp: string[] | null;
+  plugins: string[] | null;
+  skills: string[] | null;
+  tools: { allow: string[]; deny: string[] } | null;
   source: RoleSource;
   path: string | null;
   /** Why it cannot start, when it cannot. */
@@ -457,6 +462,7 @@ export const roleHint = (r: AgentRole): string =>
         r.harness === "claude" ? null : HARNESS_LABEL[r.harness],
         r.model ?? "default model",
         r.way ? `way: ${r.way}` : null,
+        r.mcp || r.plugins || r.skills || r.tools ? "limited" : null,
         r.source === "repo" ? "repo" : null,
       ]
         .filter(Boolean)

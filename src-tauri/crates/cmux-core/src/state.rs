@@ -44,6 +44,10 @@ pub struct PaneMeta {
     /// until the agent exits, and across restarts so a resume gets the
     /// role's model back.
     pub agent_role: Option<String>,
+    /// The settings file holding the role's Claude Code to its MCP servers,
+    /// plugins, skills and tools (`roles::write_settings`). Kept, like the
+    /// role, so a resume passes it again.
+    pub agent_settings: Option<String>,
     /// Started as an agent (`mira agent new`, the wall, the palette), with
     /// or without a role. It makes the pane an agent from the moment it
     /// opens, before Claude has started and a hook has recorded a session —
@@ -129,6 +133,7 @@ impl PaneMeta {
         self.agent_started_at = None;
         self.agent_session = None;
         self.agent_role = None;
+        self.agent_settings = None;
         self.agent_launched = false;
         self.agent_harness = None;
         self.agent_transcript = None;

@@ -195,6 +195,17 @@ role's source, and warns about anything it could not use — a file that
 does not parse, an unknown field, a way nobody wrote; `--json` gives the
 whole catalog, including `problem` on a role that cannot start.
 
+A Claude Code role may also list what it is allowed: `mcp: [names]`,
+`plugins: [names]`, `skills: [names]` (only those; `[]` is none; absent is
+everything) and `tools: { allow: [...], deny: [...] }` in Claude Code's
+permission syntax. They become one settings file passed with `--settings`
+(`allowedMcpServers`, `enabledPlugins`, `skillOverrides`, `permissions`),
+kept with the pane so a resume passes it again. `skills` and `plugins`
+first ask `claude` itself what exists, in the agent's directory; an
+unknown name stops the launch with the list. A repository's role may not
+`allow` tools, and a Codex role may not use any of these yet — both are
+reported as the role's `problem`.
+
 `agent new` splits the pane it runs in (the focused pane, from outside
 Mirador), opens a shell there and types the agent into it, with the task as
 the first message — so `/exit` leaves a prompt. Claude Code gets the role's

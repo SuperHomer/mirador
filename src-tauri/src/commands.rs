@@ -1266,7 +1266,9 @@ pub fn graph_show_commit(
 /// prompt and `task` as its first message. A shell rather than a command
 /// pane, as a restored agent is: `/exit` leaves a prompt, and the session
 /// it records resumes like any other.
-#[tauri::command]
+// Off the main thread: a role that keeps a list of skills or plugins
+// asks Claude Code for its inventory first, which takes a second.
+#[tauri::command(async)]
 pub fn open_agent(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1296,7 +1298,37 @@ pub fn open_agent(
         }
         None => (None, None),
     };
+    // What a Claude Code role may use: its MCP servers, plugins, skills and
+    // tools, as a settings file. A list of skills or plugins to keep needs
+    // every name there is, which only Claude Code knows — asked in the
+    // directory the agent will work in, on the PATH its shell would give
+    // it. Nothing starts if that fails: an agent meant to be limited must
+    // not start with everything.
+    let settings_file = match &role {
+        Some(r) if cmux_core::role_limits::limits(r) => {
+            let inventory = if cmux_core::role_limits::needs_inventory(r) {
+                #[cfg(unix)]
+                let path = cmux_core::pty::shell::interactive_path();
+                #[cfg(not(unix))]
+                let path: Option<&str> = None;
+                Some(
+                    cmux_core::role_limits::probe(cwd.as_deref().map(std::path::Path::new), path)
+                        .map_err(|e| format!("role `{}`: {e}", r.name))?,
+                )
+            } else {
+                None
+            };
+            let settings = cmux_core::role_limits::settings(r, inventory.as_ref())
+                .map_err(|e| format!("role `{}`: {e}", r.name))?;
+            Some(
+                cmux_core::roles::write_settings(&r.name, &settings)
+                    .map_err(|e| format!("could not write the role's settings: {e}"))?,
+            )
+        }
+        _ => None,
+    };
     // Claude Code reads a role's prompt from a file; Codex takes it inline.
+    // Written once the role is known to start, so a refused one leaves none.
     let prompt_file = match (&role, &prompt) {
         (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(
             cmux_core::roles::write_prompt(&r.name, p)
@@ -1325,6 +1357,7 @@ pub fn open_agent(
         role.as_ref(),
         prompt.as_deref(),
         prompt_file.as_deref(),
+        settings_file.as_deref(),
         task.as_deref(),
         cmux_core::pty::shell::quote_arg,
     );
@@ -1344,6 +1377,7 @@ pub fn open_agent(
             }
             entry.agent_model = role.model;
             entry.agent_role = Some(role.name);
+            entry.agent_settings = settings_file.map(|f| f.to_string_lossy().into_owned());
         }
     }
     emit_workspace(&app);
