@@ -161,4 +161,19 @@ fn the_built_in_omakase_team_starts_out_of_the_box() {
     let instructions = config["developer_instructions"].as_str().unwrap();
     assert!(instructions.contains("You are the reviewer") && instructions.contains("APPROVE"), "{instructions}");
     assert!(instructions.contains("`planner` (omakase-planner, leads the team)"), "{instructions}");
+
+    // Every member goes by its member name — the Codex one too, which has
+    // no session name and once showed as its role, `omakase-reviewer`.
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+    let member_of = |pane: &str| {
+        agents
+            .iter()
+            .find(|a| a["paneId"] == pane)
+            .and_then(|a| a["member"].as_str().map(String::from))
+    };
+    assert_eq!(member_of(&reviewer_pane).as_deref(), Some("reviewer"));
+    assert_eq!(member_of(&pane_of(&sb, "worker")).as_deref(), Some("worker"));
+    let (_, listed, _) = sb.mira(None, &["agent", "list"]);
+    let reviewer_line = listed.lines().find(|l| l.starts_with(&reviewer_pane)).unwrap_or_default().to_string();
+    assert!(reviewer_line.contains(" reviewer ") && !reviewer_line.contains("omakase-reviewer"), "{listed}");
 }

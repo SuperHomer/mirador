@@ -141,26 +141,33 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
 /// exited — in tab and layout order, which is the order the wall draws
 /// them in.
 pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
-    let panes: Vec<(String, String)> = {
+    // Each pane with its tab, and its name in the tab's team if it has one.
+    let panes: Vec<(String, String, Option<String>)> = {
         let ws = state.workspace.lock().unwrap();
         ws.tabs
             .iter()
             .flat_map(|t| {
-                cmux_core::layout::pane_ids(&t.root)
-                    .into_iter()
-                    .map(move |p| (t.id.clone(), p))
+                cmux_core::layout::pane_ids(&t.root).into_iter().map(move |p| {
+                    let member = t
+                        .team
+                        .as_ref()
+                        .and_then(|run| run.members.iter().find(|s| s.pane == p))
+                        .map(|s| s.name.clone());
+                    (t.id.clone(), p, member)
+                })
             })
             .collect()
     };
     let meta = state.meta.lock().unwrap();
     panes
         .into_iter()
-        .filter_map(|(tab_id, pane)| {
+        .filter_map(|(tab_id, pane, member)| {
             let m = meta.get(&pane)?;
             let harness = m.harness()?;
             Some(cmux_protocol::AgentInfo {
                 tab_id,
                 harness,
+                member,
                 role: m.agent_role.clone(),
                 name: m.agent_name.clone(),
                 has_activity: m.has_activity(),

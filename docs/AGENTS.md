@@ -213,7 +213,12 @@ the first message — so `/exit` leaves a prompt. Claude Code gets the role's
 `--model`, `--name`, and its prompt (the role's, then its way's) through
 `--append-system-prompt-file`; the session resumes like any other, on the
 role's model, and keeps that prompt. Codex gets `--model` and the prompt as
-`-c developer_instructions="…"`; it has no session Mirador can resume. The
+`-c developer_instructions="…"`; it has no session Mirador can resume.
+A `-c` override makes Codex run in its embedded mode rather than on its
+shared background server, which it says once at startup ("Running without
+the shared background server"); the agent works the same, but `codex
+agents` does not list it. A team member goes by its member name in `agent
+list` and the app (`member`), a Codex one included. The
 arguments are quoted for the pane's shell and put on one line: they are
 typed, so a newline would submit half a command.
 
