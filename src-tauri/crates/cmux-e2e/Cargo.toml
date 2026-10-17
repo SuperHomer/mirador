@@ -14,3 +14,6 @@ serde_json.workspace = true
 [[bin]]
 name = "fake-agent"
 path = "src/bin/fake_agent.rs"
+
+[dev-dependencies]
+toml = "1.1"

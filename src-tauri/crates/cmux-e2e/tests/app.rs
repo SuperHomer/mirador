@@ -3,18 +3,9 @@
 
 use std::time::Duration;
 
-use cmux_e2e::{enabled, Sandbox};
+use cmux_e2e::{e2e, Sandbox};
 use cmux_protocol::Request;
 use serde_json::Value;
-
-macro_rules! e2e {
-    () => {
-        if !enabled() {
-            eprintln!("skipped: set MIRA_E2E=1 to run the app end to end");
-            return;
-        }
-    };
-}
 
 const LONG: Duration = Duration::from_secs(45);
 

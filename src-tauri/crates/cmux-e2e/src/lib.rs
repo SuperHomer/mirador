@@ -28,6 +28,28 @@ use std::time::{Duration, Instant};
 use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope};
 use serde_json::Value;
 
+/// The value after `flag` in an agent's arguments.
+pub fn flag(args: &[String], flag: &str) -> Option<String> {
+    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
+}
+
+/// Whether a process whose whole command line matches `pattern` (a
+/// `pgrep -f` regular expression) is running.
+pub fn process_running(pattern: &str) -> bool {
+    Command::new("pgrep").args(["-f", pattern]).output().is_ok_and(|o| o.status.success())
+}
+
+/// Returns from the test, saying why, unless `MIRA_E2E=1`.
+#[macro_export]
+macro_rules! e2e {
+    () => {
+        if !$crate::enabled() {
+            eprintln!("skipped: set MIRA_E2E=1 to run the app end to end");
+            return;
+        }
+    };
+}
+
 /// Whether end-to-end tests run: they start the app, so only when asked.
 pub fn enabled() -> bool {
     std::env::var("MIRA_E2E").is_ok_and(|v| v == "1")
@@ -141,6 +163,8 @@ pub struct Sandbox {
     app_log: PathBuf,
     app: Option<Child>,
     launches: u32,
+    /// Extra environment for the app, and so for its panes and agents.
+    env: Vec<(String, String)>,
 }
 
 impl Sandbox {
@@ -180,6 +204,7 @@ impl Sandbox {
             project,
             app: None,
             launches: 0,
+            env: Vec::new(),
         }
     }
 
@@ -202,6 +227,7 @@ impl Sandbox {
             .env("XDG_CONFIG_HOME", &self.config)
             .env("E2E_AGENT_LOG", &self.agent_log)
             .env("E2E_MIRA", bin("mira"))
+            .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .current_dir(&self.project)
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
@@ -320,16 +346,95 @@ impl Sandbox {
         self.call(Request::SendInput { pane_id: Some(pane.to_string()), data: text.to_string() });
     }
 
-    /// Everything the fake agents have logged so far, oldest first.
+    /// Everything the fake agents have logged so far, oldest first. A line
+    /// that does not parse fails the test: skipping it once hid two agents'
+    /// lines written into each other, and with them an agent's start.
     pub fn agent_events(&self) -> Vec<Value> {
         std::fs::read_to_string(&self.agent_log)
             .unwrap_or_default()
             .lines()
-            .filter_map(|l| serde_json::from_str(l).ok())
+            .map(|l| serde_json::from_str(l).unwrap_or_else(|e| self.fail(&format!("agent log line {l:?}: {e}"))))
             .collect()
     }
 
-    /// How many times this sandbox has been launched.
+    /// Sets `key` in the app's environment from the next launch on — its
+    /// panes', and so the fake agents', too.
+    pub fn set_env(&mut self, key: &str, value: &str) {
+        self.env.retain(|(k, _)| k != key);
+        self.env.push((key.to_string(), value.to_string()));
+    }
+
+    /// Writes `text` to `path`, relative to the project directory.
+    pub fn write(&self, path: &str, text: &str) {
+        let path = self.project.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    /// The real `mira` CLI as if run from `pane` (its `MIRA_PANE`),
+    /// against this sandbox, not yet started.
+    pub fn mira_command(&self, pane: Option<&str>, args: &[&str]) -> Command {
+        let mut cmd = Command::new(bin("mira"));
+        cmd.args(args)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", &self.home)
+            .env("XDG_RUNTIME_DIR", &self.runtime)
+            .env("XDG_CONFIG_HOME", &self.config);
+        if let Some(pane) = pane {
+            cmd.env("MIRA_PANE", pane);
+        }
+        cmd
+    }
+
+    /// Runs [`Self::mira_command`]: exit code, stdout, stderr.
+    pub fn mira(&self, pane: Option<&str>, args: &[&str]) -> (i32, String, String) {
+        let out = self.mira_command(pane, args).output().expect("run mira");
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+
+    /// The first pane, once its terminal is drawn.
+    pub fn first_pane(&self) -> String {
+        let pane = self.wait_for("a pane", Duration::from_secs(45), || self.panes().into_iter().next());
+        self.wait_for("the first pane to mount", Duration::from_secs(45), || self.screen(&pane));
+        pane
+    }
+
+    /// The fake agents' events of one kind in `pane`, oldest first.
+    pub fn events(&self, event: &str, pane: &str) -> Vec<Value> {
+        self.agent_events()
+            .into_iter()
+            .filter(|e| e["event"] == event && e["pane"] == pane)
+            .collect()
+    }
+
+    /// Waits for the `n`th (from 1) agent started in `pane`, and gives its
+    /// arguments.
+    pub fn nth_start(&self, pane: &str, n: usize) -> Vec<String> {
+        let start = self.wait_for(&format!("agent start #{n} in {pane}"), Duration::from_secs(45), || {
+            self.events("start", pane).into_iter().nth(n - 1)
+        });
+        serde_json::from_value(start["args"].clone()).unwrap()
+    }
+
+    /// The running teams, as `team list` gives them.
+    pub fn teams(&self) -> Vec<Value> {
+        self.call(Request::TeamList)["teams"].as_array().cloned().unwrap_or_default()
+    }
+
+    /// One team member, by name, from `team list`.
+    pub fn member(&self, name: &str) -> Option<Value> {
+        self.teams()
+            .into_iter()
+            .flat_map(|t| t["members"].as_array().cloned().unwrap_or_default())
+            .find(|m| m["name"] == name)
+    }
+
+    /// How many times this sandbox has been launched.    /// How many times this sandbox has been launched.
     pub fn launches(&self) -> u32 {
         self.launches
     }
