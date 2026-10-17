@@ -174,6 +174,28 @@ A `read-screen` that times out with "pane not mounted?" is the signature of a
 render throw. And `send-input` cannot stand in for a keypress on an idle
 restored pane — its PTY does not exist yet; that path needs a human.
 
+**Most of that is now a test suite: `crates/cmux-e2e`.** It does the
+above in code — a sandbox per test (its own `HOME`, config and runtime
+directories, an empty `.zshrc`), the real debug app, requests over the
+sandbox's own socket — and fakes the agents: `fake-agent`, linked into the
+sandbox's PATH as `claude` and `codex`, logs how it was started, records
+its session through the real `mira claude-hook`, and echoes input. So a
+test needs no login and costs nothing, and the process table sees a real
+`claude` (a shell script would show as `/bin/sh`).
+
+```bash
+npm run build && npm run build:cli && (cd src-tauri && cargo build --workspace)
+cd src-tauri && MIRA_E2E=1 cargo test -p cmux-e2e -- --test-threads=1
+```
+
+Without `MIRA_E2E=1` its tests skip, so `cargo test --workspace` is
+unchanged; `.github/workflows/e2e.yml` runs it on macOS for PRs that touch
+the app. When you check something by hand in a sandbox, write it down there
+instead: wait with `Sandbox::wait_for` on a condition, never a fixed sleep,
+and prove a new test fails by putting the bug back once. A failing test
+keeps its sandbox (`$TMPDIR/me2e-*`) with the app's and the agents' logs.
+It cannot see the window — anything visual still needs a human.
+
 A release binary embeds `dist` and needs no server, but it embeds whatever
 `dist` was on disk at build time — rebuild the frontend first or you are
 testing a stale bundle.
