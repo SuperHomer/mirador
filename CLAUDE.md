@@ -179,7 +179,10 @@ above in code — a sandbox per test (its own `HOME`, config and runtime
 directories, an empty `.zshrc`), the real debug app, requests over the
 sandbox's own socket — and fakes the agents: `fake-agent`, linked into the
 sandbox's PATH as `claude` and `codex`, logs how it was started, records
-its session through the real `mira claude-hook`, and echoes input. So a
+its session through the real `mira claude-hook`, and echoes input. As
+`claude` it also answers the skills probe (`E2E_SKILLS`), turns each
+message — a bracketed paste is one — into a turn with `prompt-submit` and
+`stop` hooks (`E2E_TURN_MS`), and raises a permission prompt on `!ask`. So a
 test needs no login and costs nothing, and the process table sees a real
 `claude` (a shell script would show as `/bin/sh`).
 
