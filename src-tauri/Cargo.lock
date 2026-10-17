@@ -619,6 +619,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmux-e2e"
+version = "0.1.27"
+dependencies = [
+ "cmux-core",
+ "cmux-protocol",
+ "serde_json",
+]
+
+[[package]]
 name = "cmux-protocol"
 version = "0.1.27"
 dependencies = [

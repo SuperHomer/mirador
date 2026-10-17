@@ -1,0 +1,16 @@
+[package]
+name = "cmux-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "End-to-end tests: the real app, in a sandbox, driven over its socket. Run with MIRA_E2E=1."
+publish = false
+
+[dependencies]
+cmux-core = { path = "../cmux-core" }
+cmux-protocol = { path = "../cmux-protocol" }
+serde_json.workspace = true
+
+[[bin]]
+name = "fake-agent"
+path = "src/bin/fake_agent.rs"

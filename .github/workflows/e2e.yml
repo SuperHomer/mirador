@@ -1,0 +1,84 @@
+name: End-to-end
+
+# The other workflows compile and unit-test the app but never open it, so
+# a render throw, a startup panic or a broken restore rides a green build
+# (CLAUDE.md, *Verifying a change*). This one starts the real debug app in
+# a sandbox and drives it over its socket: `crates/cmux-e2e`.
+#
+# Its own workflow, not a step of build-macos.yml, so that it is not a
+# required check until it has shown it is not flaky.
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/e2e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    # A GUI session, which the app's window needs, and Apple silicon.
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # In this order: the debug app loads `dist` from :1420 (the harness
+      # serves it), and building the app copies the `mira` sidecar over
+      # target/debug/mira — which must be this commit's, or the hooks the
+      # fake agents call are an old build's.
+      - name: Frontend
+        run: npm run build
+      - name: mira sidecar
+        run: npm run build:cli
+      - name: Build
+        working-directory: src-tauri
+        run: cargo build --workspace
+
+      - name: End-to-end tests
+        working-directory: src-tauri
+        env:
+          MIRA_E2E: "1"
+        # One app at a time: they are separate sandboxes, but a runner is
+        # small and a timeout should mean a bug, not a busy machine.
+        run: cargo test -p cmux-e2e -- --test-threads=1
+
+      # A failing test keeps its sandbox: the app's log, the agents' log,
+      # the session file. That is most of what there is to go on.
+      - name: Keep the failed sandboxes
+        if: failure()
+        run: |
+          mkdir -p e2e-failed
+          for d in "${TMPDIR:-/tmp}"/me2e-*; do [ -d "$d" ] && cp -R "$d" e2e-failed/ || true; done
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-sandboxes
+          path: e2e-failed
+          if-no-files-found: ignore
