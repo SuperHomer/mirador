@@ -82,8 +82,8 @@ fn live_holders(workspace: &mut Workspace) -> HashSet<String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cmux_core::config::write_default_if_missing();
-    // Launch prompts are read once, by a launch: none is pending now.
-    cmux_core::roles::clear_prompts();
+    // Launch prompts nobody has started an agent with in a month.
+    cmux_core::roles::prune_prompts();
     let (cfg, cfg_err) = cmux_core::config::load();
     if let Some(err) = &cfg_err {
         eprintln!("mirador: config error, using defaults: {err}");

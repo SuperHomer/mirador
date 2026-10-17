@@ -1299,7 +1299,7 @@ pub fn open_agent(
     // Claude Code reads a role's prompt from a file; Codex takes it inline.
     let prompt_file = match (&role, &prompt) {
         (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(
-            cmux_core::roles::write_prompt(p)
+            cmux_core::roles::write_prompt(&r.name, p)
                 .map_err(|e| format!("could not write the role's prompt: {e}"))?,
         ),
         _ => None,

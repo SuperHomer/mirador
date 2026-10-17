@@ -291,25 +291,66 @@ fn one_line(text: &str) -> String {
 }
 
 /// Where launch prompts are written, for a harness that reads its prompt
-/// from a file. Only the launch reads one — a resumed conversation keeps
-/// its system prompt — so all of them are removed at the next start.
+/// from a file.
 pub fn prompts_dir() -> PathBuf {
     crate::session::data_dir().join("prompts")
 }
 
-/// Writes a launch prompt and returns where: a file of its own, never one
-/// a launch still to read could share.
-pub fn write_prompt(prompt: &str) -> Result<PathBuf, String> {
-    let dir = prompts_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let path = dir.join(format!("{}.md", uuid::Uuid::new_v4()));
-    std::fs::write(&path, prompt).map_err(|e| format!("{}: {e}", path.display()))?;
+/// How long a prompt file nobody launched is kept.
+pub const PROMPT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Writes a launch prompt and returns where.
+///
+/// The file is named after the role and its content, and outlives the
+/// launch: the command that names it stays in the shell's history, and
+/// ↑ Enter after `/exit` is how people start an agent again — which a file
+/// deleted after the launch would break. The same prompt is the same file,
+/// rewritten (so not pruned) each launch; a role edited is a new one.
+pub fn write_prompt(role: &str, prompt: &str) -> Result<PathBuf, String> {
+    write_prompt_in(&prompts_dir(), role, prompt)
+}
+
+fn write_prompt_in(dir: &Path, role: &str, prompt: &str) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let role = if is_name(role) { role } else { "role" };
+    let path = dir.join(format!("{role}-{:016x}.md", fnv1a(prompt.as_bytes())));
+    // Through a file of its own and a rename: a launch reading the same
+    // prompt never sees it half written.
+    let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    std::fs::write(&tmp, prompt)
+        .and_then(|()| std::fs::rename(&tmp, &path))
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            format!("{}: {e}", path.display())
+        })?;
     Ok(path)
 }
 
-/// Removes every launch prompt: run at startup, when no launch is pending.
-pub fn clear_prompts() {
-    let _ = std::fs::remove_dir_all(prompts_dir());
+/// Removes prompt files no launch has written for [`PROMPT_MAX_AGE`]:
+/// run at startup.
+pub fn prune_prompts() {
+    prune_prompts_in(&prompts_dir(), PROMPT_MAX_AGE);
+}
+
+fn prune_prompts_in(dir: &Path, max_age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// FNV-1a: a name for a prompt's content that is the same in every build,
+/// which `DefaultHasher` does not promise.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
 }
 
 #[cfg(test)]
@@ -435,6 +476,27 @@ mod tests {
         assert!(lost.problem.as_deref().is_some_and(|p| p.contains("nowhere")));
         assert!(resolve(&cat, "gem").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_prompt_file_outlives_its_launch_and_is_shared_by_its_content() {
+        let dir = tree("prompts");
+        let a = write_prompt_in(&dir, "reviewer", "You review.").unwrap();
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "You review.");
+        assert!(a.file_name().unwrap().to_string_lossy().starts_with("reviewer-"));
+        // Same prompt, same file; an edited role, a new one.
+        assert_eq!(write_prompt_in(&dir, "reviewer", "You review.").unwrap(), a);
+        let b = write_prompt_in(&dir, "reviewer", "You review. Be terse.").unwrap();
+        assert_ne!(a, b);
+        assert!(write_prompt_in(&dir, "a;b", "x").unwrap().file_name().unwrap().to_string_lossy().starts_with("role-"));
+
+        // Only a file unwritten for longer than the limit goes.
+        let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600);
+        std::fs::File::options().write(true).open(&a).unwrap().set_modified(month_ago).unwrap();
+        prune_prompts_in(&dir, PROMPT_MAX_AGE);
+        assert!(!a.exists());
+        assert!(b.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
