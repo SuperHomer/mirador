@@ -308,6 +308,39 @@ description: Small steps, tests first
 2. One branch per task; never push — a human does.
 ```
 
+A Claude Code role can also be held to **only what it needs** — the MCP
+servers, plugins and skills it may use, and permission rules:
+
+```markdown
+<!-- .mirador/roles/charts.md -->
+---
+model: haiku
+mcp: [github]            # only this MCP server, from wherever it is configured
+plugins: []              # no plugins
+skills: [dataviz]        # only this skill; `pdf` also names `anthropic-skills:pdf`
+tools:
+  deny: ["Bash(git push *)"]
+---
+You draw charts from the data you are given.
+```
+
+A field left out changes nothing; an empty list means none. Mirador gives
+them to Claude Code as a settings file (`--settings`), and passes the same
+file again when the conversation resumes after a restart — if that file is
+gone, the pane comes back as a plain shell rather than an agent with every
+tool. For `skills` and `plugins` it first asks Claude Code, in the agent's
+directory, which ones exist (a `claude -p` that is stopped before it calls
+a model), so every other one can be switched off; a name that matches
+nothing stops the launch and lists what there is. Skills left out are
+hidden from the agent, not from you: `/name` still works when you type it.
+
+**A repository's role can take tools away, never hand them out.**
+`tools.allow` is refused in `.mirador/roles` — rules given at launch are
+Claude Code's highest-priority settings, and would skip the trust prompt
+it shows before a project's own settings apply. Put `allow` in a role of
+your own. Codex roles cannot be limited yet: a Codex role with any of
+these fields does not start.
+
 Roles and ways live in two places, and the same name means the first:
 
 1. **The repository's** `.mirador/roles/` and `.mirador/ways/` — the

@@ -25,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentRole, AgentWay, Harness, RoleCatalog, RoleSource};
+use cmux_protocol::{AgentRole, AgentWay, Harness, RoleCatalog, RoleSource, ToolRules};
 use serde::Deserialize;
 
 /// A prompt longer than this is not a prompt: refused, not read.
@@ -90,14 +90,7 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
     // A role that cannot start stays listed — it is still the role you
     // wrote — but says why, here and on the role.
     for role in &mut roles {
-        role.problem = if !can_start(role.harness) {
-            Some(format!("a role cannot start {} yet, only Claude Code and Codex", role.harness.label()))
-        } else {
-            role.way
-                .as_ref()
-                .filter(|way| !ways.iter().any(|w| &w.name == *way))
-                .map(|way| format!("way of working `{way}` is not in any ways/ directory"))
-        };
+        role.problem = problem_of(role, &ways);
         if let Some(problem) = &role.problem {
             problems.push(format!("{}: {problem}", role.path.as_deref().unwrap_or("agentRoles")));
         }
@@ -206,6 +199,10 @@ struct RoleFront {
     model: Option<String>,
     way: Option<String>,
     description: Option<String>,
+    mcp: Option<Vec<String>>,
+    plugins: Option<Vec<String>>,
+    skills: Option<Vec<String>>,
+    tools: Option<ToolRules>,
     #[serde(flatten)]
     other: std::collections::BTreeMap<String, serde_yaml_ng::Value>,
 }
@@ -236,6 +233,10 @@ fn parse_role(name: &str, text: &str) -> Result<(AgentRole, Vec<String>), String
         prompt: present(Some(body.to_string())),
         way,
         description: present(front.description).map(|d| one_line(&d)),
+        mcp: front.mcp.map(names),
+        plugins: front.plugins.map(names),
+        skills: front.skills.map(names),
+        tools: front.tools.map(|t| ToolRules { allow: names(t.allow), deny: names(t.deny) }),
         ..Default::default()
     };
     Ok((role, front.other.into_keys().collect()))
@@ -282,6 +283,37 @@ fn split_frontmatter(text: &str) -> Result<(Option<&str>, &str), String> {
     Err("frontmatter opened with `---` is never closed".into())
 }
 
+/// A list's entries, trimmed, without the empty ones.
+fn names(list: Vec<String>) -> Vec<String> {
+    list.into_iter().filter_map(|n| present(Some(n))).collect()
+}
+
+/// Why `role` cannot start, if it cannot.
+fn problem_of(role: &AgentRole, ways: &[AgentWay]) -> Option<String> {
+    if !can_start(role.harness) {
+        return Some(format!("a role cannot start {} yet, only Claude Code and Codex", role.harness.label()));
+    }
+    if let Some(way) = role.way.as_ref().filter(|way| !ways.iter().any(|w| &&w.name == way)) {
+        return Some(format!("way of working `{way}` is not in any ways/ directory"));
+    }
+    let limits = role.mcp.is_some() || role.plugins.is_some() || role.skills.is_some() || role.tools.is_some();
+    if role.harness != Harness::Claude && limits {
+        return Some(format!(
+            "a {} role cannot limit its MCP servers, plugins, skills or tools yet — only Claude Code's can",
+            role.harness.label()
+        ));
+    }
+    // A repository can take tools away, never hand them out: rules given
+    // at launch are Claude Code's highest-priority settings, and would
+    // skip the trust it asks before a project's own settings apply.
+    if role.source == RoleSource::Repo && role.tools.as_ref().is_some_and(|t| !t.allow.is_empty()) {
+        return Some(
+            "a repository's role cannot allow tools, only deny them — put `tools.allow` in a role of your own".into(),
+        );
+    }
+    None
+}
+
 fn present(value: Option<String>) -> Option<String> {
     value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
@@ -290,13 +322,13 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Where launch prompts are written, for a harness that reads its prompt
-/// from a file.
+/// Where launch files are written — a role's prompt, its settings — for a
+/// harness that reads them from a file.
 pub fn prompts_dir() -> PathBuf {
     crate::session::data_dir().join("prompts")
 }
 
-/// How long a prompt file nobody launched is kept.
+/// How long a launch file nobody launched with is kept.
 pub const PROMPT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
 
 /// Writes a launch prompt and returns where.
@@ -307,17 +339,26 @@ pub const PROMPT_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3
 /// deleted after the launch would break. The same prompt is the same file,
 /// rewritten (so not pruned) each launch; a role edited is a new one.
 pub fn write_prompt(role: &str, prompt: &str) -> Result<PathBuf, String> {
-    write_prompt_in(&prompts_dir(), role, prompt)
+    write_launch_file(&prompts_dir(), role, "md", prompt)
 }
 
-fn write_prompt_in(dir: &Path, role: &str, prompt: &str) -> Result<PathBuf, String> {
+/// Writes a role's Claude Code settings ([`crate::role_limits`]), named
+/// the same way. A resumed conversation does not keep them — they are the
+/// process's, not the conversation's — so a restore passes the same file
+/// again, and the session names it.
+pub fn write_settings(role: &str, settings: &serde_json::Value) -> Result<PathBuf, String> {
+    let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    write_launch_file(&prompts_dir(), role, "settings.json", &text)
+}
+
+fn write_launch_file(dir: &Path, role: &str, ext: &str, content: &str) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let role = if is_name(role) { role } else { "role" };
-    let path = dir.join(format!("{role}-{:016x}.md", fnv1a(prompt.as_bytes())));
+    let path = dir.join(format!("{role}-{:016x}.{ext}", fnv1a(content.as_bytes())));
     // Through a file of its own and a rename: a launch reading the same
-    // prompt never sees it half written.
+    // file never sees it half written.
     let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
-    std::fs::write(&tmp, prompt)
+    std::fs::write(&tmp, content)
         .and_then(|()| std::fs::rename(&tmp, &path))
         .map_err(|e| {
             let _ = std::fs::remove_file(&tmp);
@@ -326,15 +367,19 @@ fn write_prompt_in(dir: &Path, role: &str, prompt: &str) -> Result<PathBuf, Stri
     Ok(path)
 }
 
-/// Removes prompt files no launch has written for [`PROMPT_MAX_AGE`]:
-/// run at startup.
-pub fn prune_prompts() {
-    prune_prompts_in(&prompts_dir(), PROMPT_MAX_AGE);
+/// Removes launch files no launch has written for [`PROMPT_MAX_AGE`],
+/// except those in `keep` — the ones a restored pane will pass again: run
+/// at startup.
+pub fn prune_prompts(keep: &[PathBuf]) {
+    prune_prompts_in(&prompts_dir(), PROMPT_MAX_AGE, keep);
 }
 
-fn prune_prompts_in(dir: &Path, max_age: std::time::Duration) {
+fn prune_prompts_in(dir: &Path, max_age: std::time::Duration, keep: &[PathBuf]) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
+        if keep.contains(&entry.path()) {
+            continue;
+        }
         let old = entry
             .metadata()
             .and_then(|m| m.modified())
@@ -381,7 +426,7 @@ mod tests {
     fn parses_a_role_file() {
         let (role, ignored) = parse_role(
             "reviewer",
-            "---\nharness: codex\nmodel: gpt-5\nway: our-way\ndescription: |\n  Reviews\n  diffs\nmcp: [github]\n---\n\nYou review. Never edit.\n",
+            "---\nharness: codex\nmodel: gpt-5\nway: our-way\ndescription: |\n  Reviews\n  diffs\nsandbox: read-only\n---\n\nYou review. Never edit.\n",
         )
         .unwrap();
         assert_eq!(role.name, "reviewer");
@@ -390,7 +435,21 @@ mod tests {
         assert_eq!(role.way.as_deref(), Some("our-way"));
         assert_eq!(role.description.as_deref(), Some("Reviews diffs"));
         assert_eq!(role.prompt.as_deref(), Some("You review. Never edit."));
-        assert_eq!(ignored, vec!["mcp".to_string()]);
+        assert_eq!(ignored, vec!["sandbox".to_string()]);
+
+        // What a Claude Code role may use: lists, trimmed, empty ones kept.
+        let (limited, ignored) = parse_role(
+            "lean",
+            "---\nmcp: [github, ' linear ']\nplugins: []\nskills:\n  - pdf\n  - ''\ntools:\n  deny: [\"Bash(git push *)\"]\n---\n",
+        )
+        .unwrap();
+        assert!(ignored.is_empty());
+        assert_eq!(limited.mcp, Some(vec!["github".to_string(), "linear".to_string()]));
+        assert_eq!(limited.plugins, Some(vec![]));
+        assert_eq!(limited.skills, Some(vec!["pdf".to_string()]));
+        assert_eq!(limited.tools, Some(ToolRules { allow: vec![], deny: vec!["Bash(git push *)".into()] }));
+        assert_eq!((limited.prompt, limited.harness), (None, Harness::Claude));
+        assert!(parse_role("x", "---\nmcp: github\n---\n").unwrap_err().starts_with("frontmatter"));
 
         // No frontmatter: a Claude Code role that is all prompt.
         let (plain, _) = parse_role("plain", "Be terse.").unwrap();
@@ -461,10 +520,20 @@ mod tests {
         write(&global.join("roles/-bad.md"), "x");
         write(&global.join("roles/gem.md"), "---\nharness: gemini\n---\n");
         write(&global.join("ways/empty.md"), "---\ndescription: nothing\n---\n\n");
+        write(&global.join("roles/codex-mcp.md"), "---\nharness: codex\nmcp: [github]\n---\n");
+        // Yours may allow tools; a repository's may only deny them.
+        write(&global.join("roles/mine.md"), "---\ntools: { allow: [\"Bash(npm test)\"] }\n---\n");
+        let repo = root.join("repo/.mirador");
+        write(&repo.join("roles/theirs.md"), "---\ntools: { allow: [\"Bash(*)\"], deny: [\"Read\"] }\n---\n");
+        write(&repo.join("roles/careful.md"), "---\ntools: { deny: [\"Bash(git push *)\"] }\n---\n");
 
-        let cat = catalog_in(None, &global, &[]);
+        let cat = catalog_in(Some(&repo), &global, &[]);
         let names: Vec<_> = cat.roles.iter().map(|r| r.name.as_str()).collect();
-        assert_eq!(names, ["gem", "lost"]);
+        assert_eq!(names, ["careful", "codex-mcp", "gem", "lost", "mine", "theirs"]);
+        let problem = |name: &str| cat.roles.iter().find(|r| r.name == name).unwrap().problem.clone();
+        assert!(problem("codex-mcp").is_some_and(|p| p.contains("only Claude Code's can")));
+        assert!(problem("theirs").is_some_and(|p| p.contains("cannot allow tools")));
+        assert_eq!((problem("mine"), problem("careful")), (None, None));
         let has = |needle: &str| cat.problems.iter().any(|p| p.contains(needle));
         assert!(has("never closed"), "{:?}", cat.problems);
         assert!(has("a name is letters"));
@@ -481,21 +550,28 @@ mod tests {
     #[test]
     fn a_prompt_file_outlives_its_launch_and_is_shared_by_its_content() {
         let dir = tree("prompts");
-        let a = write_prompt_in(&dir, "reviewer", "You review.").unwrap();
+        let w = |role: &str, text: &str| write_launch_file(&dir, role, "md", text);
+        let a = w("reviewer", "You review.").unwrap();
         assert_eq!(std::fs::read_to_string(&a).unwrap(), "You review.");
         assert!(a.file_name().unwrap().to_string_lossy().starts_with("reviewer-"));
         // Same prompt, same file; an edited role, a new one.
-        assert_eq!(write_prompt_in(&dir, "reviewer", "You review.").unwrap(), a);
-        let b = write_prompt_in(&dir, "reviewer", "You review. Be terse.").unwrap();
+        assert_eq!(w("reviewer", "You review.").unwrap(), a);
+        let b = w("reviewer", "You review. Be terse.").unwrap();
         assert_ne!(a, b);
-        assert!(write_prompt_in(&dir, "a;b", "x").unwrap().file_name().unwrap().to_string_lossy().starts_with("role-"));
+        assert!(w("a;b", "x").unwrap().file_name().unwrap().to_string_lossy().starts_with("role-"));
+        let settings = write_launch_file(&dir, "reviewer", "settings.json", "{}").unwrap();
+        assert!(settings.to_string_lossy().ends_with(".settings.json"));
 
         // Only a file unwritten for longer than the limit goes.
         let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600);
-        std::fs::File::options().write(true).open(&a).unwrap().set_modified(month_ago).unwrap();
-        prune_prompts_in(&dir, PROMPT_MAX_AGE);
+        for old in [&a, &settings] {
+            std::fs::File::options().write(true).open(old).unwrap().set_modified(month_ago).unwrap();
+        }
+        // Unless a restored pane still names it.
+        prune_prompts_in(&dir, PROMPT_MAX_AGE, std::slice::from_ref(&settings));
         assert!(!a.exists());
         assert!(b.exists());
+        assert!(settings.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

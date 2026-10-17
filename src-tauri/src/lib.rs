@@ -82,8 +82,6 @@ fn live_holders(workspace: &mut Workspace) -> HashSet<String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cmux_core::config::write_default_if_missing();
-    // Launch prompts nobody has started an agent with in a month.
-    cmux_core::roles::prune_prompts();
     let (cfg, cfg_err) = cmux_core::config::load();
     if let Some(err) = &cfg_err {
         eprintln!("mirador: config error, using defaults: {err}");
@@ -136,16 +134,30 @@ pub fn run() {
             .and_then(|r| r.model);
         m.agent_model = role_model.clone();
         let quoted_model = role_model.as_deref().map(cmux_core::pty::shell::quote_arg);
+        // Its limits too, from the file it started with. A file gone since
+        // drops the pane's resume rather than its limits: an agent meant
+        // to be held to some tools must not come back with all of them.
+        let settings = m.agent_settings.clone();
+        let settings_gone = settings.as_deref().is_some_and(|f| !std::path::Path::new(f).is_file());
+        let quoted_settings = settings.as_deref().map(cmux_core::pty::shell::quote_arg);
         let restored = cmux_core::agents::restore_pane(
             m.command.as_deref(),
             m.remote_host.is_some(),
-            m.agent_session.as_deref(),
+            m.agent_session.as_deref().filter(|_| !settings_gone),
             quoted_model.as_deref(),
+            quoted_settings.as_deref(),
             cmux_core::agents::AUTO_RESUME,
         );
         m.command = restored.command;
         m.startup_input = restored.startup_input;
     }
+    // Launch files nobody has started an agent with in a month — except
+    // the settings a restored pane is about to pass again.
+    let keep: Vec<std::path::PathBuf> = meta
+        .values()
+        .filter_map(|m| m.agent_settings.as_ref().map(std::path::PathBuf::from))
+        .collect();
+    cmux_core::roles::prune_prompts(&keep);
     // Panes whose holder survived the quit are still running: nothing about
     // them is restored, so no resume is typed and no keypress is waited for.
     // Checked whatever `persistSessions` says now — turning it off must not

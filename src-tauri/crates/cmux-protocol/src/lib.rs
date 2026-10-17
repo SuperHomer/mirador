@@ -586,6 +586,16 @@ pub struct AgentRole {
     pub way: Option<String>,
     /// One line saying what it is for, shown beside its name.
     pub description: Option<String>,
+    /// Only these MCP servers, by name, wherever they are configured; none
+    /// when empty. Absent, every server the agent would have anyway.
+    pub mcp: Option<Vec<String>>,
+    /// Only these plugins (`name` or `name@marketplace`); none when empty.
+    pub plugins: Option<Vec<String>>,
+    /// Only these skills (`pdf`, or `anthropic-skills:pdf`); none when
+    /// empty, the built-in ones included.
+    pub skills: Option<Vec<String>>,
+    /// Permission rules, in Claude Code's own syntax (`Bash(git push *)`).
+    pub tools: Option<ToolRules>,
     /// Where it was defined. Set by whoever loads it, never read from it.
     #[serde(skip_deserializing)]
     pub source: RoleSource,
@@ -597,6 +607,15 @@ pub struct AgentRole {
     /// role you wrote — so this says what to fix.
     #[serde(skip_deserializing)]
     pub problem: Option<String>,
+}
+
+/// A role's permission rules: what it may do without asking, and what it
+/// may never do.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ToolRules {
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
 }
 
 /// A way of working: a playbook any role can follow, from `ways/<name>.md`.
