@@ -167,7 +167,11 @@ export function CommandPalette() {
               t.members
                 .map((m) => (m.count > 1 ? `${m.role}×${m.count}` : m.role))
                 .join(", "),
-              t.source === "repo" ? "repo" : null,
+              t.source === "repo"
+                ? "repo"
+                : t.source === "builtin"
+                  ? "built-in"
+                  : null,
             ]
               .filter(Boolean)
               .join(" · "),

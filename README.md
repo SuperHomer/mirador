@@ -354,7 +354,8 @@ It only ever touches `.md` files in those `roles/`, `ways/` and `teams/`
 directories. `agentRoles` entries show read-only: they live in
 mirador.json.
 
-Roles and ways live in two places, and the same name means the first:
+Roles and ways live in two places, and the same name means the first (a
+few also ship with Mirador, below both — see *Teams*):
 
 1. **The repository's** `.mirador/roles/` and `.mirador/ways/` — the
    nearest `.mirador` at or above the pane's directory. Commit them and
@@ -416,6 +417,21 @@ show their panes and screens; each Claude session is named after its
 member. The task goes to the lead. Every member's launch is worked out
 before any pane opens, so a team that cannot start — a missing role, a
 role that cannot start, two members of the same name — opens nothing.
+
+**One team ships with Mirador: `omakase`** — a planner and a worker on
+Claude Code (Opus 5.5) and a reviewer on Codex (`gpt-6-luna`), working in
+the Rails doctrine's taste: the codebase's conventions, the simplest thing
+that works, small steps that ship with their tests, nothing pushed. The
+planner splits the task and hands the worker one step at a time (`--wait`),
+then asks the reviewer, who answers it with APPROVE or CHANGES; the
+planner's edit tools are off. Start it with the palette's *Start Team…* ›
+*omakase*, or `mira team start omakase "…"`. Its roles
+(`omakase-planner`, `-worker`, `-reviewer`), its way of working and the
+team are *built-in*: the same for everyone, read-only, and replaced by any
+file of the same name — the editor's *Copy to yours* makes one to change.
+The first time the reviewer runs `mira`, Codex's sandbox asks you to allow
+it; Claude Code's hooks (`mira hooks setup`) are what let the planner wait
+on the worker.
 
 Mirador keeps track of the team with its tab, across restarts:
 

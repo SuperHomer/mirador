@@ -75,6 +75,7 @@ impl Places {
                 .ok_or_else(|| "this pane is not in a repository: save it in yours instead".to_string()),
             RoleSource::Global => Ok(&self.global),
             RoleSource::Config => Err("an `agentRoles` entry is edited in mirador.json".into()),
+            RoleSource::Builtin => Err("a built-in ships with Mirador: save a copy in yours or the repository".into()),
         }
     }
 
@@ -112,8 +113,12 @@ impl Places {
         }
     }
 
-    /// The text of the file at `path`.
+    /// The text of the file at `path` — or of a built-in, by its
+    /// `builtin:` name.
     pub fn read(&self, path: &Path) -> Result<String, String> {
+        if let Some(text) = path.to_str().and_then(crate::builtin::read) {
+            return Ok(text.to_string());
+        }
         self.check_path(path)?;
         std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
     }
@@ -274,6 +279,11 @@ mod tests {
         // Names that are not names, and mirador.json's roles.
         assert!(p.save(Kind::Role, RoleSource::Repo, "../x", "x", true).is_err());
         assert!(p.save(Kind::Role, RoleSource::Config, "x", "x", true).is_err());
+        assert!(p.save(Kind::Role, RoleSource::Builtin, "x", "x", false).is_err());
+        // A built-in reads by its name, and is never a file to delete.
+        assert!(p.read(Path::new("builtin:teams/omakase.md")).unwrap().contains("omakase"));
+        assert!(p.delete(Path::new("builtin:teams/omakase.md")).is_err());
+        assert!(p.read(Path::new("builtin:../secret.md")).is_err());
         let nowhere = Places { repo: None, global: p.global.clone() };
         assert!(nowhere.save(Kind::Way, RoleSource::Repo, "w", "W.", true).unwrap_err().contains("not in a repository"));
         let _ = std::fs::remove_dir_all(&root);

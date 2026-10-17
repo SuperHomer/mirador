@@ -290,7 +290,7 @@ export interface AgentWallPaneInfo {
 }
 
 /** Where a role or a way of working was defined (`cmux_protocol::RoleSource`). */
-export type RoleSource = "repo" | "global" | "config";
+export type RoleSource = "repo" | "global" | "config" | "builtin";
 
 /** A named way to start an agent (`cmux_protocol::AgentRole`). */
 export interface AgentRole {
@@ -491,7 +491,11 @@ export const roleHint = (r: AgentRole): string =>
         r.model ?? "default model",
         r.way ? `way: ${r.way}` : null,
         r.mcp || r.plugins || r.skills || r.tools ? "limited" : null,
-        r.source === "repo" ? "repo" : null,
+        r.source === "repo"
+          ? "repo"
+          : r.source === "builtin"
+            ? "built-in"
+            : null,
       ]
         .filter(Boolean)
         .join(" · ");

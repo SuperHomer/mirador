@@ -782,10 +782,13 @@ pub enum SeatState {
 }
 
 /// Where a role or a way of working was defined. A repository's wins over
-/// the user's, and a file over an `agentRoles` entry of the same name.
+/// the user's, a file over an `agentRoles` entry of the same name, and any
+/// of them over one that ships with Mirador.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RoleSource {
+    /// Shipped with Mirador, the same for everyone (`cmux_core::builtin`).
+    Builtin,
     /// `agentRoles` in mirador.json.
     #[default]
     Config,

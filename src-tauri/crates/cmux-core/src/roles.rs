@@ -51,13 +51,27 @@ pub fn catalog(cwd: Option<&Path>) -> RoleCatalog {
 pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]) -> RoleCatalog {
     let mut problems = Vec::new();
 
-    let mut roles: Vec<AgentRole> = config_roles
-        .iter()
-        .cloned()
-        .map(|r| AgentRole { source: RoleSource::Config, path: None, ..r })
-        .collect();
+    let mut roles: Vec<AgentRole> = Vec::new();
     let mut ways: Vec<AgentWay> = Vec::new();
     let mut teams: Vec<AgentTeam> = Vec::new();
+    // What ships with Mirador first, so that anything of the same name —
+    // an `agentRoles` entry, your file, the repository's — replaces it.
+    for (path, name, text) in crate::builtin::of("ways") {
+        let (description, prompt) = parse_way(text).expect("a built-in way parses (tested)");
+        ways.push(AgentWay { name, prompt, description, source: RoleSource::Builtin, path });
+    }
+    for (path, name, text) in crate::builtin::of("roles") {
+        let (role, _) = parse_role(&name, text).expect("a built-in role parses (tested)");
+        roles.push(AgentRole { source: RoleSource::Builtin, path: Some(path), ..role });
+    }
+    for (path, name, text) in crate::builtin::of("teams") {
+        let (team, _) = crate::teams::parse_team(&name, std::path::Path::new(&path), RoleSource::Builtin, text)
+            .expect("a built-in team parses (tested)");
+        teams.push(team);
+    }
+    for role in config_roles {
+        replace(&mut roles, AgentRole { source: RoleSource::Config, path: None, ..role.clone() }, |r| &r.name);
+    }
     let dirs = [(Some(global), RoleSource::Global), (repo, RoleSource::Repo)];
     for (dir, source) in dirs {
         let Some(dir) = dir else { continue };
@@ -511,19 +525,30 @@ mod tests {
         write(&repo.join("teams/ghosts.md"), "---\nmembers: [{role: ghost}]\n---\n");
         let cat = catalog_in(Some(&repo), &global, &config);
         // Teams merge like roles, and are checked against the merged roles.
-        let teams: Vec<_> = cat.teams.iter().map(|t| (t.name.as_str(), t.source, t.problem.is_some())).collect();
+        let teams: Vec<_> = cat
+            .teams
+            .iter()
+            .filter(|t| t.source != RoleSource::Builtin)
+            .map(|t| (t.name.as_str(), t.source, t.problem.is_some()))
+            .collect();
         assert_eq!(teams, [("ghosts", RoleSource::Repo, true), ("squad", RoleSource::Repo, false)]);
-        assert_eq!(cat.teams[1].prompt.as_deref(), Some("Repo squad."));
+        assert_eq!(cat.teams.iter().find(|t| t.name == "squad").unwrap().prompt.as_deref(), Some("Repo squad."));
         let cat = RoleCatalog { problems: cat.problems.into_iter().filter(|p| !p.contains("ghosts")).collect(), ..cat };
         assert_eq!(cat.problems, Vec::<String>::new());
         assert!(cat.roles.iter().all(|r| r.problem.is_none()));
-        let names: Vec<_> = cat.roles.iter().map(|r| (r.name.as_str(), r.source)).collect();
+        let names: Vec<_> = cat
+            .roles
+            .iter()
+            .filter(|r| r.source != RoleSource::Builtin)
+            .map(|r| (r.name.as_str(), r.source))
+            .collect();
         assert_eq!(
             names,
             [("coder", RoleSource::Config), ("planner", RoleSource::Global), ("reviewer", RoleSource::Repo)]
         );
-        assert_eq!(cat.ways.len(), 1);
-        assert_eq!((cat.ways[0].source, cat.ways[0].description.as_deref()), (RoleSource::Repo, Some("ours")));
+        let our_way = cat.ways.iter().find(|w| w.name == "our-way").unwrap();
+        assert_eq!(cat.ways.iter().filter(|w| w.name == "our-way").count(), 1);
+        assert_eq!((our_way.source, our_way.description.as_deref()), (RoleSource::Repo, Some("ours")));
 
         // The global planner follows the repository's way of the same name.
         let (role, prompt) = resolve(&cat, "reviewer").unwrap();
@@ -556,7 +581,7 @@ mod tests {
         write(&repo.join("roles/careful.md"), "---\ntools: { deny: [\"Bash(git push *)\"] }\n---\n");
 
         let cat = catalog_in(Some(&repo), &global, &[]);
-        let names: Vec<_> = cat.roles.iter().map(|r| r.name.as_str()).collect();
+        let names: Vec<_> = cat.roles.iter().filter(|r| r.source != RoleSource::Builtin).map(|r| r.name.as_str()).collect();
         assert_eq!(names, ["careful", "codex-mcp", "gem", "lost", "mine", "theirs"]);
         let problem = |name: &str| cat.roles.iter().find(|r| r.name == name).unwrap().problem.clone();
         assert!(problem("codex-mcp").is_some_and(|p| p.contains("only Claude Code's can")));

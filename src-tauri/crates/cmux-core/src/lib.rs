@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod builtin;
 pub mod claude_integration;
 pub mod config;
 pub mod cwd;

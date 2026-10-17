@@ -274,6 +274,15 @@ terminal's processes; anything else on it is `busy`), and gives a closed
 member a new pane beside a teammate. `team add` and `team restart` act on
 the team of the calling pane's tab.
 
+Built in: Mirador ships the `omakase` team, its roles `omakase-planner`,
+`omakase-worker` (Claude Code, `claude-opus-5-5`) and `omakase-reviewer`
+(Codex, `gpt-6-luna`), and the `omakase` way of working
+(`src-tauri/crates/cmux-core/builtin/`). They are listed with source
+`builtin`, below `agentRoles` and every file: a file or entry of the same
+name replaces one. The reviewer reports back with `mira agent send planner`
+— nobody can `wait` on a Codex agent — and Codex's default sandbox asks
+before letting it reach Mirador's socket.
+
 ### Handoffs
 
 ```bash
