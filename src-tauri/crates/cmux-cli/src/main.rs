@@ -183,11 +183,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AgentAction {
-    /// Start Claude Code in a pane beside this one, with a role's model and
-    /// prompt from `agentRoles` in mirador.json. TASK becomes its first
-    /// message.
+    /// Start an agent in a pane beside this one: Claude Code, or a role's
+    /// harness, model and prompt (its own, then its way of working's).
+    /// TASK becomes its first message.
     New {
-        /// A role name from `agentRoles` (`mira agent roles` lists them).
+        /// A role this directory sees (`mira agent roles` lists them).
         #[arg(short, long)]
         role: Option<String>,
         /// Open a new tab instead of splitting this pane.
@@ -205,7 +205,8 @@ enum AgentAction {
         #[arg(long)]
         pane: Option<String>,
     },
-    /// The roles `agent new --role` accepts.
+    /// The roles `agent new --role` accepts here — this repository's
+    /// `.mirador/roles`, then yours — and the ways of working they follow.
     Roles,
     /// Open the agent wall for this tab: its agents' terminals in one
     /// grid, in a tab of its own (the existing wall, if there is one).
@@ -688,19 +689,58 @@ fn render_activity(data: &serde_json::Value) {
 /// `mira agent roles`: read from the config file, as the app reads it — no
 /// running app needed.
 fn agent_roles(json: bool) -> Result<(), String> {
-    let roles = cmux_core::config::agent_roles();
+    // This directory's roles: the pane's, since `mira` runs in it.
+    let cwd = std::env::current_dir().ok();
+    let catalog = cmux_core::roles::catalog(cwd.as_deref());
     if json {
-        println!("{}", serde_json::to_string_pretty(&roles).map_err(|e| e.to_string())?);
+        println!("{}", serde_json::to_string_pretty(&catalog).map_err(|e| e.to_string())?);
         return Ok(());
     }
-    if roles.is_empty() {
+    let source = |s: cmux_protocol::RoleSource| match s {
+        cmux_protocol::RoleSource::Repo => "repo",
+        cmux_protocol::RoleSource::Global => "yours",
+        cmux_protocol::RoleSource::Config => "mirador.json",
+    };
+    if catalog.roles.is_empty() {
         println!(
-            "(no roles — add \"agentRoles\" to {})",
-            cmux_core::config::config_path().display()
+            "(no roles — add .mirador/roles/<name>.md to the repository, or {})",
+            cmux_core::config::config_dir().join("roles").join("<name>.md").display()
         );
     }
-    for r in roles {
-        println!("{:<12}  {}", r.name, r.model.as_deref().unwrap_or("default"));
+    for r in &catalog.roles {
+        let mut line = format!(
+            "{:<14}  {:<12}  {:<14}  {:<12}",
+            r.name,
+            r.harness.label(),
+            r.model.as_deref().unwrap_or("default model"),
+            source(r.source)
+        );
+        if let Some(way) = &r.way {
+            line.push_str(&format!("  way: {way}"));
+        }
+        if let Some(d) = &r.description {
+            line.push_str(&format!("  — {d}"));
+        }
+        if r.problem.is_some() {
+            line.push_str("  (cannot start: see below)");
+        }
+        println!("{}", line.trim_end());
+    }
+    if !catalog.ways.is_empty() {
+        println!();
+        println!("Ways of working:");
+        for w in &catalog.ways {
+            let line = format!(
+                "  {:<14}  {:<12}  {}",
+                w.name,
+                source(w.source),
+                w.description.as_deref().unwrap_or("")
+            );
+            println!("{}", line.trim_end());
+        }
+    }
+    for p in &catalog.problems {
+        eprintln!("warning: {p}");
     }
     Ok(())
 }

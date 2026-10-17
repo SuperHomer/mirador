@@ -230,10 +230,11 @@ pub enum Request {
         #[serde(default)]
         message: Option<String>,
     },
-    /// Starts a Claude Code agent in a new pane (a split of the calling
-    /// pane, or a new tab), with a role's model and prompt from the config.
+    /// Starts an agent in a new pane (a split of the calling pane, or a new
+    /// tab): plain Claude Code, or a role's harness, model and prompt.
     AgentNew {
-        /// A role name from `agentRoles`; none starts plain `claude`.
+        /// A role the calling pane's directory sees (`RoleCatalog`); none
+        /// starts plain `claude`.
         #[serde(default)]
         role: Option<String>,
         /// The first prompt, typed in as Claude's initial message.
@@ -567,15 +568,71 @@ pub struct AgentWallPane {
     pub tab_id: Option<String>,
 }
 
-/// A named way to start a Claude Code agent: `agentRoles` in mirador.json.
+/// A named way to start an agent: a Markdown file in a repository's
+/// `.mirador/roles` or the config directory's `roles`, or an `agentRoles`
+/// entry in mirador.json.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentRole {
     pub name: String,
+    /// What it starts: Claude Code unless the role says otherwise.
+    pub harness: Harness,
     /// `--model`: an alias ("opus", "sonnet") or a full model name.
     pub model: Option<String>,
-    /// Appended to Claude Code's system prompt (`--append-system-prompt`).
+    /// The role's own instructions, added to the harness's system prompt.
     pub prompt: Option<String>,
+    /// The way of working it follows, by name: its prompt comes after the
+    /// role's.
+    pub way: Option<String>,
+    /// One line saying what it is for, shown beside its name.
+    pub description: Option<String>,
+    /// Where it was defined. Set by whoever loads it, never read from it.
+    #[serde(skip_deserializing)]
+    pub source: RoleSource,
+    /// The file it came from; none for an `agentRoles` entry.
+    #[serde(skip_deserializing)]
+    pub path: Option<String>,
+    /// Why it cannot start, when it cannot: a way of working nobody wrote,
+    /// a harness a role cannot start yet. Listed anyway — it is still the
+    /// role you wrote — so this says what to fix.
+    #[serde(skip_deserializing)]
+    pub problem: Option<String>,
+}
+
+/// A way of working: a playbook any role can follow, from `ways/<name>.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentWay {
+    pub name: String,
+    pub prompt: String,
+    pub description: Option<String>,
+    pub source: RoleSource,
+    pub path: String,
+}
+
+/// Where a role or a way of working was defined. A repository's wins over
+/// the user's, and a file over an `agentRoles` entry of the same name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RoleSource {
+    /// `agentRoles` in mirador.json.
+    #[default]
+    Config,
+    /// A file in the config directory's `roles` or `ways`.
+    Global,
+    /// A file in the repository's `.mirador/roles` or `.mirador/ways`.
+    Repo,
+}
+
+/// The roles and ways of working a directory sees, and what was wrong with
+/// the files that did not make it in.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleCatalog {
+    pub roles: Vec<AgentRole>,
+    pub ways: Vec<AgentWay>,
+    /// `<file>: <what is wrong>`, one per problem.
+    pub problems: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

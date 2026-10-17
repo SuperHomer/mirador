@@ -163,7 +163,7 @@ it takes the repository from the pane it ran in and refuses outside one.
 ## 6. Agents with roles, and the wall
 
 ```bash
-mira agent roles                              # agentRoles from mirador.json
+mira agent roles                              # the roles and ways this directory sees
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, harness, name, model
@@ -171,12 +171,39 @@ mira agent wall                               # this tab's agents, in a grid
 mira agent activity [--pane <id>]             # its tasks and subagents
 ```
 
+A role is a Markdown file — its frontmatter says how it starts, its body is
+its prompt — and may follow a *way of working*, a playbook in `ways/` that
+any role can share:
+
+```markdown
+<!-- .mirador/roles/reviewer.md -->
+---
+harness: claude        # or codex; Claude Code when absent
+model: haiku
+way: our-way           # .mirador/ways/our-way.md, appended after this prompt
+description: Reviews diffs, never edits
+---
+You review. Never edit files.
+```
+
+Roles come from the nearest `.mirador/roles/` at or above the pane's
+directory (the repository's, committed and shared), then the config
+directory's `roles/` (yours, everywhere), then `agentRoles` in mirador.json;
+the same name means the first of those. Ways of working resolve the same
+way. `agent roles` prints what the current directory sees, with each
+role's source, and warns about anything it could not use — a file that
+does not parse, an unknown field, a way nobody wrote; `--json` gives the
+whole catalog, including `problem` on a role that cannot start.
+
 `agent new` splits the pane it runs in (the focused pane, from outside
-Mirador), opens a shell there and types `claude` into it with the role's
-`--model`, `--append-system-prompt` and `--name`, and the task as the first
-message — so `/exit` leaves a prompt, and the session resumes like any other
-(on the role's model). The arguments are quoted for the pane's shell and put
-on one line: they are typed, so a newline would submit half a command.
+Mirador), opens a shell there and types the agent into it, with the task as
+the first message — so `/exit` leaves a prompt. Claude Code gets the role's
+`--model`, `--name`, and its prompt (the role's, then its way's) through
+`--append-system-prompt-file`; the session resumes like any other, on the
+role's model, and keeps that prompt. Codex gets `--model` and the prompt as
+`-c developer_instructions="…"`; it has no session Mirador can resume. The
+arguments are quoted for the pane's shell and put on one line: they are
+typed, so a newline would submit half a command.
 
 `agent list` and the wall cover every agent, not only Claude Code: on macOS
 and Linux a pane whose terminal runs `codex`, `opencode`, `pi`, `gemini`,

@@ -1276,21 +1276,34 @@ pub fn open_agent(
     tab: bool,
     background: bool,
 ) -> Result<String, String> {
-    let role = match role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
-        Some(name) => Some(
-            cmux_core::config::agent_role(name)
-                .ok_or_else(|| format!("no role `{name}` in agentRoles (mirador.json)"))?,
-        ),
-        None => None,
-    };
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    let input = cmux_core::agents::launch_command(
-        role.as_ref(),
-        task.as_deref(),
-        cmux_core::pty::shell::quote_arg,
-    );
+    // The agent works where it was asked from, whichever way it opens, and
+    // gets the roles that directory sees: its repository's, then yours.
+    let cwd = state
+        .meta
+        .lock()
+        .unwrap()
+        .get(&source)
+        .and_then(|m| m.cwd.clone())
+        .or_else(cmux_core::config::default_cwd);
+    let (role, prompt) = match role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        Some(name) => {
+            let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
+            let (role, prompt) = cmux_core::roles::resolve(&catalog, name)?;
+            (Some(role), prompt)
+        }
+        None => (None, None),
+    };
+    // Claude Code reads a role's prompt from a file; Codex takes it inline.
+    let prompt_file = match (&role, &prompt) {
+        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(
+            cmux_core::roles::write_prompt(&r.name, p)
+                .map_err(|e| format!("could not write the role's prompt: {e}"))?,
+        ),
+        _ => None,
+    };
 
     let new_pane = if tab {
         let mut ws = state.workspace.lock().unwrap();
@@ -1308,25 +1321,48 @@ pub fn open_agent(
             .split_pane(&source, SplitDir::Row)
             .ok_or_else(|| format!("no pane {source}"))?
     };
+    let input = cmux_core::agents::launch_command(
+        role.as_ref(),
+        prompt.as_deref(),
+        prompt_file.as_deref(),
+        task.as_deref(),
+        cmux_core::pty::shell::quote_arg,
+    );
     {
         let mut meta = state.meta.lock().unwrap();
-        // The agent works where it was asked from, whichever way it opens.
-        let cwd = meta
-            .get(&source)
-            .and_then(|m| m.cwd.clone())
-            .or_else(cmux_core::config::default_cwd);
         let entry = meta.entry(new_pane.clone()).or_default();
         entry.cwd = cwd;
         entry.startup_input = Some(input);
         entry.agent_launched = true;
         entry.agent_started_at = Some(std::time::Instant::now());
         if let Some(role) = role {
+            // A Codex role is a Codex agent from the start, not a Claude
+            // one until the poller sees otherwise — and on Windows, which
+            // lists no processes, the poller never would.
+            if role.harness != cmux_protocol::Harness::Claude {
+                entry.agent_harness = Some(role.harness);
+            }
             entry.agent_model = role.model;
             entry.agent_role = Some(role.name);
         }
     }
     emit_workspace(&app);
     Ok(new_pane)
+}
+
+/// The roles and ways of working `pane_id`'s directory sees (the focused
+/// pane's when absent): its repository's `.mirador`, then the user's.
+#[tauri::command]
+pub fn agent_roles(state: State<'_, AppState>, pane_id: Option<String>) -> cmux_protocol::RoleCatalog {
+    let pane = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let cwd = state
+        .meta
+        .lock()
+        .unwrap()
+        .get(&pane)
+        .and_then(|m| m.cwd.clone())
+        .or_else(cmux_core::config::default_cwd);
+    cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new))
 }
 
 /// Opens the agent wall for the tab of `pane_id` (the focused pane when

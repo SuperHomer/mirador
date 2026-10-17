@@ -1,5 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AgentRole,
+  agentRoles,
+  roleHint,
   AgentInfo,
   agentLabel,
   AgentStatus,
@@ -10,7 +13,6 @@ import {
   zoomPane,
 } from "../bindings";
 import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
-import { useConfigStore } from "../state/configStore";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import {
@@ -69,14 +71,15 @@ export const AgentWall = memo(function AgentWall({
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   // The tab it shows; gone if that tab has closed since.
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
-  const roles = useConfigStore((s) => s.config?.agentRoles ?? []);
+  const [roles, setRoles] = useState<AgentRole[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const now = useNow(visible);
 
   const tiles = useMemo(() => {
     const tabOf = new Map<string, { id: string; title: string }>();
     for (const t of snapshot?.tabs ?? []) {
-      for (const p of paneIds(t.root)) tabOf.set(p, { id: t.id, title: t.title });
+      for (const p of paneIds(t.root))
+        tabOf.set(p, { id: t.id, title: t.title });
     }
     const ownTab = tabOf.get(paneId)?.id;
     const tiles = (snapshot?.agents ?? []).filter(
@@ -89,6 +92,20 @@ export const AgentWall = memo(function AgentWall({
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
   const cols = columns(tiles.length);
 
+  // The roles of the directory a new agent would work in: the shown tab's
+  // focused pane's, read each time the menu opens.
+  const rolesPane = shown?.focusedPane ?? paneId;
+  useEffect(() => {
+    if (!menuOpen) return;
+    let live = true;
+    agentRoles(rolesPane)
+      .then((c) => live && setRoles(c.roles))
+      .catch(() => live && setRoles([]));
+    return () => {
+      live = false;
+    };
+  }, [menuOpen, rolesPane]);
+
   const start = (role: string | null) => {
     setMenuOpen(false);
     // Like everywhere else, the agent joins a tab rather than getting its
@@ -96,8 +113,10 @@ export const AgentWall = memo(function AgentWall({
     // wall's own tab is no place to work). That tab is behind the wall, so
     // the wall stays on screen and gains a tile. With that tab gone, a tab
     // of its own, also behind the wall.
-    if (shown) void openAgent(role, null, shown.focusedPane, false);
-    else void openAgent(role, null, paneId, true, true);
+    const opened = shown
+      ? openAgent(role, null, shown.focusedPane, false)
+      : openAgent(role, null, paneId, true, true);
+    opened.catch((e) => console.error(`mirador: role ${role}: ${e}`));
   };
 
   return (
@@ -105,7 +124,10 @@ export const AgentWall = memo(function AgentWall({
       <div className="wall-chrome">
         <span className="wall-badge">Agents</span>
         {shown && (
-          <span className="wall-tab" title="The tab this wall shows the agents of">
+          <span
+            className="wall-tab"
+            title="The tab this wall shows the agents of"
+          >
             {shown.title}
           </span>
         )}
@@ -141,17 +163,21 @@ export const AgentWall = memo(function AgentWall({
                 <span className="wall-menu-model">default model</span>
               </button>
               {roles.map((r) => (
-                <button key={r.name} onClick={() => start(r.name)}>
+                <button
+                  key={r.name}
+                  disabled={!!r.problem}
+                  title={r.problem ?? r.description ?? undefined}
+                  onClick={() => start(r.name)}
+                >
                   <span>{r.name}</span>
-                  <span className="wall-menu-model">
-                    {r.model ?? "default model"}
-                  </span>
+                  <span className="wall-menu-model">{roleHint(r)}</span>
                 </button>
               ))}
               {roles.length === 0 && (
                 <p className="wall-menu-hint">
-                  Add <code>agentRoles</code> to mirador.json for roles with
-                  their own model and prompt.
+                  Add <code>.mirador/roles/&lt;name&gt;.md</code> to the
+                  repository for roles with their own model, prompt and way of
+                  working.
                 </p>
               )}
             </div>
@@ -176,8 +202,8 @@ export const AgentWall = memo(function AgentWall({
           <p className="wall-empty-hint">
             Start one with <em>+ New agent</em>, or run <code>claude</code>,{" "}
             <code>codex</code>, <code>opencode</code> or another agent in a pane
-            of that tab. For another tab's agents, go to the tab and
-            open the wall from there.
+            of that tab. For another tab's agents, go to the tab and open the
+            wall from there.
           </p>
         </div>
       ) : (

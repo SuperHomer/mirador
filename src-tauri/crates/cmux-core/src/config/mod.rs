@@ -348,19 +348,18 @@ fn agent_roles_in(cfg: &Config) -> Vec<AgentRole> {
             name: name.to_string(),
             model: present(&role.model),
             prompt: present(&role.prompt),
+            way: present(&role.way),
+            description: present(&role.description),
+            ..role.clone()
         });
     }
     roles
 }
 
-/// The usable `agentRoles`, read from the config on disk now.
+/// The usable `agentRoles`, read from the config on disk now. Only part
+/// of the roles a pane sees — `roles::catalog` adds the role files.
 pub fn agent_roles() -> Vec<AgentRole> {
     agent_roles_in(&load().0)
-}
-
-/// The `agentRoles` entry called `name`.
-pub fn agent_role(name: &str) -> Option<AgentRole> {
-    agent_roles().into_iter().find(|r| r.name == name)
 }
 
 fn import_theme(cfg: &Config) -> Option<ImportedTheme> {
@@ -466,7 +465,7 @@ mod tests {
         assert_eq!(roles.len(), 2);
         assert_eq!(roles[0].name, "planner");
         assert_eq!(roles[0].model.as_deref(), Some("opus"));
-        assert_eq!(roles[1], AgentRole { name: "coder".into(), model: None, prompt: None });
+        assert_eq!(roles[1], AgentRole { name: "coder".into(), ..Default::default() });
         assert!(agent_roles_in(&Config::default()).is_empty());
     }
 

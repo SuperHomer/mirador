@@ -15,6 +15,7 @@ pub mod notes;
 pub mod osc;
 pub mod proc;
 pub mod pty;
+pub mod roles;
 pub mod state;
 pub mod transcript;
 pub mod transport;

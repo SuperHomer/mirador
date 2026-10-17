@@ -263,10 +263,37 @@ export interface AgentWallPaneInfo {
   tabId: string | null;
 }
 
+/** Where a role or a way of working was defined (`cmux_protocol::RoleSource`). */
+export type RoleSource = "repo" | "global" | "config";
+
+/** A named way to start an agent (`cmux_protocol::AgentRole`). */
 export interface AgentRole {
   name: string;
+  harness: Harness;
   model: string | null;
   prompt: string | null;
+  /** The way of working it follows. */
+  way: string | null;
+  description: string | null;
+  source: RoleSource;
+  path: string | null;
+  /** Why it cannot start, when it cannot. */
+  problem: string | null;
+}
+
+export interface AgentWay {
+  name: string;
+  prompt: string;
+  description: string | null;
+  source: RoleSource;
+  path: string;
+}
+
+/** The roles and ways a pane's directory sees (`cmux_protocol::RoleCatalog`). */
+export interface RoleCatalog {
+  roles: AgentRole[];
+  ways: AgentWay[];
+  problems: string[];
 }
 
 export interface RemotePaneInfo {
@@ -321,6 +348,7 @@ export interface ResolvedConfig {
   colors: ResolvedColors;
   keybindings: Record<string, string>;
   customCommands: CustomCommand[];
+  /** Only mirador.json's: a pane's roles come from `agentRoles()`. */
   agentRoles: AgentRole[];
 }
 
@@ -343,11 +371,14 @@ export const workspaceSnapshot = () =>
   invoke<WorkspaceSnapshot>("workspace_snapshot");
 export const getConfig = () => invoke<ResolvedConfig>("get_config");
 /** Whether to offer the Claude Code integration (decided in Rust). */
-export const claudeIntegrationOffer = () => invoke<boolean>("claude_integration_offer");
+export const claudeIntegrationOffer = () =>
+  invoke<boolean>("claude_integration_offer");
 /** `mira` on PATH, then the hooks and `/mira-diff`. Lines of what was done. */
-export const setupClaudeIntegration = () => invoke<string[]>("setup_claude_integration");
+export const setupClaudeIntegration = () =>
+  invoke<string[]>("setup_claude_integration");
 /** "Not now": the offer is not made again. */
-export const dismissClaudeIntegration = () => invoke<void>("dismiss_claude_integration");
+export const dismissClaudeIntegration = () =>
+  invoke<void>("dismiss_claude_integration");
 /** Ends every terminal session, held ones included, then quits. */
 export const quitEndingSessions = () => invoke<void>("quit_ending_sessions");
 export const newTab = (command?: string) =>
@@ -418,6 +449,22 @@ export const openWhatsNew = (
 ) => invoke<string>("open_whats_new", { version, since });
 export const openGraph = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_graph", { paneId, tab });
+/** What a role's menu entry says beside its name. */
+export const roleHint = (r: AgentRole): string =>
+  r.problem
+    ? `can't start: ${r.problem}`
+    : [
+        r.harness === "claude" ? null : HARNESS_LABEL[r.harness],
+        r.model ?? "default model",
+        r.way ? `way: ${r.way}` : null,
+        r.source === "repo" ? "repo" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+/** The roles `paneId`'s directory sees: its repository's, then yours. */
+export const agentRoles = (paneId: string | null) =>
+  invoke<RoleCatalog>("agent_roles", { paneId });
 export const openAgent = (
   role: string | null,
   task: string | null,
