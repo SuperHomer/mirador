@@ -42,6 +42,7 @@ const SOURCE_LABEL: Record<RoleSource, string> = {
   repo: "repo",
   global: "yours",
   config: "mirador.json",
+  builtin: "built-in",
 };
 
 function items(cat: EditorCatalog | null): Item[] {
@@ -110,7 +111,9 @@ export const AgentEditor = memo(function AgentEditor({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const dirty = text !== saved;
-  const readOnly = sel?.source === "config";
+  // mirador.json's entries are edited there; a built-in ships with the
+  // app — both are read here, and a built-in can be copied to change it.
+  const readOnly = sel?.source === "config" || sel?.source === "builtin";
   const list = useMemo(() => items(cat), [cat]);
 
   const refresh = useCallback(() => {
@@ -160,6 +163,21 @@ export const AgentEditor = memo(function AgentEditor({
       .then((t) => {
         setText(t);
         setSaved(t);
+      })
+      .catch((e: unknown) => setStatus(String(e)));
+  };
+
+  // A built-in's text as a file of the same name — which, being yours or
+  // the repository's, replaces the built-in from then on.
+  const copyTo = (to: RoleSource) => {
+    if (!sel) return;
+    const copy = { ...sel, source: to };
+    agentFileSave(paneId, sel.kind, to, sel.name, text, true)
+      .then((next) => {
+        setCat(next);
+        const now = items(next).find((i) => same(i, copy));
+        if (now) open(now);
+        setStatus(`Copied to ${SOURCE_LABEL[to]}: edit away`);
       })
       .catch((e: unknown) => setStatus(String(e)));
   };
@@ -356,11 +374,28 @@ export const AgentEditor = memo(function AgentEditor({
                   {dirty && " •"}
                 </span>
                 <span className="editor-path" title={sel.path ?? undefined}>
-                  {readOnly
+                  {sel.source === "config"
                     ? "agentRoles in mirador.json — read only here"
-                    : (sel.path ??
-                      `new ${sel.kind}, in ${SOURCE_LABEL[sel.source]}`)}
+                    : sel.source === "builtin"
+                      ? "ships with Mirador — copy it to change it; your copy replaces it"
+                      : (sel.path ??
+                        `new ${sel.kind}, in ${SOURCE_LABEL[sel.source]}`)}
                 </span>
+                {sel.source === "builtin" &&
+                  (["repo", "global"] as const).map((to) => (
+                    <button
+                      key={to}
+                      disabled={to === "repo" && !cat?.repoDir}
+                      title={
+                        to === "repo" && !cat?.repoDir
+                          ? "Not in a repository"
+                          : `A file of the same name, in ${SOURCE_LABEL[to]}, which replaces the built-in`
+                      }
+                      onClick={() => copyTo(to)}
+                    >
+                      Copy to {SOURCE_LABEL[to]}
+                    </button>
+                  ))}
                 {(sel.kind === "role" || sel.kind === "team") && !isNew && (
                   <button
                     disabled={dirty || !!sel.problem}

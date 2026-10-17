@@ -114,3 +114,51 @@ fn a_team_starts_is_tracked_and_comes_back() {
         .collect();
     assert_eq!(after, before);
 }
+
+/// The team that ships with Mirador starts in a sandbox with no role, way
+/// or team file at all: a planner and a worker on Claude Code's Opus 5.5,
+/// the planner unable to edit, and a reviewer on Codex — each told the
+/// omakase way of working.
+#[test]
+fn the_built_in_omakase_team_starts_out_of_the_box() {
+    e2e!();
+    let mut sb = Sandbox::new("omakase");
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::TeamStart {
+        team: "omakase".into(),
+        task: Some("add a health check".into()),
+        pane_id: Some(first),
+    });
+    let names: Vec<String> = sb.wait_for("the team", LONG, || {
+        let t = sb.teams().into_iter().next()?;
+        Some(t["members"].as_array()?.iter().map(|m| m["name"].as_str().unwrap().to_string()).collect())
+    });
+    assert_eq!(names, ["planner", "worker", "reviewer"]);
+
+    let planner = sb.nth_start(&pane_of(&sb, "planner"), 1);
+    assert_eq!(cmux_e2e::flag(&planner, "--model").as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(planner.last().map(String::as_str), Some("add a health check"));
+    let settings: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(cmux_e2e::flag(&planner, "--settings").expect("the planner's limits")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(settings["permissions"]["deny"], serde_json::json!(["Edit", "Write", "NotebookEdit"]));
+    let prompt = std::fs::read_to_string(cmux_e2e::flag(&planner, "--append-system-prompt-file").unwrap()).unwrap();
+    assert!(prompt.contains("You are the planner") && prompt.contains("# The omakase way"), "{prompt}");
+
+    let worker = sb.nth_start(&pane_of(&sb, "worker"), 1);
+    assert_eq!(cmux_e2e::flag(&worker, "--model").as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(cmux_e2e::flag(&worker, "--settings"), None, "the worker is not limited");
+
+    // The reviewer is Codex: its prompt is its developer_instructions.
+    let reviewer_pane = pane_of(&sb, "reviewer");
+    let start = sb.wait_for("the reviewer", LONG, || sb.events("start", &reviewer_pane).into_iter().next());
+    assert_eq!(start["kind"], "codex");
+    let args: Vec<String> = serde_json::from_value(start["args"].clone()).unwrap();
+    assert_eq!(cmux_e2e::flag(&args, "--model").as_deref(), Some("gpt-6-luna"));
+    let config: toml::Table = toml::from_str(&cmux_e2e::flag(&args, "-c").unwrap()).unwrap();
+    let instructions = config["developer_instructions"].as_str().unwrap();
+    assert!(instructions.contains("You are the reviewer") && instructions.contains("APPROVE"), "{instructions}");
+    assert!(instructions.contains("`planner` (omakase-planner, leads the team)"), "{instructions}");
+}

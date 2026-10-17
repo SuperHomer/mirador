@@ -912,6 +912,7 @@ fn agent_roles(json: bool) -> Result<(), String> {
         cmux_protocol::RoleSource::Repo => "repo",
         cmux_protocol::RoleSource::Global => "yours",
         cmux_protocol::RoleSource::Config => "mirador.json",
+        cmux_protocol::RoleSource::Builtin => "built-in",
     };
     if catalog.roles.is_empty() {
         println!(
