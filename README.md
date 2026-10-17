@@ -369,9 +369,13 @@ what the current directory sees and where each came from, and warns about
 anything it could not use: a file that does not parse, a field that is not
 one, a way nobody wrote.
 
-Each role becomes a *New Agent: <role>* palette entry, an entry in the
-wall's **+ New agent** menu, and a `mira agent new --role <role> [task…]`
-target — the roles of the directory you are in. The agent opens in a pane
+Each role is an entry under the palette's *New Agent…* — Enter on it
+lists plain Claude Code and the roles, to search in turn (Esc or
+Backspace goes back; typing a role's name at the top finds it too, below
+the commands) — an entry in the wall's **+ New agent** menu, and a `mira
+agent new --role <role> [task…]` target — the roles of the directory you
+are in. Teams (*Start Team…*) and `~/.ssh/config` hosts (*SSH…*) are
+listed the same way. The agent opens in a pane
 beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
 that pane's directory: `claude --model … --append-system-prompt-file …
@@ -404,8 +408,8 @@ The planner splits the work into tasks; devs build; nothing merges
 until gate has read the diff.
 ```
 
-`mira team start squad "add OAuth"` (or the palette's *Start Team:
-squad*) opens the tab with every member in an even grid, its `⚑` mark in
+`mira team start squad "add OAuth"` (or the palette's *Start Team…* ›
+*squad*) opens the tab with every member in an even grid, its `⚑` mark in
 the sidebar. Each member gets its role's prompt, then the charter, the
 team's way of working, and its teammates by name with the commands that
 show their panes and screens; each Claude session is named after its
