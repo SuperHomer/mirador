@@ -265,6 +265,19 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let activity = crate::commands::agent_activity(&state, &pane)?;
             Ok(serde_json::to_value(activity).map_err(|e| e.to_string())?)
         }
+        Request::TeamStart { team, task, pane_id } => {
+            let tab = crate::teams::start_team(app.clone(), app.state(), team, task, pane_id)?;
+            Ok(json!({ "tabId": tab }))
+        }
+        Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
+        Request::TeamAdd { role, name, pane_id } => {
+            let pane = crate::teams::team_add(app.clone(), app.state(), role, name, pane_id)?;
+            Ok(json!({ "paneId": pane }))
+        }
+        Request::TeamRestart { members, pane_id } => {
+            let done = crate::teams::team_restart(app.clone(), app.state(), members, pane_id)?;
+            Ok(json!({ "members": done }))
+        }
         Request::AgentWall { pane_id } => {
             let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;
             Ok(json!({ "paneId": pane_id }))

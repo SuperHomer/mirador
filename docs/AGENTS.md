@@ -244,6 +244,35 @@ For Claude Code, `agent list` reads what the hooks reported: `working`, `needs-y
 message, e.g. the tool awaiting permission), `idle`, or `-` before the first
 hook. `--json` adds the cwd, branch and when the status last changed.
 
+### Teams
+
+```bash
+mira team list --defined                 # teams this directory can start
+mira team start squad "add OAuth"        # a tab of its own; the task goes to the lead
+mira team list                           # running teams: each member's state and pane
+mira team add reviewer [--name gate]     # another member, beside this pane
+mira team restart [member…]              # bring back exited or closed members
+```
+
+A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
+config directory's): frontmatter `members` — each a `role`, with an
+optional `name`, `count` (named `<name>-1`, `-2`, …) and `lead` — plus
+`way`, `layout` (`grid`, `columns`, `rows`) and `description`; the body is
+its charter. Each member's prompt is its role's, then a section naming the
+team, its teammates and the `mira` commands to find them (by absolute
+path: the agent's shell may not have `mira` on its PATH), the charter, and
+the team's way of working unless the role already follows it. A Claude
+member's session is named after the member.
+
+The running team is kept with its tab (`team` on a tab of the workspace
+snapshot, persisted in the session). A member is `running` while its pane
+runs an agent, `exited` when the pane is back to a shell, `closed` when
+the pane is gone. `team restart` types an exited member's command into its
+pane only if the shell is idle (on macOS and Linux it checks the
+terminal's processes; anything else on it is `busy`), and gives a closed
+member a new pane beside a teammate. `team add` and `team restart` act on
+the team of the calling pane's tab.
+
 ## 7. Workspace control
 
 ```bash

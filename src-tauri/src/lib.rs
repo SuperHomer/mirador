@@ -5,6 +5,7 @@ mod intel;
 mod notify;
 mod runs;
 mod server;
+mod teams;
 mod update;
 mod whatsnew;
 
@@ -298,6 +299,10 @@ pub fn run() {
             commands::open_graph,
             commands::open_agent,
             commands::agent_roles,
+            teams::start_team,
+            teams::list_teams,
+            teams::team_add,
+            teams::team_restart,
             commands::open_agent_wall,
             commands::get_agent_activity,
             commands::mark_pane_read,

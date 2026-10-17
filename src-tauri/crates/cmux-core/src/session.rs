@@ -19,6 +19,8 @@ pub struct SessionTab {
     pub title: Option<String>,
     pub root: Node,
     pub focused: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<cmux_protocol::TeamRun>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -113,6 +115,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
             title: t.title.clone(),
             root: t.root.clone(),
             focused: t.focused.clone(),
+            team: t.team.clone(),
         })
         .collect();
     let pane_ids: Vec<String> = workspace.all_pane_ids();
@@ -179,6 +182,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             root: t.root,
             focused,
             zoomed: None,
+            team: t.team,
         });
     }
     if tabs.is_empty() {
@@ -248,6 +252,28 @@ pub fn gc_scrollback(live_panes: &[String]) {
 mod tests {
     use super::*;
     use cmux_protocol::SplitDir;
+
+    #[test]
+    fn a_team_comes_back_with_its_tab() {
+        let mut ws = Workspace::default();
+        let panes = Workspace::fresh_pane_ids(2);
+        let run = cmux_protocol::TeamRun {
+            name: "squad".into(),
+            members: vec![
+                cmux_protocol::TeamSeat { name: "lead".into(), role: "planner".into(), pane: panes[0].clone(), lead: true },
+                cmux_protocol::TeamSeat { name: "dev".into(), role: "dev".into(), pane: panes[1].clone(), lead: false },
+            ],
+        };
+        let tab = ws.new_team_tab(crate::teams::layout(&panes, None), run.clone(), "squad");
+        let file = capture(&ws, &HashMap::new());
+        let json = serde_json::to_string(&file).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        let t = back.tabs.iter().find(|t| t.id == tab).unwrap();
+        assert_eq!(t.team.as_ref(), Some(&run));
+        assert_eq!(t.title.as_deref(), Some("squad"));
+        // A tab with no team writes nothing for it.
+        assert!(!json.contains(r#""team":null"#));
+    }
 
     #[test]
     fn capture_restore_roundtrip() {

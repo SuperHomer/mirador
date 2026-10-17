@@ -238,6 +238,14 @@ function TabRow({
           />
         ) : (
           <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
+            {tab.team && (
+              <span
+                className="tab-team"
+                title={`Team ${tab.team.name}: ${tab.team.members.map((m) => m.name).join(", ")}`}
+              >
+                ⚑
+              </span>
+            )}
             {tab.title}
           </span>
         )}

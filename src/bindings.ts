@@ -29,6 +29,32 @@ export interface TabSnapshot {
   ports: number[];
   /** The pane shown alone, filling the tab, when one is. */
   zoomedPane: string | null;
+  /** The team running in it, when it is a team's tab. */
+  team: TeamRun | null;
+}
+
+/** A team running in a tab (`cmux_protocol::TeamRun`). */
+export interface TeamRun {
+  name: string;
+  members: { name: string; role: string; pane: string; lead: boolean }[];
+}
+
+/** A team definition (`cmux_protocol::AgentTeam`). */
+export interface AgentTeam {
+  name: string;
+  description: string | null;
+  way: string | null;
+  members: {
+    role: string;
+    name: string | null;
+    count: number;
+    lead: boolean;
+  }[];
+  layout: string | null;
+  prompt: string | null;
+  source: RoleSource;
+  path: string;
+  problem: string | null;
 }
 
 export interface AgentPane {
@@ -298,6 +324,7 @@ export interface AgentWay {
 export interface RoleCatalog {
   roles: AgentRole[];
   ways: AgentWay[];
+  teams: AgentTeam[];
   problems: string[];
 }
 
@@ -467,6 +494,13 @@ export const roleHint = (r: AgentRole): string =>
       ]
         .filter(Boolean)
         .join(" · ");
+
+/** Starts a team in a tab of its own; `task` goes to its lead. */
+export const startTeam = (
+  team: string,
+  task: string | null,
+  paneId: string | null,
+) => invoke<string>("start_team", { team, task, paneId });
 
 /** The roles `paneId`'s directory sees: its repository's, then yours. */
 export const agentRoles = (paneId: string | null) =>

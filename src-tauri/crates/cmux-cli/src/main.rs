@@ -124,6 +124,13 @@ enum Command {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// Teams: roles started together in a tab of their own, each told who
+    /// its teammates are, and kept track of — list them, add a member,
+    /// restart the ones that exited.
+    Team {
+        #[command(subcommand)]
+        action: TeamAction,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -179,6 +186,34 @@ enum Command {
         #[arg(long)]
         ssh: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum TeamAction {
+    /// Start a team (`.mirador/teams/<team>.md`, or yours) in a tab of its
+    /// own. TASK goes to its lead as its first message.
+    Start {
+        team: String,
+        #[arg(trailing_var_arg = true)]
+        task: Vec<String>,
+    },
+    /// Running teams and where each member is: running, exited, or closed.
+    /// With --defined, the teams this directory can start instead.
+    List {
+        #[arg(long)]
+        defined: bool,
+    },
+    /// Add a member to this tab's team, beside this pane.
+    Add {
+        role: String,
+        /// What to call it; the role's name, numbered if taken, otherwise.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Start again this tab's members whose agent exited or whose pane was
+    /// closed — the ones named, or all of them. A member's shell must be
+    /// idle: a command is typed into it.
+    Restart { members: Vec<String> },
 }
 
 #[derive(Subcommand)]
@@ -417,6 +452,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
             },
         },
+        Command::Team { action } => match action {
+            TeamAction::Start { team, task } => Request::TeamStart {
+                team,
+                task: (!task.is_empty()).then(|| task.join(" ")),
+                pane_id: own_pane(),
+            },
+            TeamAction::List { defined: true } => return defined_teams(cli.json),
+            TeamAction::List { defined: false } => Request::TeamList,
+            TeamAction::Add { role, name } => Request::TeamAdd { role, name, pane_id: own_pane() },
+            TeamAction::Restart { members } => Request::TeamRestart { members, pane_id: own_pane() },
+        },
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab } => Request::SshOpen {
                 host,
@@ -584,6 +630,17 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 render_agents(agents);
             } else if map.contains_key("subagents") {
                 render_activity(&data);
+            } else if let Some(teams) = map.get("teams").and_then(|v| v.as_array()) {
+                render_teams(teams);
+            } else if let Some(members) = map.get("members").and_then(|v| v.as_array()) {
+                for m in members {
+                    println!(
+                        "{:<14}  {:<10}  {}",
+                        m["name"].as_str().unwrap_or(""),
+                        m["outcome"].as_str().unwrap_or(""),
+                        m["pane"].as_str().unwrap_or("")
+                    );
+                }
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
@@ -603,6 +660,62 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
             render_worktrees(items);
         }
         other => println!("{}", serde_json::to_string_pretty(other).unwrap()),
+    }
+    Ok(())
+}
+
+/// Running teams: a line per team, then one per member with its state.
+fn render_teams(teams: &[serde_json::Value]) {
+    if teams.is_empty() {
+        println!("(no teams running — `mira team start <team>` starts one)");
+        return;
+    }
+    for t in teams {
+        println!("{}  (tab {})", t["name"].as_str().unwrap_or(""), t["tabId"].as_str().unwrap_or(""));
+        for m in t["members"].as_array().into_iter().flatten() {
+            let status = match (m["state"].as_str(), m["status"].as_str()) {
+                (Some("running"), Some("needsYou")) => "needs-you",
+                (Some("running"), Some(s)) => s,
+                (Some(state), _) => state,
+                _ => "-",
+            };
+            let lead = if m["lead"].as_bool() == Some(true) { "  (lead)" } else { "" };
+            println!(
+                "  {:<14}  {:<12}  {:<9}  {}{lead}",
+                m["name"].as_str().unwrap_or(""),
+                m["role"].as_str().unwrap_or(""),
+                status,
+                m["pane"].as_str().unwrap_or(""),
+            );
+        }
+    }
+}
+
+/// The teams this directory can start: `.mirador/teams`, then yours.
+fn defined_teams(json: bool) -> Result<(), String> {
+    let cwd = std::env::current_dir().ok();
+    let catalog = cmux_core::roles::catalog(cwd.as_deref());
+    if json {
+        println!("{}", serde_json::to_string_pretty(&catalog.teams).map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    if catalog.teams.is_empty() {
+        println!("(no teams — add .mirador/teams/<name>.md to the repository)");
+    }
+    for t in &catalog.teams {
+        let members: Vec<String> = t
+            .members
+            .iter()
+            .map(|m| if m.count > 1 { format!("{}×{}", m.role, m.count) } else { m.role.clone() })
+            .collect();
+        let mut line = format!("{:<14}  {}", t.name, members.join(", "));
+        if let Some(d) = &t.description {
+            line.push_str(&format!("  — {d}"));
+        }
+        if let Some(p) = &t.problem {
+            line.push_str(&format!("  (cannot start: {p})"));
+        }
+        println!("{line}");
     }
     Ok(())
 }

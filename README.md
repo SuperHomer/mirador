@@ -31,7 +31,9 @@ downloads, the feature tour and the keybinding reference.
   any of them from there.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
   start Claude Code or Codex with their own model, prompt and shared way of
-  working (`mira agent new --role reviewer "…"`)
+  working (`mira agent new --role reviewer "…"`). **Teams**
+  (`.mirador/teams/*.md`) start several in a tab of their own, each told
+  its teammates, and stay tracked across restarts (`mira team start`)
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: agents open pages, snapshot the DOM, click,
@@ -366,6 +368,54 @@ that pane's directory: `claude --model … --append-system-prompt-file …
 agent new --tab` gives it a tab of its own instead.) Exiting the agent
 leaves the shell; restarting Mirador resumes a Claude conversation on the
 role's model, with its prompt.
+
+### Teams
+
+A **team** is roles started together, in a tab of their own, each told who
+its teammates are — `teams/<name>.md` beside `roles/` and `ways/` (the
+repository's `.mirador/teams`, then yours):
+
+```markdown
+<!-- .mirador/teams/squad.md -->
+---
+description: Plan, build, review
+way: our-way             # every member follows it, besides its role's own
+layout: grid             # or columns, rows
+members:
+  - role: planner
+    lead: true           # the team's task goes to it
+  - role: dev
+    count: 2             # dev-1 and dev-2
+  - role: reviewer
+    name: gate           # called gate instead of reviewer
+---
+The planner splits the work into tasks; devs build; nothing merges
+until gate has read the diff.
+```
+
+`mira team start squad "add OAuth"` (or the palette's *Start Team:
+squad*) opens the tab with every member in an even grid, its `⚑` mark in
+the sidebar. Each member gets its role's prompt, then the charter, the
+team's way of working, and its teammates by name with the commands that
+show their panes and screens; each Claude session is named after its
+member. The task goes to the lead. Every member's launch is worked out
+before any pane opens, so a team that cannot start — a missing role, a
+role that cannot start, two members of the same name — opens nothing.
+
+Mirador keeps track of the team with its tab, across restarts:
+
+```bash
+mira team list               # each member: running, exited, or closed
+mira team restart            # start the exited and closed ones again
+mira team restart dev-2      # …or just these
+mira team add reviewer       # another member, beside this pane: reviewer-2
+mira team list --defined     # the teams this directory can start
+```
+
+`team restart` types a member's command back into its pane when its shell
+is idle — never into a shell running something else, which it reports as
+`busy` — and opens a new pane beside a teammate for one whose pane was
+closed. Run `team add` and `team restart` from a pane of the team's tab.
 
 The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, the **▦ Wall**
 button beside the sidebar's Agents heading, or `mira agent wall`) draws the

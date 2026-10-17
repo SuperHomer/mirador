@@ -25,7 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentRole, AgentWay, Harness, RoleCatalog, RoleSource, ToolRules};
+use cmux_protocol::{AgentRole, AgentTeam, AgentWay, Harness, RoleCatalog, RoleSource, ToolRules};
 use serde::Deserialize;
 
 /// A prompt longer than this is not a prompt: refused, not read.
@@ -57,6 +57,7 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
         .map(|r| AgentRole { source: RoleSource::Config, path: None, ..r })
         .collect();
     let mut ways: Vec<AgentWay> = Vec::new();
+    let mut teams: Vec<AgentTeam> = Vec::new();
     let dirs = [(Some(global), RoleSource::Global), (repo, RoleSource::Repo)];
     for (dir, source) in dirs {
         let Some(dir) = dir else { continue };
@@ -67,6 +68,17 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
                     AgentWay { name, prompt, description, source, path: display(&path) },
                     |w| &w.name,
                 ),
+                Err(e) => problems.push(format!("{}: {e}", display(&path))),
+            }
+        }
+        for (path, name, text) in read_dir(&dir.join("teams"), &mut problems) {
+            match crate::teams::parse_team(&name, &path, source, &text) {
+                Ok((team, ignored)) => {
+                    for field in ignored {
+                        problems.push(format!("{}: `{field}` is not a team field; ignored", display(&path)));
+                    }
+                    replace(&mut teams, team, |t| &t.name);
+                }
                 Err(e) => problems.push(format!("{}: {e}", display(&path))),
             }
         }
@@ -95,9 +107,17 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
             problems.push(format!("{}: {problem}", role.path.as_deref().unwrap_or("agentRoles")));
         }
     }
+    // A team is only as startable as its members' roles, so after them.
+    for team in &mut teams {
+        team.problem = crate::teams::problem_of(team, &roles, &ways);
+        if let Some(problem) = &team.problem {
+            problems.push(format!("{}: {problem}", team.path));
+        }
+    }
     roles.sort_by(|a, b| a.name.cmp(&b.name));
     ways.sort_by(|a, b| a.name.cmp(&b.name));
-    RoleCatalog { roles, ways, problems }
+    teams.sort_by(|a, b| a.name.cmp(&b.name));
+    RoleCatalog { roles, ways, teams, problems }
 }
 
 /// The harnesses a role knows how to start: the ones whose command line
@@ -138,7 +158,7 @@ fn replace<T>(list: &mut Vec<T>, item: T, name: impl Fn(&T) -> &String) {
 
 /// The `.md` files of `dir` that can be read: path, name, text. A missing
 /// directory has none, and is not a problem.
-fn read_dir(dir: &Path, problems: &mut Vec<String>) -> Vec<(PathBuf, String, String)> {
+pub(crate) fn read_dir(dir: &Path, problems: &mut Vec<String>) -> Vec<(PathBuf, String, String)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -268,7 +288,7 @@ fn parse_way(text: &str) -> Result<(Option<String>, String), String> {
 
 /// Splits `---`-fenced frontmatter from the body. A file that does not
 /// start with a fence has none; one that opens a fence must close it.
-fn split_frontmatter(text: &str) -> Result<(Option<&str>, &str), String> {
+pub(crate) fn split_frontmatter(text: &str) -> Result<(Option<&str>, &str), String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let Some(rest) = text.strip_prefix("---\n").or_else(|| text.strip_prefix("---\r\n")) else {
         return Ok((None, text));
@@ -486,7 +506,15 @@ mod tests {
             AgentRole { name: "coder".into(), model: Some("sonnet".into()), ..Default::default() },
         ];
 
+        write(&global.join("teams/squad.md"), "---\nmembers: [{role: planner, lead: true}, {role: reviewer}]\n---\nGlobal squad.");
+        write(&repo.join("teams/squad.md"), "---\nway: our-way\nmembers: [{role: reviewer}, {role: coder, count: 2}]\n---\nRepo squad.");
+        write(&repo.join("teams/ghosts.md"), "---\nmembers: [{role: ghost}]\n---\n");
         let cat = catalog_in(Some(&repo), &global, &config);
+        // Teams merge like roles, and are checked against the merged roles.
+        let teams: Vec<_> = cat.teams.iter().map(|t| (t.name.as_str(), t.source, t.problem.is_some())).collect();
+        assert_eq!(teams, [("ghosts", RoleSource::Repo, true), ("squad", RoleSource::Repo, false)]);
+        assert_eq!(cat.teams[1].prompt.as_deref(), Some("Repo squad."));
+        let cat = RoleCatalog { problems: cat.problems.into_iter().filter(|p| !p.contains("ghosts")).collect(), ..cat };
         assert_eq!(cat.problems, Vec::<String>::new());
         assert!(cat.roles.iter().all(|r| r.problem.is_none()));
         let names: Vec<_> = cat.roles.iter().map(|r| (r.name.as_str(), r.source)).collect();

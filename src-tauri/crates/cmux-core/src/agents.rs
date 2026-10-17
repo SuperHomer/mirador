@@ -155,6 +155,18 @@ fn basename(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
+/// Whether the shell `shell_pid` is running something: another process on
+/// its terminal. Typing a command into it then would type into whatever
+/// that is — an editor, a dev server — so a team member is only restarted
+/// in a pane whose shell is idle. Unknown (no such process, no terminal)
+/// is busy: better to refuse than to type blind.
+pub fn shell_busy(procs: &[Proc], shell_pid: u32) -> bool {
+    let Some(tty) = procs.iter().find(|p| p.pid == shell_pid).and_then(|p| p.tty.as_deref()) else {
+        return true;
+    };
+    procs.iter().any(|p| p.pid != shell_pid && p.tty.as_deref() == Some(tty))
+}
+
 /// Pane → tty, from each pane's shell pid.
 pub fn pane_ttys(procs: &[Proc], pane_pids: &[(String, u32)]) -> HashMap<String, String> {
     let tty_of: HashMap<u32, &str> = procs
@@ -935,6 +947,19 @@ mod tests {
         assert_eq!(hook_status("notification", None, Some("Claude is waiting for your input")), None);
         assert_eq!(hook_status("notification", None, Some("Claude needs your permission to use Edit")), Some(NeedsYou));
         assert_eq!(hook_status("something-new", None, None), None);
+    }
+
+    #[test]
+    fn a_shell_is_busy_while_anything_else_is_on_its_terminal() {
+        let procs = parse_ps(PS);
+        let alone = parse_ps("  101 ttys009  -/bin/zsh\n  102 ttys010  -/bin/zsh\n  103 ttys010  vim notes.md\n");
+        assert!(!shell_busy(&alone, 101));
+        assert!(shell_busy(&alone, 102));
+        // No such process: refuse rather than type blind.
+        assert!(shell_busy(&alone, 999));
+        // The PS fixture's shell with `claude` on its terminal is busy.
+        let shell = procs.iter().find(|p| p.args.ends_with("zsh") && procs.iter().any(|q| q.pid != p.pid && q.tty == p.tty)).unwrap();
+        assert!(shell_busy(&procs, shell.pid));
     }
 
     #[test]
