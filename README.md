@@ -343,6 +343,17 @@ it shows before a project's own settings apply. Put `allow` in a role of
 your own. Codex roles cannot be limited yet: a Codex role with any of
 these fields does not start.
 
+**Edit them in the app:** *Edit Roles, Ways & Teams* in the palette (or
+`mira agent edit`) opens a pane beside the one you are in, listing every
+role, way of working and team its directory sees — marked `repo`, `yours`
+or `mirador.json` — with what is wrong with any of them. Pick one to edit
+its file; `+` starts a new one from a template, in the repository or in
+yours. It checks as you type and will not save a file that does not parse
+(⌘S / Ctrl+S saves); *Start* launches the role or team as it is saved.
+It only ever touches `.md` files in those `roles/`, `ways/` and `teams/`
+directories. `agentRoles` entries show read-only: they live in
+mirador.json.
+
 Roles and ways live in two places, and the same name means the first:
 
 1. **The repository's** `.mirador/roles/` and `.mirador/ways/` — the

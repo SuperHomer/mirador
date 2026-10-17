@@ -110,6 +110,9 @@ pub struct WorkspaceSnapshot {
     /// Agent-wall panes: each draws every agent's terminal in a grid.
     #[serde(default)]
     pub agent_wall_panes: Vec<AgentWallPane>,
+    /// Agent-editor panes: each edits the role, way and team files.
+    #[serde(default)]
+    pub agent_editor_panes: Vec<AgentEditorPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -265,6 +268,14 @@ pub enum Request {
     AgentWall {
         #[serde(default)]
         pane_id: Option<String>,
+    },
+    /// Opens the editor for the role, way and team files `pane_id`'s
+    /// directory sees: a split of that pane, or a tab with `target` "tab".
+    AgentEditor {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
     },
     /// Types `message` into another agent's terminal as its next prompt:
     /// `to` is a teammate's name in the caller's tab (`pane_id`'s) — a team
@@ -959,6 +970,15 @@ pub struct GraphResult {
     pub lanes: u32,
     /// History was cut at the row limit; older commits exist.
     pub truncated: bool,
+}
+
+/// A pane editing the role, way and team files of the directory it was
+/// opened from (its pane's `cwd`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentEditorPane {
+    pub pane_id: String,
+    pub cwd: Option<String>,
 }
 
 /// A pane showing a commit graph, and the repository it reads.

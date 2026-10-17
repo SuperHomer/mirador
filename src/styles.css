@@ -2235,3 +2235,234 @@ body,
   color: var(--muted);
   font-size: 12px;
 }
+
+/* Agent editor: the role, way and team files, a list beside a text. */
+.agent-editor {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.editor-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.editor-list {
+  width: 220px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--surface);
+  background: var(--bg-alt);
+  padding: 6px 0;
+}
+
+.editor-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.editor-section button {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.editor-section button:hover {
+  color: var(--text);
+}
+
+.editor-create {
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px 6px;
+}
+
+.editor-create input {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-create input,
+.editor-create select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--surface);
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.editor-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.editor-item:hover {
+  background: var(--surface);
+}
+
+.editor-item.selected {
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* The name gives way, not the badge: a flex row's only shrinkable item
+   would otherwise take all the overflow (CLAUDE.md). */
+.editor-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-item-problem {
+  flex-shrink: 0;
+  color: #fab387;
+}
+
+.editor-source {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.editor-source.repo {
+  color: var(--accent);
+}
+
+.editor-where {
+  margin: 12px 10px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.editor-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--surface);
+  flex-shrink: 0;
+}
+
+.editor-title {
+  flex-shrink: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.editor-path {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.editor-head button,
+.editor-bar button {
+  flex-shrink: 0;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.editor-head button.primary {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.editor-head button.danger {
+  background: #f38ba8;
+  color: var(--bg);
+}
+
+.editor-head button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.editor-bar.warn {
+  color: #fab387;
+}
+
+.editor-bar.error {
+  color: #f38ba8;
+}
+
+.editor-text {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px 12px;
+  tab-size: 2;
+}
+
+.editor-empty {
+  margin: 24px;
+  color: var(--muted);
+}
+
+.editor-status {
+  padding: 4px 8px;
+  border-top: 1px solid var(--surface);
+  color: var(--subtext);
+  font-size: 11px;
+  flex-shrink: 0;
+}

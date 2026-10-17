@@ -228,7 +228,7 @@ struct RoleFront {
 }
 
 /// A role file: the role, and the frontmatter keys it did not know.
-fn parse_role(name: &str, text: &str) -> Result<(AgentRole, Vec<String>), String> {
+pub(crate) fn parse_role(name: &str, text: &str) -> Result<(AgentRole, Vec<String>), String> {
     let (front, body) = split_frontmatter(text)?;
     let front: RoleFront = match front {
         Some(yaml) if !yaml.trim().is_empty() => {
@@ -271,7 +271,7 @@ struct WayFront {
 /// A way file: its description and its prompt. Its frontmatter may say
 /// more than a description — later versions may read more — but an empty
 /// way is a mistake.
-fn parse_way(text: &str) -> Result<(Option<String>, String), String> {
+pub(crate) fn parse_way(text: &str) -> Result<(Option<String>, String), String> {
     let (front, body) = split_frontmatter(text)?;
     let front: WayFront = match front {
         Some(yaml) if !yaml.trim().is_empty() => {

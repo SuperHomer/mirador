@@ -164,6 +164,7 @@ it takes the repository from the pane it ran in and refuses outside one.
 
 ```bash
 mira agent roles                              # the roles and ways this directory sees
+mira agent edit [--tab]                       # a pane to edit them, and teams
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, harness, name, model

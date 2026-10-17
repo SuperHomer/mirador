@@ -1,0 +1,125 @@
+//! The agent editor pane: the role, way and team files a directory sees,
+//! read, checked, saved and deleted through `cmux_core::role_files`, which
+//! decides what the page may touch. The page only ever names a path it was
+//! given in a catalog; every one is checked again here.
+
+use std::path::{Path, PathBuf};
+
+use tauri::{AppHandle, State};
+
+use cmux_core::role_files::{Kind, Places};
+use cmux_protocol::{RoleCatalog, RoleSource, SplitDir};
+
+use crate::commands::emit_workspace;
+use crate::AppState;
+
+/// Opens an editor pane for the files `pane_id`'s directory sees (the
+/// focused pane's when absent): a split of it, or a tab of its own.
+#[tauri::command]
+pub fn open_agent_editor(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+) -> Result<String, String> {
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let (cwd, repo_root) = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(&source);
+        (
+            m.and_then(|m| m.cwd.clone()).or_else(cmux_core::config::default_cwd),
+            m.and_then(|m| m.repo_root.clone()),
+        )
+    };
+    let pane = if tab {
+        state.workspace.lock().unwrap().new_tab().1
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(pane.clone()).or_default();
+        entry.cwd = cwd;
+        entry.repo_root = repo_root;
+        entry.agent_editor = true;
+    }
+    emit_workspace(&app);
+    Ok(pane)
+}
+
+/// Where an editor pane's files are: its repository's `.mirador`, and
+/// the user's config directory.
+fn places(state: &AppState, pane_id: &str) -> Result<(Places, Option<String>), String> {
+    let meta = state.meta.lock().unwrap();
+    let m = meta.get(pane_id).filter(|m| m.agent_editor).ok_or("not an agent editor pane")?;
+    let places = Places::of(m.cwd.as_deref().map(Path::new), m.repo_root.as_deref().map(Path::new));
+    Ok((places, m.cwd.clone()))
+}
+
+/// What the editor shows: the catalog its directory sees, and where a new
+/// file would go in each place (none for the repository outside one).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorCatalog {
+    pub catalog: RoleCatalog,
+    pub repo_dir: Option<String>,
+    pub global_dir: String,
+}
+
+fn catalog(state: &AppState, pane_id: &str) -> Result<EditorCatalog, String> {
+    let (places, cwd) = places(state, pane_id)?;
+    Ok(EditorCatalog {
+        catalog: cmux_core::roles::catalog(cwd.as_deref().map(Path::new)),
+        repo_dir: places.repo.map(|p| p.to_string_lossy().into_owned()),
+        global_dir: places.global.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+pub fn agent_editor_catalog(state: State<'_, AppState>, pane_id: String) -> Result<EditorCatalog, String> {
+    catalog(&state, &pane_id)
+}
+
+#[tauri::command]
+pub fn agent_file_read(state: State<'_, AppState>, pane_id: String, path: String) -> Result<String, String> {
+    places(&state, &pane_id)?.0.read(&PathBuf::from(path))
+}
+
+/// Warnings for `text` as a `kind`, or why it cannot be saved.
+#[tauri::command]
+pub fn agent_file_check(kind: String, name: String, text: String) -> Result<Vec<String>, String> {
+    cmux_core::role_files::check(Kind::parse(&kind)?, &name, &text)
+}
+
+#[tauri::command]
+pub fn agent_file_template(kind: String) -> Result<String, String> {
+    Ok(cmux_core::role_files::template(Kind::parse(&kind)?).to_string())
+}
+
+/// Saves a file — `create` a new one — and gives the catalog as it is now.
+#[tauri::command]
+pub fn agent_file_save(
+    state: State<'_, AppState>,
+    pane_id: String,
+    kind: String,
+    source: RoleSource,
+    name: String,
+    text: String,
+    create: bool,
+) -> Result<EditorCatalog, String> {
+    places(&state, &pane_id)?.0.save(Kind::parse(&kind)?, source, &name, &text, create)?;
+    catalog(&state, &pane_id)
+}
+
+#[tauri::command]
+pub fn agent_file_delete(state: State<'_, AppState>, pane_id: String, path: String) -> Result<EditorCatalog, String> {
+    places(&state, &pane_id)?.0.delete(&PathBuf::from(path))?;
+    catalog(&state, &pane_id)
+}

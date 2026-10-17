@@ -104,6 +104,13 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    snapshot.agent_editor_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter(|(_, m)| m.agent_editor)
+            .map(|(pane, m)| cmux_protocol::AgentEditorPane { pane_id: pane.clone(), cwd: m.cwd.clone() })
+            .collect()
+    };
     snapshot.agent_wall_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()

@@ -140,6 +140,7 @@ export default function App() {
               whatsNewPanes={snapshot.whatsNewPanes}
               graphPanes={snapshot.graphPanes}
               agentWallPanes={snapshot.agentWallPanes}
+              agentEditorPanes={snapshot.agentEditorPanes ?? []}
             />
           </div>
         ))}

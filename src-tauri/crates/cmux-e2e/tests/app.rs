@@ -114,3 +114,38 @@ fn a_role_pane_comes_back_resumed_with_its_model_and_limits() {
     assert_eq!(flag("--append-system-prompt-file"), None, "{args:?}");
     assert_eq!(sb.launches(), 2);
 }
+
+/// The editor for role, way and team files opens beside the pane it is
+/// asked from, knowing that pane's directory, and is still an editor after
+/// a relaunch. What it does inside is the webview's, out of reach here;
+/// `role_files`' tests cover what it may read and write.
+#[test]
+fn the_agent_editor_opens_and_comes_back() {
+    e2e!();
+    let mut sb = Sandbox::new("editor");
+    sb.launch();
+    let first = sb.first_pane();
+    let (code, out, err) = sb.mira(Some(&first), &["agent", "edit"]);
+    assert_eq!(code, 0, "{err}");
+    let editor = out.trim().to_string();
+    let listed = |sb: &Sandbox| -> Option<Value> {
+        sb.snapshot()["agentEditorPanes"]
+            .as_array()?
+            .iter()
+            .find(|e| e["paneId"] == editor.as_str())
+            .cloned()
+    };
+    let pane = sb.wait_for("the editor pane", LONG, || listed(&sb));
+    assert!(pane["cwd"].as_str().is_some_and(|c| c.ends_with("proj")), "{pane}");
+    assert_eq!(sb.panes(), [first.clone(), editor.clone()]);
+    // A render throw in the editor takes the whole tree down with it: the
+    // terminal beside it still answering says the page survived the editor.
+    sb.type_into(&first, "echo still-$((40+2))\r");
+    sb.wait_for("the terminal beside the editor", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
+    });
+
+    sb.quit();
+    sb.launch();
+    assert!(listed(&sb).is_some(), "the editor comes back as an editor, not a shell");
+}
