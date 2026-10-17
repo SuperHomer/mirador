@@ -521,6 +521,11 @@ pub struct AgentInfo {
     pub harness: Harness,
     /// The `agentRoles` entry it was started with.
     pub role: Option<String>,
+    /// Its name in its tab's team (`reviewer`, `dev-2`), when it is a
+    /// member: what it is called first, whatever its harness — a Codex
+    /// member has no session name to go by.
+    #[serde(default)]
+    pub member: Option<String>,
     /// Whether it has activity to show (`agent activity`, the panel, the
     /// wall's list): a Claude Code agent whose hooks said where its
     /// transcript is. The one place that rule lives.

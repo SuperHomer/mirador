@@ -216,9 +216,11 @@ export const HARNESS_LABEL: Record<Harness, string> = {
   droid: "Droid",
 };
 
-/** What to call an agent: its session's name, its role, or its harness. */
+/** What to call an agent: its name in its team, its session's name, its
+ *  role, or its harness. A Codex member has no session name, and would
+ *  otherwise go by its role (`omakase-reviewer`, not `reviewer`). */
 export const agentLabel = (a: AgentInfo): string =>
-  a.name ?? a.role ?? HARNESS_LABEL[a.harness];
+  a.member ?? a.name ?? a.role ?? HARNESS_LABEL[a.harness];
 
 /** A pane running a coding agent: Claude Code, Codex, OpenCode, … */
 export interface AgentInfo {
@@ -228,6 +230,8 @@ export interface AgentInfo {
   /** What it runs. Only Claude Code has hooks, and so a status. */
   harness: Harness;
   role: string | null;
+  /** Its name in its tab's team, when it is a member. */
+  member: string | null;
   /** A Claude Code agent whose transcript is known: activity to show. */
   hasActivity: boolean;
   /** The Claude Code session's name, as `claude agents` lists it. */

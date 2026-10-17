@@ -838,7 +838,7 @@ fn render_agents(agents: &[serde_json::Value]) {
             a["paneId"].as_str().unwrap_or(""),
             status,
             a["harness"].as_str().unwrap_or("claude"),
-            a["name"].as_str().or(a["role"].as_str()).unwrap_or("-"),
+            a["member"].as_str().or(a["name"].as_str()).or(a["role"].as_str()).unwrap_or("-"),
             a["model"].as_str().unwrap_or("default"),
         );
         if let Some(message) = a["message"].as_str() {

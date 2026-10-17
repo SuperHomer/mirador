@@ -431,7 +431,11 @@ team are *built-in*: the same for everyone, read-only, and replaced by any
 file of the same name — the editor's *Copy to yours* makes one to change.
 The first time the reviewer runs `mira`, Codex's sandbox asks you to allow
 it; Claude Code's hooks (`mira hooks setup`) are what let the planner wait
-on the worker.
+on the worker. Codex shows one startup warning for a role's agent —
+"Running without the shared background server" — because its prompt goes
+in as a `-c developer_instructions=…` override, which Codex runs in its
+embedded mode: the session is not on Codex's shared server (`codex
+agents` does not list it), and nothing in Mirador depends on that.
 
 Mirador keeps track of the team with its tab, across restarts:
 
