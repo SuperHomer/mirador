@@ -1603,7 +1603,8 @@ pub fn set_browser_visible(app: AppHandle, pane_id: String, visible: bool) {
 /// Async: off the main thread, which `browser::webview` may wait on.
 #[tauri::command]
 pub async fn browser_navigate(app: AppHandle, pane_id: String, url: String) -> Result<(), String> {
-    crate::browser::navigate(&app, &pane_id, &url)
+    // The URL bar does not wait for the page: the person watches it load.
+    crate::browser::navigate(&app, &pane_id, &url).map(|_| ())
 }
 
 /// Async: off the main thread, which `browser::webview` may wait on.

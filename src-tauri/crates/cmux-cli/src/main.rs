@@ -786,7 +786,14 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
             }
         }
         serde_json::Value::Object(map) => {
-            if map.contains_key("output") {
+            // Something to know about a command that still did its job: a
+            // navigation whose page had not loaded in time.
+            if let Some(note) = map.get("note").and_then(|v| v.as_str()) {
+                eprintln!("mira: {note}");
+            }
+            if map.contains_key("note") && map.len() == 1 {
+                // Only the note, said above.
+            } else if map.contains_key("output") {
                 // run --wait: print the command's output, adopt its exit code.
                 if !quiet {
                     if let Some(out) = map.get("output").and_then(|v| v.as_str()) {

@@ -3,7 +3,7 @@
 //! through an injected script, whose return value Rust reads back with
 //! `eval_with_callback` — remote pages get no IPC access to the app.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
@@ -26,6 +26,9 @@ pub struct BrowserBridge {
     /// Panes whose first page did not load in `FIRST_LOAD_WAIT`: a command
     /// to one says so at once, rather than waiting again.
     not_loaded: Mutex<HashSet<String>>,
+    /// Each pane's page loads, counted, so a command can wait for the one
+    /// it started rather than any.
+    loads: Mutex<HashMap<String, Loads>>,
     /// Browser panes by when they were last opened or driven, latest last:
     /// the pane a command goes to when it names none.
     recent: Mutex<Vec<String>>,
@@ -45,6 +48,21 @@ impl BrowserBridge {
         recent.iter().rev().find(|p| panes.contains(p)).or(panes.first()).cloned()
     }
 }
+
+/// A pane's page loads, by count: navigations asked for (`on_navigation`,
+/// which on macOS counts the page's frames too), new documents committed
+/// (`PageLoadEvent::Started`), and, of those, the latest one finished.
+#[derive(Clone, Copy, Default)]
+pub struct Loads {
+    asked: u64,
+    started: u64,
+    finished: u64,
+}
+
+/// How long a navigation command waits for anything to start loading
+/// before taking it that nothing will: back with no history, a pushState
+/// entry. Generous, for a slow machine; it is spent only on those.
+const NAVIGATION_START_WAIT: Duration = Duration::from_secs(2);
 
 /// How long a command waits for the page to answer.
 const ANSWER_WAIT: Duration = Duration::from_secs(10);
@@ -177,6 +195,8 @@ pub fn ensure_webview(
     };
 
     let nav_pane = pane_id.to_string();
+    let nav_app = app.clone();
+    let nav_pane_asked = pane_id.to_string();
     let dev = dev_origin(app);
     let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parse_url(app, &url, None)?))
         .initialization_script(
@@ -190,13 +210,23 @@ pub fn ensure_webview(
         // never reaches the app's own origins either. Only those are
         // refused: on macOS this sees the page's frames too, which may
         // well load `about:srcdoc`, `blob:` or `data:`.
-        .on_navigation(move |url| !cmux_core::pane_origin::is_app_origin(url.as_str(), dev.as_deref()))
+        .on_navigation(move |url| {
+            if cmux_core::pane_origin::is_app_origin(url.as_str(), dev.as_deref()) {
+                return false;
+            }
+            count_load(&nav_app, &nav_pane_asked, |l| l.asked += 1);
+            true
+        })
         // The page that loaded, not the one asked for: a navigation that
         // fails (nothing listening, a bad certificate) never finishes, and
         // the pane goes on showing — and reporting — the page before it.
         .on_page_load(move |webview, payload| {
+            if payload.event() == PageLoadEvent::Started {
+                count_load(webview.app_handle(), &nav_pane, |l| l.started += 1);
+            }
             if payload.event() == PageLoadEvent::Finished {
                 let app = webview.app_handle();
+                count_load(app, &nav_pane, |l| l.finished = l.started);
                 let bridge = &app.state::<AppState>().browser_bridge;
                 bridge.loaded.lock().unwrap().insert(nav_pane.clone());
                 bridge.not_loaded.lock().unwrap().remove(&nav_pane);
@@ -212,6 +242,49 @@ pub fn ensure_webview(
         )
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn count_load(app: &AppHandle, pane_id: &str, count: impl FnOnce(&mut Loads)) {
+    let state = app.state::<AppState>();
+    count(state.browser_bridge.loads.lock().unwrap().entry(pane_id.to_string()).or_default());
+}
+
+/// The pane's load counts now, to hand `wait_for_new_page` after starting
+/// a navigation.
+pub fn loads(app: &AppHandle, pane_id: &str) -> Loads {
+    let state = app.state::<AppState>();
+    let loads = state.browser_bridge.loads.lock().unwrap();
+    loads.get(pane_id).copied().unwrap_or_default()
+}
+
+/// Waits for the page a navigation started after `before` to finish
+/// loading, so the next command finds it and not the page before it: on a
+/// slow machine the old document goes on answering for a while. Waits
+/// `FIRST_LOAD_WAIT` at most, then answers with a note instead of hanging
+/// (a navigation that failed never finishes). When nothing asks to load
+/// within `NAVIGATION_START_WAIT` — back with nowhere to go, a pushState
+/// entry — nothing will, and it answers then.
+pub fn wait_for_new_page(app: &AppHandle, pane_id: &str, before: Loads) -> Option<String> {
+    let start = Instant::now();
+    loop {
+        let now = loads(app, pane_id);
+        // `finished` holds the count of the load that finished: one past
+        // `before.started` is a document committed after the command.
+        if now.finished > before.started {
+            return None;
+        }
+        let idle = now.asked == before.asked && now.started == before.started;
+        if idle && start.elapsed() >= NAVIGATION_START_WAIT {
+            return None;
+        }
+        if start.elapsed() >= FIRST_LOAD_WAIT {
+            return Some(format!(
+                "the page had not finished loading after {}s (did it fail to load?)",
+                FIRST_LOAD_WAIT.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn track_navigation(app: &AppHandle, pane_id: &str, url: &Url) {
@@ -436,7 +509,9 @@ pub fn wait(app: &AppHandle, pane_id: &str, until: &Until, timeout: Duration) ->
     }
 }
 
-pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String> {
+/// Sends the pane to `url`; whether that loads a new page, which a
+/// `#fragment` of the current one does not.
+pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<bool, String> {
     let webview = webview(app, pane_id, None)?;
     // The page the pane reports, not `webview.url()`: wry unwraps the
     // webview's URL, which is nil after a first load that failed, and the
@@ -447,8 +522,15 @@ pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String>
         meta.get(pane_id).and_then(|m| m.browser_url.clone())
     };
     let parsed = parse_url(app, url, current.as_deref())?;
+    let same_document = parsed.fragment().is_some()
+        && current.as_deref().and_then(|c| c.parse::<Url>().ok()).is_some_and(|mut c| {
+            c.set_fragment(None);
+            let mut target = parsed.clone();
+            target.set_fragment(None);
+            c == target
+        });
     webview.navigate(parsed).map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(!same_document)
 }
 
 pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<(), String> {
@@ -476,6 +558,7 @@ pub fn destroy(app: &AppHandle, pane_id: &str) {
     let bridge = &app.state::<AppState>().browser_bridge;
     bridge.loaded.lock().unwrap().remove(pane_id);
     bridge.not_loaded.lock().unwrap().remove(pane_id);
+    bridge.loads.lock().unwrap().remove(pane_id);
     bridge.recent.lock().unwrap().retain(|p| p != pane_id);
     if let Some(webview) = app.get_webview(&label_for(pane_id)) {
         let _ = webview.close();

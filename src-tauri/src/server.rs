@@ -380,8 +380,13 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::BrowserNavigate { pane_id, url } => {
             let pane = resolve_browser_pane(&state, pane_id)?;
-            crate::browser::navigate(app, &pane, &url)?;
-            Ok(json!({ "paneId": pane }))
+            let before = crate::browser::loads(app, &pane);
+            let note = if crate::browser::navigate(app, &pane, &url)? {
+                crate::browser::wait_for_new_page(app, &pane, before)
+            } else {
+                None
+            };
+            Ok(json!({ "paneId": pane, "note": note }))
         }
         Request::BrowserSnapshot { pane_id } => {
             let pane = resolve_browser_pane(&state, pane_id)?;
@@ -416,8 +421,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::BrowserHistory { pane_id, action } => {
             let pane = resolve_browser_pane(&state, pane_id)?;
+            let before = crate::browser::loads(app, &pane);
             crate::browser::history(app, &pane, &action)?;
-            Ok(Value::Null)
+            // Back, forward and reload wait for the page they go to, as
+            // navigate does.
+            match crate::browser::wait_for_new_page(app, &pane, before) {
+                Some(note) => Ok(json!({ "note": note })),
+                None => Ok(Value::Null),
+            }
         }
         Request::BrowserText { pane_id, selector } => {
             let pane = resolve_browser_pane(&state, pane_id)?;

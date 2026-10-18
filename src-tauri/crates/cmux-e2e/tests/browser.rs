@@ -101,6 +101,16 @@ fn serve_page(mut stream: std::net::TcpStream) {
         line.clear();
     }
     let path = request.split_whitespace().nth(1).unwrap_or("/").split('?').next().unwrap_or("/");
+    // `/slow/<page>` is `<page>`, half a second late: on a fast machine a
+    // navigation's new document lands before the next command, on a slow
+    // one (CI) it does not, and these make every machine a slow one.
+    let path = match path.strip_prefix("/slow") {
+        Some(rest) if rest.starts_with('/') => {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            rest
+        }
+        _ => path,
+    };
     // Redirects to Mirador's own pages, which a pane must not follow.
     let location = match path {
         "/to-app" => Some("tauri://localhost/"),
@@ -892,6 +902,48 @@ fn snapshot_right_after_open() {
     }
 }
 
+/// `navigate`, `reload`, `back` and `forward` answer once the page they
+/// went to has loaded — even when it is slow to come — so the next
+/// command finds it, not the page before.
+#[test]
+fn history_and_navigation_wait_for_the_new_page() {
+    e2e!();
+    let (sb, first) = launched("bslow");
+    open(&sb, &first, &page("/"));
+    browser(&sb, &first, &["navigate", "/slow/page2"]);
+    let snap = browser(&sb, &first, &["snapshot"]);
+    assert!(snap.starts_with("Page two — "), "navigate: the new page, not the old one:\n{snap}");
+
+    // A reload's old document must not answer for the new one.
+    browser(&sb, &first, &["navigate", "/slow/late"]);
+    browser(&sb, &first, &["wait", "#arrived"]);
+    browser(&sb, &first, &["reload"]);
+    let (code, out, err) = sb.mira(Some(&first), &["browser", "eval", "document.getElementById('spinner') !== null"]);
+    assert_eq!((code, out.trim()), (0, "true"), "reload: the fresh document, spinner and all: {err}");
+    browser(&sb, &first, &["wait", "--text", "Arrived late"]);
+    assert!(browser(&sb, &first, &["snapshot"]).contains("<h1> \"Arrived late\""));
+
+    browser(&sb, &first, &["back"]);
+    let snap = browser(&sb, &first, &["snapshot"]);
+    assert!(snap.starts_with("Page two — "), "back: the page before:\n{snap}");
+    browser(&sb, &first, &["forward"]);
+    let (_, out, _) = sb.mira(Some(&first), &["browser", "eval", "location.pathname"]);
+    assert_eq!(out.trim(), "\"/slow/late\"", "forward");
+
+    // What loads no new page answers at once: a #fragment, and back with
+    // nowhere to go.
+    browser(&sb, &first, &["navigate", "/"]);
+    let started = std::time::Instant::now();
+    browser(&sb, &first, &["navigate", "#section"]);
+    assert!(started.elapsed() < Duration::from_secs(3), "a fragment: {:?}", started.elapsed());
+    let fresh = browser(&sb, &first, &["open", "--tab", &page("/")]).trim().to_string();
+    let started = std::time::Instant::now();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "back", "--pane", &fresh]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.is_empty(), "no note for nowhere to go: {err}");
+    assert!(started.elapsed() < Duration::from_secs(5), "back with no history: {:?}", started.elapsed());
+}
+
 /// Without `--pane`, a command goes to the active tab's browser pane;
 /// with none there, to the one opened or driven last — never an arbitrary
 /// one.
@@ -934,8 +986,10 @@ fn a_page_that_never_loaded_says_so() {
     browser_until(&sb, &first, &["snapshot", "--pane", &pane], "page two", |s| s.starts_with("Page two — "));
 }
 
-/// `navigate` returns before the page loads, yet the next command already
-/// reaches the new document: twenty in a row did, not one the old page.
+/// `navigate` returns once the new page has loaded, so the next command
+/// reaches it. On a fast machine this held even when `navigate` returned
+/// at once (twenty in a row); CI's slower runner showed it does not, and
+/// `history_and_navigation_wait_for_the_new_page` makes every machine slow.
 #[test]
 fn snapshot_right_after_navigate() {
     e2e!();
