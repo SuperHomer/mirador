@@ -469,6 +469,11 @@ fn type_and_press_keys_like_a_person() {
     browser(&sb, &first, &["eval", "document.getElementById('pre').setSelectionRange(0, 0); 0"]);
     browser(&sb, &first, &["type", "#pre", ">"]);
     assert_eq!(pre(&sb), "\">prefix\"");
+    // An editable element too: never focused, its text gets the cursor at
+    // its end.
+    browser(&sb, &first, &["eval", "document.body.insertAdjacentHTML('beforeend', '<div id=ed contenteditable>note</div>'); 0"]);
+    browser(&sb, &first, &["type", "#ed", "book"]);
+    assert_eq!(browser(&sb, &first, &["eval", "document.getElementById('ed').textContent"]).trim(), "\"notebook\"");
     // And `press --target` on a field not focused edits at its end.
     browser(&sb, &first, &["press", "Backspace", "--target", "#q"]);
     browser(&sb, &first, &["press", "Backspace", "--target", "#pre"]);

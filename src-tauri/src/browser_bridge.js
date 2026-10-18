@@ -291,6 +291,17 @@
   function focusForKeys(el) {
     if (el === document.activeElement) return;
     if (el.focus) el.focus();
+    if (el.isContentEditable) {
+      // Its cursor is the document's selection: collapse it after the
+      // last of its contents.
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return;
+    }
     if (!isTextField(el)) return;
     try {
       el.setSelectionRange(el.value.length, el.value.length);

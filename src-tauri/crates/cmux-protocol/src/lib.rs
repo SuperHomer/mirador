@@ -387,8 +387,8 @@ pub enum Request {
         #[serde(default)]
         selector: Option<String>,
     },
-    /// Types `text` into `target` key by key, at the cursor; a field not
-    /// focused gets the cursor at its end first.
+    /// Types `text` into `target` key by key, at the cursor; a field or
+    /// editable element not focused gets the cursor at its end first.
     BrowserType {
         #[serde(default)]
         pane_id: Option<String>,

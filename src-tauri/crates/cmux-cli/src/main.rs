@@ -379,8 +379,8 @@ enum BrowserAction {
     /// Type text into an element key by key (keydown, keypress, input,
     /// keyup per character) — for pages that react to keys: autocomplete,
     /// validation on keyup. It types at the cursor, replacing a selection,
-    /// as a person would; a field not already focused gets the cursor at
-    /// the end of its text, so typing there appends. `fill` sets a value
+    /// as a person would; a field or editable element not already focused
+    /// gets the cursor at the end of its text, so typing there appends. `fill` sets a value
     /// at once. No change event until the field loses focus (`press Tab`),
     /// as in a browser. The events are synthetic (isTrusted is false),
     /// which a few pages ignore.
@@ -391,7 +391,7 @@ enum BrowserAction {
         pane: Option<String>,
     },
     /// Press a key or chord on the focused element, or on --target (focused
-    /// first, the cursor at the end of a field's text): Enter,
+    /// first, the cursor at the end of a field's or editable's text): Enter,
     /// Tab, Escape, Backspace, Delete, Space, arrows, Home, End, PageUp,
     /// PageDown, a letter or digit, with Shift+, Control+, Alt+, Meta+
     /// ("Shift+Tab", "Meta+A"). Enter in a form's field submits the form,

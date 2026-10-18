@@ -140,11 +140,12 @@ the active tab's browser pane, else the one used last:
   target is a snapshot id or a CSS selector. `fill` sets a value at once
   (a select takes an option's value or text). `type` sends keydown,
   keypress, input and keyup per character, typing at the cursor and
-  replacing a selection as a person would; a field it has to focus gets
-  the cursor at the end of its text, so there it appends. `change` comes
+  replacing a selection as a person would; a field or editable element
+  (`contenteditable`) it has to focus gets the cursor at the end of its
+  text, so there it appends. `change` comes
   only when the field loses focus.
-- `press <key> [--target <t>]` (a field it focuses gets the cursor at the
-  end): Enter, Tab, Escape, Backspace, Delete,
+- `press <key> [--target <t>]` (a field or editable element it focuses
+  gets the cursor at the end): Enter, Tab, Escape, Backspace, Delete,
   Space, the arrows, Home, End, PageUp, PageDown, a letter or digit, with
   `Shift+`, `Control+`, `Alt+`, `Meta+`. Enter in a form's field submits it
   by the browser's rule (through its default button, if it has one); Tab
