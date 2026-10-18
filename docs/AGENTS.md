@@ -214,6 +214,13 @@ the first message — so `/exit` leaves a prompt. Claude Code gets the role's
 `--append-system-prompt-file`; the session resumes like any other, on the
 role's model, and keeps that prompt. Codex gets `--model` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
+It also gets `-c` overrides for a permissions profile, `mirador`, that
+extends the one Codex would run on — your `default_permissions`, else
+`:workspace` in a trusted project and `:read-only` elsewhere — with
+Mirador's socket and nothing else (network only through Codex's proxy),
+so its `mira` reaches the app. They are left out when your Codex config
+uses `sandbox_mode` (Codex then ignores profiles), gives full access, or
+cannot be read or parsed.
 A `-c` override makes Codex run in its embedded mode rather than on its
 shared background server, which it says once at startup ("Running without
 the shared background server"); the agent works the same, but `codex
