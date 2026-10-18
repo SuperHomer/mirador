@@ -240,28 +240,35 @@ fn webview(app: &AppHandle, pane_id: &str) -> Result<Webview, String> {
 pub fn wait_for_first_load(app: &AppHandle, pane_id: &str) -> Result<(), String> {
     webview(app, pane_id)?;
     // A page that never loads still leaves an open pane: `open` succeeded.
-    let _ = first_load(app, pane_id);
+    let _ = first_load(app, pane_id, None);
     Ok(())
 }
 
 /// Waits for the pane's first page to have loaded. Until one has, the
 /// bridge is not in it — a failed load shows WebKit's error page, which
 /// would leave every command to time out as if the page were busy.
-fn first_load(app: &AppHandle, pane_id: &str) -> Result<(), String> {
+///
+/// Gives up at `deadline` when there is one, the caller's — `wait
+/// --timeout 1` means one second, first load included — but only a full
+/// `FIRST_LOAD_WAIT` marks the page as one that never loaded.
+fn first_load(app: &AppHandle, pane_id: &str, deadline: Option<Instant>) -> Result<(), String> {
     let state = app.state::<AppState>();
     let bridge = &state.browser_bridge;
-    let deadline = Instant::now() + FIRST_LOAD_WAIT;
+    let given_up = Instant::now() + FIRST_LOAD_WAIT;
+    let url = || state.meta.lock().unwrap().get(pane_id).and_then(|m| m.browser_url.clone()).unwrap_or_default();
     loop {
         if bridge.loaded.lock().unwrap().contains(pane_id) {
             return Ok(());
         }
-        if bridge.not_loaded.lock().unwrap().contains(pane_id) || Instant::now() >= deadline {
+        if bridge.not_loaded.lock().unwrap().contains(pane_id) || Instant::now() >= given_up {
             bridge.not_loaded.lock().unwrap().insert(pane_id.to_string());
-            let url = state.meta.lock().unwrap().get(pane_id).and_then(|m| m.browser_url.clone());
             return Err(format!(
                 "the page at {} never loaded: is anything serving it? `mira browser navigate` to another",
-                url.unwrap_or_default()
+                url()
             ));
+        }
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            return Err(format!("the page at {} has not loaded yet", url()));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -270,12 +277,15 @@ fn first_load(app: &AppHandle, pane_id: &str) -> Result<(), String> {
 /// Runs an automation op inside the pane's page and gives its JSON
 /// answer, waiting up to `ANSWER_WAIT` — for a Promise `eval` too.
 pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<String, String> {
-    execute_by(app, pane_id, op, Instant::now() + ANSWER_WAIT)
+    execute_by(app, pane_id, op, None)
 }
 
-fn execute_by(app: &AppHandle, pane_id: &str, op: serde_json::Value, deadline: Instant) -> Result<String, String> {
+/// `execute`, all of it — the first load too — over by `deadline` when
+/// there is one.
+fn execute_by(app: &AppHandle, pane_id: &str, op: serde_json::Value, deadline: Option<Instant>) -> Result<String, String> {
     let webview = webview(app, pane_id)?;
-    first_load(app, pane_id)?;
+    first_load(app, pane_id, deadline)?;
+    let deadline = deadline.unwrap_or_else(|| Instant::now() + ANSWER_WAIT);
     let id = app.state::<AppState>().browser_bridge.next_id.fetch_add(1, Ordering::Relaxed);
     let op_json = serde_json::to_string(&op).map_err(|e| e.to_string())?;
     let mut answer = ask(&webview, format!("window.__miraRun ? window.__miraRun({id}, {op_json}) : null"), deadline)?;
@@ -373,7 +383,7 @@ pub fn wait(app: &AppHandle, pane_id: &str, until: &Until, timeout: Duration) ->
             // glimpse of the page the timeout message shows.
             let left = deadline.saturating_duration_since(Instant::now());
             let ask_by = Instant::now() + left.clamp(Duration::from_secs(1), ANSWER_WAIT);
-            match execute_by(app, pane_id, op.clone(), ask_by) {
+            match execute_by(app, pane_id, op.clone(), Some(ask_by)) {
                 Ok(raw) => {
                     let answer: serde_json::Value =
                         serde_json::from_str(&raw).map_err(|e| format!("bad bridge payload: {e}"))?;

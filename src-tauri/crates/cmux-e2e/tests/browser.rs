@@ -399,6 +399,35 @@ fn wait_times_out_naming_what_it_waited_for() {
     assert_ne!(code, 0);
 }
 
+/// `--timeout` holds while the page is still loading — one that never
+/// will — and not only once it has.
+#[test]
+fn wait_keeps_its_timeout_before_the_page_has_loaded() {
+    e2e!();
+    let (sb, first) = launched("bwaitload");
+    let closed = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{closed}/");
+    // `open` waits up to 10 s for that page; ask while it is still waiting.
+    let mut opening = sb.mira_command(Some(&first), &["browser", "open", "--tab", &url])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pane = sb.wait_for("the pane to open", LONG, || {
+        sb.snapshot()["browserPanes"]
+            .as_array()?
+            .iter()
+            .find(|b| b["url"] == url.as_str())
+            .and_then(|b| b["paneId"].as_str().map(String::from))
+    });
+    let started = std::time::Instant::now();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "h1", "--timeout", "1", "--pane", &pane]);
+    let took = started.elapsed();
+    assert_ne!(code, 0);
+    assert!(took < Duration::from_secs(3), "--timeout 1 took {took:?}: {err}");
+    assert!(err.contains("timed out after 1s waiting for h1 to be shown") && err.contains("has not loaded yet"), "{err}");
+    opening.wait().unwrap();
+}
+
 /// An answer has a size limit, and it holds even against a page that
 /// rewrites the bridge — as it holds the time limit against one that
 /// never answers.
