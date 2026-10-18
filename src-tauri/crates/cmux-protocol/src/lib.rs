@@ -380,6 +380,58 @@ pub enum Request {
         /// "back" | "forward" | "reload"
         action: String,
     },
+    /// The visible text of the element `selector` matches, or of the page.
+    BrowserText {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        selector: Option<String>,
+    },
+    /// Types `text` into `target` key by key, at the cursor; a field or
+    /// editable element not focused gets the cursor at its end first.
+    BrowserType {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+        text: String,
+    },
+    /// Presses one key or chord ("Enter", "Shift+Tab", "Meta+A") on the
+    /// focused element, or on `target`.
+    BrowserPress {
+        #[serde(default)]
+        pane_id: Option<String>,
+        key: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// What the page logged to its console, and its errors, since it
+    /// loaded: `errors` keeps only errors; `clear` empties the log after.
+    BrowserConsole {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        errors: bool,
+        #[serde(default)]
+        clear: bool,
+    },
+    /// Waits until the page meets one condition: `selector` shown, `text`
+    /// in its visible text, the loaded URL containing `url`, or `gone` no
+    /// longer shown. Answers nothing when met; an error on timeout.
+    BrowserWait {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        selector: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        gone: Option<String>,
+        /// Seconds (default 10).
+        #[serde(default)]
+        timeout_secs: Option<u64>,
+    },
     /// Opens a remote (SSH) pane running `ssh -tt <host>`.
     SshOpen {
         /// ssh host spec (alias, or full destination with options).

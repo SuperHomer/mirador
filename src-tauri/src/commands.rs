@@ -936,6 +936,8 @@ pub fn open_browser(
     tab: bool,
     url: String,
 ) -> Result<String, String> {
+    // Before the pane exists: a URL that does not parse opens no pane.
+    let url = crate::browser::parse_url(&app, &url, None)?.to_string();
     let new_pane = if tab {
         let (_, pane) = state.workspace.lock().unwrap().new_tab();
         pane
@@ -1598,14 +1600,17 @@ pub fn set_browser_visible(app: AppHandle, pane_id: String, visible: bool) {
     crate::browser::set_visible(&app, &pane_id, visible);
 }
 
+/// Async: off the main thread, which `browser::webview` may wait on.
 #[tauri::command]
-pub fn browser_navigate(app: AppHandle, pane_id: String, url: String) -> Result<(), String> {
-    crate::browser::navigate(&app, &pane_id, &url)
+pub async fn browser_navigate(app: AppHandle, pane_id: String, url: String) -> Result<(), String> {
+    // The URL bar does not wait for the page: the person watches it load.
+    crate::browser::navigate(&app, &pane_id, &url).map(|_| ())
 }
 
+/// Async: off the main thread, which `browser::webview` may wait on.
 #[tauri::command]
-pub fn browser_history(app: AppHandle, pane_id: String, action: String) -> Result<(), String> {
-    crate::browser::history(&app, &pane_id, &action)
+pub async fn browser_history(app: AppHandle, pane_id: String, action: String) -> Result<(), String> {
+    crate::browser::history(&app, &pane_id, &action).map(|_| ())
 }
 
 /// Frontend persists a pane's serialized scrollback (30s tick / blur).

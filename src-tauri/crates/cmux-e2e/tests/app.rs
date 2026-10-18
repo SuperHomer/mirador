@@ -36,6 +36,40 @@ fn a_pane_mounts_and_its_terminal_echoes() {
     assert!(cwd.ends_with("proj"), "the first pane works in defaultCwd, not {cwd:?}");
 }
 
+/// The app's own webview keeps its plugins now that the capability names
+/// it, `"webviews": ["main"]`, rather than its window. It learns of a
+/// pane added after launch, and answers `read-screen`, through Tauri's
+/// event plugin (`plugin:event|listen`, from `core:default`): a pane
+/// split off here that then shows its shell says both calls went
+/// through — and that the host webview is labelled `main`: named
+/// anything else, the capability leaves the app's UI unable to draw even
+/// its first pane. The other
+/// plugins (notifications, the opener, the updater) are only reached by
+/// a person, and no test here sees them.
+#[test]
+fn the_apps_own_webview_keeps_its_plugins() {
+    e2e!();
+    let mut sb = Sandbox::new("hostacl");
+    sb.launch();
+    let first = sb.first_pane();
+    let split = sb.call(Request::SplitPane {
+        pane_id: Some(first.clone()),
+        dir: cmux_protocol::SplitDir::Row,
+        command: None,
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("the split pane to mount", LONG, || sb.screen(&split));
+    // Its shell starts a moment after it is drawn.
+    sb.wait_for("the split pane to take input", LONG, || {
+        sb.request(Request::SendInput { pane_id: Some(split.clone()), data: "echo host-$((6*7))\r".into() }).ok()
+    });
+    sb.wait_for("the split pane's shell", LONG, || {
+        sb.screen(&split).filter(|s| s.lines().any(|l| l.trim() == "host-42"))
+    });
+}
+
 /// A role's Claude Code pane, quit and relaunched, comes back as the same
 /// pane resuming the same conversation — on the role's model, and still
 /// held to the role's limits, which a resumed conversation does not keep

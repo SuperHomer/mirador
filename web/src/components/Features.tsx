@@ -9,7 +9,7 @@ const FEATURES: Feature[] = [
   { icon: "▶", title: "Command panes", body: "Agent-launched commands run in a visible, interruptible pane. <--wait> returns clean output and an exit code to the caller." },
   { icon: "±", title: "Diff panes", body: "Review what changed without leaving the terminal: file tree, hunks, and your own theme. <mira diff> for uncommitted work, a commit, or a branch, in any git worktree — untracked files included." },
   { icon: "⑂", title: "Commit graph", body: "The branch structure across every ref, with lanes, tags and remotes. Click a commit and its diff opens beside it — <mira graph>, or the palette." },
-  { icon: "◱", title: "Scriptable browser", body: "Agents open pages, snapshot the DOM, click, fill, and eval — while you watch it happen in a real pane via <mira browser>." },
+  { icon: "◱", title: "Scriptable browser", body: "An agent tests the page it is building, the way you would: it opens it, clicks, types and presses keys, waits for what should appear, and reads the console’s errors — while you watch in a real pane. <mira browser wait>, <mira browser console --errors>." },
   { icon: "⇄", title: "Remote workspaces", body: "Panes run the system <ssh> — 2FA and ProxyJump just work. ControlMaster port forwarding brings remote dev servers to your browser pane." },
   { icon: "⟳", title: "Sessions that outlive the app", body: "Quit and your shells, builds and agents keep running; the next launch reattaches to the same processes. Layout and scrollback survive a reboot. Config hot-reloads from <mirador.json>." },
 ];

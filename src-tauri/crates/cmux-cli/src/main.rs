@@ -338,7 +338,9 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
-    /// Fill an input (snapshot id or CSS selector) with a value.
+    /// Fill an input (snapshot id or CSS selector) with a value: sets it at
+    /// once, with one input and change event. To type it key by key, for
+    /// pages that listen to keys, use `type`.
     Fill {
         target: String,
         value: String,
@@ -351,15 +353,87 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Go back in the browser pane's history.
     Back {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Go forward in the browser pane's history.
     Forward {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Reload the browser pane's page (its console log starts empty).
     Reload {
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// The visible text of an element (a CSS selector), or of the whole
+    /// page: what a person reads there, as the browser lays it out. Long
+    /// text stops at 100,000 characters, saying how many more there were.
+    Text {
+        selector: Option<String>,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Type text into an element key by key (keydown, keypress, input,
+    /// keyup per character) — for pages that react to keys: autocomplete,
+    /// validation on keyup. It types at the cursor, replacing a selection,
+    /// as a person would; a field or editable element not already focused
+    /// gets the cursor at the end of its text, so typing there appends. `fill` sets a value
+    /// at once. No change event until the field loses focus (`press Tab`),
+    /// as in a browser. The events are synthetic (isTrusted is false),
+    /// which a few pages ignore.
+    Type {
+        target: String,
+        text: String,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Press a key or chord on the focused element, or on --target (focused
+    /// first, the cursor at the end of a field's or editable's text): Enter,
+    /// Tab, Escape, Backspace, Delete, Space, arrows, Home, End, PageUp,
+    /// PageDown, a letter or digit, with Shift+, Control+, Alt+, Meta+
+    /// ("Shift+Tab", "Meta+A"). Enter in a form's field submits the form,
+    /// as a browser does. Synthetic events (isTrusted is false).
+    Press {
+        key: String,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// The page's console output and errors (uncaught, unhandled
+    /// rejections, failed loads), oldest first. Per page: a navigation
+    /// starts empty. Exits 0 whatever it shows — it only reads.
+    Console {
+        /// Only errors.
+        #[arg(long)]
+        errors: bool,
+        /// Empty the log after printing it.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Wait until the page shows a CSS selector, some text, a URL, or no
+    /// longer shows a selector — instead of sleeping.
+    #[command(group(clap::ArgGroup::new("until").required(true).args(["selector", "text", "url", "gone"])))]
+    Wait {
+        /// Until an element matching this CSS selector is shown.
+        selector: Option<String>,
+        /// Until the page's visible text contains this.
+        #[arg(long)]
+        text: Option<String>,
+        /// Until the loaded page's URL contains this.
+        #[arg(long)]
+        url: Option<String>,
+        /// Until nothing matching this CSS selector is shown (a spinner).
+        #[arg(long, value_name = "SELECTOR")]
+        gone: Option<String>,
+        /// Seconds before giving up.
+        #[arg(long, default_value_t = 10)]
+        timeout: u64,
         #[arg(long)]
         pane: Option<String>,
     },
@@ -378,6 +452,9 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), String> {
     let mut quiet_output = false;
+    // What to say when a command succeeds with nothing to show, where
+    // silence could read as "did nothing": `wait` met, an empty console.
+    let mut empty_note: Option<String> = None;
     let req = match cli.command {
         Command::ListTabs => Request::ListTabs,
         Command::NewTab { command } => Request::NewTab { command },
@@ -496,7 +573,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     force,
                 })?;
                 if !wait || !resp.ok {
-                    return render(resp, cli.json, false);
+                    return render(resp, cli.json, false, None);
                 }
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&to, &pane, started, timeout);
@@ -505,7 +582,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 let started = now_ms();
                 let resp = send_request(Request::AgentFind { name: name.clone(), pane_id: own_pane() })?;
                 if !resp.ok {
-                    return render(resp, cli.json, false);
+                    return render(resp, cli.json, false, None);
                 }
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&name, &pane, started, timeout);
@@ -578,6 +655,52 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: pane,
                 action: "reload".into(),
             },
+            BrowserAction::Text { selector, pane } => Request::BrowserText {
+                pane_id: pane,
+                selector,
+            },
+            BrowserAction::Type { target, text, pane } => Request::BrowserType {
+                pane_id: pane,
+                target,
+                text,
+            },
+            BrowserAction::Press { key, target, pane } => Request::BrowserPress {
+                pane_id: pane,
+                key,
+                target,
+            },
+            BrowserAction::Console { errors, clear, pane } => {
+                empty_note = Some(if errors { "(no errors)" } else { "(no console output)" }.into());
+                Request::BrowserConsole {
+                    pane_id: pane,
+                    errors,
+                    clear,
+                }
+            }
+            BrowserAction::Wait {
+                selector,
+                text,
+                url,
+                gone,
+                timeout,
+                pane,
+            } => {
+                empty_note = Some(match (&selector, &text, &url, &gone) {
+                    (Some(s), ..) => format!("{s} is shown"),
+                    (_, Some(t), ..) => format!("text {t:?} found"),
+                    (_, _, Some(u), _) => format!("url contains {u}"),
+                    (.., Some(g)) => format!("{g} is gone"),
+                    _ => String::new(),
+                });
+                Request::BrowserWait {
+                    pane_id: pane,
+                    selector,
+                    text,
+                    url,
+                    gone,
+                    timeout_secs: Some(timeout),
+                }
+            }
         },
         Command::Notify {
             title,
@@ -612,7 +735,7 @@ fn run(cli: Cli) -> Result<(), String> {
     };
 
     let response = send_request(req)?;
-    render(response, cli.json, quiet_output)
+    render(response, cli.json, quiet_output, empty_note.as_deref())
 }
 
 fn parse_dir(s: &str) -> Result<SplitDir, String> {
@@ -647,7 +770,7 @@ fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     serde_json::from_str(&response).map_err(|e| format!("bad response: {e}"))
 }
 
-fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), String> {
+fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Option<&str>) -> Result<(), String> {
     if !resp.ok {
         return Err(resp.error.unwrap_or_else(|| "unknown error".into()));
     }
@@ -657,9 +780,20 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
         return Ok(());
     }
     match &data {
-        serde_json::Value::Null => {}
+        serde_json::Value::Null => {
+            if let Some(note) = empty_note {
+                println!("{note}");
+            }
+        }
         serde_json::Value::Object(map) => {
-            if map.contains_key("output") {
+            // Something to know about a command that still did its job: a
+            // navigation whose page had not loaded in time.
+            if let Some(note) = map.get("note").and_then(|v| v.as_str()) {
+                eprintln!("mira: {note}");
+            }
+            if map.contains_key("note") && map.len() == 1 {
+                // Only the note, said above.
+            } else if map.contains_key("output") {
                 // run --wait: print the command's output, adopt its exit code.
                 if !quiet {
                     if let Some(out) = map.get("output").and_then(|v| v.as_str()) {
@@ -672,6 +806,14 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 println!("{text}");
             } else if map.contains_key("nodes") {
                 render_page_snapshot(&data);
+            } else if let Some(entries) = map.get("console").and_then(|v| v.as_array()) {
+                let dropped = map["dropped"].as_u64().unwrap_or(0);
+                if entries.is_empty() && dropped == 0 {
+                    if let Some(note) = empty_note {
+                        println!("{note}");
+                    }
+                }
+                render_console(entries, dropped);
             } else if map.contains_key("value") {
                 println!("{}", serde_json::to_string_pretty(&map["value"]).unwrap());
             } else if let Some(hosts) = map.get("hosts").and_then(|v| v.as_array()) {
@@ -1007,6 +1149,21 @@ fn render_worktrees(items: &[serde_json::Value]) {
     }
 }
 
+/// `error  app.js:12:5  TypeError: x is undefined`, one per entry.
+fn render_console(entries: &[serde_json::Value], dropped: u64) {
+    if dropped > 0 {
+        println!("({dropped} earlier entries dropped)");
+    }
+    for entry in entries {
+        let source = entry["source"].as_str().map(|s| format!("{s}  ")).unwrap_or_default();
+        println!(
+            "{:<5}  {source}{}",
+            entry["level"].as_str().unwrap_or(""),
+            entry["message"].as_str().unwrap_or("")
+        );
+    }
+}
+
 fn render_page_snapshot(data: &serde_json::Value) {
     println!(
         "{} — {}",
@@ -1038,6 +1195,18 @@ fn render_page_snapshot(data: &serde_json::Value) {
             if extras.is_empty() { "" } else { " " },
             extras.join(" ")
         );
+        // A select's choices, under it: what `fill` takes.
+        for option in node["options"].as_array().into_iter().flatten() {
+            println!(
+                "      option \"{}\" value=\"{}\"{}",
+                option["text"].as_str().unwrap_or(""),
+                option["value"].as_str().unwrap_or(""),
+                if option["selected"].as_bool() == Some(true) { " selected" } else { "" }
+            );
+        }
+        if let Some(more) = node["moreOptions"].as_u64() {
+            println!("      … {more} more options");
+        }
     }
 }
 

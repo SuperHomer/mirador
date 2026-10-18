@@ -36,8 +36,9 @@ downloads, the feature tour and the keybinding reference.
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
-- **Scriptable browser pane**: agents open pages, snapshot the DOM, click,
-  fill, and eval — while you watch (`mira browser …`)
+- **Scriptable browser pane**: an agent tests the page it is building —
+  opens it, snapshots it, clicks, fills, types and presses keys, waits for
+  it, reads its console errors — while you watch (`mira browser …`)
 - **Remote workspaces**: `mira ssh open <host>` panes run the system ssh
   (agent auth, 2FA, ProxyJump all work); ControlMaster-backed port
   forwarding brings remote dev servers to your browser pane
