@@ -179,6 +179,8 @@
   }
 
   const MAX_OPTIONS = 50;
+  // `text` stops here: a page's worth to read, far under the answer's 1 MB.
+  const MAX_TEXT = 100000;
 
   function optionText(option) {
     return option.text.replace(/\s+/g, " ").trim().slice(0, 100);
@@ -429,6 +431,15 @@
       return { value: value === undefined ? null : value };
     } else if (op.op === "check") {
       return check(op);
+    } else if (op.op === "text") {
+      const el = op.selector ? document.querySelector(op.selector) : document.body;
+      if (!el) return { error: "nothing matches " + op.selector };
+      // As a person reads it: innerText, laid out, hidden parts left out.
+      const text = el.innerText || "";
+      return {
+        text:
+          text.length > MAX_TEXT ? text.slice(0, MAX_TEXT) + "\n… " + (text.length - MAX_TEXT) + " more characters" : text,
+      };
     } else if (op.op === "console") {
       const answer = {
         console: op.errors ? entries.filter((e) => e.level === "error") : entries,

@@ -419,6 +419,11 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::browser::history(app, &pane, &action)?;
             Ok(Value::Null)
         }
+        Request::BrowserText { pane_id, selector } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result = crate::browser::execute(app, &pane, json!({ "op": "text", "selector": selector }))?;
+            parse_bridge_result(&pane, &result)
+        }
         Request::BrowserType { pane_id, target, text } => {
             let pane = resolve_browser_pane(&state, pane_id)?;
             let result =

@@ -118,6 +118,8 @@ mira browser type 3 "hunter2"          # key by key, for pages that listen to ke
 mira browser press Enter               # submits the form, as a browser does
 mira browser wait --url /dashboard     # instead of sleeping
 mira browser wait --gone .spinner
+mira browser text main                 # what the page says (a snapshot lists
+                                       # only what you can act on)
 mira browser console --errors          # what went wrong on this page
 mira browser eval "document.title"     # anything else, as JSON
 ```
@@ -141,6 +143,8 @@ the active tab's browser pane, else the one used last:
   `Shift+`, `Control+`, `Alt+`, `Meta+`. Enter in a form's field submits it
   by the browser's rule (through its default button, if it has one); Tab
   moves focus.
+- `text [selector]`: the visible text of an element, or of the page, as
+  laid out; long text stops at 100,000 characters, saying how many more.
 - `wait <selector>`, `wait --text <text>`, `wait --url <part>`,
   `wait --gone <selector>`, each with `--timeout <secs>` (default 10). On a
   timeout it says what it waited for and what the page showed instead.
@@ -417,7 +421,7 @@ Newline-delimited JSON on the socket named in the discovery file:
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session agent_new agent_list
 agent_wall zoom_pane browser_open browser_navigate browser_snapshot
-browser_click browser_fill browser_type browser_press browser_eval
+browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console ssh_open ssh_hosts
 ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.

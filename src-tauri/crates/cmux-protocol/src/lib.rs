@@ -380,6 +380,13 @@ pub enum Request {
         /// "back" | "forward" | "reload"
         action: String,
     },
+    /// The visible text of the element `selector` matches, or of the page.
+    BrowserText {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        selector: Option<String>,
+    },
     /// Focuses `target` and types `text` key by key, appending to its value.
     BrowserType {
         #[serde(default)]

@@ -498,6 +498,30 @@ fn enter_submits_a_form_as_a_browser_would() {
     }
 }
 
+/// What a person reads on the page, which a snapshot leaves out.
+#[test]
+fn text_gives_what_the_page_says() {
+    e2e!();
+    let (sb, first) = launched("btext");
+    open(&sb, &first, &page("/"));
+    assert_eq!(browser(&sb, &first, &["text", "h1"]).trim(), "Form");
+    let page_text = browser(&sb, &first, &["text"]);
+    assert!(page_text.contains("Form") && page_text.contains("Page two"), "{page_text}");
+    browser(&sb, &first, &["click", "#go"]);
+    // As laid out: the empty name collapses into one space.
+    assert_eq!(browser(&sb, &first, &["text", "#out"]).trim(), "hello red");
+
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "text", "#missing"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("nothing matches #missing"), "{err}");
+
+    // A long page stops, and says how much more there was.
+    browser(&sb, &first, &["eval", "document.body.innerText = 'x'.repeat(250000); 0"]);
+    let long = browser(&sb, &first, &["text"]);
+    assert!(long.trim_end().ends_with("… 150000 more characters"), "{}", &long[long.len().saturating_sub(80)..]);
+    assert!(long.len() < 110_000, "{}", long.len());
+}
+
 /// What a page logs and throws — while it loads, too — with its level and
 /// where it came from.
 #[test]

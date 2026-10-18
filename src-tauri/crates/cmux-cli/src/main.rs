@@ -368,6 +368,14 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// The visible text of an element (a CSS selector), or of the whole
+    /// page: what a person reads there, as the browser lays it out. Long
+    /// text stops at 100,000 characters, saying how many more there were.
+    Text {
+        selector: Option<String>,
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// Type text into an element key by key (keydown, keypress, input,
     /// keyup per character), appending to its value — for pages that react
     /// to keys: autocomplete, validation on keyup. `fill` sets a value at
@@ -640,6 +648,10 @@ fn run(cli: Cli) -> Result<(), String> {
             BrowserAction::Reload { pane } => Request::BrowserHistory {
                 pane_id: pane,
                 action: "reload".into(),
+            },
+            BrowserAction::Text { selector, pane } => Request::BrowserText {
+                pane_id: pane,
+                selector,
             },
             BrowserAction::Type { target, text, pane } => Request::BrowserType {
                 pane_id: pane,
