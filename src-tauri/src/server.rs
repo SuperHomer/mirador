@@ -131,6 +131,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::commands::close_pane(app.clone(), app.state(), pane_id);
             Ok(Value::Null)
         }
+        Request::CloseTab { tab_id } => {
+            crate::commands::close_tab(app.clone(), app.state(), tab_id);
+            Ok(Value::Null)
+        }
         Request::FocusPane { pane_id } => {
             crate::commands::focus_pane(app.clone(), app.state(), pane_id);
             Ok(Value::Null)

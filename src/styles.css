@@ -438,6 +438,10 @@ body,
 /* The frame's title bar: its label, and the handle that moves it. */
 .frame-label {
   position: absolute;
+  /* Above the frame's split layer, which spans the whole frame and is
+     drawn after it: under it, a press on the title bar or its buttons
+     landed on the layer instead. */
+  z-index: 1;
   top: 0;
   left: 0;
   right: 0;
@@ -490,13 +494,11 @@ body,
   color: var(--text);
 }
 
-/* What a frame's "+" adds: a short list under its title bar. */
+/* What a frame's "+" adds: a short list under it, on screen (placed by
+   FrameMenu), above the board. */
 .frame-menu {
-  position: absolute;
-  top: 34px;
-  right: 8px;
-  z-index: 20;
-  min-width: 200px;
+  position: fixed;
+  z-index: 50;
   display: flex;
   flex-direction: column;
   padding: 4px;

@@ -151,11 +151,17 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     };
   }, [board]);
 
-  // Dragging empty board — anywhere outside a card — pans.
+  // Dragging empty board pans: the board itself, or a frame's background.
+  // Only those — anything drawn on the board (a card, a title bar, a
+  // button, the corner controls) has its own use for a press, and a pan
+  // captures the pointer, which would take the click away from a button.
   const onPointerDown = (e: React.PointerEvent) => {
     if (!board || e.button !== 0) return;
-    // Cards and frame labels have drags of their own.
-    if ((e.target as Element).closest(".pane-slot, .frame-label")) return;
+    const target = e.target as Element;
+    const empty =
+      target === e.currentTarget ||
+      target.matches(".board-canvas, .tab-layer, .split-layer");
+    if (!empty) return;
     const start = useBoardStore.getState().camera;
     if (!start) return;
     e.preventDefault();
@@ -303,7 +309,8 @@ export function TabLayer({
   // where Rust put it: there, or back where it was if another frame is.
   const [held, setHeld] = useState<{ x: number; y: number } | null>(null);
   const at = held ?? tab.frame;
-  const [menuOpen, setMenuOpen] = useState(false);
+  // Where the "+" that opened the menu is on screen, while it is open.
+  const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
 
   const drag = (e: React.PointerEvent) => {
     let to = { x: tab.frame.x, y: tab.frame.y };
@@ -336,9 +343,13 @@ export function TabLayer({
           <span className="frame-title">{tab.title}</span>
           <button
             className="frame-button"
+            data-frame-menu
             title="Add a pane to this tab"
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => setMenuOpen((o) => !o)}
+            onClick={(e) => {
+              const at = e.currentTarget.getBoundingClientRect();
+              setMenuAt((open) => (open ? null : at));
+            }}
           >
             +
           </button>
@@ -352,8 +363,12 @@ export function TabLayer({
           </button>
         </div>
       )}
-      {board && menuOpen && (
-        <FrameMenu pane={tab.focusedPane} onClose={() => setMenuOpen(false)} />
+      {board && menuAt && (
+        <FrameMenu
+          pane={tab.focusedPane}
+          at={menuAt}
+          onClose={() => setMenuAt(null)}
+        />
       )}
       {children}
     </div>

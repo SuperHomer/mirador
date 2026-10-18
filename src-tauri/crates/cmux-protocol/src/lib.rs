@@ -225,6 +225,10 @@ pub enum Request {
     ClosePane {
         pane_id: String,
     },
+    /// Closes a tab and every pane in it.
+    CloseTab {
+        tab_id: String,
+    },
     FocusPane {
         pane_id: String,
     },

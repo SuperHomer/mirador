@@ -5,6 +5,9 @@ interface UiStore {
   notificationsOpen: boolean;
   /** The agent pane whose activity panel is open. */
   activityPane: string | null;
+  /** A frame's "+" menu is open on the board. */
+  boardMenuOpen: boolean;
+  setBoardMenuOpen: (open: boolean) => void;
   togglePalette: () => void;
   closePalette: () => void;
   toggleNotifications: () => void;
@@ -17,6 +20,8 @@ export const useUiStore = create<UiStore>((set) => ({
   paletteOpen: false,
   notificationsOpen: false,
   activityPane: null,
+  boardMenuOpen: false,
+  setBoardMenuOpen: (boardMenuOpen) => set({ boardMenuOpen }),
   togglePalette: () =>
     set((s) => ({ paletteOpen: !s.paletteOpen, notificationsOpen: false })),
   closePalette: () => set({ paletteOpen: false }),

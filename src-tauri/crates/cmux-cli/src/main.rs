@@ -37,6 +37,8 @@ enum Command {
     },
     /// Close a pane.
     ClosePane { pane: String },
+    /// Close a tab and every pane in it.
+    CloseTab { tab: String },
     /// Focus a pane (activates its tab).
     Focus { pane: String },
     /// Show a pane alone, filling its tab (activates it); again, or with
@@ -467,6 +469,7 @@ fn run(cli: Cli) -> Result<(), String> {
             command,
         },
         Command::ClosePane { pane } => Request::ClosePane { pane_id: pane },
+        Command::CloseTab { tab } => Request::CloseTab { tab_id: tab },
         Command::Focus { pane } => Request::FocusPane { pane_id: pane },
         Command::Zoom { pane, off } => Request::ZoomPane {
             pane_id: pane,

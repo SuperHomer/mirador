@@ -450,4 +450,18 @@ fn what_mira_creates_lands_by_the_boards_rules() {
     let f = |k: &str| frame[k].as_f64().unwrap();
     assert_eq!((f("x") + f("w") / 2.0, f("y") + f("h") / 2.0), (-19500.0, -19600.0), "centred in view: {frame}");
     assert_nothing_overlaps(&snap);
+
+    // What else a frame's buttons do: open the wall (a frame of its own),
+    // and close a tab, its frame with it.
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "wall"]);
+    assert_eq!(code, 0, "{err}");
+    let snap = sb.snapshot();
+    assert_eq!(snap["tabs"].as_array().unwrap().len(), 3);
+    assert_nothing_overlaps(&snap);
+    let wall_tab = snap["activeTab"].as_str().unwrap().to_string();
+    let (code, _, err) = sb.mira(None, &["close-tab", &wall_tab]);
+    assert_eq!(code, 0, "{err}");
+    let snap = sb.snapshot();
+    assert_eq!(snap["tabs"].as_array().unwrap().len(), 2);
+    assert!(!snap.to_string().contains(&wall_tab));
 }
