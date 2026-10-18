@@ -270,11 +270,14 @@ fn first_load(app: &AppHandle, pane_id: &str) -> Result<(), String> {
 /// Runs an automation op inside the pane's page and gives its JSON
 /// answer, waiting up to `ANSWER_WAIT` — for a Promise `eval` too.
 pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<String, String> {
+    execute_by(app, pane_id, op, Instant::now() + ANSWER_WAIT)
+}
+
+fn execute_by(app: &AppHandle, pane_id: &str, op: serde_json::Value, deadline: Instant) -> Result<String, String> {
     let webview = webview(app, pane_id)?;
     first_load(app, pane_id)?;
     let id = app.state::<AppState>().browser_bridge.next_id.fetch_add(1, Ordering::Relaxed);
     let op_json = serde_json::to_string(&op).map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + ANSWER_WAIT;
     let mut answer = ask(&webview, format!("window.__miraRun ? window.__miraRun({id}, {op_json}) : null"), deadline)?;
     // A Promise: its answer is collected once it settles.
     while serde_json::from_str::<serde_json::Value>(&answer).is_ok_and(|v| v["pending"] == true) {
@@ -314,6 +317,84 @@ fn ask(webview: &Webview, js: String, deadline: Instant) -> Result<String, Strin
         .ok()
         .flatten()
         .ok_or_else(|| "the page has no automation bridge (a browser error page?)".to_string())
+}
+
+/// What `wait` waits for.
+pub enum Until {
+    /// An element matching the selector, shown.
+    Shown(String),
+    /// The page's visible text containing this.
+    Text(String),
+    /// The loaded page's URL containing this.
+    Url(String),
+    /// Nothing matching the selector shown.
+    Gone(String),
+}
+
+impl std::fmt::Display for Until {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Until::Shown(s) => write!(f, "{s} to be shown"),
+            Until::Text(t) => write!(f, "the text {t:?}"),
+            Until::Url(u) => write!(f, "a URL containing {u:?}"),
+            Until::Gone(s) => write!(f, "{s} to be gone"),
+        }
+    }
+}
+
+/// Waits until the page meets `until`, asking it again every 100 ms.
+///
+/// The polling is Rust's, not a Promise in the page: a navigation or a
+/// reload starts a new document, which would drop a Promise waiting in
+/// the old one, and the wait may outlast `ANSWER_WAIT`. A failed ask is
+/// one more try — mid-navigation the page cannot answer — and the last
+/// one's error says why, on a timeout.
+pub fn wait(app: &AppHandle, pane_id: &str, until: &Until, timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    let op = match until {
+        Until::Shown(s) => serde_json::json!({ "op": "check", "shown": s }),
+        Until::Text(t) => serde_json::json!({ "op": "check", "text": t }),
+        Until::Gone(s) => serde_json::json!({ "op": "check", "gone": s }),
+        Until::Url(_) => serde_json::Value::Null,
+    };
+    loop {
+        let last = if let Until::Url(part) = until {
+            // The URL the pane reports is the page that finished loading.
+            let state = app.state::<AppState>();
+            let url = state.meta.lock().unwrap().get(pane_id).and_then(|m| m.browser_url.clone());
+            let url = url.unwrap_or_default();
+            if url.contains(part.as_str()) {
+                return Ok(());
+            }
+            format!("the page is at {url}")
+        } else {
+            // At least a second per look, even the last: one cut short by
+            // the deadline would time out, and its error would replace the
+            // glimpse of the page the timeout message shows.
+            let left = deadline.saturating_duration_since(Instant::now());
+            let ask_by = Instant::now() + left.clamp(Duration::from_secs(1), ANSWER_WAIT);
+            match execute_by(app, pane_id, op.clone(), ask_by) {
+                Ok(raw) => {
+                    let answer: serde_json::Value =
+                        serde_json::from_str(&raw).map_err(|e| format!("bad bridge payload: {e}"))?;
+                    // The page refused the condition itself (a bad selector):
+                    // no amount of waiting fixes that.
+                    if let Some(error) = answer["error"].as_str() {
+                        return Err(error.to_string());
+                    }
+                    if answer["met"] == true {
+                        return Ok(());
+                    }
+                    answer["shows"].as_str().unwrap_or_default().to_string()
+                }
+                Err(e) => e,
+            }
+        };
+        if Instant::now() >= deadline {
+            return Err(format!("timed out after {}s waiting for {until}; {last}", timeout.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String> {

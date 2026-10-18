@@ -28,7 +28,8 @@ const ERRORS: &str = r#"<!doctype html><title>Errors</title><h1>Errors</h1>
 <script>console.log("fixture-log"); throw new Error("fixture-boom");</script>"#;
 
 const LATE: &str = r#"<!doctype html><title>Late</title>
-<script>setTimeout(() => { document.body.innerHTML = "<h1>Arrived late</h1>"; }, 1500);</script>"#;
+<script>setTimeout(() => { document.body.innerHTML = "<h1 id='arrived'>Arrived late</h1>"; }, 1500);</script>
+<div id="spinner">Loading…</div>"#;
 
 /// Serves the fixture pages on an ephemeral port for the life of the test
 /// process, and gives the port.
@@ -268,6 +269,69 @@ fn eval_awaits_a_promise() {
     let (code, _, err) = sb.mira(Some(&first), &["browser", "eval", "Promise.reject(new Error('nah'))"]);
     assert_ne!(code, 0);
     assert!(err.contains("nah"), "a rejection is the command's error: {err}");
+}
+
+/// `wait` instead of a sleep: for an element, for text, for a spinner to
+/// go, for a URL — each on a page that gets there only after a while.
+#[test]
+fn wait_until_the_page_is_ready() {
+    e2e!();
+    let (sb, first) = launched("bwait");
+    open(&sb, &first, &page("/"));
+
+    browser(&sb, &first, &["navigate", "/late"]);
+    assert_eq!(browser(&sb, &first, &["wait", "#arrived"]), "");
+    assert!(browser(&sb, &first, &["snapshot"]).contains("<h1> \"Arrived late\""));
+
+    browser(&sb, &first, &["reload"]);
+    browser(&sb, &first, &["wait", "--text", "Arrived late"]);
+    assert!(browser(&sb, &first, &["snapshot"]).contains("<h1> \"Arrived late\""));
+
+    // Seen first, so the wait for it to go is on this page and not met
+    // by the last one.
+    browser(&sb, &first, &["reload"]);
+    browser(&sb, &first, &["wait", "#spinner"]);
+    browser(&sb, &first, &["wait", "--gone", "#spinner"]);
+    assert_eq!(browser(&sb, &first, &["eval", "document.querySelector('#spinner')"]).trim(), "null");
+
+    // Across a navigation the page starts by itself, a second from now.
+    browser(&sb, &first, &["navigate", "/"]);
+    browser(&sb, &first, &["wait", "--url", &page("/")]);
+    browser(&sb, &first, &["eval", "setTimeout(() => document.querySelector('a').click(), 1000); 0"]);
+    browser(&sb, &first, &["wait", "--url", "/page2"]);
+    assert!(browser(&sb, &first, &["snapshot"]).starts_with("Page two — "));
+}
+
+#[test]
+fn wait_times_out_naming_what_it_waited_for() {
+    e2e!();
+    let (sb, first) = launched("bwaitout");
+    open(&sb, &first, &page("/"));
+    let started = std::time::Instant::now();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "#never", "--timeout", "1"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("timed out after 1s waiting for #never to be shown"), "{err}");
+    assert!(err.contains("the page shows: \"Form"), "a glimpse of the page: {err}");
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "--text", "Never there", "--timeout", "1"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("waiting for the text \"Never there\""), "{err}");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "--gone", "h1", "--timeout", "1"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("h1 to be gone; still shown: \"Form\""), "{err}");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "--url", "/nowhere", "--timeout", "1"]);
+    assert_ne!(code, 0);
+    assert!(err.contains(&format!("a URL containing \"/nowhere\"; the page is at {}", page("/"))), "{err}");
+
+    // A selector that cannot match anything fails at once, not on timeout.
+    let started = std::time::Instant::now();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "[[", "--timeout", "10"]);
+    assert_ne!(code, 0);
+    assert!(started.elapsed() < Duration::from_secs(5), "{err}");
+    // And one thing at a time.
+    let (code, _, _) = sb.mira(Some(&first), &["browser", "wait", "h1", "--text", "Form"]);
+    assert_ne!(code, 0);
 }
 
 /// An answer has a size limit, and it holds even against a page that

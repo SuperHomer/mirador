@@ -380,6 +380,24 @@ pub enum Request {
         /// "back" | "forward" | "reload"
         action: String,
     },
+    /// Waits until the page meets one condition: `selector` shown, `text`
+    /// in its visible text, the loaded URL containing `url`, or `gone` no
+    /// longer shown. Answers nothing when met; an error on timeout.
+    BrowserWait {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        selector: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        gone: Option<String>,
+        /// Seconds (default 10).
+        #[serde(default)]
+        timeout_secs: Option<u64>,
+    },
     /// Opens a remote (SSH) pane running `ssh -tt <host>`.
     SshOpen {
         /// ssh host spec (alias, or full destination with options).

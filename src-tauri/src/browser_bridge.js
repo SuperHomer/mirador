@@ -156,8 +156,30 @@
         return Promise.resolve(value).then((v) => ({ value: v === undefined ? null : v }));
       // `undefined` has no JSON: without this the key would vanish.
       return { value: value === undefined ? null : value };
+    } else if (op.op === "check") {
+      return check(op);
     }
     return { error: "unknown op " + op.op };
+  }
+
+  // One look for `mira browser wait`, which asks again until it is met.
+  // `shows` is a glimpse of the page, for the message when it never is.
+  function check(op) {
+    const glimpse = () =>
+      "the page shows: " + JSON.stringify((document.body ? document.body.innerText : "").replace(/\s+/g, " ").trim().slice(0, 200));
+    if (op.shown !== undefined) {
+      const met = Array.from(document.querySelectorAll(op.shown)).some(visible);
+      return met ? { met } : { met, shows: glimpse() };
+    }
+    if (op.gone !== undefined) {
+      const still = Array.from(document.querySelectorAll(op.gone)).find(visible);
+      return still ? { met: false, shows: "still shown: " + JSON.stringify(textOf(still)) } : { met: true };
+    }
+    if (op.text !== undefined) {
+      const met = Boolean(document.body) && document.body.innerText.includes(op.text);
+      return met ? { met } : { met, shows: glimpse() };
+    }
+    return { error: "nothing to check" };
   }
 
   // Rust refuses a callback string over MAX_ANSWER_BYTES (browser.rs).

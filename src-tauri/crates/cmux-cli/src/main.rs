@@ -363,6 +363,27 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Wait until the page shows a CSS selector, some text, a URL, or no
+    /// longer shows a selector — instead of sleeping.
+    #[command(group(clap::ArgGroup::new("until").required(true).args(["selector", "text", "url", "gone"])))]
+    Wait {
+        /// Until an element matching this CSS selector is shown.
+        selector: Option<String>,
+        /// Until the page's visible text contains this.
+        #[arg(long)]
+        text: Option<String>,
+        /// Until the loaded page's URL contains this.
+        #[arg(long)]
+        url: Option<String>,
+        /// Until nothing matching this CSS selector is shown (a spinner).
+        #[arg(long, value_name = "SELECTOR")]
+        gone: Option<String>,
+        /// Seconds before giving up.
+        #[arg(long, default_value_t = 10)]
+        timeout: u64,
+        #[arg(long)]
+        pane: Option<String>,
+    },
 }
 
 fn main() {
@@ -577,6 +598,21 @@ fn run(cli: Cli) -> Result<(), String> {
             BrowserAction::Reload { pane } => Request::BrowserHistory {
                 pane_id: pane,
                 action: "reload".into(),
+            },
+            BrowserAction::Wait {
+                selector,
+                text,
+                url,
+                gone,
+                timeout,
+                pane,
+            } => Request::BrowserWait {
+                pane_id: pane,
+                selector,
+                text,
+                url,
+                gone,
+                timeout_secs: Some(timeout),
             },
         },
         Command::Notify {

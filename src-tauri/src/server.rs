@@ -419,6 +419,26 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::browser::history(app, &pane, &action)?;
             Ok(Value::Null)
         }
+        Request::BrowserWait {
+            pane_id,
+            selector,
+            text,
+            url,
+            gone,
+            timeout_secs,
+        } => {
+            use crate::browser::Until;
+            let until = match (selector, text, url, gone) {
+                (Some(s), None, None, None) => Until::Shown(s),
+                (None, Some(t), None, None) => Until::Text(t),
+                (None, None, Some(u), None) => Until::Url(u),
+                (None, None, None, Some(g)) => Until::Gone(g),
+                _ => return Err("wait for one thing: a selector, --text, --url or --gone".into()),
+            };
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            crate::browser::wait(app, &pane, &until, Duration::from_secs(timeout_secs.unwrap_or(10)))?;
+            Ok(Value::Null)
+        }
         Request::SshOpen { host, target } => {
             let pane_id = crate::commands::open_ssh(
                 app.clone(),
