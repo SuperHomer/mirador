@@ -70,10 +70,23 @@ fn label_for(pane_id: &str) -> String {
 
 /// `url` as typed, made a URL against the page the pane shows now
 /// (`cmux_core::browser_url::resolve`).
-pub fn parse_url(url: &str, current: Option<&str>) -> Result<Url, String> {
-    cmux_core::browser_url::resolve(url, current)?
+/// Refused when it is not a web page, or is one of Mirador's own
+/// (`cmux_core::pane_origin`).
+pub fn parse_url(app: &AppHandle, url: &str, current: Option<&str>) -> Result<Url, String> {
+    let parsed: Url = cmux_core::browser_url::resolve(url, current)?
         .parse()
-        .map_err(|e| format!("bad url {url}: {e}"))
+        .map_err(|e| format!("bad url {url}: {e}"))?;
+    cmux_core::pane_origin::may_open(parsed.as_str(), dev_origin(app).as_deref())?;
+    Ok(parsed)
+}
+
+/// Where a debug build loads its frontend from: an origin of the app's
+/// own, as much as `tauri://localhost` is in a release build.
+fn dev_origin(app: &AppHandle) -> Option<String> {
+    if !tauri::is_dev() {
+        return None;
+    }
+    app.config().build.dev_url.as_ref().map(|u| u.to_string())
 }
 
 /// Where the host webview's client area starts inside the window.
@@ -164,8 +177,14 @@ pub fn ensure_webview(
     };
 
     let nav_pane = pane_id.to_string();
-    let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parse_url(&url, None)?))
+    let dev = dev_origin(app);
+    let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parse_url(app, &url, None)?))
         .initialization_script(BRIDGE_JS)
+        // What the page itself asks for — a link, a script, a redirect —
+        // never reaches the app's own origins either. Only those are
+        // refused: on macOS this sees the page's frames too, which may
+        // well load `about:srcdoc`, `blob:` or `data:`.
+        .on_navigation(move |url| !cmux_core::pane_origin::is_app_origin(url.as_str(), dev.as_deref()))
         // The page that loaded, not the one asked for: a navigation that
         // fails (nothing listening, a bad certificate) never finishes, and
         // the pane goes on showing — and reporting — the page before it.
@@ -417,7 +436,7 @@ pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String>
         let meta = state.meta.lock().unwrap();
         meta.get(pane_id).and_then(|m| m.browser_url.clone())
     };
-    let parsed = parse_url(url, current.as_deref())?;
+    let parsed = parse_url(app, url, current.as_deref())?;
     webview.navigate(parsed).map_err(|e| e.to_string())?;
     Ok(())
 }

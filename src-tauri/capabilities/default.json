@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main window",
-  "windows": [
+  "description": "Capabilities for the app's own webview only: never its browser panes, which are webviews in the same window",
+  "webviews": [
     "main"
   ],
   "permissions": [

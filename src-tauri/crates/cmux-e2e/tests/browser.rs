@@ -68,6 +68,16 @@ fn serve_page(mut stream: std::net::TcpStream) {
         line.clear();
     }
     let path = request.split_whitespace().nth(1).unwrap_or("/").split('?').next().unwrap_or("/");
+    // Redirects to Mirador's own pages, which a pane must not follow.
+    let location = match path {
+        "/to-app" => Some("tauri://localhost/"),
+        "/to-dev" => Some(DEV_FRONTEND),
+        _ => None,
+    };
+    if let Some(location) = location {
+        let _ = write!(stream, "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
     let (status, body) = match path {
         "/" => ("200 OK", FORM),
         "/page2" => ("200 OK", PAGE2),
@@ -83,6 +93,9 @@ fn serve_page(mut stream: std::net::TcpStream) {
         body.len()
     );
 }
+
+/// Where the debug app under test loads its frontend from (`devUrl`).
+const DEV_FRONTEND: &str = "http://localhost:1420/";
 
 /// `http://127.0.0.1:<port><path>` on the fixture.
 fn page(path: &str) -> String {
@@ -280,6 +293,88 @@ fn eval_awaits_a_promise() {
     let (code, _, err) = sb.mira(Some(&first), &["browser", "eval", "Promise.reject(new Error('nah'))"]);
     assert_ne!(code, 0);
     assert!(err.contains("nah"), "a rejection is the command's error: {err}");
+}
+
+/// From a page in a pane, every command of the app that matters, through
+/// the IPC entry point Tauri's plugins inject: a read, writes to the
+/// sandbox's own panes, and a plugin's. Each answer is "refused: …" or
+/// "ALLOWED".
+fn try_the_apps_commands(sb: &Sandbox, from: &str, pane: &str, victim: &str) -> Vec<String> {
+    let js = format!(
+        r#"Promise.all([
+            ["workspace_snapshot", {{}}],
+            ["write_pty", {{ paneId: "{victim}", data: "echo pwned-$((6*7))\r" }}],
+            ["open_browser", {{ paneId: null, tab: true, url: "about:blank" }}],
+            ["plugin:notification|notify", {{ options: {{ title: "pwned" }} }}],
+            ["close_pane", {{ paneId: "{victim}" }}],
+        ].map(([cmd, args]) => window.__TAURI_INTERNALS__.invoke(cmd, args).then(
+            () => cmd + " ALLOWED",
+            (e) => cmd + " refused: " + String(e).slice(0, 80),
+        )))"#
+    );
+    serde_json::from_str(&browser(sb, from, &["eval", "--pane", pane, &js])).unwrap()
+}
+
+/// Every one refused by Tauri's ACL — not failing for some other reason,
+/// like a wrong argument, which would pass for a refusal — and nothing
+/// done in the sandbox: no new pane, no pane closed, nothing typed.
+fn assert_all_refused(sb: &Sandbox, answers: &[String], victim: &str, panes: &[String]) {
+    assert_eq!(answers.len(), 5, "{answers:?}");
+    for answer in answers {
+        assert!(answer.contains(" refused: ") && answer.contains("not allowed"), "{answers:?}");
+    }
+    assert_eq!(sb.panes(), panes, "no pane opened or closed");
+    assert!(!sb.screen(victim).unwrap_or_default().contains("pwned-42"), "nothing typed");
+}
+
+/// The boundary in CLAUDE.md, *Security boundaries*: a page in a browser
+/// pane gets none of the app's commands.
+#[test]
+fn a_page_in_a_pane_gets_no_command_of_the_app() {
+    e2e!();
+    let (sb, first) = launched("bipc");
+    let pane = open(&sb, &first, &page("/"));
+    let panes = sb.panes();
+    // The entry point is there — Tauri's plugins put it in every webview.
+    assert_eq!(browser(&sb, &first, &["eval", "typeof window.__TAURI_INTERNALS__"]).trim(), "\"object\"");
+    let answers = try_the_apps_commands(&sb, &first, &pane, &first);
+    assert_all_refused(&sb, &answers, &first, &panes);
+}
+
+/// Nor can a pane be made one of the app's own pages, which Tauri trusts
+/// as local: not by `mira`, not by the page itself, not by a redirect.
+#[test]
+fn a_pane_never_shows_the_apps_own_pages() {
+    e2e!();
+    let (sb, first) = launched("bipcnav");
+    for url in ["tauri://localhost/", DEV_FRONTEND, "http://tauri.localhost/"] {
+        let (code, _, err) = sb.mira(Some(&first), &["browser", "open", "--tab", url]);
+        assert_ne!(code, 0, "open {url}");
+        assert!(err.contains("never opens Mirador's own pages") || err.contains("opens http(s) pages"), "{err}");
+    }
+    let pane = open(&sb, &first, &page("/"));
+    let panes = sb.panes();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "navigate", "tauri://localhost/"]);
+    assert_ne!(code, 0, "{err}");
+
+    let stays = |how: &str, leaves_for: &str| {
+        // Refused, the navigation never lands: the page waited for never
+        // comes, and the form is still there to answer.
+        let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "--url", leaves_for, "--timeout", "2"]);
+        assert_ne!(code, 0, "{how} reached {leaves_for}: {err}");
+        let at = browser(&sb, &first, &["eval", "location.href"]);
+        assert_eq!(at.trim(), format!("{:?}", page("/")), "{how} left the page");
+        let answers = try_the_apps_commands(&sb, &first, &pane, &first);
+        assert_all_refused(&sb, &answers, &first, &panes);
+    };
+    for target in ["tauri://localhost/", DEV_FRONTEND] {
+        browser(&sb, &first, &["eval", &format!("location.href = {target:?}; 0")]);
+        stays(&format!("location.href = {target}"), target);
+    }
+    for (path, target) in [("/to-app", "tauri://"), ("/to-dev", DEV_FRONTEND)] {
+        browser(&sb, &first, &["eval", &format!("location.href = {path:?}; 0")]);
+        stays(&format!("a redirect from {path}"), target);
+    }
 }
 
 /// What a page logs and throws — while it loads, too — with its level and
