@@ -249,9 +249,8 @@ fn count_load(app: &AppHandle, pane_id: &str, count: impl FnOnce(&mut Loads)) {
     count(state.browser_bridge.loads.lock().unwrap().entry(pane_id.to_string()).or_default());
 }
 
-/// The pane's load counts now, to hand `wait_for_new_page` after starting
-/// a navigation.
-pub fn loads(app: &AppHandle, pane_id: &str) -> Loads {
+/// The pane's load counts now.
+fn loads(app: &AppHandle, pane_id: &str) -> Loads {
     let state = app.state::<AppState>();
     let loads = state.browser_bridge.loads.lock().unwrap();
     loads.get(pane_id).copied().unwrap_or_default()
@@ -509,9 +508,10 @@ pub fn wait(app: &AppHandle, pane_id: &str, until: &Until, timeout: Duration) ->
     }
 }
 
-/// Sends the pane to `url`; whether that loads a new page, which a
+/// Sends the pane to `url`. Gives the load counts from just before, to
+/// hand `wait_for_new_page` — or `None` when it loads no new page, as a
 /// `#fragment` of the current one does not.
-pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<bool, String> {
+pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<Option<Loads>, String> {
     let webview = webview(app, pane_id, None)?;
     // The page the pane reports, not `webview.url()`: wry unwraps the
     // webview's URL, which is nil after a first load that failed, and the
@@ -529,11 +529,16 @@ pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<bool, Strin
             target.set_fragment(None);
             c == target
         });
+    // Counted after the webview is found, which can take a while: a load
+    // finishing during that wait is not the one this starts.
+    let before = loads(app, pane_id);
     webview.navigate(parsed).map_err(|e| e.to_string())?;
-    Ok(!same_document)
+    Ok((!same_document).then_some(before))
 }
 
-pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<(), String> {
+/// Goes back, forward or reloads; gives the load counts from just before,
+/// as `navigate` does.
+pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<Loads, String> {
     let webview = webview(app, pane_id, None)?;
     let js = match action {
         "back" => "history.back()",
@@ -541,7 +546,9 @@ pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<(), Strin
         "reload" => "location.reload()",
         _ => return Err(format!("unknown history action {action}")),
     };
-    webview.eval(js).map_err(|e| e.to_string())
+    let before = loads(app, pane_id);
+    webview.eval(js).map_err(|e| e.to_string())?;
+    Ok(before)
 }
 
 pub fn set_visible(app: &AppHandle, pane_id: &str, visible: bool) {

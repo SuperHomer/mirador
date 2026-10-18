@@ -1610,7 +1610,7 @@ pub async fn browser_navigate(app: AppHandle, pane_id: String, url: String) -> R
 /// Async: off the main thread, which `browser::webview` may wait on.
 #[tauri::command]
 pub async fn browser_history(app: AppHandle, pane_id: String, action: String) -> Result<(), String> {
-    crate::browser::history(&app, &pane_id, &action)
+    crate::browser::history(&app, &pane_id, &action).map(|_| ())
 }
 
 /// Frontend persists a pane's serialized scrollback (30s tick / blur).

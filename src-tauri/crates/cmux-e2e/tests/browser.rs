@@ -944,6 +944,32 @@ fn history_and_navigation_wait_for_the_new_page() {
     assert!(started.elapsed() < Duration::from_secs(5), "back with no history: {:?}", started.elapsed());
 }
 
+/// A navigation sent while the pane's webview is still being created —
+/// its own first page loading slowly — answers for the page it was sent
+/// to, not the first one.
+#[test]
+fn navigate_while_the_pane_is_being_created_lands_where_it_was_sent() {
+    e2e!();
+    let (sb, first) = launched("bnavearly");
+    let url = page("/slow/late");
+    let mut opening = sb
+        .mira_command(Some(&first), &["browser", "open", "--tab", &url])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pane = sb.wait_for("the pane to be listed", LONG, || {
+        sb.snapshot()["browserPanes"]
+            .as_array()?
+            .iter()
+            .find(|b| b["url"] == url.as_str())
+            .and_then(|b| b["paneId"].as_str().map(String::from))
+    });
+    browser(&sb, &first, &["navigate", "--pane", &pane, &page("/slow/page2")]);
+    let snap = browser(&sb, &first, &["snapshot", "--pane", &pane]);
+    assert!(snap.starts_with("Page two — "), "the page it was sent to:\n{snap}");
+    opening.wait().unwrap();
+}
+
 /// Without `--pane`, a command goes to the active tab's browser pane;
 /// with none there, to the one opened or driven last — never an arbitrary
 /// one.
