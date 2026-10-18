@@ -229,7 +229,10 @@ fn track_navigation(app: &AppHandle, pane_id: &str, url: &Url) {
 /// The pane's webview, waiting a moment for it: the frontend creates it
 /// when it first draws the pane, just after `open` has answered. Never
 /// call it on the main thread, which is the one that creates it.
-fn webview(app: &AppHandle, pane_id: &str) -> Result<Webview, String> {
+///
+/// Gives up at `deadline` too, when there is one sooner: `wait --timeout
+/// 1` means one second, the wait for a pane to be drawn included.
+fn webview(app: &AppHandle, pane_id: &str, deadline: Option<Instant>) -> Result<Webview, String> {
     let is_browser = |app: &AppHandle| {
         let state = app.state::<AppState>();
         let meta = state.meta.lock().unwrap();
@@ -238,7 +241,8 @@ fn webview(app: &AppHandle, pane_id: &str) -> Result<Webview, String> {
     if !is_browser(app) {
         return Err(format!("no browser pane {pane_id}"));
     }
-    let deadline = Instant::now() + WEBVIEW_WAIT;
+    let own = Instant::now() + WEBVIEW_WAIT;
+    let deadline = deadline.map_or(own, |d| d.min(own));
     loop {
         if let Some(webview) = app.get_webview(&label_for(pane_id)) {
             return Ok(webview);
@@ -257,7 +261,7 @@ fn webview(app: &AppHandle, pane_id: &str) -> Result<Webview, String> {
 /// to load or `FIRST_LOAD_WAIT`, whichever comes first — so the command
 /// after `open` finds the page there.
 pub fn wait_for_first_load(app: &AppHandle, pane_id: &str) -> Result<(), String> {
-    webview(app, pane_id)?;
+    webview(app, pane_id, None)?;
     // A page that never loads still leaves an open pane: `open` succeeded.
     let _ = first_load(app, pane_id, None);
     Ok(())
@@ -302,7 +306,7 @@ pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<
 /// `execute`, all of it — the first load too — over by `deadline` when
 /// there is one.
 fn execute_by(app: &AppHandle, pane_id: &str, op: serde_json::Value, deadline: Option<Instant>) -> Result<String, String> {
-    let webview = webview(app, pane_id)?;
+    let webview = webview(app, pane_id, deadline)?;
     first_load(app, pane_id, deadline)?;
     let deadline = deadline.unwrap_or_else(|| Instant::now() + ANSWER_WAIT);
     let id = app.state::<AppState>().browser_bridge.next_id.fetch_add(1, Ordering::Relaxed);
@@ -427,7 +431,7 @@ pub fn wait(app: &AppHandle, pane_id: &str, until: &Until, timeout: Duration) ->
 }
 
 pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String> {
-    let webview = webview(app, pane_id)?;
+    let webview = webview(app, pane_id, None)?;
     // The page the pane reports, not `webview.url()`: wry unwraps the
     // webview's URL, which is nil after a first load that failed, and the
     // app panics.
@@ -442,7 +446,7 @@ pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String>
 }
 
 pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<(), String> {
-    let webview = webview(app, pane_id)?;
+    let webview = webview(app, pane_id, None)?;
     let js = match action {
         "back" => "history.back()",
         "forward" => "history.forward()",

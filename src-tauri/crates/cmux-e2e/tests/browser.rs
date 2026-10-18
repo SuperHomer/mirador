@@ -532,6 +532,37 @@ fn wait_keeps_its_timeout_before_the_page_has_loaded() {
     opening.wait().unwrap();
 }
 
+/// And before the pane is even drawn: a pane under 2 px wide never is,
+/// so its page never gets a webview.
+#[test]
+fn wait_keeps_its_timeout_before_the_pane_is_drawn() {
+    e2e!();
+    let (sb, first) = launched("bundrawn");
+    // Each split halves the last pane: twelve leave it a fraction of a pixel.
+    let mut tiny = first.clone();
+    for _ in 0..12 {
+        tiny = sb.call(cmux_protocol::Request::SplitPane {
+            pane_id: Some(tiny.clone()),
+            dir: cmux_protocol::SplitDir::Row,
+            command: None,
+        })["paneId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    }
+    sb.call(cmux_protocol::Request::FocusPane { pane_id: tiny.clone() });
+    let (code, _, err) = sb.mira(Some(&tiny), &["browser", "open", &page("/")]);
+    assert_ne!(code, 0, "no webview, so `open` says so: {err}");
+    let pane = sb.snapshot()["browserPanes"][0]["paneId"].as_str().unwrap().to_string();
+
+    let started = std::time::Instant::now();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "wait", "h1", "--timeout", "1", "--pane", &pane]);
+    let took = started.elapsed();
+    assert_ne!(code, 0);
+    assert!(took < Duration::from_secs(3), "--timeout 1 took {took:?}: {err}");
+    assert!(err.contains("timed out after 1s waiting for h1 to be shown") && err.contains("has no page yet"), "{err}");
+}
+
 /// An answer has a size limit, and it holds even against a page that
 /// rewrites the bridge — as it holds the time limit against one that
 /// never answers.
