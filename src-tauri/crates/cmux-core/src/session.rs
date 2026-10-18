@@ -402,6 +402,22 @@ mod tests {
     }
 
     #[test]
+    fn cards_saved_overlapping_come_back_apart() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        let mut file = capture(&ws, &HashMap::new());
+        // `b` saved on top of `a`, as an older or hand-edited file can.
+        let first = file.tabs[0].cards[&a];
+        file.tabs[0].cards.insert(b.clone(), BoardRect { x: first.x + 50.0, y: first.y + 50.0, ..first });
+        let (back, _) = restore(file).unwrap();
+        let cards = &back.tabs[0].cards;
+        assert_eq!(cards[&a], first, "the first card where it was");
+        let (x, y) = (cards[&a], cards[&b]);
+        assert!(x.x + x.w <= y.x || y.x + y.w <= x.x || x.y + x.h <= y.y || y.y + y.h <= x.y, "{x:?} {y:?}");
+    }
+
+    #[test]
     fn frames_saved_overlapping_come_back_apart() {
         let mut ws = Workspace::default();
         ws.new_tab();

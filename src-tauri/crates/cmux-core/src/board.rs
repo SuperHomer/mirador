@@ -224,10 +224,13 @@ fn overlaps(a: &BoardRect, b: &BoardRect) -> bool {
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
-/// Makes `cards` hold exactly the panes of `root`: drops the cards of panes
-/// that left, and gives a card to any pane without one — the tab's split
-/// layout when it has none at all (a tab from a session saved before the
-/// board), otherwise its default size, right of the others.
+/// Makes `cards` hold exactly the panes of `root`, none covering another:
+/// drops the cards of panes that left; moves a card that covers one before
+/// it in the tab's pane order to a free place (`card_spot`) — a session
+/// from before cards were kept apart, or a file edited by hand, can hold
+/// such; and gives a card to any pane without one — the tab's split layout
+/// when it has none at all (a tab from a session saved before the board),
+/// otherwise its default size, right of the others.
 pub fn settle(root: &Node, cards: &mut Cards) {
     let panes = layout::pane_ids(root);
     cards.retain(|pane, _| panes.contains(pane));
@@ -235,6 +238,19 @@ pub fn settle(root: &Node, cards: &mut Cards) {
         *cards = default_cards(root);
         return;
     }
+    let mut apart = Cards::new();
+    for pane in &panes {
+        let Some(&card) = cards.get(pane) else { continue };
+        let card = if apart.values().any(|c| overlaps(c, &card)) {
+            let mut with = apart.clone();
+            with.insert(pane.clone(), card);
+            card_spot(&with, pane, SplitDir::Row).unwrap_or(card)
+        } else {
+            card
+        };
+        apart.insert(pane.clone(), card);
+    }
+    *cards = apart;
     let defaults = default_cards(root);
     for pane in panes {
         if cards.contains_key(&pane) {
@@ -531,6 +547,25 @@ mod tests {
     fn centring_puts_the_rect_in_the_middle() {
         let cam = centre_on(rect(100.0, 100.0, 200.0, 100.0), 1000.0, 600.0, 1.0);
         assert_eq!(cam, Camera { x: 200.0 - 500.0, y: 150.0 - 300.0, zoom: 1.0 });
+    }
+
+    #[test]
+    fn settling_moves_a_card_off_one_it_covers() {
+        let root = split(SplitDir::Row, vec![leaf("a"), leaf("b"), leaf("c")]);
+        let mut cards = Cards::new();
+        let a = rect(22.0, 42.0, 400.0, 300.0);
+        cards.insert("a".into(), a);
+        // On `a`, and on both: the first in pane order stays, the others move.
+        cards.insert("b".into(), rect(100.0, 100.0, 400.0, 300.0));
+        cards.insert("c".into(), rect(22.0, 42.0, 400.0, 300.0));
+        settle(&root, &mut cards);
+        assert_eq!(cards["a"], a);
+        let all: Vec<BoardRect> = ["a", "b", "c"].iter().map(|p| cards[*p]).collect();
+        for (i, x) in all.iter().enumerate() {
+            for y in &all[i + 1..] {
+                assert!(!overlaps(x, y), "{x:?} {y:?}");
+            }
+        }
     }
 
     #[test]
