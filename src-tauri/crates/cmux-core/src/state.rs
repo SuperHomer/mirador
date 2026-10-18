@@ -4,9 +4,12 @@
 
 use std::collections::HashMap;
 
-use cmux_protocol::{Direction, Node, SplitDir, TabSnapshot, WorkspaceSnapshot};
+use cmux_protocol::{
+    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, View,
+    WorkspaceSnapshot,
+};
 
-use crate::layout;
+use crate::{board, layout};
 
 #[derive(Debug, Default, Clone)]
 pub struct PaneMeta {
@@ -277,6 +280,11 @@ pub struct Tab {
     /// The team running in this tab, if one was started here: who is in
     /// which pane. Persisted, so a team is still a team after a restart.
     pub team: Option<cmux_protocol::TeamRun>,
+    /// Where the tab's frame sits on the board.
+    pub frame: BoardPoint,
+    /// Each pane's card on the board, relative to `frame`. Kept for every
+    /// pane in either view, so the board is ready whenever it is shown.
+    pub cards: board::Cards,
 }
 
 fn new_id() -> String {
@@ -286,19 +294,28 @@ fn new_id() -> String {
 impl Tab {
     fn new() -> (Self, String) {
         let pane = new_id();
-        (
-            Self {
-                id: new_id(),
-                title: None,
-                root: Node::Leaf {
-                    pane_id: pane.clone(),
-                },
-                focused: pane.clone(),
-                zoomed: None,
-                team: None,
-            },
-            pane,
-        )
+        (Self::with_root(Node::Leaf { pane_id: pane.clone() }), pane)
+    }
+
+    /// A tab laid out as `root`, its first pane focused, its cards its
+    /// splits. Its frame is placed by the workspace that takes it in.
+    fn with_root(root: Node) -> Self {
+        let focused = layout::pane_ids(&root).into_iter().next().unwrap_or_default();
+        Self {
+            id: new_id(),
+            title: None,
+            cards: board::default_cards(&root),
+            root,
+            focused,
+            zoomed: None,
+            team: None,
+            frame: BoardPoint::default(),
+        }
+    }
+
+    /// The tab's frame on the board.
+    pub fn frame_rect(&self) -> BoardRect {
+        board::frame_rect(self.frame, &self.cards)
     }
 }
 
@@ -306,6 +323,8 @@ impl Tab {
 pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active: usize,
+    pub view: View,
+    pub camera: Camera,
 }
 
 impl Default for Workspace {
@@ -314,6 +333,8 @@ impl Default for Workspace {
         Self {
             tabs: vec![tab],
             active: 0,
+            view: View::default(),
+            camera: Camera::default(),
         }
     }
 }
@@ -331,6 +352,22 @@ impl Workspace {
         self.tabs.iter_mut().find(|t| layout::contains(&t.root, pane))
     }
 
+    /// Gives a tab just taken in a frame of its own on the board, right of
+    /// every other: wherever the tab sits in the tab order, a new frame
+    /// never lands on top of one already there.
+    fn place_frame(&mut self, tab_id: &str) {
+        let others = self
+            .tabs
+            .iter()
+            .filter(|t| t.id != tab_id)
+            .map(Tab::frame_rect)
+            .collect::<Vec<_>>();
+        let origin = board::next_frame_origin(others);
+        if let Some(tab) = self.tab_mut(tab_id) {
+            tab.frame = origin;
+        }
+    }
+
     /// Creates a tab (with one fresh pane) after the active one and
     /// activates it. Returns (tab_id, pane_id).
     pub fn new_tab(&mut self) -> (String, String) {
@@ -338,6 +375,7 @@ impl Workspace {
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
+        self.place_frame(&id);
         (id, pane)
     }
 
@@ -349,24 +387,22 @@ impl Workspace {
         let id = tab.id.clone();
         let at = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(at, tab);
+        self.place_frame(&id);
         (id, pane)
     }
 
     /// Opens a team's tab after the active one, its panes laid out as
     /// `root`, the first focused. Returns the tab id.
     pub fn new_team_tab(&mut self, root: Node, team: cmux_protocol::TeamRun, title: &str) -> String {
-        let focused = layout::pane_ids(&root).into_iter().next().unwrap_or_default();
         let tab = Tab {
-            id: new_id(),
             title: Some(title.to_string()),
-            root,
-            focused,
-            zoomed: None,
             team: Some(team),
+            ..Tab::with_root(root)
         };
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
+        self.place_frame(&id);
         id
     }
 
@@ -388,18 +424,12 @@ impl Workspace {
     /// Adds a tab at the end for an existing pane id, leaving the active tab
     /// alone: how a session holder no saved pane names gets a home.
     pub fn adopt_pane(&mut self, pane: &str) -> String {
-        let tab = Tab {
-            id: new_id(),
-            title: None,
-            root: Node::Leaf {
-                pane_id: pane.to_string(),
-            },
-            focused: pane.to_string(),
-            zoomed: None,
-            team: None,
-        };
+        let tab = Tab::with_root(Node::Leaf {
+            pane_id: pane.to_string(),
+        });
         let id = tab.id.clone();
         self.tabs.push(tab);
+        self.place_frame(&id);
         id
     }
 
@@ -409,11 +439,15 @@ impl Workspace {
         let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
             return Vec::new();
         };
-        let tab = self.tabs.remove(idx);
-        let panes = layout::pane_ids(&tab.root);
+        let closed = self.tabs.remove(idx);
+        let panes = layout::pane_ids(&closed.root);
         if self.tabs.is_empty() {
+            // Where the last frame was, which the board is showing.
             let (tab, _) = Tab::new();
-            self.tabs.push(tab);
+            self.tabs.push(Tab {
+                frame: closed.frame,
+                ..tab
+            });
             self.active = 0;
         } else if self.active >= self.tabs.len() {
             self.active = self.tabs.len() - 1;
@@ -467,6 +501,12 @@ impl Workspace {
         if layout::split(&mut tab.root, pane, dir, &new_pane) {
             tab.focused = new_pane.clone();
             tab.zoomed = None;
+            match board::card_beside(&tab.cards, pane, dir) {
+                Some(card) => {
+                    tab.cards.insert(new_pane.clone(), card);
+                }
+                None => board::settle(&tab.root, &mut tab.cards),
+            }
             Some(new_pane)
         } else {
             None
@@ -484,6 +524,7 @@ impl Workspace {
             layout::RemoveOutcome::BecameEmpty => self.close_tab(&tab_id),
             layout::RemoveOutcome::Removed => {
                 tab.zoomed = None;
+                tab.cards.remove(pane);
                 if tab.focused == pane {
                     tab.focused = layout::pane_ids(&tab.root)
                         .first()
@@ -575,6 +616,33 @@ impl Workspace {
         }
     }
 
+    /// Shows the workspace as tabs or as the board. False when it already was.
+    pub fn set_view(&mut self, view: View) -> bool {
+        std::mem::replace(&mut self.view, view) != view
+    }
+
+    /// Moves or resizes `pane`'s card. Its splits stay as they are.
+    pub fn set_card_rect(&mut self, pane: &str, rect: BoardRect) -> bool {
+        match self.tab_of_pane_mut(pane) {
+            Some(tab) => {
+                tab.cards.insert(pane.to_string(), rect);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Moves a tab's frame, and its cards with it.
+    pub fn set_frame_position(&mut self, tab_id: &str, origin: BoardPoint) -> bool {
+        match self.tab_mut(tab_id) {
+            Some(tab) => {
+                tab.frame = origin;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Whether `pane` is still in a tab. A pane leaves its tab before its
     /// `PaneMeta` is removed, so a writer that checks this under the
     /// workspace lock never brings a closed pane's meta back.
@@ -636,6 +704,14 @@ impl Workspace {
                             ports
                         },
                         zoomed_pane: t.zoomed.clone(),
+                        frame: t.frame_rect(),
+                        cards: layout::pane_ids(&t.root)
+                            .into_iter()
+                            .filter_map(|pane| {
+                                let rect = *t.cards.get(&pane)?;
+                                Some(CardRect { pane_id: pane, rect })
+                            })
+                            .collect(),
                     }
                 })
                 .collect(),
@@ -650,6 +726,8 @@ impl Workspace {
             agent_wall_panes: Vec::new(),
             agent_editor_panes: Vec::new(),
             agents: Vec::new(),
+            view: self.view,
+            camera: self.camera,
         }
     }
 }
@@ -928,6 +1006,102 @@ mod tests {
         assert_eq!(ws.active, active);
         assert_eq!(ws.focused_pane(), second);
         assert_eq!(ws.all_pane_ids().last().map(String::as_str), Some("orphan-1"));
+    }
+
+    /// Every pane of every tab has a card, and no frame covers another.
+    fn assert_board_consistent(ws: &Workspace) {
+        for t in &ws.tabs {
+            let mut panes = layout::pane_ids(&t.root);
+            let mut cards: Vec<String> = t.cards.keys().cloned().collect();
+            panes.sort();
+            cards.sort();
+            assert_eq!(panes, cards, "tab {}", t.id);
+        }
+        let frames: Vec<BoardRect> = ws.tabs.iter().map(Tab::frame_rect).collect();
+        for (i, a) in frames.iter().enumerate() {
+            for b in &frames[i + 1..] {
+                let apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                assert!(apart, "{a:?} covers {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_pane_has_a_card_however_panes_come_and_go() {
+        let mut ws = Workspace::default();
+        assert_board_consistent(&ws);
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        ws.split_pane(&b, SplitDir::Column).unwrap();
+        ws.new_tab();
+        let first = ws.tabs[0].id.clone();
+        ws.set_active_tab(&first);
+        // Inserted in the tab order before the second tab, its frame still
+        // goes right of every other.
+        ws.new_background_tab();
+        let panes = Workspace::fresh_pane_ids(2);
+        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![] };
+        ws.new_team_tab(crate::teams::layout(&panes, None), team, "t");
+        ws.adopt_pane("orphan");
+        assert_board_consistent(&ws);
+        ws.close_pane(&b);
+        assert!(!ws.tabs[0].cards.contains_key(&b));
+        assert_board_consistent(&ws);
+    }
+
+    #[test]
+    fn a_new_frame_goes_right_of_the_rightmost() {
+        let mut ws = Workspace::default();
+        let first = ws.tabs[0].id.clone();
+        ws.set_frame_position(&first, BoardPoint { x: 5000.0, y: 300.0 });
+        let (second, _) = ws.new_tab();
+        let tab = ws.tabs.iter().find(|t| t.id == second).unwrap();
+        let right = ws.tabs[0].frame_rect();
+        assert_eq!(tab.frame, BoardPoint { x: right.x + right.w + board::FRAME_GAP, y: 0.0 });
+    }
+
+    #[test]
+    fn a_split_adds_a_card_beside_its_source_and_moves_none() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let moved = BoardRect { x: 400.0, y: 300.0, w: 500.0, h: 250.0 };
+        assert!(ws.set_card_rect(&a, moved));
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        let cards = &ws.tabs[0].cards;
+        assert_eq!(cards[&a], moved, "the source stays where it was put");
+        assert_eq!(cards[&b], BoardRect { x: moved.x + moved.w + board::CARD_GAP, ..moved });
+        // And moving a card changes no split.
+        let root = ws.tabs[0].root.clone();
+        ws.set_card_rect(&b, BoardRect { x: 16.0, y: 36.0, w: 200.0, h: 200.0 });
+        assert_eq!(ws.tabs[0].root, root);
+        assert!(!ws.set_card_rect("gone", moved));
+    }
+
+    #[test]
+    fn the_last_tab_closed_comes_back_where_its_frame_was() {
+        let mut ws = Workspace::default();
+        let id = ws.tabs[0].id.clone();
+        ws.set_frame_position(&id, BoardPoint { x: 700.0, y: -40.0 });
+        ws.close_tab(&id);
+        assert_eq!(ws.tabs[0].frame, BoardPoint { x: 700.0, y: -40.0 });
+        assert_board_consistent(&ws);
+    }
+
+    #[test]
+    fn the_snapshot_carries_the_board() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Column).unwrap();
+        assert!(ws.set_view(View::Board));
+        assert!(!ws.set_view(View::Board), "already the board");
+        ws.camera = Camera { x: -20.0, y: 10.0, zoom: 0.5 };
+        let snap = ws.snapshot(&HashMap::new());
+        assert_eq!(snap.view, View::Board);
+        assert_eq!(snap.camera, ws.camera);
+        let tab = &snap.tabs[0];
+        let ids: Vec<&str> = tab.cards.iter().map(|c| c.pane_id.as_str()).collect();
+        assert_eq!(ids, vec![a.as_str(), b.as_str()], "in the tab's pane order");
+        assert_eq!(tab.frame, ws.tabs[0].frame_rect());
     }
 
     #[test]

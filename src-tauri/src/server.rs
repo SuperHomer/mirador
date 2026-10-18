@@ -141,6 +141,25 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 crate::commands::zoom_pane(app.clone(), app.state(), pane.clone(), zoom)?;
             Ok(json!({ "paneId": pane, "zoomed": zoomed }))
         }
+        Request::View { view } => {
+            if let Some(view) = view {
+                crate::commands::set_view(app.clone(), app.state(), view);
+            }
+            let view = state.workspace.lock().unwrap().view;
+            Ok(json!({ "view": view }))
+        }
+        Request::SetCamera { x, y, zoom } => {
+            crate::commands::set_camera(app.state(), x, y, zoom)?;
+            Ok(Value::Null)
+        }
+        Request::SetCardRect { pane_id, x, y, w, h } => {
+            crate::commands::set_card_rect(app.clone(), app.state(), pane_id, x, y, w, h)?;
+            Ok(Value::Null)
+        }
+        Request::SetFramePosition { tab_id, x, y } => {
+            crate::commands::set_frame_position(app.clone(), app.state(), tab_id, x, y)?;
+            Ok(Value::Null)
+        }
         Request::SendInput { pane_id, data } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             state.pty.write(&pane, data.as_bytes())?;

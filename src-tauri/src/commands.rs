@@ -6,7 +6,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use cmux_core::osc::{OscEvent, OscScanner};
-use cmux_protocol::{Direction, NotificationDto, SplitDir, WorkspaceSnapshot};
+use cmux_protocol::{Direction, NotificationDto, SplitDir, View, WorkspaceSnapshot};
 
 use crate::{notify, runs, AppState};
 
@@ -503,6 +503,61 @@ pub fn set_split_ratios(
     {
         emit_workspace(&app);
     }
+}
+
+/// Shows the workspace as tabs or as the board.
+#[tauri::command]
+pub fn set_view(app: AppHandle, state: State<'_, AppState>, view: View) {
+    if state.workspace.lock().unwrap().set_view(view) {
+        emit_workspace(&app);
+    }
+}
+
+/// Saved with the session but never broadcast: the board moving it shows
+/// it already, and a snapshot per frame of a pan would re-render every
+/// pane.
+#[tauri::command]
+pub fn set_camera(state: State<'_, AppState>, x: f64, y: f64, zoom: f64) -> Result<(), String> {
+    let camera = cmux_core::board::camera(x, y, zoom)?;
+    state.workspace.lock().unwrap().camera = camera;
+    state
+        .session_dirty
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_card_rect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    let rect = cmux_core::board::card(x, y, w, h)?;
+    if !state.workspace.lock().unwrap().set_card_rect(&pane_id, rect) {
+        return Err(format!("no pane {pane_id}"));
+    }
+    emit_workspace(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_frame_position(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: String,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let origin = cmux_core::board::frame_origin(x, y)?;
+    if !state.workspace.lock().unwrap().set_frame_position(&tab_id, origin) {
+        return Err(format!("no tab {tab_id}"));
+    }
+    emit_workspace(&app);
+    Ok(())
 }
 
 /// Serializes attaches. The command is async so a ConPTY spawn (tens to

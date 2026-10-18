@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::Node;
+use cmux_protocol::{BoardPoint, BoardRect, Camera, Node, View};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{PaneMeta, Tab, Workspace};
@@ -21,6 +21,12 @@ pub struct SessionTab {
     pub focused: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<cmux_protocol::TeamRun>,
+    /// Absent from sessions saved before the board: the tab gets a frame
+    /// and cards from its splits when it is restored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<BoardPoint>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub cards: HashMap<String, BoardRect>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -57,6 +63,10 @@ pub struct SessionFile {
     pub tabs: Vec<SessionTab>,
     pub active_tab: String,
     pub panes: HashMap<String, SessionPane>,
+    #[serde(default)]
+    pub view: View,
+    #[serde(default)]
+    pub camera: Camera,
 }
 
 pub fn data_dir() -> PathBuf {
@@ -118,11 +128,15 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
             root: t.root.clone(),
             focused: t.focused.clone(),
             team: t.team.clone(),
+            frame: Some(t.frame),
+            cards: t.cards.clone(),
         })
         .collect();
     let pane_ids: Vec<String> = workspace.all_pane_ids();
     SessionFile {
         version: VERSION,
+        view: workspace.view,
+        camera: workspace.camera,
         active_tab: workspace.tabs[workspace.active].id.clone(),
         panes: pane_ids
             .into_iter()
@@ -169,6 +183,7 @@ pub fn load() -> Option<SessionFile> {
 /// an unusable session yields None (caller starts fresh).
 pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta>)> {
     let mut tabs = Vec::new();
+    let mut unplaced = Vec::new();
     for t in file.tabs {
         let panes = crate::layout::pane_ids(&t.root);
         if panes.is_empty() {
@@ -179,6 +194,11 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
         } else {
             panes[0].clone()
         };
+        let mut cards = t.cards;
+        crate::board::settle(&t.root, &mut cards);
+        if t.frame.is_none() {
+            unplaced.push(t.id.clone());
+        }
         tabs.push(Tab {
             id: t.id,
             title: t.title,
@@ -186,6 +206,8 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             focused,
             zoomed: None,
             team: t.team,
+            frame: t.frame.unwrap_or_default(),
+            cards,
         });
     }
     if tabs.is_empty() {
@@ -195,7 +217,23 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
         .iter()
         .position(|t| t.id == file.active_tab)
         .unwrap_or(0);
-    let workspace = Workspace { tabs, active };
+    // Frames the session did not place go in a row, in tab order, right
+    // of every frame it did.
+    let mut placed: Vec<BoardRect> = tabs
+        .iter()
+        .filter(|t| !unplaced.contains(&t.id))
+        .map(Tab::frame_rect)
+        .collect();
+    for tab in tabs.iter_mut().filter(|t| unplaced.contains(&t.id)) {
+        tab.frame = crate::board::next_frame_origin(placed.iter().copied());
+        placed.push(tab.frame_rect());
+    }
+    let workspace = Workspace {
+        tabs,
+        active,
+        view: file.view,
+        camera: file.camera,
+    };
 
     let meta = file
         .panes
@@ -335,6 +373,52 @@ mod tests {
         assert_eq!(rmeta[&b].agent_status, None);
         assert!(!rmeta[&a].agent_wall);
         assert_eq!(rmeta[&c].command.as_deref(), Some("npm test"));
+    }
+
+    #[test]
+    fn the_board_comes_back_as_it_was_left() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let (tab2, c) = ws.new_tab();
+        ws.set_view(View::Board);
+        ws.camera = Camera { x: 120.0, y: -60.0, zoom: 0.75 };
+        let card = BoardRect { x: 50.0, y: 90.0, w: 640.0, h: 400.0 };
+        ws.set_card_rect(&c, card);
+        ws.set_frame_position(&tab2, BoardPoint { x: 3000.0, y: 500.0 });
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(back.view, View::Board);
+        assert_eq!(back.camera, ws.camera);
+        assert_eq!(back.tabs[1].frame, BoardPoint { x: 3000.0, y: 500.0 });
+        assert_eq!(back.tabs[1].cards[&c], card);
+        assert_eq!(back.tabs[0].cards[&a], ws.tabs[0].cards[&a]);
+    }
+
+    #[test]
+    fn a_session_saved_before_the_board_gets_one() {
+        // What a release before the board wrote: no view, camera, frames
+        // or cards.
+        let json = r#"{
+            "version": 1,
+            "tabs": [
+                {"id": "t1", "title": null, "focused": "a",
+                 "root": {"type": "split", "dir": "row", "ratios": [0.5, 0.5],
+                          "children": [{"type": "leaf", "paneId": "a"}, {"type": "leaf", "paneId": "b"}]}},
+                {"id": "t2", "title": "two", "focused": "c",
+                 "root": {"type": "leaf", "paneId": "c"}}
+            ],
+            "active_tab": "t2",
+            "panes": {"a": {"cwd": "/tmp"}, "b": {}, "c": {}}
+        }"#;
+        let (ws, _) = restore(serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(ws.view, View::Tabs);
+        assert_eq!(ws.camera, Camera::default());
+        // Its splits as cards, its frames in a row in tab order.
+        assert_eq!(ws.tabs[0].cards, crate::board::default_cards(&ws.tabs[0].root));
+        assert_eq!(ws.tabs[0].frame, BoardPoint::default());
+        let first = ws.tabs[0].frame_rect();
+        assert_eq!(ws.tabs[1].frame.x, first.x + first.w + crate::board::FRAME_GAP);
+        assert!(ws.tabs[1].cards.contains_key("c"));
     }
 
     #[test]

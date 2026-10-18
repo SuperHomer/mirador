@@ -31,6 +31,32 @@ export interface TabSnapshot {
   zoomedPane: string | null;
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
+  /** Its frame on the board; its cards are placed relative to `x`, `y`. */
+  frame: BoardRect;
+  /** Every pane's card, in the tab's pane order. */
+  cards: CardRect[];
+}
+
+/** Tabs one at a time with their splits, or every pane on one board. */
+export type View = "tabs" | "board";
+
+/** The board point at the viewport's top-left, and screen px per unit. */
+export interface Camera {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface BoardRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** A pane's card, relative to its tab's frame. */
+export interface CardRect extends BoardRect {
+  paneId: string;
 }
 
 /** A team running in a tab (`cmux_protocol::TeamRun`). */
@@ -350,6 +376,8 @@ export interface WorkspaceSnapshot {
   agentEditorPanes: AgentEditorPaneInfo[];
   agentWallPanes: AgentWallPaneInfo[];
   agents: AgentInfo[];
+  view: View;
+  camera: Camera;
 }
 
 export interface NotificationDto {
