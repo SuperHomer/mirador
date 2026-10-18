@@ -109,6 +109,15 @@ fn open(sb: &Sandbox, pane: &str, url: &str) -> String {
     browser_pane
 }
 
+/// The URL the workspace reports for `pane`, as the URL bar shows it.
+fn reported_url(sb: &Sandbox, pane: &str) -> Option<String> {
+    sb.snapshot()["browserPanes"]
+        .as_array()?
+        .iter()
+        .find(|b| b["paneId"] == pane)
+        .and_then(|b| b["url"].as_str().map(String::from))
+}
+
 /// The snapshot id of the first element whose line contains `needle`.
 fn id_of(snapshot: &str, needle: &str) -> String {
     let line = snapshot
@@ -213,16 +222,70 @@ fn navigate_to_an_absolute_url() {
 }
 
 #[test]
+fn navigate_to_a_relative_path() {
+    e2e!();
+    let (sb, first) = launched("bnavrel");
+    let pane = open(&sb, &first, &page("/"));
+    browser(&sb, &first, &["navigate", "/page2"]);
+    browser_until(&sb, &first, &["snapshot"], "page two on the same site", |s| {
+        s.starts_with(&format!("Page two — {}", page("/page2")))
+    });
+    sb.wait_for("the reported url", LONG, || reported_url(&sb, &pane).filter(|u| *u == page("/page2")));
+}
+
+#[test]
+fn navigate_to_localhost_without_a_scheme() {
+    e2e!();
+    let (sb, first) = launched("bnavlocal");
+    open(&sb, &first, &page("/"));
+    browser(&sb, &first, &["navigate", &format!("localhost:{}/page2", serve_fixture())]);
+    let url = format!("http://localhost:{}/page2", serve_fixture());
+    browser_until(&sb, &first, &["snapshot"], "page two over http", |s| s.starts_with(&format!("Page two — {url}")));
+}
+
+#[test]
+fn open_localhost_without_a_scheme() {
+    e2e!();
+    let (sb, first) = launched("bopenlocal");
+    let pane = browser(&sb, &first, &["open", "--tab", &format!("localhost:{}", serve_fixture())]).trim().to_string();
+    let url = format!("http://localhost:{}/", serve_fixture());
+    browser_until(&sb, &first, &["snapshot", "--pane", &pane], "the form over http", |s| {
+        s.starts_with(&format!("Form — {url}"))
+    });
+    assert_eq!(reported_url(&sb, &pane), Some(url));
+}
+
+/// A navigation that fails leaves the pane on the page it was showing,
+/// and the reported URL says so — not the one that never loaded.
+#[test]
+fn a_failed_navigation_reports_the_page_still_shown() {
+    e2e!();
+    let (sb, first) = launched("bnavfail");
+    let pane = open(&sb, &first, &page("/"));
+    let closed = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    browser(&sb, &first, &["navigate", &format!("http://127.0.0.1:{closed}/")]);
+    // Nothing listens there, so the load fails at once; the page still
+    // answering says it is over.
+    browser_until(&sb, &first, &["eval", "location.href"], "the form, still", |s| s.trim() == format!("{:?}", page("/")));
+    assert_eq!(reported_url(&sb, &pane), Some(page("/")));
+}
+
+#[test]
 fn back_forward_and_reload() {
     e2e!();
     let (sb, first) = launched("bhistory");
-    open(&sb, &first, &page("/"));
-    browser(&sb, &first, &["navigate", &page("/page2")]);
-    browser_until(&sb, &first, &["snapshot"], "page two", |s| s.starts_with("Page two — "));
+    let pane = open(&sb, &first, &page("/"));
+    // Followed a link, as a person would. Deferred: a link clicked within
+    // the bridge's own call does not navigate yet.
+    browser(&sb, &first, &["eval", "setTimeout(() => document.querySelector('a').click(), 50); 0"]);
+    browser_until(&sb, &first, &["snapshot"], "page two after the link", |s| s.starts_with("Page two — "));
+    sb.wait_for("the url bar after the link", LONG, || reported_url(&sb, &pane).filter(|u| *u == page("/page2")));
     browser(&sb, &first, &["back"]);
     browser_until(&sb, &first, &["snapshot"], "the form after back", |s| s.starts_with("Form — "));
+    sb.wait_for("the url bar after back", LONG, || reported_url(&sb, &pane).filter(|u| *u == page("/")));
     browser(&sb, &first, &["forward"]);
     browser_until(&sb, &first, &["snapshot"], "page two after forward", |s| s.starts_with("Page two — "));
+    sb.wait_for("the url bar after forward", LONG, || reported_url(&sb, &pane).filter(|u| *u == page("/page2")));
 
     // A reload is a new document: what the page held is gone.
     browser(&sb, &first, &["eval", "window.marker = 1"]);

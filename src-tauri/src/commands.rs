@@ -936,6 +936,8 @@ pub fn open_browser(
     tab: bool,
     url: String,
 ) -> Result<String, String> {
+    // Before the pane exists: a URL that does not parse opens no pane.
+    let url = crate::browser::parse_url(&url, None)?.to_string();
     let new_pane = if tab {
         let (_, pane) = state.workspace.lock().unwrap().new_tab();
         pane

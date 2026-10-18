@@ -108,9 +108,12 @@ mira browser snapshot          # element list with stable ids:
 mira browser click 2           # snapshot id — or a CSS selector: "#submit"
 mira browser fill 3 "a@b.c"    # React-safe native setters
 mira browser eval "document.title"
-mira browser navigate /checkout
+mira browser navigate /checkout # a path is on the current page's site
 mira browser back|forward|reload
 ```
+
+`localhost:3000`, `127.0.0.1:8000` and other loopback hosts open over
+http without typing it; any other host without a scheme gets https.
 
 Snapshots cap at 400 elements. The page gets **no** IPC access to Mirador —
 automation results travel over an intercepted navigation, so a malicious

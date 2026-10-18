@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl};
 
 use crate::AppState;
@@ -32,13 +33,12 @@ fn label_for(pane_id: &str) -> String {
     format!("browser-{safe}")
 }
 
-fn parse_url(url: &str) -> Result<Url, String> {
-    let candidate = if url.contains("://") || url == "about:blank" {
-        url.to_string()
-    } else {
-        format!("https://{url}")
-    };
-    candidate.parse().map_err(|e| format!("bad url: {e}"))
+/// `url` as typed, made a URL against the page the pane shows now
+/// (`cmux_core::browser_url::resolve`).
+pub fn parse_url(url: &str, current: Option<&str>) -> Result<Url, String> {
+    cmux_core::browser_url::resolve(url, current)?
+        .parse()
+        .map_err(|e| format!("bad url {url}: {e}"))
 }
 
 /// Where the host webview's client area starts inside the window.
@@ -130,15 +130,22 @@ pub fn ensure_webview(
 
     let nav_app = app.clone();
     let nav_pane = pane_id.to_string();
-    let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parse_url(&url)?))
+    let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parse_url(&url, None)?))
         .initialization_script(BRIDGE_JS)
         .on_navigation(move |url| {
             if url.scheme() == "mira-result" {
                 handle_result(&nav_app, url);
                 return false;
             }
-            track_navigation(&nav_app, &nav_pane, url);
             true
+        })
+        // The page that loaded, not the one asked for: a navigation that
+        // fails (nothing listening, a bad certificate) never finishes, and
+        // the pane goes on showing — and reporting — the page before it.
+        .on_page_load(move |webview, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                track_navigation(webview.app_handle(), &nav_pane, payload.url());
+            }
         });
 
     window
@@ -233,10 +240,11 @@ pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<
 }
 
 pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String> {
-    let parsed = parse_url(url)?;
     let webview = app
         .get_webview(&label_for(pane_id))
         .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+    let current = webview.url().ok().map(String::from);
+    let parsed = parse_url(url, current.as_deref())?;
     webview.navigate(parsed).map_err(|e| e.to_string())?;
     Ok(())
 }

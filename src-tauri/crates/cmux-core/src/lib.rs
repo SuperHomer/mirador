@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod browser_url;
 pub mod builtin;
 pub mod claude_integration;
 pub mod config;
