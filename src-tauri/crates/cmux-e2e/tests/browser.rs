@@ -577,7 +577,11 @@ fn console_shows_what_the_page_logged_and_threw() {
 
     // --clear prints, then empties.
     assert!(browser(&sb, &first, &["console", "--clear"]).contains("fixture-boom"));
-    assert_eq!(browser(&sb, &first, &["console"]), "");
+    // Empty, it says so, rather than print nothing.
+    assert_eq!(browser(&sb, &first, &["console"]), "(no console output)\n");
+    assert_eq!(browser(&sb, &first, &["console", "--errors"]), "(no errors)\n");
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "console"])).unwrap();
+    assert_eq!(raw["console"], serde_json::json!([]), "--json unchanged: {raw}");
 }
 
 #[test]
@@ -601,25 +605,27 @@ fn wait_until_the_page_is_ready() {
     open(&sb, &first, &page("/"));
 
     browser(&sb, &first, &["navigate", "/late"]);
-    assert_eq!(browser(&sb, &first, &["wait", "#arrived"]), "");
+    // Met, it says what it waited for; `--json` stays `null`.
+    assert_eq!(browser(&sb, &first, &["wait", "#arrived"]), "#arrived is shown\n");
+    assert_eq!(browser(&sb, &first, &["--json", "wait", "#arrived"]).trim(), "null");
     assert!(browser(&sb, &first, &["snapshot"]).contains("<h1> \"Arrived late\""));
 
     browser(&sb, &first, &["reload"]);
-    browser(&sb, &first, &["wait", "--text", "Arrived late"]);
+    assert_eq!(browser(&sb, &first, &["wait", "--text", "Arrived late"]), "text \"Arrived late\" found\n");
     assert!(browser(&sb, &first, &["snapshot"]).contains("<h1> \"Arrived late\""));
 
     // Seen first, so the wait for it to go is on this page and not met
     // by the last one.
     browser(&sb, &first, &["reload"]);
     browser(&sb, &first, &["wait", "#spinner"]);
-    browser(&sb, &first, &["wait", "--gone", "#spinner"]);
+    assert_eq!(browser(&sb, &first, &["wait", "--gone", "#spinner"]), "#spinner is gone\n");
     assert_eq!(browser(&sb, &first, &["eval", "document.querySelector('#spinner')"]).trim(), "null");
 
     // Across a navigation the page starts by itself, a second from now.
     browser(&sb, &first, &["navigate", "/"]);
     browser(&sb, &first, &["wait", "--url", &page("/")]);
     browser(&sb, &first, &["eval", "setTimeout(() => document.querySelector('a').click(), 1000); 0"]);
-    browser(&sb, &first, &["wait", "--url", "/page2"]);
+    assert_eq!(browser(&sb, &first, &["wait", "--url", "/page2"]), "url contains /page2\n");
     assert!(browser(&sb, &first, &["snapshot"]).starts_with("Page two — "));
 }
 

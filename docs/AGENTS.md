@@ -146,11 +146,12 @@ the active tab's browser pane, else the one used last:
 - `text [selector]`: the visible text of an element, or of the page, as
   laid out; long text stops at 100,000 characters, saying how many more.
 - `wait <selector>`, `wait --text <text>`, `wait --url <part>`,
-  `wait --gone <selector>`, each with `--timeout <secs>` (default 10). On a
-  timeout it says what it waited for and what the page showed instead.
+  `wait --gone <selector>`, each with `--timeout <secs>` (default 10). Met,
+  it says so in a line ("#result is shown"); on a timeout it says what it
+  waited for and what the page showed instead.
 - `console [--errors] [--clear]`: console output, uncaught errors,
-  unhandled rejections and failed loads, oldest first. Exits 0 whatever
-  it shows.
+  unhandled rejections and failed loads, oldest first, or "(no errors)" /
+  "(no console output)". Exits 0 whatever it shows.
 - `eval <js>`: the result as JSON; a Promise is awaited.
 
 What to know:

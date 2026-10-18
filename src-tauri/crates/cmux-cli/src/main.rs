@@ -449,6 +449,9 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), String> {
     let mut quiet_output = false;
+    // What to say when a command succeeds with nothing to show, where
+    // silence could read as "did nothing": `wait` met, an empty console.
+    let mut empty_note: Option<String> = None;
     let req = match cli.command {
         Command::ListTabs => Request::ListTabs,
         Command::NewTab { command } => Request::NewTab { command },
@@ -567,7 +570,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     force,
                 })?;
                 if !wait || !resp.ok {
-                    return render(resp, cli.json, false);
+                    return render(resp, cli.json, false, None);
                 }
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&to, &pane, started, timeout);
@@ -576,7 +579,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 let started = now_ms();
                 let resp = send_request(Request::AgentFind { name: name.clone(), pane_id: own_pane() })?;
                 if !resp.ok {
-                    return render(resp, cli.json, false);
+                    return render(resp, cli.json, false, None);
                 }
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&name, &pane, started, timeout);
@@ -663,11 +666,14 @@ fn run(cli: Cli) -> Result<(), String> {
                 key,
                 target,
             },
-            BrowserAction::Console { errors, clear, pane } => Request::BrowserConsole {
-                pane_id: pane,
-                errors,
-                clear,
-            },
+            BrowserAction::Console { errors, clear, pane } => {
+                empty_note = Some(if errors { "(no errors)" } else { "(no console output)" }.into());
+                Request::BrowserConsole {
+                    pane_id: pane,
+                    errors,
+                    clear,
+                }
+            }
             BrowserAction::Wait {
                 selector,
                 text,
@@ -675,14 +681,23 @@ fn run(cli: Cli) -> Result<(), String> {
                 gone,
                 timeout,
                 pane,
-            } => Request::BrowserWait {
-                pane_id: pane,
-                selector,
-                text,
-                url,
-                gone,
-                timeout_secs: Some(timeout),
-            },
+            } => {
+                empty_note = Some(match (&selector, &text, &url, &gone) {
+                    (Some(s), ..) => format!("{s} is shown"),
+                    (_, Some(t), ..) => format!("text {t:?} found"),
+                    (_, _, Some(u), _) => format!("url contains {u}"),
+                    (.., Some(g)) => format!("{g} is gone"),
+                    _ => String::new(),
+                });
+                Request::BrowserWait {
+                    pane_id: pane,
+                    selector,
+                    text,
+                    url,
+                    gone,
+                    timeout_secs: Some(timeout),
+                }
+            }
         },
         Command::Notify {
             title,
@@ -717,7 +732,7 @@ fn run(cli: Cli) -> Result<(), String> {
     };
 
     let response = send_request(req)?;
-    render(response, cli.json, quiet_output)
+    render(response, cli.json, quiet_output, empty_note.as_deref())
 }
 
 fn parse_dir(s: &str) -> Result<SplitDir, String> {
@@ -752,7 +767,7 @@ fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     serde_json::from_str(&response).map_err(|e| format!("bad response: {e}"))
 }
 
-fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), String> {
+fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Option<&str>) -> Result<(), String> {
     if !resp.ok {
         return Err(resp.error.unwrap_or_else(|| "unknown error".into()));
     }
@@ -762,7 +777,11 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
         return Ok(());
     }
     match &data {
-        serde_json::Value::Null => {}
+        serde_json::Value::Null => {
+            if let Some(note) = empty_note {
+                println!("{note}");
+            }
+        }
         serde_json::Value::Object(map) => {
             if map.contains_key("output") {
                 // run --wait: print the command's output, adopt its exit code.
@@ -778,7 +797,13 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
             } else if map.contains_key("nodes") {
                 render_page_snapshot(&data);
             } else if let Some(entries) = map.get("console").and_then(|v| v.as_array()) {
-                render_console(entries, map["dropped"].as_u64().unwrap_or(0));
+                let dropped = map["dropped"].as_u64().unwrap_or(0);
+                if entries.is_empty() && dropped == 0 {
+                    if let Some(note) = empty_note {
+                        println!("{note}");
+                    }
+                }
+                render_console(entries, dropped);
             } else if map.contains_key("value") {
                 println!("{}", serde_json::to_string_pretty(&map["value"]).unwrap());
             } else if let Some(hosts) = map.get("hosts").and_then(|v| v.as_array()) {
