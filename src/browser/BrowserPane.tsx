@@ -135,6 +135,7 @@ export function BrowserPane({ paneId, url, focused, board, covered }: Props) {
       return;
     }
     let last: boolean | null = null;
+    let lastAt = "";
     const update = () => {
       const { camera, moving } = useBoardStore.getState();
       const ui = useUiStore.getState();
@@ -155,7 +156,15 @@ export function BrowserPane({ paneId, url, focused, board, covered }: Props) {
         !ui.paletteOpen &&
         !ui.notificationsOpen &&
         !ui.activityPane;
-      if (show === last) return;
+      // A shown card that moved — its frame dragged, a snapshot placing it
+      // anew — takes its page along now, not at the next slow poll.
+      const at = `${r.x},${r.y},${r.width},${r.height}`;
+      const moved = at !== lastAt;
+      lastAt = at;
+      if (show === last) {
+        if (show && moved) reportRef.current();
+        return;
+      }
       last = show;
       if (show) reportRef.current();
       void setBrowserVisible(paneId, show);
