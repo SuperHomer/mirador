@@ -1,4 +1,7 @@
 mod agent_editor;
+// build.rs's list; compiled here only for the test that checks it.
+#[cfg(test)]
+mod app_commands;
 mod browser;
 mod commands;
 mod config_watch;

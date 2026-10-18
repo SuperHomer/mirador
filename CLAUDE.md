@@ -247,7 +247,9 @@ Panes are a pane id plus fields on `PaneMeta`. The whole chain, in order:
    (plus `Vec::new()` in `Workspace::snapshot`, which the compiler will demand)
 3. `src-tauri/src/commands.rs` — build that Vec in `workspace_snapshot`, and
    an `open_*` command that splits or opens a tab
-4. `src-tauri/src/lib.rs` — register commands in `generate_handler!`
+4. `src-tauri/src/lib.rs` — register commands in `generate_handler!`, and
+   name each in `src/app_commands.rs`, the app's ACL manifest: one missing
+   there is refused at run time, in the app's own UI. `cargo test` names it.
 5. `src/bindings.ts` — the DTO and invoke wrappers
 6. `src/layout/SplitLayer.tsx` — dispatch on the snapshot list
 7. `src/keymap/actions.ts` — a palette entry; `src/styles.css` — styles
@@ -313,10 +315,12 @@ bridge. Anything remote that reaches it is untrusted:
   child webviews of that window. And a pane never loads the app's own
   origins (`cmux_core::pane_origin`: `tauri:`, `asset:`, `ipc:`, their
   `*.localhost` forms on Windows, a debug build's devUrl) — not typed, not
-  by the page, not by a redirect — because Tauri trusts those as *local*,
-  and its app commands skip the ACL for a local page. In v0.1.28 and
-  before, a page could send its own pane to `tauri://localhost`, and that
-  pane held every command. `tests/browser.rs` (`a_page_in_a_pane_gets_no_command_of_the_app`,
+  by the page, not by a redirect — because Tauri trusts those as *local*.
+  And the app has an ACL manifest (`src/app_commands.rs`, granted as the
+  `app-commands` set), without which Tauri never checks the ACL for the
+  app's own commands from a local page. In v0.1.28 and before, a page
+  could send its own pane to `tauri://localhost`, and that pane held every
+  command. `tests/browser.rs` (`a_page_in_a_pane_gets_no_command_of_the_app`,
   `a_pane_never_shows_the_apps_own_pages`) pins both. Automation results
   are the return value of a script Rust evaluates in the page
   (`eval_with_callback`); the page only answers. Don't give that bridge a

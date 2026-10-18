@@ -6,6 +6,7 @@
     "main"
   ],
   "permissions": [
+    "app-commands",
     "core:default",
     "opener:default",
     "notification:default",
