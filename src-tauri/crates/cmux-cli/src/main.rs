@@ -338,7 +338,9 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
-    /// Fill an input (snapshot id or CSS selector) with a value.
+    /// Fill an input (snapshot id or CSS selector) with a value: sets it at
+    /// once, with one input and change event. To type it key by key, for
+    /// pages that listen to keys, use `type`.
     Fill {
         target: String,
         value: String,
@@ -360,6 +362,30 @@ enum BrowserAction {
         pane: Option<String>,
     },
     Reload {
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Type text into an element key by key (keydown, keypress, input,
+    /// keyup per character), appending to its value — for pages that react
+    /// to keys: autocomplete, validation on keyup. `fill` sets a value at
+    /// once. No change event until the field loses focus (`press Tab`), as
+    /// in a browser. The events are synthetic (isTrusted is false), which a
+    /// few pages ignore.
+    Type {
+        target: String,
+        text: String,
+        #[arg(long)]
+        pane: Option<String>,
+    },
+    /// Press a key or chord on the focused element, or on --target: Enter,
+    /// Tab, Escape, Backspace, Delete, Space, arrows, Home, End, PageUp,
+    /// PageDown, a letter or digit, with Shift+, Control+, Alt+, Meta+
+    /// ("Shift+Tab", "Meta+A"). Enter in a form's field submits the form,
+    /// as a browser does. Synthetic events (isTrusted is false).
+    Press {
+        key: String,
+        #[arg(long)]
+        target: Option<String>,
         #[arg(long)]
         pane: Option<String>,
     },
@@ -611,6 +637,16 @@ fn run(cli: Cli) -> Result<(), String> {
             BrowserAction::Reload { pane } => Request::BrowserHistory {
                 pane_id: pane,
                 action: "reload".into(),
+            },
+            BrowserAction::Type { target, text, pane } => Request::BrowserType {
+                pane_id: pane,
+                target,
+                text,
+            },
+            BrowserAction::Press { key, target, pane } => Request::BrowserPress {
+                pane_id: pane,
+                key,
+                target,
             },
             BrowserAction::Console { errors, clear, pane } => Request::BrowserConsole {
                 pane_id: pane,

@@ -380,6 +380,22 @@ pub enum Request {
         /// "back" | "forward" | "reload"
         action: String,
     },
+    /// Focuses `target` and types `text` key by key, appending to its value.
+    BrowserType {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+        text: String,
+    },
+    /// Presses one key or chord ("Enter", "Shift+Tab", "Meta+A") on the
+    /// focused element, or on `target`.
+    BrowserPress {
+        #[serde(default)]
+        pane_id: Option<String>,
+        key: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
     /// What the page logged to its console, and its errors, since it
     /// loaded: `errors` keeps only errors; `clear` empties the log after.
     BrowserConsole {

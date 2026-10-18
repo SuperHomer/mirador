@@ -108,6 +108,10 @@ mira browser snapshot          # element list with stable ids:
 mira browser click 2           # snapshot id — or a CSS selector: "#submit"
 mira browser fill 3 "a@b.c"    # React-safe native setters; a select takes an
                                # option's value or text (snapshot lists them)
+mira browser type 3 "a@b"      # key by key, appending: for pages that react
+                               # to keys (autocomplete, validate on keyup)
+mira browser press Enter       # or Tab, Escape, Backspace, Shift+Tab, Meta+A…;
+                               # --target 3 to press on an element
 mira browser eval "document.title"
 mira browser navigate /checkout # a path is on the current page's site
 mira browser back|forward|reload
@@ -121,6 +125,11 @@ mira browser console --errors  # load, oldest first; --clear empties it
 The console log is the current page's (the last 500 entries): a
 navigation or reload starts it empty, so read it before moving on.
 `console` exits 0 whatever it shows; it only reads.
+
+`fill` sets a value at once; `type` sends keydown, keypress, input and
+keyup for each character, and `change` only when the field loses focus,
+as a browser does. Enter in a form's field submits the form. The key
+events are synthetic (`isTrusted` is false): a few pages ignore them.
 
 `localhost:3000`, `127.0.0.1:8000` and other loopback hosts open over
 http without typing it; any other host without a scheme gets https.
@@ -384,7 +393,7 @@ Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session agent_new agent_list
 agent_wall zoom_pane browser_open
 browser_navigate browser_snapshot browser_click browser_fill browser_eval
-browser_history browser_wait browser_console ssh_open ssh_hosts ssh_forward diff_open`. Requests are
+browser_history browser_wait browser_console browser_type browser_press ssh_open ssh_hosts ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

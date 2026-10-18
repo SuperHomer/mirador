@@ -34,6 +34,14 @@ Promise.reject(new Error("fixture-rejected"));
 throw new Error("fixture-boom");
 </script>"#;
 
+const KEYS: &str = r#"<!doctype html><title>Keys</title>
+<form action="/page2">
+<input id="q" name="q" onkeyup="document.getElementById('mirror').textContent = this.value">
+<input id="next">
+</form>
+<p id="mirror"></p><p id="esc"></p>
+<script>document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.getElementById("esc").textContent = "escaped"; });</script>"#;
+
 const SPAM: &str = r#"<!doctype html><title>Spam</title>
 <script>for (let i = 0; i < 5000; i++) console.log("line " + i);</script>"#;
 
@@ -84,6 +92,7 @@ fn serve_page(mut stream: std::net::TcpStream) {
         "/submit" => ("200 OK", SUBMIT),
         "/errors" => ("200 OK", ERRORS),
         "/spam" => ("200 OK", SPAM),
+        "/keys" => ("200 OK", KEYS),
         "/late" => ("200 OK", LATE),
         _ => ("404 Not Found", "not found"),
     };
@@ -375,6 +384,46 @@ fn a_pane_never_shows_the_apps_own_pages() {
         browser(&sb, &first, &["eval", &format!("location.href = {path:?}; 0")]);
         stays(&format!("a redirect from {path}"), target);
     }
+}
+
+/// Typing and keys, the way a person uses a form: the page's key handlers
+/// see each key.
+#[test]
+fn type_and_press_keys_like_a_person() {
+    e2e!();
+    let (sb, first) = launched("bkeys");
+    open(&sb, &first, &page("/keys"));
+    let text = |sb: &Sandbox, id: &str| browser(sb, &first, &["eval", &format!("document.getElementById('{id}').textContent")]);
+    let focused = |sb: &Sandbox| browser(sb, &first, &["eval", "document.activeElement.id"]);
+
+    // keyup mirrors the field into the page: it saw every key.
+    assert_eq!(browser(&sb, &first, &["type", "#q", "hello"]), "");
+    assert_eq!(text(&sb, "mirror").trim(), "\"hello\"");
+    browser(&sb, &first, &["type", "#q", " world"]);
+    assert_eq!(text(&sb, "mirror").trim(), "\"hello world\"", "type appends");
+
+    assert_eq!(browser(&sb, &first, &["press", "Backspace"]), "");
+    assert_eq!(text(&sb, "mirror").trim(), "\"hello worl\"");
+    browser(&sb, &first, &["press", "Meta+A", "--target", "#q"]);
+    browser(&sb, &first, &["press", "Backspace"]);
+    assert_eq!(text(&sb, "mirror").trim(), "\"\"", "select all, then delete it");
+
+    browser(&sb, &first, &["press", "Tab"]);
+    assert_eq!(focused(&sb).trim(), "\"next\"");
+    browser(&sb, &first, &["press", "Shift+Tab"]);
+    assert_eq!(focused(&sb).trim(), "\"q\"");
+
+    browser(&sb, &first, &["press", "Escape"]);
+    assert_eq!(text(&sb, "esc").trim(), "\"escaped\"");
+
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "press", "Hyper"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("unknown key \"Hyper\"") && err.contains("Enter, Tab, Escape"), "{err}");
+
+    // Enter in a form's field submits it, as a browser does.
+    browser(&sb, &first, &["type", "#q", "sent"]);
+    browser(&sb, &first, &["press", "Enter", "--target", "#q"]);
+    browser(&sb, &first, &["wait", "--url", "/page2?q=sent"]);
 }
 
 /// What a page logs and throws — while it loads, too — with its level and

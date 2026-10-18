@@ -201,6 +201,134 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // The keys `press` knows, by the name a person would type. Letters and
+  // digits are keys too, for chords like Meta+A.
+  const KEYS = {
+    Enter: "Enter",
+    Tab: "Tab",
+    Escape: "Escape",
+    Backspace: "Backspace",
+    Delete: "Delete",
+    Space: " ",
+    ArrowUp: "ArrowUp",
+    ArrowDown: "ArrowDown",
+    ArrowLeft: "ArrowLeft",
+    ArrowRight: "ArrowRight",
+    Home: "Home",
+    End: "End",
+    PageUp: "PageUp",
+    PageDown: "PageDown",
+  };
+  const MODIFIERS = { Shift: "shiftKey", Control: "ctrlKey", Alt: "altKey", Meta: "metaKey" };
+
+  // "Shift+Tab" → { key: "Tab", shiftKey: true }; an `error` when unknown.
+  function parseKey(name) {
+    const parts = String(name).split("+");
+    const last = parts.pop();
+    const chord = {};
+    for (const m of parts) {
+      if (!MODIFIERS[m]) return { error: "unknown modifier " + JSON.stringify(m) + "; known: " + Object.keys(MODIFIERS).join(", ") };
+      chord[MODIFIERS[m]] = true;
+    }
+    if (KEYS[last]) chord.key = KEYS[last];
+    else if (/^[A-Za-z0-9]$/.test(last)) chord.key = chord.shiftKey ? last.toUpperCase() : last.toLowerCase();
+    else
+      return {
+        error: "unknown key " + JSON.stringify(last) + "; known: " + Object.keys(KEYS).join(", ") + ", a letter or a digit, with " + Object.keys(MODIFIERS).join("+, ") + "+",
+      };
+    return chord;
+  }
+
+  // One key event, as a page sees it. Untrusted (`isTrusted` is false):
+  // the page can tell, and a few ignore such events.
+  function key(el, type, chord) {
+    const code = chord.key.length === 1 ? (/\d/.test(chord.key) ? "Digit" : /[a-z]/i.test(chord.key) ? "Key" : "") + chord.key.toUpperCase() : chord.key;
+    return el.dispatchEvent(new KeyboardEvent(type, { ...chord, code, bubbles: true, cancelable: true, composed: true }));
+  }
+
+  function isTextField(el) {
+    return (el.tagName === "INPUT" && !/^(checkbox|radio|button|submit|reset|file|image|range|color)$/i.test(el.type)) || el.tagName === "TEXTAREA";
+  }
+
+  // Edits a text field at its caret, as a key does, and says so with an
+  // `input` event — no `change`, which a browser fires on blur.
+  function edit(el, text, inputType) {
+    if (el.isContentEditable) {
+      document.execCommand(inputType === "insertText" ? "insertText" : "delete", false, text);
+      return;
+    }
+    let start = el.value.length;
+    let end = start;
+    try {
+      if (el.selectionStart !== null) [start, end] = [el.selectionStart, el.selectionEnd];
+    } catch {} // email and number inputs have no caret to read.
+    if (inputType === "deleteContentBackward" && start === end) start = Math.max(0, start - 1);
+    if (inputType === "deleteContentForward" && start === end) end = Math.min(el.value.length, end + 1);
+    const value = el.value.slice(0, start) + text + el.value.slice(end);
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
+    try {
+      el.setSelectionRange(start + text.length, start + text.length);
+    } catch {}
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType, data: text || null }));
+  }
+
+  function typeInto(el, text) {
+    if (!isTextField(el) && !el.isContentEditable)
+      return { error: "not a text field: <" + el.tagName.toLowerCase() + "> cannot be typed into (an input, textarea or contenteditable can)" };
+    el.focus();
+    for (const ch of String(text)) {
+      const chord = { key: ch === "\n" ? "Enter" : ch };
+      if (key(el, "keydown", chord)) {
+        key(el, "keypress", chord);
+        edit(el, ch, ch === "\n" ? "insertLineBreak" : "insertText");
+      }
+      key(el, "keyup", chord);
+    }
+    return { ok: true };
+  }
+
+  // What tabbing visits, in document order (a positive tabindex's order
+  // is not modelled).
+  function focusable() {
+    return Array.from(
+      document.querySelectorAll("a[href], button, input, select, textarea, [tabindex], [contenteditable=true]"),
+    ).filter((el) => !el.disabled && el.tabIndex >= 0 && visible(el));
+  }
+
+  function press(el, chord) {
+    const go = key(el, "keydown", chord);
+    const printable = chord.key.length === 1 && !chord.ctrlKey && !chord.metaKey && !chord.altKey;
+    if (go && (printable || chord.key === "Enter")) key(el, "keypress", chord);
+    if (go) {
+      const k = chord.key;
+      const command = chord.ctrlKey || chord.metaKey;
+      if (k === "Tab") {
+        const all = focusable();
+        const next = all[(all.indexOf(el) + (chord.shiftKey ? -1 : 1) + all.length) % all.length];
+        if (next) next.focus();
+      } else if (k === "Enter" && el.tagName === "TEXTAREA") {
+        edit(el, "\n", "insertLineBreak");
+      } else if (k === "Enter" && isTextField(el) && el.form) {
+        // A browser submits a form when Enter is pressed in one of its
+        // fields (implicit submission); a synthetic key event does not,
+        // so it is done here — through the submit event and validation,
+        // as the browser does.
+        el.form.requestSubmit();
+      } else if ((k === "Enter" || k === " ") && (el.tagName === "BUTTON" || el.tagName === "A")) {
+        el.click();
+      } else if ((k === "Backspace" || k === "Delete") && isTextField(el)) {
+        edit(el, "", k === "Backspace" ? "deleteContentBackward" : "deleteContentForward");
+      } else if (command && k.toLowerCase() === "a" && isTextField(el)) {
+        el.select();
+      } else if (printable && (isTextField(el) || el.isContentEditable)) {
+        edit(el, k, "insertText");
+      }
+    }
+    key(el, "keyup", chord);
+    return { ok: true };
+  }
+
   // Fills a field; an answer with `error` when it cannot.
   function fill(el, value) {
     const type = (el.type || "").toLowerCase();
@@ -246,6 +374,20 @@
       if (!el) return { error: "element not found: " + op.target };
       el.focus && el.focus();
       return fill(el, op.value);
+    } else if (op.op === "type") {
+      const el = locate(op.target);
+      if (!el) return { error: "element not found: " + op.target };
+      return typeInto(el, op.text);
+    } else if (op.op === "press") {
+      const chord = parseKey(op.key);
+      if (chord.error) return chord;
+      let el = document.activeElement || document.body;
+      if (op.target !== undefined && op.target !== null) {
+        el = locate(op.target);
+        if (!el) return { error: "element not found: " + op.target };
+        el.focus && el.focus();
+      }
+      return press(el, chord);
     } else if (op.op === "eval") {
       const value = (0, eval)(op.js);
       if (value && typeof value.then === "function")
