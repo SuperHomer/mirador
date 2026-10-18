@@ -270,6 +270,41 @@ fn eval_awaits_a_promise() {
     assert!(err.contains("nah"), "a rejection is the command's error: {err}");
 }
 
+/// An answer has a size limit, and it holds even against a page that
+/// rewrites the bridge — as it holds the time limit against one that
+/// never answers.
+#[test]
+fn a_too_large_or_endless_answer_is_refused() {
+    e2e!();
+    let (sb, first) = launched("blarge");
+    open(&sb, &first, &page("/"));
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "eval", "'x'.repeat(2000000)"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("result too large") && err.contains("max 1000000"), "{err}");
+    // Just under the limit is fine.
+    let out = browser(&sb, &first, &["eval", "'x'.repeat(900000).length"]);
+    assert_eq!(out.trim(), "900000");
+
+    // A hostile page: its own __miraRun, answering 2 MB.
+    browser(&sb, &first, &["eval", "window.__miraRun = () => 'x'.repeat(2000000); 0"]);
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "snapshot"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("result too large") && err.contains("max 1000000"), "{err}");
+
+    // And one that says "pending" forever still meets the timeout.
+    browser(&sb, &first, &["reload"]);
+    browser_until(&sb, &first, &["eval", "typeof window.__miraTake"], "a fresh bridge", |s| s.trim() == "\"function\"");
+    browser(&sb, &first, &[
+        "eval",
+        "window.__miraRun = window.__miraTake = () => JSON.stringify({ pending: true }); 0",
+    ]);
+    let started = std::time::Instant::now();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "snapshot"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("timed out"), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(15), "{:?}", started.elapsed());
+}
+
 #[test]
 fn click_a_link_or_a_submit_button_navigates() {
     e2e!();

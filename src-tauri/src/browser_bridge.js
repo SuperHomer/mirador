@@ -160,6 +160,12 @@
     return { error: "unknown op " + op.op };
   }
 
+  // Rust refuses a callback string over MAX_ANSWER_BYTES (browser.rs).
+  // That string is this JSON encoded again as a JSON string, in UTF-8 —
+  // and on macOS with every "/" escaped — so that is what is measured
+  // here, to say "too large" before sending rather than be refused.
+  const MAX_ANSWER_BYTES = 1000000;
+
   function encode(result) {
     let json;
     try {
@@ -167,7 +173,10 @@
     } catch {
       json = JSON.stringify({ error: "result not serializable" });
     }
-    return json.length > 1000000 ? JSON.stringify({ error: "result too large" }) : json;
+    const bytes = new TextEncoder().encode(JSON.stringify(json)).length + (json.match(/\//g) || []).length;
+    if (bytes > MAX_ANSWER_BYTES)
+      return JSON.stringify({ error: "result too large (" + bytes + " bytes, max " + MAX_ANSWER_BYTES + ")" });
+    return json;
   }
 
   // Rust evaluates this and reads back its return value: a JSON string,

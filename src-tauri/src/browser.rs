@@ -48,6 +48,11 @@ impl BrowserBridge {
 
 /// How long a command waits for the page to answer.
 const ANSWER_WAIT: Duration = Duration::from_secs(10);
+/// The most a page's answer may be, as the callback string carries it.
+/// The bridge holds itself to the same (`MAX_ANSWER_BYTES` in
+/// browser_bridge.js), but the page controls that script: this is the
+/// limit that holds.
+const MAX_ANSWER_BYTES: usize = 1_000_000;
 
 /// How long a command waits for a browser pane's webview to exist.
 const WEBVIEW_WAIT: Duration = Duration::from_secs(5);
@@ -273,11 +278,17 @@ pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<
     let mut answer = ask(&webview, format!("window.__miraRun ? window.__miraRun({id}, {op_json}) : null"), deadline)?;
     // A Promise: its answer is collected once it settles.
     while serde_json::from_str::<serde_json::Value>(&answer).is_ok_and(|v| v["pending"] == true) {
+        // A page can answer "pending" forever: the deadline holds for all.
+        if Instant::now() >= deadline {
+            return Err(TIMED_OUT.into());
+        }
         std::thread::sleep(Duration::from_millis(20));
         answer = ask(&webview, format!("window.__miraTake ? window.__miraTake({id}) : null"), deadline)?;
     }
     Ok(answer)
 }
+
+const TIMED_OUT: &str = "browser automation timed out: the page is busy, or still waiting on a Promise";
 
 /// Evaluates `js` in the page and gives back the JSON text it returned.
 fn ask(webview: &Webview, js: String, deadline: Instant) -> Result<String, String> {
@@ -289,7 +300,14 @@ fn ask(webview: &Webview, js: String, deadline: Instant) -> Result<String, Strin
         .map_err(|e| e.to_string())?;
     let returned = rx
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|_| "browser automation timed out: the page is busy, or still waiting on a Promise".to_string())?;
+        .map_err(|_| TIMED_OUT.to_string())?;
+    // Before parsing: a hostile page can replace `__miraRun` and answer
+    // anything, at any size. The engine has already built the string by
+    // now, so this does not bound that first allocation; it bounds the
+    // parse and everything after it, the socket and the CLI included.
+    if returned.len() > MAX_ANSWER_BYTES {
+        return Err(format!("result too large ({} bytes, max {MAX_ANSWER_BYTES})", returned.len()));
+    }
     // What the script returned, as JSON: a string, holding the answer's own
     // JSON. Anything else means the bridge was not there to call.
     serde_json::from_str::<Option<String>>(&returned)
