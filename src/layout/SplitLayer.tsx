@@ -202,6 +202,7 @@ export function SplitLayer({
                   paneId={p.paneId}
                   tabId={wall.tabId}
                   visible={shown && !board}
+                  board={board}
                 />
               ) : editor ? (
                 <AgentEditor
@@ -214,7 +215,8 @@ export function SplitLayer({
                   paneId={p.paneId}
                   url={browser.url}
                   focused={focused}
-                  live={!board}
+                  board={board}
+                  covered={!!card?.covered}
                 />
               ) : graph ? (
                 <GraphPane
@@ -241,6 +243,7 @@ export function SplitLayer({
                   paneId={p.paneId}
                   focused={focused}
                   visible={shown}
+                  onBoard={board}
                   unread={unreadPanes.includes(p.paneId)}
                   agentCommand={
                     agentPanes.find((a) => a.paneId === p.paneId)?.command

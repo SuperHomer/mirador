@@ -223,3 +223,118 @@ fn a_card_sizes_its_terminal() {
     assert!(cols_big > cols_small * 18 / 10, "{cols_big} columns at 1000px, {cols_small} at 500px");
     assert!(rows_big > rows_small * 18 / 10, "{rows_big} rows at 600px, {rows_small} at 300px");
 }
+
+/// A page for a browser card, served on an ephemeral port for the life of
+/// the test.
+fn serve_page() -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let body = "<!doctype html><title>board-page</title><p id=hi>on a card</p>";
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}/")
+}
+
+/// A browser card the board is not showing — its page hidden, off in a
+/// frame out of view — still answers every `mira browser` command: hidden
+/// is not gone. And the page is laid out at its card's size.
+#[test]
+fn a_hidden_browser_card_still_answers() {
+    e2e!();
+    let mut sb = Sandbox::new("boardbrowser");
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
+    // A new tab's frame goes right of the first, out of view.
+    let (code, out, err) = sb.mira(Some(&first), &["browser", "open", &serve_page(), "--tab"]);
+    assert_eq!(code, 0, "{err}");
+    let pane = out.trim().to_string();
+    let browser = |args: &[&str]| -> String {
+        let mut all = vec!["browser"];
+        all.extend_from_slice(args);
+        all.extend_from_slice(&["--pane", &pane]);
+        let (code, out, err) = sb.mira(None, &all);
+        assert_eq!(code, 0, "{all:?}: {err}");
+        out.trim().to_string()
+    };
+    // Out of view, so hidden — and the page knows it.
+    assert_eq!(browser(&["eval", "document.visibilityState"]), "\"hidden\"");
+    assert_eq!(browser(&["eval", "document.title"]), "\"board-page\"");
+    assert!(browser(&["text"]).contains("on a card"));
+    browser(&["click", "#hi"]);
+    let width: f64 = browser(&["eval", "innerWidth"]).parse().unwrap();
+    let card = card(&sb.snapshot(), &pane);
+    let card_width = card["w"].as_f64().unwrap();
+    assert!(width > card_width - 40.0 && width <= card_width, "page {width}px wide on a {card_width}px card");
+}
+
+/// Switching views resizes a terminal once each way — its card and its
+/// split differ in size — and never more: no storm of resizes, each of
+/// which an agent's TUI would redraw for.
+#[test]
+fn switching_views_resizes_a_terminal_once_each_way() {
+    e2e!();
+    let mut sb = Sandbox::new("boardwinch");
+    sb.launch();
+    let pane = sb.first_pane();
+    let log = sb.project.join("winch.log");
+    sb.type_into(&pane, "TRAPWINCH() { echo w >> winch.log }; echo trap-$((6*7))\r");
+    sb.wait_for("the trap", LONG, || sb.screen(&pane).filter(|s| s.lines().any(|l| l.trim() == "trap-42")));
+    let resizes = || std::fs::read_to_string(&log).map(|s| s.lines().count()).unwrap_or(0);
+    let start = resizes();
+    for round in 0..3 {
+        for (i, view) in [cmux_protocol::View::Board, cmux_protocol::View::Tabs].into_iter().enumerate() {
+            sb.call(Request::View { view: Some(view) });
+            let want = start + round * 2 + i + 1;
+            sb.wait_for("the resize", LONG, || (resizes() >= want).then_some(()));
+        }
+    }
+    // A round trip through the shell after the last switch: anything
+    // still coming has had time to arrive.
+    sb.type_into(&pane, "echo settled-$((6*7))\r");
+    sb.wait_for("the shell", LONG, || sb.screen(&pane).filter(|s| s.lines().any(|l| l.trim() == "settled-42")));
+    assert_eq!(resizes() - start, 6, "one resize per switch, six switches");
+}
+
+/// A browser card shows its page when the board can show it — at 100%,
+/// wholly in view, still — and hides it as soon as another card covers it.
+#[test]
+fn a_browser_card_shows_its_page_only_when_nothing_covers_it() {
+    e2e!();
+    let mut sb = Sandbox::new("boardshow");
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
+    let (code, out, err) = sb.mira(Some(&first), &["browser", "open", &serve_page()]);
+    assert_eq!(code, 0, "{err}");
+    let pane = out.trim().to_string();
+    let visibility = || {
+        let (_, out, _) = sb.mira(None, &["browser", "eval", "document.visibilityState", "--pane", &pane]);
+        out.trim().to_string()
+    };
+    let place = |p: &str, x: f64, y: f64| {
+        sb.call(Request::SetCardRect { pane_id: p.to_string(), x, y, w: 400.0, h: 260.0 });
+    };
+    // Both cards small and apart, in the corner the board opens on.
+    place(&first, 16.0, 340.0);
+    place(&pane, 16.0, 36.0);
+    sb.wait_for("the page to be shown", LONG, || (visibility() == "\"visible\"").then_some(()));
+    // The terminal's card moved over it: hidden.
+    place(&first, 100.0, 100.0);
+    sb.wait_for("the page to be hidden", LONG, || (visibility() == "\"hidden\"").then_some(()));
+    place(&first, 16.0, 340.0);
+    sb.wait_for("the page to be shown again", LONG, || (visibility() == "\"visible\"").then_some(()));
+    // And in the tabs view it is the app's to show, as before.
+    sb.call(Request::View { view: Some(cmux_protocol::View::Tabs) });
+    sb.wait_for("the page in its tab", LONG, || (visibility() == "\"visible\"").then_some(()));
+}

@@ -6,17 +6,25 @@ import {
   closePane,
   focusPane,
   setBrowserBounds,
+  setBrowserVisible,
 } from "../bindings";
+import { atFullSize, useBoardStore } from "../state/boardStore";
+import { useUiStore } from "../state/uiStore";
 
 interface Props {
   paneId: string;
   url: string;
   focused: boolean;
   /**
-   * The page is shown. Off on the board: a native webview cannot be scaled
-   * or clipped with the card, so the card shows what the page is instead.
+   * Drawn as a card on the board. A native webview can be neither scaled
+   * nor clipped with its card, nor drawn under another, so there the page
+   * is shown only when nothing of that is asked of it; the pane decides
+   * when, and shows what the page is meanwhile. In the tabs view the app
+   * shows and hides pages (see `App`).
    */
-  live: boolean;
+  board: boolean;
+  /** Another card overlaps this one on the board. */
+  covered: boolean;
 }
 
 /**
@@ -24,8 +32,14 @@ interface Props {
  * ours; the page itself is a native child webview that Rust positions over
  * the placeholder div, tracked via ResizeObserver.
  */
-export function BrowserPane({ paneId, url, focused, live }: Props) {
+export function BrowserPane({ paneId, url, focused, board, covered }: Props) {
   const placeholderRef = useRef<HTMLDivElement>(null);
+  // The page is on screen over the placeholder.
+  const [live, setLive] = useState(!board);
+  const boardRef = useRef(board);
+  boardRef.current = board;
+  const reportRef = useRef<() => void>(() => {});
+  const updateRef = useRef<() => void>(() => {});
   const [draft, setDraft] = useState(url);
   const [editing, setEditing] = useState(false);
 
@@ -76,8 +90,12 @@ export function BrowserPane({ paneId, url, focused, live }: Props) {
     const report = () => {
       const rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
-      void setBrowserBounds(paneId, rect.x, rect.y + inset, rect.width, rect.height);
+      // The page's size is its card's, whatever the board's zoom: a page
+      // read by `mira browser` while hidden lays out as it will be shown.
+      const zoom = boardRef.current ? (useBoardStore.getState().camera?.zoom ?? 1) : 1;
+      void setBrowserBounds(paneId, rect.x, rect.y + inset, rect.width / zoom, rect.height / zoom);
     };
+    reportRef.current = report;
 
     // Re-measured on the bounds poll: toggling fullscreen or decorations
     // changes the gap.
@@ -106,6 +124,54 @@ export function BrowserPane({ paneId, url, focused, live }: Props) {
       clearInterval(remeasure);
     };
   }, [paneId]);
+
+  // On the board: shown only at 100%, with the board still, the card wholly
+  // in view and uncovered, and no overlay open. Bounds go first: a pan or
+  // zoom moves the card without resizing it, which nothing else reports.
+  useEffect(() => {
+    const el = placeholderRef.current;
+    if (!board || !el) {
+      setLive(true);
+      return;
+    }
+    let last: boolean | null = null;
+    const update = () => {
+      const { camera, moving } = useBoardStore.getState();
+      const ui = useUiStore.getState();
+      const r = el.getBoundingClientRect();
+      const host = el.closest(".tabs-host")?.getBoundingClientRect();
+      const inView =
+        !!host &&
+        r.width > 1 &&
+        r.left >= host.left &&
+        r.top >= host.top &&
+        r.right <= host.right &&
+        r.bottom <= host.bottom;
+      const show =
+        atFullSize(camera) &&
+        !moving &&
+        !covered &&
+        inView &&
+        !ui.paletteOpen &&
+        !ui.notificationsOpen &&
+        !ui.activityPane;
+      if (show === last) return;
+      last = show;
+      if (show) reportRef.current();
+      void setBrowserVisible(paneId, show);
+      setLive(show);
+    };
+    updateRef.current = update;
+    update();
+    const unsubscribe = [useBoardStore.subscribe(update), useUiStore.subscribe(update)];
+    return () => {
+      updateRef.current = () => {};
+      unsubscribe.forEach((u) => u());
+    };
+  }, [board, covered, paneId]);
+  // A snapshot can move the card (or its frame) without a pan: look again
+  // after every render. It only measures, and acts on a change.
+  useEffect(() => updateRef.current());
 
   const commit = () => {
     setEditing(false);

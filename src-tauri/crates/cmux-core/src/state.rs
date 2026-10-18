@@ -660,7 +660,7 @@ impl Workspace {
     }
 
     pub fn snapshot(&self, meta: &HashMap<String, PaneMeta>) -> WorkspaceSnapshot {
-        WorkspaceSnapshot {
+        let mut snapshot = WorkspaceSnapshot {
             tabs: self
                 .tabs
                 .iter()
@@ -710,7 +710,7 @@ impl Workspace {
                             .filter_map(|pane| {
                                 let rect = *t.cards.get(&pane)?;
                                 let title = pane_title(meta.get(&pane));
-                                Some(CardRect { pane_id: pane, title, rect })
+                                Some(CardRect { pane_id: pane, title, covered: false, rect })
                             })
                             .collect(),
                     }
@@ -729,7 +729,24 @@ impl Workspace {
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
+        };
+        // Cards of different tabs can overlap too, once frames move.
+        let on_board: Vec<BoardRect> = snapshot
+            .tabs
+            .iter()
+            .flat_map(|t| {
+                t.cards.iter().map(move |c| BoardRect {
+                    x: t.frame.x + c.rect.x,
+                    y: t.frame.y + c.rect.y,
+                    ..c.rect
+                })
+            })
+            .collect();
+        let mut covered = board::covered(&on_board).into_iter();
+        for card in snapshot.tabs.iter_mut().flat_map(|t| t.cards.iter_mut()) {
+            card.covered = covered.next().unwrap_or(false);
         }
+        snapshot
     }
 }
 
@@ -1129,9 +1146,22 @@ mod tests {
         assert_eq!(snap.view, View::Board);
         assert_eq!(snap.camera, ws.camera);
         let tab = &snap.tabs[0];
+        assert!(tab.cards.iter().all(|c| !c.covered), "a split's cards sit apart");
         let ids: Vec<&str> = tab.cards.iter().map(|c| c.pane_id.as_str()).collect();
         assert_eq!(ids, vec![a.as_str(), b.as_str()], "in the tab's pane order");
         assert_eq!(tab.frame, ws.tabs[0].frame_rect());
+    }
+
+    #[test]
+    fn a_frame_moved_onto_another_covers_its_cards() {
+        let mut ws = Workspace::default();
+        let (second, _) = ws.new_tab();
+        let covered = |ws: &Workspace| -> Vec<bool> {
+            ws.snapshot(&HashMap::new()).tabs.iter().flat_map(|t| t.cards.iter().map(|c| c.covered)).collect()
+        };
+        assert_eq!(covered(&ws), vec![false, false]);
+        ws.set_frame_position(&second, BoardPoint { x: 100.0, y: 100.0 });
+        assert_eq!(covered(&ws), vec![true, true]);
     }
 
     #[test]

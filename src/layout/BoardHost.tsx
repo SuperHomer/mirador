@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useRef } from "react";
 import { Camera } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { fitBoard, useBoardStore } from "../state/boardStore";
+import { atFullSize, fitBoard, useBoardStore } from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -10,11 +10,6 @@ const MAX_ZOOM = 4;
 const SNAP = 0.04;
 /** Wheel line steps, in pixels (Firefox-style `deltaMode` 1). */
 const LINE_PX = 16;
-
-/** Zoom 100% (within rounding): card content takes the pointer. */
-export function atFullSize(camera: Camera | null): boolean {
-  return !camera || Math.abs(camera.zoom - 1) < 1e-3;
-}
 
 function clampZoom(zoom: number): number {
   const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
@@ -98,6 +93,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     const onGestureStart = (e: Event) => {
       e.preventDefault();
       pinching = { zoom: store().camera?.zoom ?? 1 };
+      store().hold(true);
     };
     const onGestureChange = (e: Event) => {
       e.preventDefault();
@@ -110,6 +106,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     const onGestureEnd = (e: Event) => {
       e.preventDefault();
       pinching = null;
+      store().hold(false);
     };
 
     // Capture: ctrl+wheel over a terminal must zoom the board, not reach
@@ -136,6 +133,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     const host = e.currentTarget as HTMLElement;
     host.setPointerCapture(e.pointerId);
     host.classList.add("panning");
+    useBoardStore.getState().hold(true);
     const [x0, y0] = [e.clientX, e.clientY];
     const onMove = (m: PointerEvent) =>
       useBoardStore.getState().moveTo({
@@ -145,6 +143,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       });
     const onUp = () => {
       host.classList.remove("panning");
+      useBoardStore.getState().hold(false);
       host.removeEventListener("pointermove", onMove);
       host.removeEventListener("pointerup", onUp);
       host.removeEventListener("pointercancel", onUp);

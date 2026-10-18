@@ -44,11 +44,10 @@ export default function App() {
   useKeymap();
 
   // Native child webviews float above the host webview: hide the ones on
-  // inactive tabs, and all of them while an overlay is open — or the board
-  // is shown, where cards move and scale and a native view can do neither.
+  // inactive tabs, and all of them while an overlay is open. On the board
+  // each browser card decides for itself (`BrowserPane`).
   useEffect(() => {
-    if (!snapshot) return;
-    const board = snapshot.view === "board";
+    if (!snapshot || snapshot.view === "board") return;
     const activeTab = snapshot.tabs.find((t) => t.id === snapshot.activeTab);
     // A zoomed tab shows one pane; a browser pane zoomed out of view is
     // hidden like one on another tab.
@@ -57,7 +56,7 @@ export default function App() {
         ? [activeTab.zoomedPane]
         : collectPaneIds(activeTab.root)
       : [];
-    const overlaysOpen = board || paletteOpen || notificationsOpen;
+    const overlaysOpen = paletteOpen || notificationsOpen;
     for (const b of snapshot.browserPanes) {
       const visible = !overlaysOpen && activePanes.includes(b.paneId);
       void setBrowserVisible(b.paneId, visible);

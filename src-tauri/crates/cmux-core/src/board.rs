@@ -127,6 +127,16 @@ pub fn card_beside(cards: &Cards, source: &str, dir: SplitDir) -> Option<BoardRe
     }
 }
 
+/// Whether each of `rects` (on the board, not relative to a frame) is
+/// overlapped by another.
+pub fn covered(rects: &[BoardRect]) -> Vec<bool> {
+    rects
+        .iter()
+        .enumerate()
+        .map(|(i, a)| rects.iter().enumerate().any(|(j, b)| i != j && overlaps(a, b)))
+        .collect()
+}
+
 fn is_free(cards: &Cards, rect: &BoardRect) -> bool {
     !cards.values().any(|c| overlaps(c, rect))
 }
@@ -313,6 +323,18 @@ mod tests {
         let card = card_beside(&cards, "a", SplitDir::Column).unwrap();
         assert!(is_free(&cards, &card));
         assert_eq!(card.x, 0.0);
+    }
+
+    #[test]
+    fn a_card_overlapped_by_any_other_is_covered() {
+        let rects = [
+            rect(0.0, 0.0, 100.0, 100.0),
+            rect(50.0, 50.0, 100.0, 100.0),
+            // Touching is not covering.
+            rect(150.0, 0.0, 100.0, 100.0),
+        ];
+        assert_eq!(covered(&rects), vec![true, true, false]);
+        assert!(covered(&[]).is_empty());
     }
 
     #[test]
