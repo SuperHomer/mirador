@@ -199,6 +199,19 @@ and prove a new test fails by putting the bug back once. A failing test
 keeps its sandbox (`$TMPDIR/me2e-*`) with the app's and the agents' logs.
 It cannot see the window — anything visual still needs a human.
 
+`tests/live.rs` goes further, by hand only: the release bundle, with the
+real `claude` (on `claude-haiku-5-5`) and `codex` (on `gpt-6-luna`), up to
+a two-member team handing off a job. They spend real tokens, so CI never
+runs them — they skip without `MIRA_E2E_LIVE=1`. They use your logins:
+`CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, billed to your Claude
+plan) or else `ANTHROPIC_API_KEY`, and a copy of `~/.codex/auth.json`; a
+failed run's kept sandbox is scrubbed of them.
+
+```bash
+npm run tauri build     # the bundle they run
+cd src-tauri && MIRA_E2E=1 MIRA_E2E_LIVE=1 cargo test -p cmux-e2e --test live -- --test-threads=1
+```
+
 A release binary embeds `dist` and needs no server, but it embeds whatever
 `dist` was on disk at build time — rebuild the frontend first or you are
 testing a stale bundle.
