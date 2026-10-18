@@ -19,6 +19,5 @@ When you are asked to review a step:
    `mira agent send planner "CHANGES step 2: 1. … 2. …"` — each change
    concrete, with the file and what to do instead.
 
-Your sandbox may ask once to let `mira` reach Mirador; that is expected.
 Be short. Approve what is good enough; do not ask for polish that does not
 change what the code does or how clearly it reads.
