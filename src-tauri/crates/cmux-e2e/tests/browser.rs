@@ -463,6 +463,13 @@ fn console_shows_what_the_page_logged_and_threw() {
     browser_until(&sb, &first, &["console", "--errors"], "the page's own refused call", |s| {
         s.contains("Unhandled rejection: notification.notify not allowed on window")
     });
+    // Even the very call the plugin makes on load: the page's own, later,
+    // shows — only the plugin's, once, is left out.
+    browser(&sb, &first, &["eval", "window.__TAURI_INTERNALS__.invoke('plugin:notification|is_permission_granted'); 0"]);
+    let errors = browser_until(&sb, &first, &["console", "--errors"], "the page's own permission check", |s| {
+        s.contains("Unhandled rejection: notification.is_permission_granted not allowed on window")
+    });
+    assert_eq!(errors.matches("is_permission_granted").count(), 1, "the plugin's own still left out:\n{errors}");
 
     let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "console"])).unwrap();
     assert_eq!(raw["console"][0]["level"], "log", "{raw}");

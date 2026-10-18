@@ -86,8 +86,12 @@
   // this one too, and the notification plugin's asks whether it may
   // notify on load — which this webview, rightly, is refused. Exactly
   // that refusal, as Tauri words it in a debug build (naming this
-  // webview) and in a release one (naming nothing): any other rejection
-  // is the page's.
+  // webview) and in a release one (naming nothing) — and only once per
+  // document, the plugin asking once on load: the same refusal later is
+  // the page's own call, and shows. Any other rejection is the page's.
+  // Expected only where the plugin asks at all (not on Windows, says
+  // browser.rs).
+  let ambientCheckPending = __MIRA_AMBIENT_CHECK__;
   function ourPermissionCheckRefused(message) {
     return (
       message === "Command plugin:notification|is_permission_granted not allowed by ACL" ||
@@ -99,7 +103,10 @@
 
   window.addEventListener("unhandledrejection", (e) => {
     const message = describe(e.reason);
-    if (ourPermissionCheckRefused(message)) return;
+    if (ambientCheckPending && ourPermissionCheckRefused(message)) {
+      ambientCheckPending = false;
+      return;
+    }
     keep("error", "Unhandled rejection: " + message);
   });
 
