@@ -114,7 +114,13 @@ mira browser back|forward|reload
 mira browser wait "#result"     # until shown — instead of sleeping; also
 mira browser wait --text Saved  # --url /checkout, --gone .spinner,
                                # --timeout <secs> (default 10)
+mira browser console           # what the page logged, threw and failed to
+mira browser console --errors  # load, oldest first; --clear empties it
 ```
+
+The console log is the current page's (the last 500 entries): a
+navigation or reload starts it empty, so read it before moving on.
+`console` exits 0 whatever it shows; it only reads.
 
 `localhost:3000`, `127.0.0.1:8000` and other loopback hosts open over
 http without typing it; any other host without a scheme gets https.
@@ -378,7 +384,7 @@ Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session agent_new agent_list
 agent_wall zoom_pane browser_open
 browser_navigate browser_snapshot browser_click browser_fill browser_eval
-browser_history browser_wait ssh_open ssh_hosts ssh_forward diff_open`. Requests are
+browser_history browser_wait browser_console ssh_open ssh_hosts ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

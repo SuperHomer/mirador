@@ -7,6 +7,88 @@
   window.__miraInit = true;
   let nextId = 0;
 
+  // The page's console, kept for `mira browser console`: this script runs
+  // at document start, so it sees errors thrown while the page loads. Per
+  // document — a navigation starts an empty one. The cap keeps a page that
+  // logs in a loop well under the answer's 1 MB.
+  const MAX_ENTRIES = 500;
+  const MAX_MESSAGE = 2000;
+  let entries = [];
+  let dropped = 0;
+
+  function keep(level, message, source) {
+    const entry = {
+      level,
+      message: message.length > MAX_MESSAGE ? message.slice(0, MAX_MESSAGE) + "…" : message,
+      time: new Date().toISOString().slice(11, 23),
+    };
+    if (source) entry.source = source;
+    entries.push(entry);
+    if (entries.length > MAX_ENTRIES) {
+      entries.shift();
+      dropped++;
+    }
+  }
+
+  function describe(value) {
+    if (typeof value === "string") return value;
+    if (value instanceof Error) return value.name + ": " + value.message;
+    try {
+      const json = JSON.stringify(value);
+      if (json !== undefined) return json;
+    } catch {}
+    return String(value);
+  }
+
+  // `file:line:col`, the file by its last path segment, as a person names it.
+  function sourceOf(url, line, col) {
+    if (!url) return undefined;
+    const file = url.split(/[?#]/)[0].split("/").pop() || url;
+    return line ? file + ":" + line + (col ? ":" + col : "") : file;
+  }
+
+  // Where a console call came from: the stack's frame for its caller.
+  function caller() {
+    const frame = (new Error().stack || "").split("\n")[2] || "";
+    const at = frame.match(/(\S+?):(\d+):(\d+)\)?$/);
+    return at ? sourceOf(at[1].replace(/^.*@/, ""), at[2], at[3]) : undefined;
+  }
+
+  for (const level of ["log", "info", "warn", "error", "debug"]) {
+    const original = console[level];
+    console[level] = function (...args) {
+      try {
+        keep(level, args.map(describe).join(" "), caller());
+      } catch {}
+      return original.apply(this, args);
+    };
+  }
+
+  window.addEventListener(
+    "error",
+    (e) => {
+      if (e instanceof ErrorEvent) {
+        keep("error", "Uncaught " + (e.error ? describe(e.error) : e.message), sourceOf(e.filename, e.lineno, e.colno));
+      } else if (e.target && e.target !== window) {
+        // A resource that did not load: an error that never bubbles,
+        // hence the capture phase.
+        const el = e.target;
+        const url = el.currentSrc || el.src || el.href || "";
+        keep("error", "Failed to load <" + el.tagName.toLowerCase() + "> " + url, sourceOf(url));
+      }
+    },
+    true,
+  );
+  window.addEventListener("unhandledrejection", (e) => {
+    const message = describe(e.reason);
+    // Not the page's: Tauri plugins inject their scripts into every
+    // webview, this one too, and the notification plugin's asks for a
+    // permission on load — which this webview, rightly, is refused. Only
+    // Tauri's ACL words a refusal this way.
+    if (/ not allowed on window "[^"]*", webview "browser-/.test(message)) return;
+    keep("error", "Unhandled rejection: " + message);
+  });
+
   function visible(el) {
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return false;
@@ -158,6 +240,16 @@
       return { value: value === undefined ? null : value };
     } else if (op.op === "check") {
       return check(op);
+    } else if (op.op === "console") {
+      const answer = {
+        console: op.errors ? entries.filter((e) => e.level === "error") : entries,
+        dropped,
+      };
+      if (op.clear) {
+        entries = [];
+        dropped = 0;
+      }
+      return answer;
     }
     return { error: "unknown op " + op.op };
   }

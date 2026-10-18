@@ -363,6 +363,19 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// The page's console output and errors (uncaught, unhandled
+    /// rejections, failed loads), oldest first. Per page: a navigation
+    /// starts empty. Exits 0 whatever it shows — it only reads.
+    Console {
+        /// Only errors.
+        #[arg(long)]
+        errors: bool,
+        /// Empty the log after printing it.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// Wait until the page shows a CSS selector, some text, a URL, or no
     /// longer shows a selector — instead of sleeping.
     #[command(group(clap::ArgGroup::new("until").required(true).args(["selector", "text", "url", "gone"])))]
@@ -599,6 +612,11 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: pane,
                 action: "reload".into(),
             },
+            BrowserAction::Console { errors, clear, pane } => Request::BrowserConsole {
+                pane_id: pane,
+                errors,
+                clear,
+            },
             BrowserAction::Wait {
                 selector,
                 text,
@@ -708,6 +726,8 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool) -> Result<(), Str
                 println!("{text}");
             } else if map.contains_key("nodes") {
                 render_page_snapshot(&data);
+            } else if let Some(entries) = map.get("console").and_then(|v| v.as_array()) {
+                render_console(entries, map["dropped"].as_u64().unwrap_or(0));
             } else if map.contains_key("value") {
                 println!("{}", serde_json::to_string_pretty(&map["value"]).unwrap());
             } else if let Some(hosts) = map.get("hosts").and_then(|v| v.as_array()) {
@@ -1039,6 +1059,21 @@ fn render_worktrees(items: &[serde_json::Value]) {
             name(w),
             w["path"].as_str().unwrap_or(""),
             suffix,
+        );
+    }
+}
+
+/// `error  app.js:12:5  TypeError: x is undefined`, one per entry.
+fn render_console(entries: &[serde_json::Value], dropped: u64) {
+    if dropped > 0 {
+        println!("({dropped} earlier entries dropped)");
+    }
+    for entry in entries {
+        let source = entry["source"].as_str().map(|s| format!("{s}  ")).unwrap_or_default();
+        println!(
+            "{:<5}  {source}{}",
+            entry["level"].as_str().unwrap_or(""),
+            entry["message"].as_str().unwrap_or("")
         );
     }
 }

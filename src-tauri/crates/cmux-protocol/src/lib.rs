@@ -380,6 +380,16 @@ pub enum Request {
         /// "back" | "forward" | "reload"
         action: String,
     },
+    /// What the page logged to its console, and its errors, since it
+    /// loaded: `errors` keeps only errors; `clear` empties the log after.
+    BrowserConsole {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        errors: bool,
+        #[serde(default)]
+        clear: bool,
+    },
     /// Waits until the page meets one condition: `selector` shown, `text`
     /// in its visible text, the loaded URL containing `url`, or `gone` no
     /// longer shown. Answers nothing when met; an error on timeout.

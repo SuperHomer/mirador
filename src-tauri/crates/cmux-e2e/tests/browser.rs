@@ -25,7 +25,17 @@ const SUBMIT: &str = r#"<!doctype html><title>Submit</title>
 const PAGE2: &str = "<!doctype html><title>Page two</title><h1>Second page</h1>";
 
 const ERRORS: &str = r#"<!doctype html><title>Errors</title><h1>Errors</h1>
-<script>console.log("fixture-log"); throw new Error("fixture-boom");</script>"#;
+<img src="/missing.png" alt="broken">
+<script>
+console.log("fixture-log", { a: 1 });
+console.warn("fixture-warn");
+console.error("fixture-error");
+Promise.reject(new Error("fixture-rejected"));
+throw new Error("fixture-boom");
+</script>"#;
+
+const SPAM: &str = r#"<!doctype html><title>Spam</title>
+<script>for (let i = 0; i < 5000; i++) console.log("line " + i);</script>"#;
 
 const LATE: &str = r#"<!doctype html><title>Late</title>
 <script>setTimeout(() => { document.body.innerHTML = "<h1 id='arrived'>Arrived late</h1>"; }, 1500);</script>
@@ -63,6 +73,7 @@ fn serve_page(mut stream: std::net::TcpStream) {
         "/page2" => ("200 OK", PAGE2),
         "/submit" => ("200 OK", SUBMIT),
         "/errors" => ("200 OK", ERRORS),
+        "/spam" => ("200 OK", SPAM),
         "/late" => ("200 OK", LATE),
         _ => ("404 Not Found", "not found"),
     };
@@ -269,6 +280,60 @@ fn eval_awaits_a_promise() {
     let (code, _, err) = sb.mira(Some(&first), &["browser", "eval", "Promise.reject(new Error('nah'))"]);
     assert_ne!(code, 0);
     assert!(err.contains("nah"), "a rejection is the command's error: {err}");
+}
+
+/// What a page logs and throws — while it loads, too — with its level and
+/// where it came from.
+#[test]
+fn console_shows_what_the_page_logged_and_threw() {
+    e2e!();
+    let (sb, first) = launched("bconsole");
+    open(&sb, &first, &page("/errors"));
+    // The failed image and the rejection come in on their own time.
+    let out = browser_until(&sb, &first, &["console"], "every entry", |s| {
+        s.contains("Failed to load <img>") && s.contains("Unhandled rejection")
+    });
+    for (level, at, message) in [
+        ("log  ", "errors:4:", "fixture-log {\"a\":1}"),
+        ("warn ", "errors:5:", "fixture-warn"),
+        ("error", "errors:6:", "fixture-error"),
+        ("error", "errors:8:", "Uncaught Error: fixture-boom"),
+    ] {
+        assert!(
+            out.lines().any(|l| l.starts_with(&format!("{level}  {at}")) && l.ends_with(message)),
+            "no {level} at {at} saying {message:?} in:\n{out}"
+        );
+    }
+    assert!(out.contains(&format!("error  missing.png  Failed to load <img> {}", page("/missing.png"))), "{out}");
+    assert!(out.contains("error  Unhandled rejection: Error: fixture-rejected"), "{out}");
+
+    let errors = browser(&sb, &first, &["console", "--errors"]);
+    assert_eq!(errors.lines().count(), 4, "{errors}");
+    assert!(errors.lines().all(|l| l.starts_with("error")), "{errors}");
+
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "console"])).unwrap();
+    assert_eq!(raw["console"][0]["level"], "log", "{raw}");
+    assert!(raw["console"][0]["time"].is_string(), "{raw}");
+
+    // The page's own console still works, and returns what it did.
+    assert_eq!(browser(&sb, &first, &["eval", "console.log('from-eval')"]).trim(), "null");
+    assert!(browser(&sb, &first, &["console"]).contains("from-eval"));
+
+    // --clear prints, then empties.
+    assert!(browser(&sb, &first, &["console", "--clear"]).contains("fixture-boom"));
+    assert_eq!(browser(&sb, &first, &["console"]), "");
+}
+
+#[test]
+fn console_keeps_the_last_500_entries() {
+    e2e!();
+    let (sb, first) = launched("bspam");
+    open(&sb, &first, &page("/spam"));
+    let out = browser(&sb, &first, &["console"]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.first(), Some(&"(4500 earlier entries dropped)"));
+    assert_eq!(lines.len(), 501);
+    assert!(lines[1].ends_with("line 4500") && lines[500].ends_with("line 4999"), "{out}");
 }
 
 /// `wait` instead of a sleep: for an element, for text, for a spinner to
