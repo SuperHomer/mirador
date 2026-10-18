@@ -1,7 +1,7 @@
 // Injected into every browser-pane webview. Exposes window.__miraRun for
-// the automation bridge. Results leave the page by navigating to a
-// mira-result:// URL that the Rust side intercepts and cancels — the page
-// never gets IPC access to the app.
+// the automation bridge. Rust evaluates it and reads its return value
+// (`eval_with_callback`) — the page never gets IPC access to the app, and
+// nothing navigates, so a click's own navigation is left alone.
 (function () {
   if (window.__miraInit) return;
   window.__miraInit = true;
@@ -86,56 +86,73 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  window.__miraRun = function (reqId, op) {
-    let result;
-    try {
-      if (op.op === "snapshot") {
-        result = {
-          url: location.href,
-          title: document.title,
-          nodes: collect(),
-        };
-      } else if (op.op === "click") {
-        const el = locate(op.target);
-        if (!el) result = { error: "element not found: " + op.target };
-        else {
-          el.scrollIntoView({ block: "center", inline: "center" });
-          if (el.focus) el.focus();
-          el.click();
-          result = { ok: true };
-        }
-      } else if (op.op === "fill") {
-        const el = locate(op.target);
-        if (!el) result = { error: "element not found: " + op.target };
-        else {
-          el.focus && el.focus();
-          setNativeValue(el, op.value);
-          result = { ok: true };
-        }
-      } else if (op.op === "eval") {
-        result = { value: (0, eval)(op.js) };
-      } else {
-        result = { error: "unknown op " + op.op };
-      }
-    } catch (e) {
-      result = { error: String(e) };
+  // Answers by id: a Promise's, until Rust takes it with __miraTake.
+  const answers = new Map();
+  const waiting = new Set();
+
+  function perform(op) {
+    if (op.op === "snapshot") {
+      return { url: location.href, title: document.title, nodes: collect() };
+    } else if (op.op === "click") {
+      const el = locate(op.target);
+      if (!el) return { error: "element not found: " + op.target };
+      el.scrollIntoView({ block: "center", inline: "center" });
+      if (el.focus) el.focus();
+      el.click();
+      return { ok: true };
+    } else if (op.op === "fill") {
+      const el = locate(op.target);
+      if (!el) return { error: "element not found: " + op.target };
+      el.focus && el.focus();
+      setNativeValue(el, op.value);
+      return { ok: true };
+    } else if (op.op === "eval") {
+      const value = (0, eval)(op.js);
+      if (value && typeof value.then === "function")
+        return Promise.resolve(value).then((v) => ({ value: v === undefined ? null : v }));
+      // `undefined` has no JSON: without this the key would vanish.
+      return { value: value === undefined ? null : value };
     }
+    return { error: "unknown op " + op.op };
+  }
+
+  function encode(result) {
     let json;
     try {
       json = JSON.stringify(result);
-      if (json === undefined) json = "null";
     } catch {
       json = JSON.stringify({ error: "result not serializable" });
     }
-    const b64 = btoa(unescape(encodeURIComponent(json)))
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-    // Oversized results are truncated; agents get a marker instead of junk.
-    const capped =
-      b64.length > 400000
-        ? btoa(unescape(encodeURIComponent(JSON.stringify({ error: "result too large" }))))
-        : b64;
-    location.href = "mira-result://r/" + reqId + "/" + capped;
+    return json.length > 1000000 ? JSON.stringify({ error: "result too large" }) : json;
+  }
+
+  // Rust evaluates this and reads back its return value: a JSON string,
+  // or `{"pending":true}` for a Promise still running.
+  window.__miraRun = function (id, op) {
+    let result;
+    try {
+      result = perform(op);
+    } catch (e) {
+      result = { error: String(e) };
+    }
+    if (!(result instanceof Promise)) return encode(result);
+    waiting.add(id);
+    result
+      .catch((e) => ({ error: String(e) }))
+      .then((r) => {
+        waiting.delete(id);
+        answers.set(id, encode(r));
+      });
+    return JSON.stringify({ pending: true });
+  };
+
+  window.__miraTake = function (id) {
+    if (answers.has(id)) {
+      const answer = answers.get(id);
+      answers.delete(id);
+      return answer;
+    }
+    if (waiting.has(id)) return JSON.stringify({ pending: true });
+    return JSON.stringify({ error: "the page changed before it answered" });
   };
 })();

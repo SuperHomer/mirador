@@ -343,6 +343,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 url,
             )?;
             crate::browser::wait_for_first_load(app, &pane_id)?;
+            state.browser_bridge.used(&pane_id);
             Ok(json!({ "paneId": pane_id }))
         }
         Request::GraphOpen { target, pane_id } => {
@@ -391,7 +392,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = resolve_browser_pane(&state, pane_id)?;
             let result =
                 crate::browser::execute(app, &pane, json!({ "op": "click", "target": target }))?;
-            parse_bridge_result(&pane, &result)
+            parse_bridge_result(&pane, &result)?;
+            Ok(Value::Null)
         }
         Request::BrowserFill {
             pane_id,
@@ -404,7 +406,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 &pane,
                 json!({ "op": "fill", "target": target, "value": value }),
             )?;
-            parse_bridge_result(&pane, &result)
+            parse_bridge_result(&pane, &result)?;
+            Ok(Value::Null)
         }
         Request::BrowserEval { pane_id, js } => {
             let pane = resolve_browser_pane(&state, pane_id)?;
@@ -503,29 +506,41 @@ fn resolve_pane(
     )
 }
 
-/// Default browser pane: the given one, or the first browser pane of the
-/// active tab, or any browser pane.
+/// The browser pane a command goes to: the given one; else, of the active
+/// tab's browser panes — or every tab's, when it has none — the one opened
+/// or driven last, or failing that the first in layout order.
 fn resolve_browser_pane(state: &AppState, pane_id: Option<String>) -> Result<String, String> {
-    if let Some(id) = pane_id {
-        return Ok(id);
-    }
-    let meta = state.meta.lock().unwrap();
-    let browser_panes: Vec<String> = meta
-        .iter()
-        .filter(|(_, m)| m.browser_url.is_some())
-        .map(|(id, _)| id.clone())
-        .collect();
-    drop(meta);
-    if browser_panes.is_empty() {
-        return Err("no browser pane (open one with `mira browser open <url>`)".into());
-    }
-    let ws = state.workspace.lock().unwrap();
-    let active_panes = cmux_core::layout::pane_ids(&ws.active_tab().root);
-    Ok(browser_panes
-        .iter()
-        .find(|p| active_panes.contains(p))
-        .unwrap_or(&browser_panes[0])
-        .clone())
+    let pane = match pane_id {
+        Some(id) => id,
+        None => {
+            let browsers: Vec<String> = {
+                // One lock at a time: never meta and workspace together.
+                let browser_ids: std::collections::HashSet<String> = state
+                    .meta
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, m)| m.browser_url.is_some())
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                let ws = state.workspace.lock().unwrap();
+                let is_browser = |p: &String| browser_ids.contains(p);
+                let active: Vec<String> =
+                    cmux_core::layout::pane_ids(&ws.active_tab().root).into_iter().filter(is_browser).collect();
+                if active.is_empty() {
+                    ws.tabs.iter().flat_map(|t| cmux_core::layout::pane_ids(&t.root)).filter(is_browser).collect()
+                } else {
+                    active
+                }
+            };
+            state
+                .browser_bridge
+                .latest_of(&browsers)
+                .ok_or("no browser pane (open one with `mira browser open <url>`)")?
+        }
+    };
+    state.browser_bridge.used(&pane);
+    Ok(pane)
 }
 
 /// Bridge results are JSON; error payloads become protocol errors.

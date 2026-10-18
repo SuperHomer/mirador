@@ -18,6 +18,9 @@ const FORM: &str = r#"<!doctype html><title>Form</title>
 <p id="out"></p>
 <a href="/page2">Page two</a>"#;
 
+const SUBMIT: &str = r#"<!doctype html><title>Submit</title>
+<form action="/page2"><input name="q" value="sent"><button>Send</button></form>"#;
+
 const PAGE2: &str = "<!doctype html><title>Page two</title><h1>Second page</h1>";
 
 const ERRORS: &str = r#"<!doctype html><title>Errors</title><h1>Errors</h1>
@@ -56,6 +59,7 @@ fn serve_page(mut stream: std::net::TcpStream) {
     let (status, body) = match path {
         "/" => ("200 OK", FORM),
         "/page2" => ("200 OK", PAGE2),
+        "/submit" => ("200 OK", SUBMIT),
         "/errors" => ("200 OK", ERRORS),
         "/late" => ("200 OK", LATE),
         _ => ("404 Not Found", "not found"),
@@ -189,8 +193,9 @@ fn fill_and_click_by_css_selector() {
     e2e!();
     let (sb, first) = launched("bclickcss");
     open(&sb, &first, &page("/"));
-    browser(&sb, &first, &["fill", "#name", "Grace"]);
-    browser(&sb, &first, &["click", "#go"]);
+    // Nothing to say on success: not the pane id, which read as a result.
+    assert_eq!(browser(&sb, &first, &["fill", "#name", "Grace"]), "");
+    assert_eq!(browser(&sb, &first, &["click", "#go"]), "");
     let out = browser(&sb, &first, &["eval", "document.getElementById('out').textContent"]);
     assert_eq!(out.trim(), "\"hello Grace red\"");
     let (code, _, err) = sb.mira(Some(&first), &["browser", "click", "#missing"]);
@@ -210,6 +215,38 @@ fn eval_gives_a_value_as_json() {
     let (code, _, err) = sb.mira(Some(&first), &["browser", "eval", "nope()"]);
     assert_ne!(code, 0);
     assert!(err.contains("nope"), "a thrown error is the command's error: {err}");
+    // No value is `null`, never the pane id.
+    assert_eq!(browser(&sb, &first, &["eval", "undefined"]).trim(), "null");
+    assert_eq!(browser(&sb, &first, &["eval", "window.noSuchThing"]).trim(), "null");
+}
+
+#[test]
+fn eval_awaits_a_promise() {
+    e2e!();
+    let (sb, first) = launched("bpromise");
+    open(&sb, &first, &page("/"));
+    let out = browser(&sb, &first, &["eval", "new Promise(r => setTimeout(() => r(42), 300))"]);
+    assert_eq!(out.trim(), "42");
+    let out = browser(&sb, &first, &["eval", "fetch('/page2').then(r => r.text()).then(t => t.length > 0)"]);
+    assert_eq!(out.trim(), "true");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "eval", "Promise.reject(new Error('nah'))"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("nah"), "a rejection is the command's error: {err}");
+}
+
+#[test]
+fn click_a_link_or_a_submit_button_navigates() {
+    e2e!();
+    let (sb, first) = launched("bclicknav");
+    open(&sb, &first, &page("/"));
+    browser(&sb, &first, &["click", "a"]);
+    browser_until(&sb, &first, &["snapshot"], "page two after the link", |s| s.starts_with("Page two — "));
+    browser(&sb, &first, &["navigate", "/submit"]);
+    browser_until(&sb, &first, &["snapshot"], "the form to submit", |s| s.starts_with("Submit — "));
+    browser(&sb, &first, &["click", "button"]);
+    browser_until(&sb, &first, &["snapshot"], "page two after the submit", |s| {
+        s.starts_with(&format!("Page two — {}", page("/page2?q=sent")))
+    });
 }
 
 #[test]
@@ -275,9 +312,7 @@ fn back_forward_and_reload() {
     e2e!();
     let (sb, first) = launched("bhistory");
     let pane = open(&sb, &first, &page("/"));
-    // Followed a link, as a person would. Deferred: a link clicked within
-    // the bridge's own call does not navigate yet.
-    browser(&sb, &first, &["eval", "setTimeout(() => document.querySelector('a').click(), 50); 0"]);
+    browser(&sb, &first, &["click", "a"]);
     browser_until(&sb, &first, &["snapshot"], "page two after the link", |s| s.starts_with("Page two — "));
     sb.wait_for("the url bar after the link", LONG, || reported_url(&sb, &pane).filter(|u| *u == page("/page2")));
     browser(&sb, &first, &["back"]);
@@ -312,6 +347,48 @@ fn snapshot_right_after_open() {
         let (code, _, err) = sb.mira(None, &["close-pane", &pane]);
         assert_eq!(code, 0, "{err}");
     }
+}
+
+/// Without `--pane`, a command goes to the active tab's browser pane;
+/// with none there, to the one opened or driven last — never an arbitrary
+/// one.
+#[test]
+fn a_command_without_pane_picks_a_browser_pane_predictably() {
+    e2e!();
+    let (sb, first) = launched("bchoice");
+    let split = open(&sb, &first, &page("/"));
+    let tab = browser(&sb, &first, &["open", "--tab", &page("/page2")]).trim().to_string();
+    let title = |sb: &Sandbox| browser(sb, &first, &["eval", "document.title"]).trim().to_string();
+    assert_eq!(title(&sb), "\"Page two\"", "the active tab's");
+    sb.call(cmux_protocol::Request::FocusPane { pane_id: first.clone() });
+    assert_eq!(title(&sb), "\"Form\"", "the active tab's, after switching back");
+    // A tab with no browser pane: the one driven last.
+    sb.call(cmux_protocol::Request::NewTab { command: None });
+    for _ in 0..3 {
+        assert_eq!(title(&sb), "\"Form\"", "still the one driven last");
+    }
+    browser(&sb, &first, &["snapshot", "--pane", &tab]);
+    assert_eq!(title(&sb), "\"Page two\"", "now this one, driven by --pane");
+    browser(&sb, &first, &["snapshot", "--pane", &split]);
+    assert_eq!(title(&sb), "\"Form\"");
+}
+
+/// A pane whose page never loaded says so, at once — not that the page
+/// is busy, after a timeout.
+#[test]
+fn a_page_that_never_loaded_says_so() {
+    e2e!();
+    let (sb, first) = launched("bnoload");
+    let closed = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let pane = browser(&sb, &first, &["open", "--tab", &format!("http://127.0.0.1:{closed}/")]).trim().to_string();
+    let started = std::time::Instant::now();
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "snapshot", "--pane", &pane]);
+    assert_ne!(code, 0);
+    assert!(err.contains("never loaded") && err.contains(&closed.to_string()), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(3), "at once, not after a wait: {:?}", started.elapsed());
+    // And navigating it somewhere that answers brings it back.
+    browser(&sb, &first, &["navigate", "--pane", &pane, &page("/page2")]);
+    browser_until(&sb, &first, &["snapshot", "--pane", &pane], "page two", |s| s.starts_with("Page two — "));
 }
 
 /// `navigate` returns before the page loads, yet the next command already

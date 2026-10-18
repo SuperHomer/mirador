@@ -307,9 +307,11 @@ bridge. Anything remote that reaches it is untrusted:
   carry script. They reach the page as raw IPC bytes turned into a blob.
 - **Browser panes get no IPC.** They load remote origins, and no capability
   grants those IPC (`capabilities/default.json` has no `remote` entry — keep
-  it that way). Automation results leave the page by navigating to a
-  `mira-result://` URL that Rust intercepts and cancels. Don't give that
-  bridge a shortcut back into Tauri commands.
+  it that way). Automation results are the return value of a script Rust
+  evaluates in the page (`eval_with_callback`); the page only ever answers,
+  it cannot call. Don't give that bridge a shortcut back into Tauri
+  commands. (Results once left by navigating to `mira-result://`, which
+  replaced any navigation a click had just started.)
 - Updater payloads are verified against the public key in `tauri.conf.json`,
   not against the Apple signature: the minisign key is what protects an
   in-place update. Release builds also carry a Developer ID signature and

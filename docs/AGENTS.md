@@ -116,8 +116,9 @@ mira browser back|forward|reload
 http without typing it; any other host without a scheme gets https.
 
 Snapshots cap at 400 elements. The page gets **no** IPC access to Mirador —
-automation results travel over an intercepted navigation, so a malicious
-page cannot drive your terminal.
+automation reads back what a script it runs in the page returns, so a
+malicious page cannot drive your terminal. `eval` awaits a Promise (10s at
+most).
 
 ## 5. Show the human what you changed
 
