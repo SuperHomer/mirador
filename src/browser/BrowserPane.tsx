@@ -23,8 +23,6 @@ interface Props {
    * shows and hides pages (see `App`).
    */
   board: boolean;
-  /** Another card overlaps this one on the board. */
-  covered: boolean;
 }
 
 /**
@@ -32,7 +30,7 @@ interface Props {
  * ours; the page itself is a native child webview that Rust positions over
  * the placeholder div, tracked via ResizeObserver.
  */
-export function BrowserPane({ paneId, url, focused, board, covered }: Props) {
+export function BrowserPane({ paneId, url, focused, board }: Props) {
   const placeholderRef = useRef<HTMLDivElement>(null);
   // The page is on screen over the placeholder.
   const [live, setLive] = useState(!board);
@@ -126,8 +124,9 @@ export function BrowserPane({ paneId, url, focused, board, covered }: Props) {
   }, [paneId]);
 
   // On the board: shown only at 100%, with the board still, the card wholly
-  // in view and uncovered, and no overlay open. Bounds go first: a pan or
-  // zoom moves the card without resizing it, which nothing else reports.
+  // in view, and no overlay open. (No card ever covers another: the model
+  // keeps them apart.) Bounds go first: a pan or zoom moves the card
+  // without resizing it, which nothing else reports.
   useEffect(() => {
     const el = placeholderRef.current;
     if (!board || !el) {
@@ -151,7 +150,6 @@ export function BrowserPane({ paneId, url, focused, board, covered }: Props) {
       const show =
         atFullSize(camera) &&
         !moving &&
-        !covered &&
         inView &&
         !ui.paletteOpen &&
         !ui.notificationsOpen &&
@@ -177,7 +175,7 @@ export function BrowserPane({ paneId, url, focused, board, covered }: Props) {
       updateRef.current = () => {};
       unsubscribe.forEach((u) => u());
     };
-  }, [board, covered, paneId]);
+  }, [board, paneId]);
   // A snapshot can move the card (or its frame) without a pan: look again
   // after every render. It only measures, and acts on a change.
   useEffect(() => updateRef.current());

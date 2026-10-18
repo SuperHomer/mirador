@@ -128,21 +128,13 @@ pub fn card_beside(cards: &Cards, source: &str, dir: SplitDir) -> Option<BoardRe
 }
 
 /// Whether `pane`'s card can go to `wanted`: not over another card of its
-/// frame, and not growing its frame (at `origin`) into one of
-/// `other_frames` it was clear of. A move or resize that cannot is refused,
-/// and the card stays where it was — what a drag dropped on a taken place
-/// does, snapping back. Simpler to follow than pushing the others aside,
-/// and it keeps every card uncovered, which a browser card needs to show
-/// its page.
-pub fn card_fits(cards: &Cards, pane: &str, wanted: BoardRect, origin: BoardPoint, other_frames: &[BoardRect]) -> bool {
-    if cards.iter().any(|(p, c)| p != pane && overlaps(c, &wanted)) {
-        return false;
-    }
-    let before = frame_rect(origin, cards);
-    let mut moved = cards.clone();
-    moved.insert(pane.to_string(), wanted);
-    let after = frame_rect(origin, &moved);
-    !other_frames.iter().any(|f| overlaps(f, &after) && !overlaps(f, &before))
+/// frame. A move or resize that cannot is refused, and the card stays
+/// where it was — what a drag dropped on a taken place does, snapping
+/// back. Its frame may grow; frames it then reaches are pushed clear
+/// (`push_clear`), so no card is ever covered, in its frame or another —
+/// which a browser card needs to show its page.
+pub fn card_fits(cards: &Cards, pane: &str, wanted: BoardRect) -> bool {
+    !cards.iter().any(|(p, c)| p != pane && overlaps(c, &wanted))
 }
 
 /// Whether a frame holding `cards` can move to `origin`: clear of every one
@@ -152,15 +144,24 @@ pub fn frame_fits(cards: &Cards, origin: BoardPoint, other_frames: &[BoardRect])
     !other_frames.iter().any(|f| overlaps(f, &frame))
 }
 
-/// Whether each of `rects` (on the board, not relative to a frame) is
-/// overlapped by another. Moves never cause that, but a split can: its
-/// card grows its frame into the next one.
-pub fn covered(rects: &[BoardRect]) -> Vec<bool> {
-    rects
-        .iter()
-        .enumerate()
-        .map(|(i, a)| rects.iter().enumerate().any(|(j, b)| i != j && overlaps(a, b)))
-        .collect()
+/// Keeps frames apart after `frames[grown]` grew (a split's card, a card
+/// moved or resized past its edge): a frame it now overlaps moves right,
+/// to `FRAME_GAP` past it, and in turn pushes whatever that one reaches.
+/// Only ever rightwards — frames grow right and down, and in a row is
+/// where they start — so it ends: a frame pushed lands right of what
+/// pushed it, and nothing to its left can reach it again. The grown frame
+/// itself stays put.
+pub fn push_clear(frames: &mut [BoardRect], grown: usize) {
+    let mut pushers = vec![grown];
+    while let Some(i) = pushers.pop() {
+        let pusher = frames[i];
+        for (j, frame) in frames.iter_mut().enumerate() {
+            if j != i && j != grown && overlaps(&pusher, frame) {
+                frame.x = pusher.x + pusher.w + FRAME_GAP;
+                pushers.push(j);
+            }
+        }
+    }
 }
 
 fn is_free(cards: &Cards, rect: &BoardRect) -> bool {
@@ -352,36 +353,37 @@ mod tests {
     }
 
     #[test]
-    fn a_card_overlapped_by_any_other_is_covered() {
-        let rects = [
-            rect(0.0, 0.0, 100.0, 100.0),
-            rect(50.0, 50.0, 100.0, 100.0),
-            // Touching is not covering.
-            rect(150.0, 0.0, 100.0, 100.0),
-        ];
-        assert_eq!(covered(&rects), vec![true, true, false]);
-        assert!(covered(&[]).is_empty());
-    }
-
-    #[test]
     fn a_card_goes_only_where_it_covers_nothing() {
         let mut cards = Cards::new();
         cards.insert("a".into(), rect(16.0, 36.0, 300.0, 200.0));
         cards.insert("b".into(), rect(16.0, 300.0, 300.0, 200.0));
-        let origin = BoardPoint::default();
-        // Free space in its frame: fine, and so is staying put.
-        assert!(card_fits(&cards, "a", rect(400.0, 36.0, 300.0, 200.0), origin, &[]));
-        assert!(card_fits(&cards, "a", cards["a"], origin, &[]));
+        // Free space in its frame, however far: fine, and so is staying put.
+        assert!(card_fits(&cards, "a", rect(4000.0, 36.0, 300.0, 200.0)));
+        assert!(card_fits(&cards, "a", cards["a"]));
         // Over its neighbour: refused.
-        assert!(!card_fits(&cards, "a", rect(16.0, 200.0, 300.0, 200.0), origin, &[]));
-        // Growing the frame into the next frame: refused; up to it, fine.
-        let next = [rect(800.0, 0.0, 500.0, 500.0)];
-        assert!(!card_fits(&cards, "a", rect(500.0, 36.0, 300.0, 200.0), origin, &next));
-        assert!(card_fits(&cards, "a", rect(400.0, 36.0, 300.0, 200.0), origin, &next));
-        // A frame a split already pushed into its neighbour does not lock
-        // its cards: only growing into a frame it was clear of is refused.
-        let touching = [rect(300.0, 0.0, 500.0, 500.0)];
-        assert!(card_fits(&cards, "b", rect(16.0, 520.0, 200.0, 150.0), origin, &touching));
+        assert!(!card_fits(&cards, "a", rect(16.0, 200.0, 300.0, 200.0)));
+    }
+
+    #[test]
+    fn a_grown_frame_pushes_the_frames_it_reaches() {
+        let mut frames = [
+            rect(0.0, 0.0, 1500.0, 800.0),
+            // Reached by the first, and pushes the third in turn.
+            rect(1300.0, 0.0, 1000.0, 800.0),
+            rect(2400.0, 100.0, 500.0, 500.0),
+            // Below the first, clear of it: stays.
+            rect(0.0, 900.0, 500.0, 500.0),
+        ];
+        push_clear(&mut frames, 0);
+        assert_eq!(frames[0].x, 0.0, "the grown frame stays");
+        assert_eq!(frames[1].x, 1500.0 + FRAME_GAP);
+        assert_eq!(frames[2].x, frames[1].x + 1000.0 + FRAME_GAP);
+        assert_eq!(frames[3].x, 0.0);
+        for (i, a) in frames.iter().enumerate() {
+            for b in &frames[i + 1..] {
+                assert!(!overlaps(a, b), "{a:?} {b:?}");
+            }
+        }
     }
 
     #[test]

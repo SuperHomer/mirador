@@ -59,8 +59,6 @@ export interface CardRect extends BoardRect {
   paneId: string;
   /** What the card's header says the pane is. */
   title: string;
-  /** Another card overlaps it, in this frame or another. */
-  covered: boolean;
 }
 
 /** A team running in a tab (`cmux_protocol::TeamRun`). */

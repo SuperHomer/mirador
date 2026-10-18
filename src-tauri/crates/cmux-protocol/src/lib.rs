@@ -124,10 +124,6 @@ pub struct CardRect {
     /// What the card's header says the pane is.
     #[serde(default)]
     pub title: String,
-    /// Another card overlaps it, in this frame or another: a native view
-    /// drawn over it would cover that card.
-    #[serde(default)]
-    pub covered: bool,
     #[serde(flatten)]
     pub rect: BoardRect,
 }

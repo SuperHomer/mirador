@@ -228,12 +228,18 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
         tab.frame = crate::board::next_frame_origin(placed.iter().copied());
         placed.push(tab.frame_rect());
     }
-    let workspace = Workspace {
+    let mut workspace = Workspace {
         tabs,
         active,
         view: file.view,
         camera: file.camera,
     };
+    // A session written before frames were kept apart may have them
+    // overlapping; from here on they never do.
+    let ids: Vec<String> = workspace.tabs.iter().map(|t| t.id.clone()).collect();
+    for id in ids {
+        workspace.push_frames_clear(&id);
+    }
 
     let meta = file
         .panes
@@ -392,6 +398,17 @@ mod tests {
         assert_eq!(back.tabs[1].frame, BoardPoint { x: 3000.0, y: 500.0 });
         assert_eq!(back.tabs[1].cards[&c], card);
         assert_eq!(back.tabs[0].cards[&a], ws.tabs[0].cards[&a]);
+    }
+
+    #[test]
+    fn frames_saved_overlapping_come_back_apart() {
+        let mut ws = Workspace::default();
+        ws.new_tab();
+        let mut file = capture(&ws, &HashMap::new());
+        file.tabs[1].frame = Some(BoardPoint { x: 50.0, y: 50.0 });
+        let (back, _) = restore(file).unwrap();
+        let (a, b) = (back.tabs[0].frame_rect(), back.tabs[1].frame_rect());
+        assert!(b.x >= a.x + a.w, "{a:?} {b:?}");
     }
 
     #[test]

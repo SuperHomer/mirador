@@ -501,6 +501,8 @@ impl Workspace {
                 }
                 None => board::settle(&tab.root, &mut tab.cards),
             }
+            let tab_id = tab.id.clone();
+            self.push_frames_clear(&tab_id);
             Some(new_pane)
         } else {
             None
@@ -624,17 +626,32 @@ impl Workspace {
             .collect()
     }
 
-    /// Moves or resizes `pane`'s card, if it fits there
-    /// (`board::card_fits`); its splits stay as they are. The card's place
-    /// afterwards — unchanged when refused — or None for no such pane.
+    /// Keeps frames apart after `tab_id`'s frame grew: frames it reaches
+    /// are pushed clear (`board::push_clear`). Every change that can grow a
+    /// frame ends here, so no two frames — and so no two cards — overlap.
+    pub(crate) fn push_frames_clear(&mut self, tab_id: &str) {
+        let Some(grown) = self.tabs.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
+        let mut frames: Vec<BoardRect> = self.tabs.iter().map(Tab::frame_rect).collect();
+        board::push_clear(&mut frames, grown);
+        for (tab, frame) in self.tabs.iter_mut().zip(frames) {
+            tab.frame.x = frame.x;
+        }
+    }
+
+    /// Moves or resizes `pane`'s card, if no other card of its frame is
+    /// there (`board::card_fits`); its splits stay as they are. The card's
+    /// place afterwards — unchanged when refused — or None for no such pane.
     pub fn set_card_rect(&mut self, pane: &str, rect: BoardRect) -> Option<BoardRect> {
         let tab_id = self.tab_of_pane(pane)?.id.clone();
-        let others = self.other_frames(&tab_id);
         let tab = self.tab_mut(&tab_id)?;
-        if board::card_fits(&tab.cards, pane, rect, tab.frame, &others) {
+        if board::card_fits(&tab.cards, pane, rect) {
             tab.cards.insert(pane.to_string(), rect);
         }
-        tab.cards.get(pane).copied()
+        let placed = tab.cards.get(pane).copied();
+        self.push_frames_clear(&tab_id);
+        placed
     }
 
     /// Moves a tab's frame, and its cards with it, if no other frame is
@@ -665,7 +682,7 @@ impl Workspace {
     }
 
     pub fn snapshot(&self, meta: &HashMap<String, PaneMeta>) -> WorkspaceSnapshot {
-        let mut snapshot = WorkspaceSnapshot {
+        WorkspaceSnapshot {
             tabs: self
                 .tabs
                 .iter()
@@ -715,7 +732,7 @@ impl Workspace {
                             .filter_map(|pane| {
                                 let rect = *t.cards.get(&pane)?;
                                 let title = pane_title(meta.get(&pane));
-                                Some(CardRect { pane_id: pane, title, covered: false, rect })
+                                Some(CardRect { pane_id: pane, title, rect })
                             })
                             .collect(),
                     }
@@ -734,24 +751,7 @@ impl Workspace {
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
-        };
-        // Cards of different tabs can overlap too, once frames move.
-        let on_board: Vec<BoardRect> = snapshot
-            .tabs
-            .iter()
-            .flat_map(|t| {
-                t.cards.iter().map(move |c| BoardRect {
-                    x: t.frame.x + c.rect.x,
-                    y: t.frame.y + c.rect.y,
-                    ..c.rect
-                })
-            })
-            .collect();
-        let mut covered = board::covered(&on_board).into_iter();
-        for card in snapshot.tabs.iter_mut().flat_map(|t| t.cards.iter_mut()) {
-            card.covered = covered.next().unwrap_or(false);
         }
-        snapshot
     }
 }
 
@@ -1151,7 +1151,6 @@ mod tests {
         assert_eq!(snap.view, View::Board);
         assert_eq!(snap.camera, ws.camera);
         let tab = &snap.tabs[0];
-        assert!(tab.cards.iter().all(|c| !c.covered), "a split's cards sit apart");
         let ids: Vec<&str> = tab.cards.iter().map(|c| c.pane_id.as_str()).collect();
         assert_eq!(ids, vec![a.as_str(), b.as_str()], "in the tab's pane order");
         assert_eq!(tab.frame, ws.tabs[0].frame_rect());
@@ -1178,18 +1177,86 @@ mod tests {
         assert_eq!(ws.set_frame_position("gone", at), None);
     }
 
+    /// No two frames overlap, and no two cards anywhere on the board.
+    fn assert_nothing_overlaps(ws: &Workspace) {
+        let apart = |a: &BoardRect, b: &BoardRect| {
+            a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y
+        };
+        let frames: Vec<BoardRect> = ws.tabs.iter().map(Tab::frame_rect).collect();
+        let cards: Vec<BoardRect> = ws
+            .tabs
+            .iter()
+            .flat_map(|t| t.cards.values().map(move |c| BoardRect { x: t.frame.x + c.x, y: t.frame.y + c.y, ..*c }))
+            .collect();
+        for rects in [frames, cards] {
+            for (i, a) in rects.iter().enumerate() {
+                for b in &rects[i + 1..] {
+                    assert!(apart(a, b), "{a:?} overlaps {b:?}");
+                }
+            }
+        }
+    }
+
     #[test]
-    fn a_split_growing_its_frame_into_the_next_covers_cards() {
+    fn a_split_growing_its_frame_pushes_the_next_frame_clear() {
         let mut ws = Workspace::default();
         let a = ws.focused_pane();
-        ws.new_tab();
-        let covered = |ws: &Workspace| -> Vec<bool> {
-            ws.snapshot(&HashMap::new()).tabs.iter().flat_map(|t| t.cards.iter().map(|c| c.covered)).collect()
-        };
-        assert_eq!(covered(&ws), vec![false, false]);
-        // The split's card goes right of `a`, into the second tab's frame.
+        let (_, other) = ws.new_tab();
+        // The split's card goes right of `a`, where the second frame was:
+        // that frame moves on, and its card can't be stacked on.
         ws.split_pane(&a, SplitDir::Row);
-        assert_eq!(covered(&ws), vec![false, true, true]);
+        assert_nothing_overlaps(&ws);
+        // Neither by a card of the first tab moved or resized onto it.
+        let theirs = ws.tabs[1].frame.x + ws.tabs[1].cards[&other].x;
+        let onto = BoardRect { x: theirs, y: 42.0, w: 400.0, h: 300.0 };
+        ws.set_card_rect(&a, onto);
+        assert_nothing_overlaps(&ws);
+    }
+
+    /// A tiny deterministic generator: no `rand` dependency for one test.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self, n: usize) -> usize {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % n
+        }
+    }
+
+    #[test]
+    fn nothing_on_the_board_ever_overlaps() {
+        let mut rng = Lcg(7);
+        let mut ws = Workspace::default();
+        for _ in 0..400 {
+            let panes = ws.all_pane_ids();
+            let pane = panes[rng.next(panes.len())].clone();
+            let tab = ws.tabs[rng.next(ws.tabs.len())].id.clone();
+            let n = |rng: &mut Lcg, max: usize| rng.next(max) as f64;
+            match rng.next(7) {
+                0 => {
+                    ws.new_tab();
+                }
+                1 => {
+                    ws.split_pane(&pane, SplitDir::Row);
+                }
+                2 => {
+                    ws.split_pane(&pane, SplitDir::Column);
+                }
+                3 => {
+                    ws.close_pane(&pane);
+                }
+                4 => {
+                    let rect = board::card(n(&mut rng, 3000), n(&mut rng, 2000), 160.0 + n(&mut rng, 1500), 100.0 + n(&mut rng, 1000)).unwrap();
+                    ws.set_card_rect(&pane, rect);
+                }
+                5 => {
+                    ws.set_frame_position(&tab, BoardPoint { x: n(&mut rng, 20000), y: n(&mut rng, 8000) });
+                }
+                _ => {
+                    ws.adopt_pane(&format!("held-{}", rng.next(1_000_000)));
+                }
+            }
+            assert_nothing_overlaps(&ws);
+        }
     }
 
     #[test]

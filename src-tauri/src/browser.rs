@@ -242,7 +242,7 @@ pub fn ensure_webview(
         )
         .map_err(|e| e.to_string())?;
     // On the board a page is shown only once its card can show it (at
-    // 100%, in view, uncovered), which the board decides and asks for. A
+    // 100%, in view, the board still), which the board decides and asks for. A
     // pane opened there must not appear over the board until then.
     let board = app.state::<AppState>().workspace.lock().unwrap().view == cmux_protocol::View::Board;
     if board {

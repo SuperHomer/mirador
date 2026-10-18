@@ -263,7 +263,6 @@ export function SplitLayer({
                   url={browser.url}
                   focused={focused}
                   board={board}
-                  covered={!!card?.covered}
                 />
               ) : graph ? (
                 <GraphPane
