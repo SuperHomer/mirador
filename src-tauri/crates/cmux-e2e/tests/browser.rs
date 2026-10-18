@@ -52,6 +52,10 @@ fn implicit_form(path: &str) -> Option<String> {
         "/form-button" => r#"<input id="f" name="q" value="b"><input id="g">
             <input type="hidden" name="clicked">
             <button name="via" value="button" onclick="this.form.clicked.value = 'yes'">Send</button>"#,
+        // An image is a submit button too.
+        "/form-image" => r#"<input id="f" name="q" value="i"><input id="g">
+            <input type="hidden" name="clicked">
+            <input type="image" name="img" alt="Send" onclick="this.form.clicked.value = 'yes'">"#,
         "/form-one" => r#"<input id="f" name="q" value="one">"#,
         "/form-two" => r#"<input id="f" name="q" value="two"><input id="g" name="r">"#,
         "/form-disabled" => r#"<input id="f" name="q" value="d"><button disabled>Send</button>"#,
@@ -470,6 +474,13 @@ fn enter_submits_a_form_as_a_browser_would() {
     let pane = open(&sb, &first, &page("/form-button"));
     browser(&sb, &first, &["press", "Enter", "--target", "#f"]);
     browser(&sb, &first, &["wait", "--url", "/page2?q=b&clicked=yes&via=button"]);
+
+    // Its handler ran, and it was the submitter: an image sends where it
+    // was clicked.
+    browser(&sb, &first, &["navigate", "/form-image"]);
+    browser(&sb, &first, &["wait", "#f"]);
+    browser(&sb, &first, &["press", "Enter", "--target", "#f"]);
+    browser(&sb, &first, &["wait", "--url", "/page2?q=i&clicked=yes&img.x=0&img.y=0"]);
 
     browser(&sb, &first, &["navigate", "/form-one"]);
     browser(&sb, &first, &["wait", "#f"]);

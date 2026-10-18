@@ -304,7 +304,12 @@
   // submission at all. With no submit button, the form submits itself
   // unless more than one of its fields blocks implicit submission.
   function implicitSubmit(form) {
-    const button = Array.from(form.elements).find((e) => e.type === "submit");
+    // Not `form.elements`, which leaves out `<input type=image>` — a
+    // submit button all the same. Tree order, the form's own (`form=`
+    // included).
+    const button = Array.from(document.querySelectorAll("button, input")).find(
+      (e) => e.form === form && (e.type === "submit" || e.type === "image"),
+    );
     if (button) {
       if (!button.disabled) button.click();
       return;
