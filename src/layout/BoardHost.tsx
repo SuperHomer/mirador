@@ -1,0 +1,195 @@
+import { ReactNode, useEffect, useRef } from "react";
+import { Camera } from "../bindings";
+import { useWorkspaceStore } from "../state/workspaceStore";
+import { fitBoard, useBoardStore } from "../state/boardStore";
+
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 4;
+/** Zooming this close to 100% lands on it: 100% is where cards take the
+ *  pointer, and a pinch rarely stops exactly there. */
+const SNAP = 0.04;
+/** Wheel line steps, in pixels (Firefox-style `deltaMode` 1). */
+const LINE_PX = 16;
+
+/** Zoom 100% (within rounding): card content takes the pointer. */
+export function atFullSize(camera: Camera | null): boolean {
+  return !camera || Math.abs(camera.zoom - 1) < 1e-3;
+}
+
+function clampZoom(zoom: number): number {
+  const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+  return Math.abs(z - 1) < SNAP ? 1 : z;
+}
+
+/** `camera` zoomed to `zoom`, keeping the board point under (px, py) there. */
+function zoomAround(camera: Camera, zoom: number, px: number, py: number): Camera {
+  const bx = camera.x + px / camera.zoom;
+  const by = camera.y + py / camera.zoom;
+  return { x: bx - px / zoom, y: by - py / zoom, zoom };
+}
+
+/**
+ * The host every tab's layer lives in. In the tabs view it is inert: the
+ * canvas fills it untransformed and the active tab's layer covers it. On
+ * the board, the canvas is the board itself — one transform for the
+ * camera — and each tab's layer is its frame on it. The layers are the
+ * same elements in both views, so switching remounts no pane.
+ *
+ * Safari-style `gesture*` events are what WKWebView sends for a trackpad
+ * pinch; Chromium-based webviews send ctrl+wheel instead. Both zoom.
+ */
+export function BoardHost({ board, children }: { board: boolean; children: ReactNode }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const camera = useBoardStore((s) => s.camera);
+
+  // The saved camera, once; from then on the board owns it.
+  useEffect(() => {
+    const saved = useWorkspaceStore.getState().snapshot?.camera;
+    if (saved && !useBoardStore.getState().camera) useBoardStore.getState().moveTo(saved);
+  }, []);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const observer = new ResizeObserver(() =>
+      useBoardStore.getState().setViewport(host.clientWidth, host.clientHeight),
+    );
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !board) return;
+    const store = useBoardStore.getState;
+    const local = (e: { clientX: number; clientY: number }) => {
+      const r = host.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top] as const;
+    };
+
+    let pinching: { zoom: number } | null = null;
+
+    const onWheel = (e: WheelEvent) => {
+      const cam = store().camera;
+      if (!cam) return;
+      if (e.ctrlKey) {
+        // A pinch reported both ways must not zoom twice.
+        e.preventDefault();
+        e.stopPropagation();
+        if (pinching) return;
+        const [px, py] = local(e);
+        const step = e.deltaMode === 1 ? e.deltaY * LINE_PX : e.deltaY;
+        store().moveTo(zoomAround(cam, clampZoom(cam.zoom * Math.exp(-step * 0.01)), px, py));
+        return;
+      }
+      // At 100% a card's content scrolls itself (a terminal's scrollback).
+      const inCard = (e.target as Element).closest?.(".pane-body");
+      if (inCard && atFullSize(cam)) return;
+      e.preventDefault();
+      const scale = e.deltaMode === 1 ? LINE_PX : 1;
+      store().moveTo({
+        ...cam,
+        x: cam.x + (e.deltaX * scale) / cam.zoom,
+        y: cam.y + (e.deltaY * scale) / cam.zoom,
+      });
+    };
+
+    type GestureEvent = UIEvent & { scale: number; clientX: number; clientY: number };
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      pinching = { zoom: store().camera?.zoom ?? 1 };
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const cam = store().camera;
+      if (!cam || !pinching) return;
+      const g = e as GestureEvent;
+      const [px, py] = local(g);
+      store().moveTo(zoomAround(cam, clampZoom(pinching.zoom * g.scale), px, py));
+    };
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault();
+      pinching = null;
+    };
+
+    // Capture: ctrl+wheel over a terminal must zoom the board, not reach
+    // xterm. Not passive, to stop the page scrolling or zooming itself.
+    host.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    host.addEventListener("gesturestart", onGestureStart, { capture: true });
+    host.addEventListener("gesturechange", onGestureChange, { capture: true });
+    host.addEventListener("gestureend", onGestureEnd, { capture: true });
+    return () => {
+      host.removeEventListener("wheel", onWheel, { capture: true });
+      host.removeEventListener("gesturestart", onGestureStart, { capture: true });
+      host.removeEventListener("gesturechange", onGestureChange, { capture: true });
+      host.removeEventListener("gestureend", onGestureEnd, { capture: true });
+    };
+  }, [board]);
+
+  // Dragging empty board — anywhere outside a card — pans.
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!board || e.button !== 0) return;
+    if ((e.target as Element).closest(".pane-slot")) return;
+    const start = useBoardStore.getState().camera;
+    if (!start) return;
+    e.preventDefault();
+    const host = e.currentTarget as HTMLElement;
+    host.setPointerCapture(e.pointerId);
+    host.classList.add("panning");
+    const [x0, y0] = [e.clientX, e.clientY];
+    const onMove = (m: PointerEvent) =>
+      useBoardStore.getState().moveTo({
+        ...start,
+        x: start.x - (m.clientX - x0) / start.zoom,
+        y: start.y - (m.clientY - y0) / start.zoom,
+      });
+    const onUp = () => {
+      host.classList.remove("panning");
+      host.removeEventListener("pointermove", onMove);
+      host.removeEventListener("pointerup", onUp);
+      host.removeEventListener("pointercancel", onUp);
+    };
+    host.addEventListener("pointermove", onMove);
+    host.addEventListener("pointerup", onUp);
+    host.addEventListener("pointercancel", onUp);
+  };
+
+  const cam = camera ?? { x: 0, y: 0, zoom: 1 };
+  const grid = 24 * cam.zoom;
+  return (
+    <div
+      ref={hostRef}
+      className={`tabs-host${board ? " board" : ""}${board && !atFullSize(camera) ? " overview" : ""}`}
+      style={
+        board
+          ? {
+              backgroundSize: `${grid}px ${grid}px`,
+              backgroundPosition: `${-cam.x * cam.zoom}px ${-cam.y * cam.zoom}px`,
+            }
+          : undefined
+      }
+      onPointerDown={onPointerDown}
+    >
+      <div
+        className="board-canvas"
+        style={
+          board
+            ? {
+                transform: `translate(${-cam.x * cam.zoom}px, ${-cam.y * cam.zoom}px) scale(${cam.zoom})`,
+              }
+            : undefined
+        }
+      >
+        {children}
+      </div>
+      {board && (
+        <div className="board-controls">
+          <span className="board-zoom">{Math.round(cam.zoom * 100)}%</span>
+          <button title="Show the whole board" onClick={fitBoard}>
+            Fit
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

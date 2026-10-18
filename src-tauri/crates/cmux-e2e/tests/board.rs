@@ -145,9 +145,81 @@ fn the_board_comes_back_as_it_was_left() {
     assert_eq!(after["camera"], before["camera"]);
     assert_eq!(after["tabs"][0]["frame"], before["tabs"][0]["frame"]);
     assert_eq!(after["tabs"][0]["frame"]["x"], -300.0);
-    assert_eq!(card(&after, &second), serde_json::json!({ "paneId": second, "x": 900.0, "y": 600.0, "w": 420.0, "h": 260.0 }));
+    let moved = card(&after, &second);
+    assert_eq!((&moved["x"], &moved["y"], &moved["w"], &moved["h"]), (&900.0.into(), &600.0.into(), &420.0.into(), &260.0.into()));
     assert_eq!(card(&after, &first), card(&before, &first));
     // The splits were never touched by any of it.
     assert_eq!(after["tabs"][0]["root"], before["tabs"][0]["root"]);
     assert_panes_answer(&sb, &[first, second]);
+}
+
+/// A terminal shows the same thing after a trip to the board and back: the
+/// board draws the same xterm, never a new one, so nothing is lost or
+/// replayed. (Its size changes on the way, and it reflows, so only lines
+/// that fit either width are compared.)
+#[test]
+fn switching_views_keeps_what_a_terminal_shows() {
+    e2e!();
+    let mut sb = Sandbox::new("boardkeepscreen");
+    sb.launch();
+    let first = sb.first_pane();
+    let other = sb.call(Request::NewTab { command: None })["paneId"].as_str().unwrap().to_string();
+    for (pane, word) in [(&first, "alpha"), (&other, "beta")] {
+        sb.wait_for("the pane to take input", LONG, || sb.screen(pane));
+        sb.type_into(pane, &format!("for i in 1 2 3; do echo {word}-$((i*7)); done\r"));
+        let last = format!("{word}-21");
+        sb.wait_for("the shell's output", LONG, || sb.screen(pane).filter(|s| s.lines().any(|l| l.trim() == last)));
+    }
+    let lines = |pane: &str| -> Vec<String> {
+        let text = sb.request(Request::ReadScreen { pane_id: Some(pane.to_string()), lines: Some(200) }).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        text.lines().filter(|l| l.contains("alpha-") || l.contains("beta-")).map(|l| l.trim().to_string()).collect()
+    };
+    let before = (lines(&first), lines(&other));
+    assert_eq!(before.0.len(), 4, "the command line and three answers: {:?}", before.0);
+
+    sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
+    // Both terminals are drawn on the board, the other tab's included.
+    sb.wait_for("the board to settle", LONG, || (lines(&first) == before.0 && lines(&other) == before.1).then_some(()));
+    sb.call(Request::View { view: Some(cmux_protocol::View::Tabs) });
+    sb.wait_for("the tabs to settle", LONG, || (lines(&first) == before.0 && lines(&other) == before.1).then_some(()));
+    // And they still take input after the round trip.
+    assert_panes_answer(&sb, &[first, other]);
+}
+
+/// On the board a terminal is as big as its card: its PTY follows the
+/// card's size, not the split it has in its tab.
+#[test]
+fn a_card_sizes_its_terminal() {
+    e2e!();
+    let mut sb = Sandbox::new("boardsize");
+    sb.launch();
+    let pane = sb.first_pane();
+    let stty = || -> Option<(u32, u32)> {
+        sb.type_into(&pane, "clear; stty size\r");
+        let screen = sb.screen(&pane)?;
+        let line = screen
+            .lines()
+            .find(|l| l.split_whitespace().count() == 2 && l.chars().all(|c| c.is_ascii_digit() || c == ' '))?;
+        let mut it = line.split_whitespace().map(|n| n.parse::<u32>().unwrap());
+        Some((it.next()?, it.next()?))
+    };
+    // The terminal's size once it differs from `from`: the card is laid
+    // out, xterm refits, and the shell hears of it.
+    let size = |w: f64, h: f64, from: Option<(u32, u32)>| -> (u32, u32) {
+        sb.call(Request::SetCardRect { pane_id: pane.clone(), x: 16.0, y: 36.0, w, h });
+        sb.wait_for("the terminal to take the card's size", LONG, || stty().filter(|s| Some(*s) != from))
+    };
+    // Each size is read once it has changed from the one before, so a
+    // reading never belongs to the previous layout: the tab's, then the
+    // card's default, then each card size asked for.
+    let in_tab = sb.wait_for("the terminal's size", LONG, stty);
+    sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
+    let default_card = sb.wait_for("the board's size", LONG, || stty().filter(|s| *s != in_tab));
+    let (rows_big, cols_big) = size(1000.0, 600.0, Some(default_card));
+    let (rows_small, cols_small) = size(500.0, 300.0, Some((rows_big, cols_big)));
+    assert!(cols_big > cols_small * 18 / 10, "{cols_big} columns at 1000px, {cols_small} at 500px");
+    assert!(rows_big > rows_small * 18 / 10, "{rows_big} rows at 600px, {rows_small} at 300px");
 }

@@ -389,7 +389,172 @@ body,
 
 .pane-slot {
   position: absolute;
-  padding: 3px;
+}
+
+/* What a pane draws in: the slot less a 3px margin, and on the board less
+   the card's header too. Always there, in both views, so that switching
+   views gives a pane no new parent — a new parent would remount it. */
+.pane-body {
+  position: absolute;
+  inset: 3px;
+}
+
+/* ---------- Board ---------- */
+
+.tabs-host.board {
+  overflow: hidden;
+  cursor: grab;
+  background-color: var(--bg-alt);
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--muted) 35%, transparent) 1px,
+    transparent 1.5px
+  );
+}
+
+.tabs-host.board.panning {
+  cursor: grabbing;
+}
+
+.board-canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+/* A tab's frame: the region its cards sit in. */
+.tabs-host.board .tab-layer {
+  right: auto;
+  bottom: auto;
+  border: 1px solid var(--surface);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.tabs-host.board .tab-layer.current {
+  border-color: var(--muted);
+}
+
+.frame-label {
+  position: absolute;
+  top: 8px;
+  left: 16px;
+  right: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.tabs-host.board .tab-layer.current .frame-label {
+  color: var(--text);
+}
+
+.pane-slot.card {
+  cursor: default;
+}
+
+.pane-slot.card .pane-body {
+  top: 27px;
+}
+
+.card-header {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  right: 3px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--subtext);
+  font-size: 11.5px;
+  user-select: none;
+}
+
+.card-header.focused {
+  color: var(--text);
+  background: color-mix(in srgb, var(--muted) 45%, var(--surface));
+}
+
+.card-header.unread {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.card-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent);
+}
+
+.card-header.needsYou .card-dot {
+  background: #fab387;
+}
+
+.card-header.idle .card-dot {
+  background: #a6e3a1;
+}
+
+.card-header.working .card-dot {
+  animation: wall-pulse 1.4s ease-in-out infinite;
+}
+
+/* Away from 100%, a card is something to look at: its content takes no
+   pointer (xterm maps the pointer wrongly under a scale), and a click
+   lands on the card, focusing it. The keyboard still types into it. */
+.tabs-host.board.overview .pane-body {
+  pointer-events: none;
+}
+
+.board-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--subtext);
+  font-size: 12px;
+  cursor: default;
+}
+
+.board-controls button {
+  border: none;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.board-controls button:hover {
+  background: var(--muted);
+}
+
+.browser-still {
+  padding: 16px;
+  color: var(--subtext);
+  font-size: 13px;
+  word-break: break-all;
 }
 
 /* Every pane draws its edge: with only the focused one outlined, panes on

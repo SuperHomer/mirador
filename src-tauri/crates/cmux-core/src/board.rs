@@ -38,15 +38,30 @@ pub type Cards = HashMap<String, BoardRect>;
 
 /// Cards for panes that have none yet: the tab's splits scaled to
 /// `TAB_WIDTH` × `TAB_HEIGHT`, so the board starts out looking like the tab.
+/// A tab split so finely that a pane would come out smaller than a card
+/// can be is laid out larger instead, keeping its proportions: shrinking
+/// only the small cards would make them overlap their neighbours.
 pub fn default_cards(root: &Node) -> Cards {
-    layout::leaf_rects(root)
+    let rects = layout::leaf_rects(root);
+    let need = |min: f64, share: f32, size: f64| (min + CARD_GAP) / (share as f64 * size);
+    let width = rects
+        .iter()
+        .map(|(_, r)| need(MIN_CARD_WIDTH, r.w, TAB_WIDTH))
+        .fold(1.0, f64::max)
+        * TAB_WIDTH;
+    let height = rects
+        .iter()
+        .map(|(_, r)| need(MIN_CARD_HEIGHT, r.h, TAB_HEIGHT))
+        .fold(1.0, f64::max)
+        * TAB_HEIGHT;
+    rects
         .into_iter()
         .map(|(pane, r)| {
             let card = BoardRect {
-                x: FRAME_PADDING + r.x as f64 * TAB_WIDTH + CARD_GAP / 2.0,
-                y: FRAME_HEADER + r.y as f64 * TAB_HEIGHT + CARD_GAP / 2.0,
-                w: r.w as f64 * TAB_WIDTH - CARD_GAP,
-                h: r.h as f64 * TAB_HEIGHT - CARD_GAP,
+                x: FRAME_PADDING + r.x as f64 * width + CARD_GAP / 2.0,
+                y: FRAME_HEADER + r.y as f64 * height + CARD_GAP / 2.0,
+                w: r.w as f64 * width - CARD_GAP,
+                h: r.h as f64 * height - CARD_GAP,
             };
             (pane, card)
         })
@@ -147,6 +162,37 @@ pub fn settle(root: &Node, cards: &mut Cards) {
             ..size
         };
         cards.insert(pane, card);
+    }
+}
+
+/// Room left around the frames when the board is fitted to the window.
+const FIT_MARGIN: f64 = 40.0;
+
+/// The camera that shows every frame, centred in a `width` × `height`
+/// viewport. Never past 100%: a single small tab is shown at its size,
+/// not blown up.
+pub fn fit(frames: impl IntoIterator<Item = BoardRect>, width: f64, height: f64) -> Camera {
+    let frames: Vec<BoardRect> = frames.into_iter().collect();
+    let Some(left) = frames.iter().map(|f| f.x).reduce(f64::min) else {
+        return Camera::default();
+    };
+    let top = frames.iter().map(|f| f.y).fold(f64::INFINITY, f64::min);
+    let right = frames.iter().map(|f| f.x + f.w).fold(f64::NEG_INFINITY, f64::max);
+    let bottom = frames.iter().map(|f| f.y + f.h).fold(f64::NEG_INFINITY, f64::max);
+    let bounds = BoardRect { x: left, y: top, w: right - left, h: bottom - top };
+    let zoom = ((width - 2.0 * FIT_MARGIN) / bounds.w)
+        .min((height - 2.0 * FIT_MARGIN) / bounds.h)
+        .clamp(MIN_ZOOM, 1.0);
+    centre_on(bounds, width, height, zoom)
+}
+
+/// The camera that puts `rect`'s centre in the middle of a `width` ×
+/// `height` viewport, at `zoom`.
+pub fn centre_on(rect: BoardRect, width: f64, height: f64, zoom: f64) -> Camera {
+    Camera {
+        x: rect.x + rect.w / 2.0 - width / zoom / 2.0,
+        y: rect.y + rect.h / 2.0 - height / zoom / 2.0,
+        zoom,
     }
 }
 
@@ -287,6 +333,43 @@ mod tests {
         assert_eq!(cards.len(), 2);
         assert_eq!(cards["a"], a);
         assert!(!overlaps(&cards["a"], &cards["b"]));
+    }
+
+    #[test]
+    fn no_default_card_is_smaller_than_a_card_can_be() {
+        // Eight panes side by side: an eighth of 1200 is under the minimum.
+        let root = split(SplitDir::Row, (0..8).map(|i| leaf(&i.to_string())).collect());
+        let cards = default_cards(&root);
+        for c in cards.values() {
+            assert!(c.w >= MIN_CARD_WIDTH - 1e-6 && c.h >= MIN_CARD_HEIGHT, "{c:?}");
+        }
+        // Still in a row, a gap apart, none covering another.
+        let (a, b) = (cards["0"], cards["1"]);
+        assert!((b.x - (a.x + a.w) - CARD_GAP).abs() < 1e-6);
+        assert_eq!(a.y, b.y);
+        // A tab with room for its panes keeps the nominal size.
+        let two = default_cards(&split(SplitDir::Row, vec![leaf("a"), leaf("b")]));
+        assert_eq!(two["a"].w, TAB_WIDTH / 2.0 - CARD_GAP);
+    }
+
+    #[test]
+    fn fitting_shows_every_frame_and_never_magnifies() {
+        let frames = [rect(0.0, 0.0, 1000.0, 500.0), rect(1100.0, 200.0, 900.0, 800.0)];
+        let cam = fit(frames, 1080.0, 620.0);
+        // 2000 x 1000 board units into a 1000 x 540 window (margins off).
+        assert!((cam.zoom - 0.5).abs() < 1e-9, "{cam:?}");
+        // Centred: the board's middle (1000, 500) is the viewport's middle.
+        assert!((cam.x + 1080.0 / cam.zoom / 2.0 - 1000.0).abs() < 1e-9);
+        assert!((cam.y + 620.0 / cam.zoom / 2.0 - 500.0).abs() < 1e-9);
+        // One small frame is shown at its own size.
+        assert_eq!(fit([rect(0.0, 0.0, 200.0, 100.0)], 1080.0, 620.0).zoom, 1.0);
+        assert_eq!(fit([], 1080.0, 620.0), Camera::default());
+    }
+
+    #[test]
+    fn centring_puts_the_rect_in_the_middle() {
+        let cam = centre_on(rect(100.0, 100.0, 200.0, 100.0), 1000.0, 600.0, 1.0);
+        assert_eq!(cam, Camera { x: 200.0 - 500.0, y: 150.0 - 300.0, zoom: 1.0 });
     }
 
     #[test]

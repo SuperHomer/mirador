@@ -57,6 +57,8 @@ export interface BoardRect {
 /** A pane's card, relative to its tab's frame. */
 export interface CardRect extends BoardRect {
   paneId: string;
+  /** What the card's header says the pane is. */
+  title: string;
 }
 
 /** A team running in a tab (`cmux_protocol::TeamRun`). */
@@ -465,6 +467,16 @@ export const focusPane = (paneId: string) =>
   invoke<void>("focus_pane", { paneId });
 export const focusDirection = (direction: Direction) =>
   invoke<void>("focus_direction", { direction });
+export const setView = (view: View) => invoke<void>("set_view", { view });
+/** Saved with the session; sends no snapshot back. */
+export const setCamera = (camera: Camera) =>
+  invoke<void>("set_camera", { ...camera });
+/** The camera showing the whole board in a viewport of this size. */
+export const boardFit = (width: number, height: number) =>
+  invoke<Camera>("board_fit", { width, height });
+/** The camera showing a pane's card at 100%, centred. */
+export const boardCardCamera = (paneId: string, width: number, height: number) =>
+  invoke<Camera>("board_card_camera", { paneId, width, height });
 export const setSplitRatios = (
   tabId: string,
   path: number[],

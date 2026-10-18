@@ -16,6 +16,7 @@ import {
   openAgentEditor,
   openWhatsNew,
   zoomPane,
+  setView,
   installUpdate,
   quitEndingSessions,
 } from "../bindings";
@@ -30,6 +31,7 @@ import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal, terminalWithFocus } from "../terminal/registry";
+import { fitBoard } from "../state/boardStore";
 
 export interface ActionDef {
   id: string;
@@ -194,6 +196,22 @@ export const actions: ActionDef[] = [
         .getState()
         .snapshot?.agents.find((a) => a.paneId === pane);
       if (pane && agent?.hasActivity) useUiStore.getState().openActivity(pane);
+    },
+  },
+  {
+    id: "toggle_board",
+    title: "Toggle Board View",
+    // Every pane of every tab as a card on one board, or back to tabs.
+    run: () => {
+      const view = useWorkspaceStore.getState().snapshot?.view;
+      void setView(view === "board" ? "tabs" : "board");
+    },
+  },
+  {
+    id: "board_fit",
+    title: "Board: Show Everything",
+    run: () => {
+      if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
     },
   },
   {

@@ -6,7 +6,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use cmux_core::osc::{OscEvent, OscScanner};
-use cmux_protocol::{Direction, NotificationDto, SplitDir, View, WorkspaceSnapshot};
+use cmux_protocol::{BoardRect, Camera, Direction, NotificationDto, SplitDir, View, WorkspaceSnapshot};
 
 use crate::{notify, runs, AppState};
 
@@ -558,6 +558,30 @@ pub fn set_frame_position(
     }
     emit_workspace(&app);
     Ok(())
+}
+
+/// The camera that shows the whole board in a `width` × `height` viewport.
+/// Only answers: the board moves there itself and saves where it ends up.
+#[tauri::command]
+pub fn board_fit(state: State<'_, AppState>, width: f64, height: f64) -> Camera {
+    let ws = state.workspace.lock().unwrap();
+    cmux_core::board::fit(ws.tabs.iter().map(|t| t.frame_rect()), width, height)
+}
+
+/// The camera that shows `pane_id`'s card at 100%, centred in a `width` ×
+/// `height` viewport — where double-clicking its header goes.
+#[tauri::command]
+pub fn board_card_camera(
+    state: State<'_, AppState>,
+    pane_id: String,
+    width: f64,
+    height: f64,
+) -> Result<Camera, String> {
+    let ws = state.workspace.lock().unwrap();
+    let tab = ws.tab_of_pane(&pane_id).ok_or_else(|| format!("no pane {pane_id}"))?;
+    let card = tab.cards.get(&pane_id).ok_or_else(|| format!("no card for {pane_id}"))?;
+    let on_board = BoardRect { x: tab.frame.x + card.x, y: tab.frame.y + card.y, ..*card };
+    Ok(cmux_core::board::centre_on(on_board, width, height, 1.0))
 }
 
 /// Serializes attaches. The command is async so a ConPTY spawn (tens to

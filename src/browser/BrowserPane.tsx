@@ -12,6 +12,11 @@ interface Props {
   paneId: string;
   url: string;
   focused: boolean;
+  /**
+   * The page is shown. Off on the board: a native webview cannot be scaled
+   * or clipped with the card, so the card shows what the page is instead.
+   */
+  live: boolean;
 }
 
 /**
@@ -19,7 +24,7 @@ interface Props {
  * ours; the page itself is a native child webview that Rust positions over
  * the placeholder div, tracked via ResizeObserver.
  */
-export function BrowserPane({ paneId, url, focused }: Props) {
+export function BrowserPane({ paneId, url, focused, live }: Props) {
   const placeholderRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState(url);
   const [editing, setEditing] = useState(false);
@@ -153,7 +158,9 @@ export function BrowserPane({ paneId, url, focused }: Props) {
           ×
         </button>
       </div>
-      <div className="browser-placeholder" ref={placeholderRef} />
+      <div className="browser-placeholder" ref={placeholderRef}>
+        {!live && <div className="browser-still">{url}</div>}
+      </div>
     </div>
   );
 }

@@ -121,6 +121,9 @@ pub struct BoardRect {
 #[serde(rename_all = "camelCase")]
 pub struct CardRect {
     pub pane_id: String,
+    /// What the card's header says the pane is.
+    #[serde(default)]
+    pub title: String,
     #[serde(flatten)]
     pub rect: BoardRect,
 }

@@ -709,7 +709,8 @@ impl Workspace {
                             .into_iter()
                             .filter_map(|pane| {
                                 let rect = *t.cards.get(&pane)?;
-                                Some(CardRect { pane_id: pane, rect })
+                                let title = pane_title(meta.get(&pane));
+                                Some(CardRect { pane_id: pane, title, rect })
                             })
                             .collect(),
                     }
@@ -739,6 +740,35 @@ impl Workspace {
 /// that sets a real title (`vim: main.rs`, `user@host:~/src`) still wins.
 pub fn is_meaningful_title(title: &str) -> bool {
     !title.trim().to_ascii_lowercase().ends_with(".exe")
+}
+
+/// What a pane is, in a few words, for its card on the board: what it
+/// shows for the panes that are not shells, else what its program titled
+/// it, else where it works.
+pub fn pane_title(meta: Option<&PaneMeta>) -> String {
+    let Some(m) = meta else {
+        return "shell".to_string();
+    };
+    let name = |path: &str| display_dir(path);
+    if m.agent_wall {
+        "Agents".to_string()
+    } else if m.agent_editor {
+        "Roles, ways & teams".to_string()
+    } else if let Some(version) = &m.whats_new {
+        format!("What's new in {version}")
+    } else if let Some(url) = &m.browser_url {
+        url.clone()
+    } else if let Some(repo) = &m.diff_repo {
+        format!("Diff · {}", name(repo))
+    } else if let Some(repo) = &m.graph_repo {
+        format!("Graph · {}", name(repo))
+    } else if let Some(title) = m.title.as_deref().filter(|t| is_meaningful_title(t)) {
+        title.to_string()
+    } else if let Some(cwd) = &m.cwd {
+        name(cwd)
+    } else {
+        "shell".to_string()
+    }
 }
 
 fn display_dir(path: &str) -> String {
@@ -1102,6 +1132,21 @@ mod tests {
         let ids: Vec<&str> = tab.cards.iter().map(|c| c.pane_id.as_str()).collect();
         assert_eq!(ids, vec![a.as_str(), b.as_str()], "in the tab's pane order");
         assert_eq!(tab.frame, ws.tabs[0].frame_rect());
+    }
+
+    #[test]
+    fn a_card_says_what_its_pane_is() {
+        assert_eq!(pane_title(None), "shell");
+        let meta = |m: PaneMeta| pane_title(Some(&m));
+        assert_eq!(meta(PaneMeta { cwd: Some("/tmp/project".into()), ..Default::default() }), "project");
+        assert_eq!(
+            meta(PaneMeta { cwd: Some("/tmp/project".into()), title: Some("vim: main.rs".into()), ..Default::default() }),
+            "vim: main.rs"
+        );
+        assert_eq!(meta(PaneMeta { title: Some(r"C:\pwsh.exe".into()), ..Default::default() }), "shell");
+        assert_eq!(meta(PaneMeta { diff_repo: Some("/src/mirador".into()), ..Default::default() }), "Diff · mirador");
+        assert_eq!(meta(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
+        assert_eq!(meta(PaneMeta { agent_wall: true, title: Some("x".into()), ..Default::default() }), "Agents");
     }
 
     #[test]

@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  AgentInfo,
   AgentWallPaneInfo,
+  CardRect,
   BrowserPaneInfo,
   DiffPaneInfo,
   Node,
@@ -9,8 +11,10 @@ import {
   AgentEditorPaneInfo,
   TabSnapshot,
   WhatsNewPaneInfo,
+  focusPane,
   setSplitRatios,
 } from "../bindings";
+import { flyToCard } from "../state/boardStore";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { BrowserPane } from "../browser/BrowserPane";
 import { DiffPane } from "../diff/DiffPane";
@@ -49,10 +53,17 @@ interface DividerBox {
  * Terminals render as one flat list of absolutely-positioned panes keyed by
  * pane id — a tree-shape change never remounts an existing terminal, so
  * xterm buffers survive splits.
+ *
+ * On the board the same list is drawn as cards: each slot takes its card's
+ * place instead of its split's, under a header, and nothing else about it
+ * changes — the pane inside is the same element either way.
  */
 export function SplitLayer({
   tab,
+  board,
   active,
+  current,
+  agents,
   unreadPanes,
   agentPanes,
   browserPanes,
@@ -64,8 +75,13 @@ export function SplitLayer({
   agentEditorPanes,
 }: {
   tab: TabSnapshot;
-  /** This tab is the one on screen. */
+  /** Drawn as cards on the board. */
+  board: boolean;
+  /** This tab is on screen: the active one, or any tab on the board. */
   active: boolean;
+  /** This tab is the active one, where the keyboard goes. */
+  current: boolean;
+  agents: AgentInfo[];
   unreadPanes: string[];
   agentPanes: { paneId: string; command: string }[];
   browserPanes: BrowserPaneInfo[];
@@ -127,8 +143,9 @@ export function SplitLayer({
   // One pane shown alone: it fills the layer, and the rest stay mounted at
   // their own size but out of sight — hidden, not unmounted, so terminals
   // keep their buffers, and not resized, so their PTYs are left alone.
+  // The board shows every pane.
   const zoomed =
-    tab.zoomedPane && panes.some((p) => p.paneId === tab.zoomedPane)
+    !board && tab.zoomedPane && panes.some((p) => p.paneId === tab.zoomedPane)
       ? tab.zoomedPane
       : null;
   const FULL: Frac = { x: 0, y: 0, w: 1, h: 1 };
@@ -138,6 +155,12 @@ export function SplitLayer({
       {panes.map((p) => {
         const hidden = zoomed !== null && p.paneId !== zoomed;
         const shown = active && !hidden;
+        // On the board every tab is shown, and each has a focused pane:
+        // only the active tab's takes the keyboard there.
+        const focused = p.paneId === tab.focusedPane && (current || !board);
+        const card = board
+          ? tab.cards.find((c) => c.paneId === p.paneId)
+          : undefined;
         const browser = browserPanes.find((b) => b.paneId === p.paneId);
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
@@ -147,66 +170,92 @@ export function SplitLayer({
         return (
           <div
             key={p.paneId}
-            className="pane-slot"
-            style={{
-              ...frac(p.paneId === zoomed ? FULL : p.rect),
-              ...(hidden
-                ? { visibility: "hidden", pointerEvents: "none" }
-                : {}),
-            }}
+            className={`pane-slot${card ? " card" : ""}`}
+            style={
+              card
+                ? px(card)
+                : {
+                    ...frac(p.paneId === zoomed ? FULL : p.rect),
+                    ...(hidden
+                      ? { visibility: "hidden", pointerEvents: "none" }
+                      : {}),
+                  }
+            }
+            // Below 100% a card's content takes no pointer; a click on it
+            // still lands here, and makes it the pane the keyboard types to.
+            onMouseDown={card ? () => void focusPane(p.paneId) : undefined}
           >
-            {wall ? (
-              <AgentWall paneId={p.paneId} tabId={wall.tabId} visible={shown} />
-            ) : editor ? (
-              <AgentEditor
-                paneId={p.paneId}
-                cwd={editor.cwd}
-                focused={p.paneId === tab.focusedPane}
-              />
-            ) : browser ? (
-              <BrowserPane
-                paneId={p.paneId}
-                url={browser.url}
-                focused={p.paneId === tab.focusedPane}
-              />
-            ) : graph ? (
-              <GraphPane
-                paneId={p.paneId}
-                repo={graph.repo}
-                focused={p.paneId === tab.focusedPane}
-              />
-            ) : news ? (
-              <WhatsNewPane
-                paneId={p.paneId}
-                version={news.version}
-                since={news.since}
-                focused={p.paneId === tab.focusedPane}
-              />
-            ) : diff ? (
-              <DiffPane
-                paneId={p.paneId}
-                repo={diff.repo}
-                spec={diff.spec}
-                focused={p.paneId === tab.focusedPane}
-              />
-            ) : (
-              <TerminalPane
-                paneId={p.paneId}
-                focused={p.paneId === tab.focusedPane}
-                visible={shown}
+            {card && (
+              <CardHeader
+                card={card}
+                focused={focused}
                 unread={unreadPanes.includes(p.paneId)}
-                agentCommand={
-                  agentPanes.find((a) => a.paneId === p.paneId)?.command
-                }
-                remoteHost={
-                  remotePanes.find((r) => r.paneId === p.paneId)?.host
-                }
+                agent={agents.find((a) => a.paneId === p.paneId)}
               />
             )}
+            <div className="pane-body">
+              {wall ? (
+                // On the board the wall borrows no terminal: each agent's own
+                // card is on screen already, and a terminal is drawn in one
+                // place.
+                <AgentWall
+                  paneId={p.paneId}
+                  tabId={wall.tabId}
+                  visible={shown && !board}
+                />
+              ) : editor ? (
+                <AgentEditor
+                  paneId={p.paneId}
+                  cwd={editor.cwd}
+                  focused={focused}
+                />
+              ) : browser ? (
+                <BrowserPane
+                  paneId={p.paneId}
+                  url={browser.url}
+                  focused={focused}
+                  live={!board}
+                />
+              ) : graph ? (
+                <GraphPane
+                  paneId={p.paneId}
+                  repo={graph.repo}
+                  focused={focused}
+                />
+              ) : news ? (
+                <WhatsNewPane
+                  paneId={p.paneId}
+                  version={news.version}
+                  since={news.since}
+                  focused={focused}
+                />
+              ) : diff ? (
+                <DiffPane
+                  paneId={p.paneId}
+                  repo={diff.repo}
+                  spec={diff.spec}
+                  focused={focused}
+                />
+              ) : (
+                <TerminalPane
+                  paneId={p.paneId}
+                  focused={focused}
+                  visible={shown}
+                  unread={unreadPanes.includes(p.paneId)}
+                  agentCommand={
+                    agentPanes.find((a) => a.paneId === p.paneId)?.command
+                  }
+                  remoteHost={
+                    remotePanes.find((r) => r.paneId === p.paneId)?.host
+                  }
+                />
+              )}
+            </div>
           </div>
         );
       })}
       {!zoomed &&
+        !board &&
         dividers.map((d) => (
           <div
             key={`${d.path.join(".")}:${d.index}`}
@@ -262,6 +311,38 @@ function frac(r: Frac): React.CSSProperties {
     width: `${r.w * 100}%`,
     height: `${r.h * 100}%`,
   };
+}
+
+function px(r: CardRect): React.CSSProperties {
+  return { left: r.x, top: r.y, width: r.w, height: r.h };
+}
+
+/**
+ * A card's title bar: what the pane is, and an agent's status. Double-click
+ * goes to the card at 100%, where its content takes the pointer.
+ */
+function CardHeader({
+  card,
+  focused,
+  unread,
+  agent,
+}: {
+  card: CardRect;
+  focused: boolean;
+  unread: boolean;
+  agent: AgentInfo | undefined;
+}) {
+  const status = agent?.status;
+  return (
+    <div
+      className={`card-header${focused ? " focused" : ""}${unread ? " unread" : ""}${status ? ` ${status}` : ""}`}
+      title={card.title}
+      onDoubleClick={() => flyToCard(card.paneId)}
+    >
+      {status && <span className="card-dot" />}
+      <span className="card-title">{agent?.name ?? card.title}</span>
+    </div>
+  );
 }
 
 function dividerStyle(d: DividerBox): React.CSSProperties {
