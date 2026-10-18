@@ -148,8 +148,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let view = state.workspace.lock().unwrap().view;
             Ok(json!({ "view": view }))
         }
-        Request::SetCamera { x, y, zoom } => {
-            crate::commands::set_camera(app.state(), x, y, zoom)?;
+        Request::SetCamera { x, y, zoom, width, height } => {
+            crate::commands::set_camera(app.state(), x, y, zoom, width, height)?;
             Ok(Value::Null)
         }
         Request::SetCardRect { pane_id, x, y, w, h } => {

@@ -325,6 +325,10 @@ pub struct Workspace {
     pub active: usize,
     pub view: View,
     pub camera: Camera,
+    /// The board's size on screen, in pixels, as the app last said: with
+    /// the camera, where the board is being looked at. Not saved — unknown
+    /// until the app has drawn the board.
+    pub viewport: Option<(f64, f64)>,
 }
 
 impl Default for Workspace {
@@ -335,6 +339,7 @@ impl Default for Workspace {
             active: 0,
             view: View::default(),
             camera: Camera::default(),
+            viewport: None,
         }
     }
 }
@@ -352,14 +357,27 @@ impl Workspace {
         self.tabs.iter_mut().find(|t| layout::contains(&t.root, pane))
     }
 
-    /// Gives a tab just taken in a frame of its own on the board, right of
-    /// every other: wherever the tab sits in the tab order, a new frame
-    /// never lands on top of one already there.
+    /// Gives a tab just taken in a frame of its own on the board, never on
+    /// top of one already there: with the board shown, where it is being
+    /// looked at (`board::frame_spot`) — a tab opened there is one to see —
+    /// and otherwise right of every other, wherever it sits in the tab order.
     fn place_frame(&mut self, tab_id: &str) {
-        let origin = board::next_frame_origin(self.other_frames(tab_id));
-        if let Some(tab) = self.tab_mut(tab_id) {
-            tab.frame = origin;
-        }
+        let others = self.other_frames(tab_id);
+        let looked_at = match (self.view, self.viewport) {
+            (View::Board, Some((w, h))) => Some(BoardPoint {
+                x: self.camera.x + w / self.camera.zoom / 2.0,
+                y: self.camera.y + h / self.camera.zoom / 2.0,
+            }),
+            _ => None,
+        };
+        let Some(tab) = self.tab_mut(tab_id) else { return };
+        tab.frame = match looked_at {
+            Some(centre) => {
+                let size = tab.frame_rect();
+                board::frame_spot(size.w, size.h, centre, &others)
+            }
+            None => board::next_frame_origin(others),
+        };
     }
 
     /// Creates a tab (with one fresh pane) after the active one and
@@ -495,7 +513,7 @@ impl Workspace {
         if layout::split(&mut tab.root, pane, dir, &new_pane) {
             tab.focused = new_pane.clone();
             tab.zoomed = None;
-            match board::card_beside(&tab.cards, pane, dir) {
+            match board::card_spot(&tab.cards, pane, dir) {
                 Some(card) => {
                     tab.cards.insert(new_pane.clone(), card);
                 }
@@ -1102,6 +1120,25 @@ mod tests {
     }
 
     #[test]
+    fn on_the_board_a_new_frame_goes_where_it_is_looked_at() {
+        let mut ws = Workspace { view: View::Board, ..Default::default() };
+        // Not drawn yet: where it would go in the tabs view.
+        let (first, _) = ws.new_tab();
+        let right = ws.tabs[0].frame_rect();
+        assert_eq!(ws.tab_mut(&first).unwrap().frame.x, right.x + right.w + board::FRAME_GAP);
+        // Looking at an empty stretch far below: there, centred.
+        ws.viewport = Some((1000.0, 800.0));
+        ws.camera = Camera { x: 0.0, y: 5000.0, zoom: 0.5 };
+        let (id, _) = ws.new_tab();
+        let frame = ws.tabs.iter().find(|t| t.id == id).unwrap().frame_rect();
+        assert_eq!((frame.x + frame.w / 2.0, frame.y + frame.h / 2.0), (1000.0, 5800.0));
+        assert_nothing_overlaps(&ws);
+        // Again, same view: beside it, not on it.
+        ws.new_tab();
+        assert_nothing_overlaps(&ws);
+    }
+
+    #[test]
     fn a_new_frame_goes_right_of_the_rightmost() {
         let mut ws = Workspace::default();
         let first = ws.tabs[0].id.clone();
@@ -1113,15 +1150,21 @@ mod tests {
     }
 
     #[test]
-    fn a_split_adds_a_card_beside_its_source_and_moves_none() {
+    fn a_split_adds_a_card_in_its_frame_and_moves_none() {
         let mut ws = Workspace::default();
         let a = ws.focused_pane();
-        let moved = BoardRect { x: 400.0, y: 300.0, w: 500.0, h: 250.0 };
+        // Moved down and right: the frame has room above and left of it.
+        let moved = BoardRect { x: 600.0, y: 400.0, w: 500.0, h: 250.0 };
         assert_eq!(ws.set_card_rect(&a, moved), Some(moved));
         let b = ws.split_pane(&a, SplitDir::Row).unwrap();
         let cards = &ws.tabs[0].cards;
         assert_eq!(cards[&a], moved, "the source stays where it was put");
-        assert_eq!(cards[&b], BoardRect { x: moved.x + moved.w + board::CARD_GAP, ..moved });
+        let inner = (board::FRAME_PADDING + board::CARD_GAP / 2.0, board::FRAME_HEADER + board::CARD_GAP / 2.0);
+        assert_eq!(cards[&b], BoardRect { x: inner.0, y: inner.1, ..moved }, "the room it had");
+        // The next one in what room is left, beside the last.
+        let c = ws.split_pane(&a, SplitDir::Row).unwrap();
+        assert_eq!(ws.tabs[0].cards[&c], BoardRect { x: inner.0 + moved.w + board::CARD_GAP, y: inner.1, ..moved });
+        assert_nothing_overlaps(&ws);
         // And moving a card changes no split.
         let root = ws.tabs[0].root.clone();
         ws.set_card_rect(&b, BoardRect { x: 16.0, y: 36.0, w: 200.0, h: 200.0 });

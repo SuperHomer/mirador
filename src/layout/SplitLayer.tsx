@@ -12,6 +12,7 @@ import {
   AgentEditorPaneInfo,
   TabSnapshot,
   WhatsNewPaneInfo,
+  closePane,
   focusPane,
   setCardRect,
   setSplitRatios,
@@ -431,6 +432,15 @@ function CardHeader({
     >
       {status && <span className="card-dot" />}
       <span className="card-title">{agent?.name ?? card.title}</span>
+      <button
+        className="card-close"
+        title="Close this pane"
+        // The header drags the card; its button must not.
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => void closePane(card.paneId)}
+      >
+        ×
+      </button>
     </div>
   );
 }

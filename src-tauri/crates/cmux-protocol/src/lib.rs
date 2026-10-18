@@ -248,6 +248,12 @@ pub enum Request {
         x: f64,
         y: f64,
         zoom: f64,
+        /// The board's size on screen: with the camera, where a new frame
+        /// goes (where it is being looked at).
+        #[serde(default)]
+        width: Option<f64>,
+        #[serde(default)]
+        height: Option<f64>,
     },
     /// Moves or resizes a pane's card, relative to its tab's frame. Refused
     /// (left where it was) over another card, or growing its frame into

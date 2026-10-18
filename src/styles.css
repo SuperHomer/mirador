@@ -442,14 +442,97 @@ body,
   left: 0;
   right: 0;
   height: 36px;
-  padding: 8px 16px 0;
+  padding: 0 8px 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 14px;
   font-weight: 600;
   color: var(--subtext);
+  cursor: move;
+}
+
+.frame-title {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: move;
+}
+
+.frame-button,
+.card-close {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--subtext);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.frame-button {
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+}
+
+.card-close {
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.frame-button:hover,
+.card-close:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* What a frame's "+" adds: a short list under its title bar. */
+.frame-menu {
+  position: absolute;
+  top: 34px;
+  right: 8px;
+  z-index: 20;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  background: var(--bg-alt);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  cursor: default;
+}
+
+.frame-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.frame-menu button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.frame-menu button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.frame-menu-hint {
+  color: var(--subtext);
+  font-size: 11.5px;
 }
 
 /* A frame or card in the hand: above the rest, lifted. */

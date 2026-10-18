@@ -88,7 +88,8 @@ fn the_board_shows_every_pane_and_none_stops_answering() {
     assert_eq!(sb.snapshot()["view"], "board");
 
     // Panes opened while the board is shown get cards: a split beside its
-    // source, the same size; a new tab a frame clear of the first.
+    // source, the same size (its frame has no room inside); a new tab a
+    // frame clear of the first.
     let second = split(&sb, &first);
     sb.call(Request::NewTab { command: None });
     let snap = sb.snapshot();
@@ -97,8 +98,7 @@ fn the_board_shows_every_pane_and_none_stops_answering() {
     assert_eq!(new["x"].as_f64().unwrap(), src["x"].as_f64().unwrap() + src["w"].as_f64().unwrap() + CARD_GAP);
     assert_eq!((&new["y"], &new["w"], &new["h"]), (&src["y"], &src["w"], &src["h"]));
     let frames: Vec<&Value> = snap["tabs"].as_array().unwrap().iter().map(|t| &t["frame"]).collect();
-    let f = |v: &Value, k: &str| v[k].as_f64().unwrap();
-    assert!(f(frames[1], "x") >= f(frames[0], "x") + f(frames[0], "w"), "{frames:?}");
+    assert_nothing_overlaps(&snap);
     // A frame dropped onto another stays where it was.
     let second_tab = snap["tabs"][1]["id"].as_str().unwrap().to_string();
     let at = sb.call(Request::SetFramePosition { tab_id: second_tab, x: 100.0, y: 100.0 });
@@ -135,7 +135,7 @@ fn the_board_comes_back_as_it_was_left() {
     let tab = sb.snapshot()["tabs"][0]["id"].as_str().unwrap().to_string();
     sb.call(Request::SetFramePosition { tab_id: tab.clone(), x: -300.0, y: 150.0 });
     // Zoom is held to what the board can show.
-    sb.call(Request::SetCamera { x: 40.0, y: -25.0, zoom: 9.0 });
+    sb.call(Request::SetCamera { x: 40.0, y: -25.0, zoom: 9.0, width: None, height: None });
     // Garbage is refused, not saved.
     assert!(sb.request(Request::SetCardRect { pane_id: second.clone(), x: 1e300, y: 0.0, w: 1.0, h: 1.0 }).is_err());
     assert!(sb.request(Request::SetFramePosition { tab_id: "nope".into(), x: 0.0, y: 0.0 }).is_err());
@@ -260,10 +260,12 @@ fn a_hidden_browser_card_still_answers() {
     sb.launch();
     let first = sb.first_pane();
     sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
-    // A new tab's frame goes right of the first, out of view.
     let (code, out, err) = sb.mira(Some(&first), &["browser", "open", &serve_page(), "--tab"]);
     assert_eq!(code, 0, "{err}");
     let pane = out.trim().to_string();
+    // Its frame moved far out of view: the page hidden.
+    let tab = sb.snapshot()["activeTab"].as_str().unwrap().to_string();
+    sb.call(Request::SetFramePosition { tab_id: tab, x: 50000.0, y: 50000.0 });
     let browser = |args: &[&str]| -> String {
         let mut all = vec!["browser"];
         all.extend_from_slice(args);
@@ -331,9 +333,13 @@ fn a_browser_card_shows_its_page_only_when_in_view() {
     let place = |p: &str, x: f64, y: f64| -> Value {
         sb.call(Request::SetCardRect { pane_id: p.to_string(), x, y, w: 400.0, h: 260.0 })
     };
-    // Both cards small and apart, in the corner the board opens on.
+    // Both cards small and apart. Focusing one brings its card into view
+    // if it is not (the board pans to it), as a person would ask for it.
+    let focus = |p: &str| sb.call(Request::FocusPane { pane_id: p.to_string() });
     place(&first, 16.0, 340.0);
     place(&pane, 16.0, 36.0);
+    focus(&first);
+    focus(&pane);
     sb.wait_for("the page to be shown", LONG, || (visibility() == "\"visible\"").then_some(()));
     // The terminal's card cannot go over it: it stays where it was.
     let refused = place(&first, 100.0, 100.0);
@@ -342,8 +348,106 @@ fn a_browser_card_shows_its_page_only_when_in_view() {
     place(&pane, 3000.0, 36.0);
     sb.wait_for("the page to be hidden", LONG, || (visibility() == "\"hidden\"").then_some(()));
     place(&pane, 16.0, 36.0);
+    focus(&first);
+    focus(&pane);
     sb.wait_for("the page to be shown again", LONG, || (visibility() == "\"visible\"").then_some(()));
     // And in the tabs view it is the app's to show, as before.
     sb.call(Request::View { view: Some(cmux_protocol::View::Tabs) });
     sb.wait_for("the page in its tab", LONG, || (visibility() == "\"visible\"").then_some(()));
+}
+
+/// Nothing on the board overlaps: no two frames, no two cards.
+fn assert_nothing_overlaps(snapshot: &Value) {
+    let rect = |v: &Value, dx: f64, dy: f64| {
+        let f = |k: &str| v[k].as_f64().unwrap();
+        (f("x") + dx, f("y") + dy, f("w"), f("h"))
+    };
+    let apart = |a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)| {
+        a.0 + a.2 <= b.0 || b.0 + b.2 <= a.0 || a.1 + a.3 <= b.1 || b.1 + b.3 <= a.1
+    };
+    let tabs = snapshot["tabs"].as_array().unwrap();
+    let frames: Vec<_> = tabs.iter().map(|t| rect(&t["frame"], 0.0, 0.0)).collect();
+    let cards: Vec<_> = tabs
+        .iter()
+        .flat_map(|t| {
+            let (fx, fy) = (t["frame"]["x"].as_f64().unwrap(), t["frame"]["y"].as_f64().unwrap());
+            t["cards"].as_array().unwrap().iter().map(move |c| rect(c, fx, fy))
+        })
+        .collect();
+    for rects in [frames, cards] {
+        for (i, a) in rects.iter().enumerate() {
+            for b in &rects[i + 1..] {
+                assert!(apart(*a, *b), "{a:?} overlaps {b:?}");
+            }
+        }
+    }
+}
+
+/// What `mira` creates while the board is shown lands by the board's rules,
+/// as what the board's own controls create does — they are the same calls:
+/// a pane beside another gets a card in that frame, a new tab a frame where
+/// the board is looked at, and nothing ever overlaps.
+#[test]
+fn what_mira_creates_lands_by_the_boards_rules() {
+    e2e!();
+    let mut sb = Sandbox::new("boardcreate");
+    // A repository with a change, for `diff` and `graph`.
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(["-c", "user.name=e2e", "-c", "user.email=e2e@example.com"])
+            .args(args)
+            .current_dir(&sb.project)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    sb.write("notes.txt", "one\n");
+    git(&["add", "."]);
+    git(&["commit", "-qm", "init"]);
+    sb.write("notes.txt", "one\ntwo\n");
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
+
+    let url = serve_page();
+    for args in [
+        vec!["split"],
+        vec!["browser", "open", url.as_str()],
+        vec!["agent", "new"],
+        vec!["diff"],
+        vec!["graph"],
+    ] {
+        let (code, _, err) = sb.mira(Some(&first), &args);
+        assert_eq!(code, 0, "{args:?}: {err}");
+        let snap = sb.snapshot();
+        assert_every_pane_has_a_card(&snap);
+        assert_nothing_overlaps(&snap);
+    }
+    let snap = sb.snapshot();
+    assert_eq!(snap["tabs"].as_array().unwrap().len(), 1, "every one joined the first frame");
+    assert_eq!(snap["tabs"][0]["cards"].as_array().unwrap().len(), 6);
+
+    // Closing a pane takes its card; the rest stay where they were.
+    let panes = sb.panes();
+    let before = snap["tabs"][0]["cards"].clone();
+    sb.call(Request::ClosePane { pane_id: panes[1].clone() });
+    let after = sb.snapshot()["tabs"][0]["cards"].clone();
+    let kept: Vec<&Value> = before.as_array().unwrap().iter().filter(|c| c["paneId"] != panes[1].as_str()).collect();
+    assert_eq!(after.as_array().unwrap().iter().collect::<Vec<_>>(), kept);
+
+    // A new tab's frame goes where the board is looked at. The app saves
+    // where that is a moment after the board moves (each pane made above
+    // brought its card into view), so let it settle before saying where.
+    sb.type_into(&first, "sleep 1; echo settled-$((6*7))\r");
+    sb.wait_for("the shell", LONG, || sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "settled-42")));
+    sb.call(Request::SetCamera { x: -20000.0, y: -20000.0, zoom: 1.0, width: Some(1000.0), height: Some(800.0) });
+    let (code, _, err) = sb.mira(None, &["new-tab"]);
+    assert_eq!(code, 0, "{err}");
+    let snap = sb.snapshot();
+    let frame = &snap["tabs"].as_array().unwrap().iter().find(|t| t["id"] == snap["activeTab"]).unwrap()["frame"];
+    let f = |k: &str| frame[k].as_f64().unwrap();
+    assert_eq!((f("x") + f("w") / 2.0, f("y") + f("h") / 2.0), (-19500.0, -19600.0), "centred in view: {frame}");
+    assert_nothing_overlaps(&snap);
 }

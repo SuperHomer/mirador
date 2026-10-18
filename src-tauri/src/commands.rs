@@ -517,9 +517,23 @@ pub fn set_view(app: AppHandle, state: State<'_, AppState>, view: View) {
 /// it already, and a snapshot per frame of a pan would re-render every
 /// pane.
 #[tauri::command]
-pub fn set_camera(state: State<'_, AppState>, x: f64, y: f64, zoom: f64) -> Result<(), String> {
+pub fn set_camera(
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    zoom: f64,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), String> {
     let camera = cmux_core::board::camera(x, y, zoom)?;
-    state.workspace.lock().unwrap().camera = camera;
+    let mut ws = state.workspace.lock().unwrap();
+    ws.camera = camera;
+    if let (Some(w), Some(h)) = (width, height) {
+        if w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 {
+            ws.viewport = Some((w, h));
+        }
+    }
+    drop(ws);
     state
         .session_dirty
         .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -576,20 +590,23 @@ pub fn board_fit(state: State<'_, AppState>, width: f64, height: f64) -> Camera 
     cmux_core::board::fit(ws.tabs.iter().map(|t| t.frame_rect()), width, height)
 }
 
-/// The camera that shows `pane_id`'s card at 100%, centred in a `width` ×
-/// `height` viewport — where double-clicking its header goes.
+/// The camera that shows `pane_id`'s card centred in a `width` × `height`
+/// viewport: at 100% — where double-clicking its header goes — or at
+/// `zoom`, to bring it into view as the board is.
 #[tauri::command]
 pub fn board_card_camera(
     state: State<'_, AppState>,
     pane_id: String,
     width: f64,
     height: f64,
+    zoom: Option<f64>,
 ) -> Result<Camera, String> {
     let ws = state.workspace.lock().unwrap();
     let tab = ws.tab_of_pane(&pane_id).ok_or_else(|| format!("no pane {pane_id}"))?;
     let card = tab.cards.get(&pane_id).ok_or_else(|| format!("no card for {pane_id}"))?;
     let on_board = BoardRect { x: tab.frame.x + card.x, y: tab.frame.y + card.y, ..*card };
-    Ok(cmux_core::board::centre_on(on_board, width, height, 1.0))
+    let zoom = zoom.unwrap_or(1.0).clamp(cmux_core::board::MIN_ZOOM, cmux_core::board::MAX_ZOOM);
+    Ok(cmux_core::board::centre_on(on_board, width, height, zoom))
 }
 
 /// Serializes attaches. The command is async so a ConPTY spawn (tens to

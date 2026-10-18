@@ -38,6 +38,13 @@ let held = false;
 let flight = 0;
 
 export const useBoardStore = create<BoardStore>((set, get) => {
+  const save = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      const { camera, viewport } = get();
+      if (camera && viewport.width > 0) void setCamera(camera, viewport);
+    }, SAVE_DELAY_MS);
+  };
   const stir = () => {
     clearTimeout(settleTimer);
     if (!get().moving) set({ moving: true });
@@ -51,13 +58,15 @@ export const useBoardStore = create<BoardStore>((set, get) => {
       held = on;
       stir();
     },
-    setViewport: (width, height) => set({ viewport: { width, height } }),
+    setViewport: (width, height) => {
+      set({ viewport: { width, height } });
+      save();
+    },
     moveTo: (camera) => {
       flight++;
       stir();
       set({ camera });
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => void setCamera(camera), SAVE_DELAY_MS);
+      save();
     },
     flyTo: (target) => {
       const from = get().camera ?? target;
@@ -103,4 +112,11 @@ export function flyToCard(paneId: string) {
   const { viewport, flyTo } = useBoardStore.getState();
   if (viewport.width === 0) return;
   void boardCardCamera(paneId, viewport.width, viewport.height).then(flyTo);
+}
+
+/** Brings a pane's card into view, centred, at the zoom the board has. */
+export function panToCard(paneId: string) {
+  const { viewport, camera, flyTo } = useBoardStore.getState();
+  if (viewport.width === 0 || !camera) return;
+  void boardCardCamera(paneId, viewport.width, viewport.height, camera.zoom).then(flyTo);
 }

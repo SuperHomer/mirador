@@ -1,7 +1,8 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { Camera, TabSnapshot, setFramePosition } from "../bindings";
+import { Camera, TabSnapshot, closeTab, newTab, setFramePosition } from "../bindings";
+import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { atFullSize, fitBoard, useBoardStore } from "../state/boardStore";
+import { atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -36,6 +37,33 @@ function zoomAround(camera: Camera, zoom: number, px: number, py: number): Camer
 export function BoardHost({ board, children }: { board: boolean; children: ReactNode }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const camera = useBoardStore((s) => s.camera);
+  const focused = useWorkspaceStore((s) => {
+    const snap = s.snapshot;
+    return snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane ?? null;
+  });
+  const lastPointerDown = useRef(0);
+
+  // A pane focused from elsewhere — a card just made, a new frame, a
+  // shortcut, `mira focus` — is brought into view when it is not wholly
+  // in it. A click on a card focuses what is under the pointer already,
+  // and must not move the board under it.
+  useEffect(() => {
+    if (!board || !focused) return;
+    if (performance.now() - lastPointerDown.current < 500) return;
+    const snap = useWorkspaceStore.getState().snapshot;
+    const tab = snap?.tabs.find((t) => t.cards.some((c) => c.paneId === focused));
+    const card = tab?.cards.find((c) => c.paneId === focused);
+    const { camera: cam, viewport } = useBoardStore.getState();
+    if (!tab || !card || !cam || viewport.width === 0) return;
+    const left = (tab.frame.x + card.x - cam.x) * cam.zoom;
+    const top = (tab.frame.y + card.y - cam.y) * cam.zoom;
+    const inView =
+      left >= 0 &&
+      top >= 0 &&
+      left + card.w * cam.zoom <= viewport.width &&
+      top + card.h * cam.zoom <= viewport.height;
+    if (!inView) panToCard(focused);
+  }, [board, focused]);
 
   // The saved camera, once; from then on the board owns it.
   useEffect(() => {
@@ -169,6 +197,12 @@ export function BoardHost({ board, children }: { board: boolean; children: React
           : undefined
       }
       onPointerDown={onPointerDown}
+      onPointerDownCapture={(e) => {
+        // A click on a card focuses that card, there under the pointer.
+        if ((e.target as Element).closest(".pane-slot")) {
+          lastPointerDown.current = performance.now();
+        }
+      }}
     >
       <div
         className="board-canvas"
@@ -185,6 +219,12 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       {board && (
         <div className="board-controls">
           <span className="board-zoom">{Math.round(cam.zoom * 100)}%</span>
+          <button
+            title="A new tab, its frame where you are looking"
+            onClick={() => void newTab()}
+          >
+            New frame
+          </button>
           <button title="Show the whole board" onClick={fitBoard}>
             Fit
           </button>
@@ -263,6 +303,7 @@ export function TabLayer({
   // where Rust put it: there, or back where it was if another frame is.
   const [held, setHeld] = useState<{ x: number; y: number } | null>(null);
   const at = held ?? tab.frame;
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const drag = (e: React.PointerEvent) => {
     let to = { x: tab.frame.x, y: tab.frame.y };
@@ -292,8 +333,27 @@ export function TabLayer({
     >
       {board && (
         <div className="frame-label" onPointerDown={drag}>
-          {tab.title}
+          <span className="frame-title">{tab.title}</span>
+          <button
+            className="frame-button"
+            title="Add a pane to this tab"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            +
+          </button>
+          <button
+            className="frame-button"
+            title="Close this tab"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => void closeTab(tab.id)}
+          >
+            ×
+          </button>
         </div>
+      )}
+      {board && menuOpen && (
+        <FrameMenu pane={tab.focusedPane} onClose={() => setMenuOpen(false)} />
       )}
       {children}
     </div>

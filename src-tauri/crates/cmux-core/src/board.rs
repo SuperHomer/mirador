@@ -164,6 +164,58 @@ pub fn push_clear(frames: &mut [BoardRect], grown: usize) {
     }
 }
 
+/// Where a card split from `source` goes: the same size, in the nearest
+/// free place inside its frame as it is — a gap the other cards left —
+/// and only when there is none, beside the source (`card_beside`), growing
+/// the frame. A free place keeps a card's gap from every other card.
+pub fn card_spot(cards: &Cards, source: &str, dir: SplitDir) -> Option<BoardRect> {
+    let src = *cards.get(source)?;
+    let right = cards.values().map(|c| c.x + c.w).fold(f64::MIN, f64::max);
+    let bottom = cards.values().map(|c| c.y + c.h).fold(f64::MIN, f64::max);
+    // Where a card can start: at the frame's inner edge, or a gap past
+    // another card.
+    let xs = std::iter::once(FRAME_PADDING + CARD_GAP / 2.0).chain(cards.values().map(|c| c.x + c.w + CARD_GAP));
+    let ys: Vec<f64> = std::iter::once(FRAME_HEADER + CARD_GAP / 2.0)
+        .chain(cards.values().map(|c| c.y + c.h + CARD_GAP))
+        .collect();
+    let distance = |r: &BoardRect| (r.x - src.x).powi(2) + (r.y - src.y).powi(2);
+    xs.flat_map(|x| ys.iter().map(move |&y| BoardRect { x, y, ..src }))
+        .filter(|r| r.x + r.w <= right && r.y + r.h <= bottom)
+        .filter(|r| is_free(cards, &inflate(r, CARD_GAP / 2.0)))
+        .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+        .or_else(|| card_beside(cards, source, dir))
+}
+
+/// Where a new frame of `w` × `h` goes on a board looked at around
+/// `centre`: centred there if that is free, else the nearest free place
+/// beside a frame, else right of every frame. Free keeps `FRAME_GAP` from
+/// every frame.
+pub fn frame_spot(w: f64, h: f64, centre: BoardPoint, frames: &[BoardRect]) -> BoardPoint {
+    let wanted = BoardPoint { x: centre.x - w / 2.0, y: centre.y - h / 2.0 };
+    let free = |p: &BoardPoint| {
+        let r = inflate(&BoardRect { x: p.x, y: p.y, w, h }, FRAME_GAP / 2.0);
+        !frames.iter().any(|f| overlaps(&inflate(f, FRAME_GAP / 2.0 - 1e-6), &r))
+    };
+    let beside = frames.iter().flat_map(|f| {
+        [
+            BoardPoint { x: f.x + f.w + FRAME_GAP, y: wanted.y },
+            BoardPoint { x: f.x - w - FRAME_GAP, y: wanted.y },
+            BoardPoint { x: wanted.x, y: f.y + f.h + FRAME_GAP },
+            BoardPoint { x: wanted.x, y: f.y - h - FRAME_GAP },
+        ]
+    });
+    let distance = |p: &BoardPoint| (p.x - wanted.x).powi(2) + (p.y - wanted.y).powi(2);
+    std::iter::once(wanted)
+        .chain(beside)
+        .filter(free)
+        .min_by(|a, b| distance(a).total_cmp(&distance(b)))
+        .unwrap_or_else(|| next_frame_origin(frames.iter().copied()))
+}
+
+fn inflate(r: &BoardRect, by: f64) -> BoardRect {
+    BoardRect { x: r.x - by, y: r.y - by, w: r.w + 2.0 * by, h: r.h + 2.0 * by }
+}
+
 fn is_free(cards: &Cards, rect: &BoardRect) -> bool {
     !cards.values().any(|c| overlaps(c, rect))
 }
@@ -362,6 +414,35 @@ mod tests {
         assert!(card_fits(&cards, "a", cards["a"]));
         // Over its neighbour: refused.
         assert!(!card_fits(&cards, "a", rect(16.0, 200.0, 300.0, 200.0)));
+    }
+
+    #[test]
+    fn a_new_card_fills_a_gap_in_its_frame_before_growing_it() {
+        // Two cards side by side, a third below the right one: the gap
+        // below the left one is where a fourth goes, not past the frame.
+        let mut cards = Cards::new();
+        cards.insert("a".into(), rect(22.0, 42.0, 300.0, 200.0));
+        cards.insert("b".into(), rect(334.0, 42.0, 300.0, 200.0));
+        cards.insert("c".into(), rect(334.0, 254.0, 300.0, 200.0));
+        let spot = card_spot(&cards, "c", SplitDir::Row).unwrap();
+        assert_eq!(spot, rect(FRAME_PADDING + CARD_GAP / 2.0, 254.0, 300.0, 200.0));
+        // No gap: beside the source, as a split always went.
+        let one = default_cards(&leaf("a"));
+        assert_eq!(card_spot(&one, "a", SplitDir::Row), card_beside(&one, "a", SplitDir::Row));
+        assert_eq!(card_spot(&one, "gone", SplitDir::Row), None);
+    }
+
+    #[test]
+    fn a_new_frame_goes_where_the_board_is_looked_at() {
+        let centre = BoardPoint { x: 5000.0, y: 3000.0 };
+        // Nothing there: centred on it.
+        assert_eq!(frame_spot(1000.0, 800.0, centre, &[]), BoardPoint { x: 4500.0, y: 2600.0 });
+        // A frame there: the nearest free place beside it.
+        let there = rect(4000.0, 2500.0, 1500.0, 1000.0);
+        let spot = frame_spot(1000.0, 800.0, centre, &[there]);
+        assert_eq!(spot, BoardPoint { x: 4500.0, y: 2500.0 + 1000.0 + FRAME_GAP });
+        // And it is clear of it by the gap.
+        assert!(!overlaps(&inflate(&there, FRAME_GAP / 2.0 - 1e-6), &inflate(&rect(spot.x, spot.y, 1000.0, 800.0), FRAME_GAP / 2.0)));
     }
 
     #[test]
