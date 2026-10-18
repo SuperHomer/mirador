@@ -293,6 +293,27 @@ fn back_forward_and_reload() {
     browser_until(&sb, &first, &["eval", "typeof window.marker"], "a fresh document", |s| s.trim() == "\"undefined\"");
 }
 
+/// `open` returns once its page is there: the next command needs no wait.
+/// Ten in a row, since a race shows only sometimes.
+#[test]
+fn snapshot_right_after_open() {
+    e2e!();
+    let (sb, first) = launched("bopenrace");
+    let url = page("/");
+    for i in 0..10 {
+        let tab = if i % 2 == 0 { None } else { Some("--tab") };
+        let mut args = vec!["open"];
+        args.extend(tab);
+        args.push(&url);
+        let pane = browser(&sb, &first, &args).trim().to_string();
+        let snap = browser(&sb, &first, &["snapshot", "--pane", &pane]);
+        assert!(snap.starts_with(&format!("Form — {url}")), "open #{i} ({args:?}):\n{snap}");
+        // Splits halve the pane each time: close it before the next.
+        let (code, _, err) = sb.mira(None, &["close-pane", &pane]);
+        assert_eq!(code, 0, "{err}");
+    }
+}
+
 /// `navigate` returns before the page loads, yet the next command already
 /// reaches the new document: twenty in a row did, not one the old page.
 #[test]

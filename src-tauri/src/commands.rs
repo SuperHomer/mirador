@@ -1600,13 +1600,15 @@ pub fn set_browser_visible(app: AppHandle, pane_id: String, visible: bool) {
     crate::browser::set_visible(&app, &pane_id, visible);
 }
 
+/// Async: off the main thread, which `browser::webview` may wait on.
 #[tauri::command]
-pub fn browser_navigate(app: AppHandle, pane_id: String, url: String) -> Result<(), String> {
+pub async fn browser_navigate(app: AppHandle, pane_id: String, url: String) -> Result<(), String> {
     crate::browser::navigate(&app, &pane_id, &url)
 }
 
+/// Async: off the main thread, which `browser::webview` may wait on.
 #[tauri::command]
-pub fn browser_history(app: AppHandle, pane_id: String, action: String) -> Result<(), String> {
+pub async fn browser_history(app: AppHandle, pane_id: String, action: String) -> Result<(), String> {
     crate::browser::history(&app, &pane_id, &action)
 }
 

@@ -4,13 +4,13 @@
 //! `mira-result://` URL we intercept and cancel — remote pages get no IPC
 //! access to the app.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::webview::PageLoadEvent;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl};
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl};
 
 use crate::AppState;
 
@@ -23,7 +23,15 @@ pub struct BrowserBridge {
     /// Memoized host-view origin. Cleared by `forget_host_origin` when the
     /// window moves or resizes, which is the only time it can change.
     host_origin: Mutex<Option<(f64, f64)>>,
+    /// Panes whose webview has finished loading a page at least once.
+    loaded: Mutex<HashSet<String>>,
 }
+
+/// How long a command waits for a browser pane's webview to exist.
+const WEBVIEW_WAIT: Duration = Duration::from_secs(5);
+/// How long `open` waits for its first page, past which it returns anyway:
+/// the pane is open, the page is just slow (or never answers).
+const FIRST_LOAD_WAIT: Duration = Duration::from_secs(10);
 
 fn label_for(pane_id: &str) -> String {
     let safe: String = pane_id
@@ -144,7 +152,9 @@ pub fn ensure_webview(
         // the pane goes on showing — and reporting — the page before it.
         .on_page_load(move |webview, payload| {
             if payload.event() == PageLoadEvent::Finished {
-                track_navigation(webview.app_handle(), &nav_pane, payload.url());
+                let app = webview.app_handle();
+                app.state::<AppState>().browser_bridge.loaded.lock().unwrap().insert(nav_pane.clone());
+                track_navigation(app, &nav_pane, payload.url());
             }
         });
 
@@ -204,13 +214,50 @@ fn decode_base64url(s: &str) -> Option<String> {
     cmux_core::osc::decode_base64(&standard)
 }
 
+/// The pane's webview, waiting a moment for it: the frontend creates it
+/// when it first draws the pane, just after `open` has answered. Never
+/// call it on the main thread, which is the one that creates it.
+fn webview(app: &AppHandle, pane_id: &str) -> Result<Webview, String> {
+    let is_browser = |app: &AppHandle| {
+        let state = app.state::<AppState>();
+        let meta = state.meta.lock().unwrap();
+        meta.get(pane_id).is_some_and(|m| m.browser_url.is_some())
+    };
+    if !is_browser(app) {
+        return Err(format!("no browser pane {pane_id}"));
+    }
+    let deadline = Instant::now() + WEBVIEW_WAIT;
+    loop {
+        if let Some(webview) = app.get_webview(&label_for(pane_id)) {
+            return Ok(webview);
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "browser pane {pane_id} has no page yet: the app has not drawn it. \
+                 Is Mirador's window open? Show the pane's tab and try again"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Waits for a just-opened pane's webview, and then for its first page
+/// to load or `FIRST_LOAD_WAIT`, whichever comes first — so the command
+/// after `open` finds the page there.
+pub fn wait_for_first_load(app: &AppHandle, pane_id: &str) -> Result<(), String> {
+    webview(app, pane_id)?;
+    let deadline = Instant::now() + FIRST_LOAD_WAIT;
+    let state = app.state::<AppState>();
+    while Instant::now() < deadline && !state.browser_bridge.loaded.lock().unwrap().contains(pane_id) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Ok(())
+}
+
 /// Runs an automation op inside the pane's webview, waiting for the
 /// bridge result (10s timeout).
 pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<String, String> {
-    let label = label_for(pane_id);
-    let webview = app
-        .get_webview(&label)
-        .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+    let webview = webview(app, pane_id)?;
 
     let state = app.state::<AppState>();
     let request_id = state.browser_bridge.next_id.fetch_add(1, Ordering::Relaxed);
@@ -240,9 +287,7 @@ pub fn execute(app: &AppHandle, pane_id: &str, op: serde_json::Value) -> Result<
 }
 
 pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String> {
-    let webview = app
-        .get_webview(&label_for(pane_id))
-        .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+    let webview = webview(app, pane_id)?;
     let current = webview.url().ok().map(String::from);
     let parsed = parse_url(url, current.as_deref())?;
     webview.navigate(parsed).map_err(|e| e.to_string())?;
@@ -250,9 +295,7 @@ pub fn navigate(app: &AppHandle, pane_id: &str, url: &str) -> Result<(), String>
 }
 
 pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<(), String> {
-    let webview = app
-        .get_webview(&label_for(pane_id))
-        .ok_or_else(|| format!("no browser pane {pane_id}"))?;
+    let webview = webview(app, pane_id)?;
     let js = match action {
         "back" => "history.back()",
         "forward" => "history.forward()",
@@ -273,6 +316,7 @@ pub fn set_visible(app: &AppHandle, pane_id: &str, visible: bool) {
 }
 
 pub fn destroy(app: &AppHandle, pane_id: &str) {
+    app.state::<AppState>().browser_bridge.loaded.lock().unwrap().remove(pane_id);
     if let Some(webview) = app.get_webview(&label_for(pane_id)) {
         let _ = webview.close();
     }

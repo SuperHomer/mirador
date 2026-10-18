@@ -101,7 +101,7 @@ fires a notification automatically.
 ## 4. Verify web changes in the browser pane
 
 ```bash
-mira browser open http://localhost:3000
+mira browser open http://localhost:3000   # returns once the page has loaded (10s at most)
 mira browser snapshot          # element list with stable ids:
 # [2] <button> "Submit" type=submit
 # [3] <input> "email" type=text value=""

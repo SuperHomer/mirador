@@ -342,6 +342,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 target.as_deref() == Some("tab"),
                 url,
             )?;
+            crate::browser::wait_for_first_load(app, &pane_id)?;
             Ok(json!({ "paneId": pane_id }))
         }
         Request::GraphOpen { target, pane_id } => {
