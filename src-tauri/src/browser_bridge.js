@@ -282,10 +282,25 @@
     el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType, data: text || null }));
   }
 
+  // Focuses `el` for keys, as a click after its text would: a field not
+  // already focused gets the cursor at its end. WebKit's own `focus()`
+  // selects all of a field it has no selection for — typing would then
+  // replace the value — or puts it back where it last was, at the start of
+  // a textarea: what a key did would depend on history no one can see. A
+  // focused field keeps its cursor and selection.
+  function focusForKeys(el) {
+    if (el === document.activeElement) return;
+    if (el.focus) el.focus();
+    if (!isTextField(el)) return;
+    try {
+      el.setSelectionRange(el.value.length, el.value.length);
+    } catch {} // email and number inputs have no cursor to set: they append.
+  }
+
   function typeInto(el, text) {
     if (!isTextField(el) && !el.isContentEditable)
       return { error: "not a text field: <" + el.tagName.toLowerCase() + "> cannot be typed into (an input, textarea or contenteditable can)" };
-    el.focus();
+    focusForKeys(el);
     for (const ch of String(text)) {
       const chord = { key: ch === "\n" ? "Enter" : ch };
       if (key(el, "keydown", chord)) {
@@ -420,7 +435,7 @@
       if (op.target !== undefined && op.target !== null) {
         el = locate(op.target);
         if (!el) return { error: "element not found: " + op.target };
-        el.focus && el.focus();
+        focusForKeys(el);
       }
       return press(el, chord);
     } else if (op.op === "eval") {

@@ -458,6 +458,22 @@ fn type_and_press_keys_like_a_person() {
     assert_ne!(code, 0);
     assert!(err.contains("unknown key \"Hyper\"") && err.contains("Enter, Tab, Escape"), "{err}");
 
+    // A field `type` or `press` focuses gets the cursor at its end, as a
+    // click after its text would — even a pre-filled one never focused,
+    // which WebKit's own focus() would select whole.
+    let pre = |sb: &Sandbox| browser(sb, &first, &["eval", "document.getElementById('pre').value"]).trim().to_string();
+    browser(&sb, &first, &["eval", "document.body.insertAdjacentHTML('beforeend', '<input id=pre value=pre>'); 0"]);
+    browser(&sb, &first, &["type", "#pre", "fix"]);
+    assert_eq!(pre(&sb), "\"prefix\"");
+    // A focused field keeps its cursor: put at the start, `type` inserts there.
+    browser(&sb, &first, &["eval", "document.getElementById('pre').setSelectionRange(0, 0); 0"]);
+    browser(&sb, &first, &["type", "#pre", ">"]);
+    assert_eq!(pre(&sb), "\">prefix\"");
+    // And `press --target` on a field not focused edits at its end.
+    browser(&sb, &first, &["press", "Backspace", "--target", "#q"]);
+    browser(&sb, &first, &["press", "Backspace", "--target", "#pre"]);
+    assert_eq!(pre(&sb), "\">prefi\"");
+
     // Enter in a form's field submits it, as a browser does.
     browser(&sb, &first, &["type", "#q", "sent"]);
     browser(&sb, &first, &["press", "Enter", "--target", "#q"]);

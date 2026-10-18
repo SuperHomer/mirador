@@ -106,7 +106,7 @@ it, wait for it, read its errors.
 
 ```bash
 mira run "npm run dev"                 # the dev server, in a pane the human sees
-mira browser open localhost:5173       # returns once the page has loaded (10s at most)
+mira browser open localhost:5173       # returns once its page has loaded
 mira browser snapshot                  # what is on the page, with ids to act on:
 # Sign in — http://localhost:5173/
 # [1] <h1> "Sign in"
@@ -128,6 +128,9 @@ The commands. All but `open` take `--pane <id>`; without it they go to
 the active tab's browser pane, else the one used last:
 
 - `open <url> [--tab]`, `navigate <url>`, `back`, `forward`, `reload`.
+  `open` waits for the pane to be drawn (up to 5 s; it fails if it never
+  is) and then for its page to load (up to 10 s more; past that it
+  returns the pane anyway). `navigate` and the others return at once.
   `localhost:5173`, `127.0.0.1:8000` and other loopback hosts open over
   http; any other host without a scheme gets https; `/path`, `?query` and
   `#hash` are taken against the current page.
@@ -135,10 +138,13 @@ the active tab's browser pane, else the one used last:
   stays the same on that page. A select lists its options.
 - `click <target>`, `fill <target> <value>`, `type <target> <text>`: a
   target is a snapshot id or a CSS selector. `fill` sets a value at once
-  (a select takes an option's value or text); `type` sends keydown,
-  keypress, input and keyup per character and appends, with `change` only
-  when the field loses focus.
-- `press <key> [--target <t>]`: Enter, Tab, Escape, Backspace, Delete,
+  (a select takes an option's value or text). `type` sends keydown,
+  keypress, input and keyup per character, typing at the cursor and
+  replacing a selection as a person would; a field it has to focus gets
+  the cursor at the end of its text, so there it appends. `change` comes
+  only when the field loses focus.
+- `press <key> [--target <t>]` (a field it focuses gets the cursor at the
+  end): Enter, Tab, Escape, Backspace, Delete,
   Space, the arrows, Home, End, PageUp, PageDown, a letter or digit, with
   `Shift+`, `Control+`, `Alt+`, `Meta+`. Enter in a form's field submits it
   by the browser's rule (through its default button, if it has one); Tab
@@ -160,8 +166,8 @@ What to know:
   pages ignore them.
 - The console log belongs to the page: a navigation or a reload starts it
   empty, so read it before moving on. It keeps the last 500 entries.
-- An answer is at most 1 MB, and a command waits 10 s for one (`wait`:
-  its `--timeout`).
+- An answer is at most 1 MB, and a command waits up to 10 s for it
+  (`wait`: its `--timeout`).
 - The URL a pane reports is the last page that finished loading: a
   single-page app's `pushState` routes do not change it. `eval
   location.href` does see them.
