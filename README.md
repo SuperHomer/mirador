@@ -381,7 +381,11 @@ beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
 that pane's directory: `claude --model … --append-system-prompt-file …
 --name <role>`, or `codex --model … -c developer_instructions=…`. (`mira
-agent new --tab` gives it a tab of its own instead.) Exiting the agent
+agent new --tab` gives it a tab of its own instead.) Codex also gets a
+permissions profile — the one it would run on anyway, plus Mirador's socket
+and nothing else — so `mira agent send` and `wait` work from inside its
+sandbox; not when your Codex config uses `sandbox_mode`, gives full access,
+or cannot be read. Exiting the agent
 leaves the shell; restarting Mirador resumes a Claude conversation on the
 role's model, with its prompt.
 
@@ -429,8 +433,8 @@ planner's edit tools are off. Start it with the palette's *Start Team…* ›
 (`omakase-planner`, `-worker`, `-reviewer`), its way of working and the
 team are *built-in*: the same for everyone, read-only, and replaced by any
 file of the same name — the editor's *Copy to yours* makes one to change.
-The first time the reviewer runs `mira`, Codex's sandbox asks you to allow
-it; Claude Code's hooks (`mira hooks setup`) are what let the planner wait
+The reviewer's `mira` reaches Mirador through Codex's sandbox (see roles,
+above); Claude Code's hooks (`mira hooks setup`) are what let the planner wait
 on the worker. Codex shows one startup warning for a role's agent —
 "Running without the shared background server" — because its prompt goes
 in as a `-c developer_instructions=…` override, which Codex runs in its

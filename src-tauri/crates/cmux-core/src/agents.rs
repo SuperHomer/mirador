@@ -451,6 +451,13 @@ pub fn hook_status(
 /// `settings_file` holds a Claude Code role to its MCP servers, plugins,
 /// skills and tools (`role_limits`).
 ///
+/// `socket` is Mirador's own, with the permissions profile Codex would
+/// otherwise run on ([`codex_base_profile`]): Codex's sandbox refuses every
+/// Unix socket, so without it the `mira` a Codex agent runs cannot reach
+/// the app. Codex is given that same profile plus the socket and nothing
+/// else — its network goes through Codex's proxy, which lets out only what
+/// the profile already allowed.
+///
 /// It is typed in, so every argument is put on one line and loses its
 /// control characters: a newline would submit the line half-quoted, and a
 /// stray `^C` would be read as a keystroke before the shell ever saw quotes.
@@ -460,6 +467,7 @@ pub fn launch_command(
     prompt_file: Option<&std::path::Path>,
     settings_file: Option<&std::path::Path>,
     task: Option<&str>,
+    socket: Option<(&str, &std::path::Path)>,
     quote: impl Fn(&str) -> String,
 ) -> String {
     let harness = role.map_or(Harness::Claude, |r| r.harness);
@@ -487,6 +495,16 @@ pub fn launch_command(
                 if let Some(prompt) = prompt {
                     arg("-c", &format!("developer_instructions={}", toml_string(prompt)));
                 }
+                if let Some((base, socket)) = socket {
+                    arg("-c", "default_permissions=\"mirador\"");
+                    arg("-c", &format!("permissions.mirador.extends={}", toml_string(base)));
+                    let socket = toml_string(&socket.to_string_lossy());
+                    arg("-c", &format!("permissions.mirador.network.unix_sockets={{{socket}=\"allow\"}}"));
+                    // Network on, but only through the proxy: it lets out
+                    // the domains the base allows, and the socket above.
+                    arg("-c", "permissions.mirador.network.enabled=true");
+                    arg("-c", "features.network_proxy=true");
+                }
             }
             _ => {
                 match (prompt, prompt_file) {
@@ -503,6 +521,35 @@ pub fn launch_command(
     }
     arg("", task.unwrap_or(""));
     line
+}
+
+/// The permissions profile a Codex started in `cwd` runs on, read from the
+/// person's Codex `config` (its text; `None` when there is no file): the
+/// base Mirador's own profile extends, so allowing its socket loosens
+/// nothing else. `None` means add nothing — a config that does not parse,
+/// one on the older `sandbox_mode` (Codex then ignores profiles), or full
+/// access (which no profile can extend, and which reaches the socket
+/// anyway). With no profile named, it is Codex's own default: the
+/// workspace one for a trusted project — `cwd`, or the repository it is
+/// in — and read-only for any other, or when `cwd` is not known.
+pub fn codex_base_profile(config: Option<&str>, cwd: Option<&std::path::Path>) -> Option<String> {
+    let config: toml::Table = toml::from_str(config.unwrap_or_default()).ok()?;
+    if config.contains_key("sandbox_mode") {
+        return None;
+    }
+    if let Some(profile) = config.get("default_permissions") {
+        return profile.as_str().filter(|p| *p != ":danger-full-access").map(String::from);
+    }
+    let Some(cwd) = cwd else { return Some(":read-only".into()) };
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    let repo = cwd.ancestors().find(|d| d.join(".git").exists());
+    let trusted = config.get("projects").and_then(|p| p.as_table()).is_some_and(|projects| {
+        projects.iter().any(|(path, project)| {
+            let path = std::path::Path::new(path);
+            (path == cwd || Some(path) == repo) && project.get("trust_level").and_then(|t| t.as_str()) == Some("trusted")
+        })
+    });
+    Some(if trusted { ":workspace" } else { ":read-only" }.to_string())
 }
 
 /// `text` as a TOML basic string on one line: every control character an
@@ -965,8 +1012,8 @@ mod tests {
     #[test]
     fn builds_the_launch_command() {
         let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
-        assert_eq!(launch_command(None, None, None, None, None, q), "claude");
-        assert_eq!(launch_command(None, None, None, None, Some("fix the flaky test"), q), "claude 'fix the flaky test'");
+        assert_eq!(launch_command(None, None, None, None, None, None, q), "claude");
+        assert_eq!(launch_command(None, None, None, None, Some("fix the flaky test"), None, q), "claude 'fix the flaky test'");
         let role = AgentRole {
             name: "reviewer".into(),
             model: Some("opus".into()),
@@ -976,21 +1023,21 @@ mod tests {
         // A prompt file is what Claude Code gets, when there is one.
         let file = std::path::Path::new("/data/prompts/p1.md");
         assert_eq!(
-            launch_command(Some(&role), Some(prompt), Some(file), None, Some("look at\r\nmain\u{3}"), q),
+            launch_command(Some(&role), Some(prompt), Some(file), None, Some("look at\r\nmain\u{3}"), None, q),
             r"claude --model 'opus' --append-system-prompt-file '/data/prompts/p1.md' --name 'reviewer' 'look at main'"
         );
         assert_eq!(
-            launch_command(Some(&role), Some(prompt), None, None, None, q),
+            launch_command(Some(&role), Some(prompt), None, None, None, None, q),
             r"claude --model 'opus' --append-system-prompt 'You review. Never edit files; it'\''s read-only.' --name 'reviewer'"
         );
         // A role that limits its tools says where its settings are.
         let settings = std::path::Path::new("/data/prompts/reviewer-2.settings.json");
         assert_eq!(
-            launch_command(Some(&role), None, None, Some(settings), None, q),
+            launch_command(Some(&role), None, None, Some(settings), None, None, q),
             r"claude --model 'opus' --settings '/data/prompts/reviewer-2.settings.json' --name 'reviewer'"
         );
         let bare = AgentRole { name: "plain".into(), ..Default::default() };
-        assert_eq!(launch_command(Some(&bare), Some("  "), Some(file), None, Some("  "), q), "claude --name 'plain'");
+        assert_eq!(launch_command(Some(&bare), Some("  "), Some(file), None, Some("  "), None, q), "claude --name 'plain'");
     }
 
     #[test]
@@ -999,13 +1046,56 @@ mod tests {
         let role = AgentRole { name: "dev".into(), harness: Harness::Codex, model: Some("gpt-5".into()), ..Default::default() };
         let file = std::path::Path::new("/data/prompts/p1.md");
         assert_eq!(
-            launch_command(Some(&role), Some("Line \"one\"\r\n\tC:\\path"), Some(file), None, Some("go"), q),
+            launch_command(Some(&role), Some("Line \"one\"\r\n\tC:\\path"), Some(file), None, Some("go"), None, q),
             r#"codex --model 'gpt-5' -c 'developer_instructions="Line \"one\"\n\tC:\\path"' 'go'"#
         );
         // The escapes are TOML's: the value reads back as the prompt.
         let value: toml::Value = toml::from_str(&format!("v = {}", toml_string("a \"b\"\nc\\d\u{7}"))).unwrap();
         assert_eq!(value["v"].as_str(), Some("a \"b\"\nc\\d\u{7}"));
-        assert_eq!(launch_command(Some(&role), None, None, None, None, q), "codex --model 'gpt-5'");
+        assert_eq!(launch_command(Some(&role), None, None, None, None, None, q), "codex --model 'gpt-5'");
+    }
+
+    #[test]
+    fn lets_a_codex_role_reach_miradors_socket_and_nothing_else() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let role = AgentRole { name: "dev".into(), harness: Harness::Codex, model: Some("gpt-5".into()), ..Default::default() };
+        let socket = Some((":read-only", std::path::Path::new("/var/folders/x/T/mira-501.sock")));
+        // The base is what the person's Codex would run on, made no looser.
+        assert_eq!(
+            launch_command(Some(&role), Some("You review."), None, None, None, socket, q),
+            "codex --model 'gpt-5' -c 'developer_instructions=\"You review.\"' \
+             -c 'default_permissions=\"mirador\"' -c 'permissions.mirador.extends=\":read-only\"' \
+             -c 'permissions.mirador.network.unix_sockets={\"/var/folders/x/T/mira-501.sock\"=\"allow\"}' \
+             -c 'permissions.mirador.network.enabled=true' -c 'features.network_proxy=true'"
+        );
+        // Claude Code is started as before.
+        let claude = AgentRole { name: "reviewer".into(), ..Default::default() };
+        assert_eq!(launch_command(Some(&claude), None, None, None, None, socket, q), "claude --name 'reviewer'");
+    }
+
+    #[test]
+    fn extends_the_codex_profile_the_person_runs_on() {
+        let dir = std::env::temp_dir().join(format!("mira-codex-base-{}", std::process::id()));
+        let project = dir.join("repo/sub");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(dir.join("repo/.git")).unwrap();
+        let repo = dir.join("repo").canonicalize().unwrap();
+        let base = |config: Option<&str>| codex_base_profile(config, Some(&project));
+
+        // Their own profile, built-in or theirs: Codex reads its definition.
+        assert_eq!(base(Some("default_permissions = \":read-only\"")).as_deref(), Some(":read-only"));
+        assert_eq!(base(Some("default_permissions = \"strict\"\n[permissions.strict]\nextends = \":read-only\"")).as_deref(), Some("strict"));
+        // None named: Codex's default, by whether the repository is trusted.
+        let trusted = format!("[projects.{:?}]\ntrust_level = \"trusted\"", repo.to_string_lossy());
+        assert_eq!(base(Some(&trusted)).as_deref(), Some(":workspace"));
+        assert_eq!(base(Some(&trusted.replace("trusted\"", "untrusted\""))).as_deref(), Some(":read-only"));
+        assert_eq!(base(None).as_deref(), Some(":read-only"));
+        assert_eq!(codex_base_profile(Some(&trusted), None).as_deref(), Some(":read-only"), "nowhere known");
+        // Nothing added where it cannot be done without guessing.
+        assert_eq!(base(Some("default_permissions = ")), None, "a config that does not parse");
+        assert_eq!(base(Some("sandbox_mode = \"read-only\"")), None, "profiles are ignored then");
+        assert_eq!(base(Some("default_permissions = \":danger-full-access\"")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
