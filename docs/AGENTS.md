@@ -106,7 +106,8 @@ mira browser snapshot          # element list with stable ids:
 # [2] <button> "Submit" type=submit
 # [3] <input> "email" type=text value=""
 mira browser click 2           # snapshot id — or a CSS selector: "#submit"
-mira browser fill 3 "a@b.c"    # React-safe native setters
+mira browser fill 3 "a@b.c"    # React-safe native setters; a select takes an
+                               # option's value or text (snapshot lists them)
 mira browser eval "document.title"
 mira browser navigate /checkout # a path is on the current page's site
 mira browser back|forward|reload

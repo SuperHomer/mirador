@@ -13,8 +13,9 @@ const LONG: Duration = Duration::from_secs(45);
 const FORM: &str = r#"<!doctype html><title>Form</title>
 <h1>Form</h1>
 <input id="name" placeholder="name">
-<select id="color"><option value="red">Red</option><option value="blue">Blue</option></select>
+<select id="color" onchange="document.getElementById('out').textContent = 'picked ' + this.value"><option value="red">Red</option><option value="blue">Blue</option><option value="g">Green</option></select>
 <button id="go" onclick="document.getElementById('out').textContent = 'hello ' + document.getElementById('name').value + ' ' + document.getElementById('color').value">Go</button>
+<input type="checkbox" id="agree">
 <p id="out"></p>
 <a href="/page2">Page two</a>"#;
 
@@ -201,6 +202,41 @@ fn fill_and_click_by_css_selector() {
     let (code, _, err) = sb.mira(Some(&first), &["browser", "click", "#missing"]);
     assert_ne!(code, 0);
     assert!(err.contains("element not found: #missing"), "{err}");
+}
+
+#[test]
+fn fill_a_select_by_value_or_text() {
+    e2e!();
+    let (sb, first) = launched("bselect");
+    open(&sb, &first, &page("/"));
+    let out = |sb: &Sandbox| browser(sb, &first, &["eval", "document.getElementById('out').textContent"]);
+    // The snapshot shows the choices, and which is chosen.
+    let snap = browser(&sb, &first, &["snapshot"]);
+    for line in [
+        "<select> \"Red\" type=select-one value=\"red\"",
+        "      option \"Red\" value=\"red\" selected\n",
+        "      option \"Blue\" value=\"blue\"\n",
+        "      option \"Green\" value=\"g\"\n",
+    ] {
+        assert!(snap.contains(line), "no {line:?} in:\n{snap}");
+    }
+    // By value, and the page hears the change.
+    assert_eq!(browser(&sb, &first, &["fill", "#color", "blue"]), "");
+    assert_eq!(out(&sb).trim(), "\"picked blue\"");
+    // By the text a person sees.
+    browser(&sb, &first, &["fill", "#color", "Green"]);
+    assert_eq!(out(&sb).trim(), "\"picked g\"");
+    assert!(browser(&sb, &first, &["snapshot"]).contains("option \"Green\" value=\"g\" selected"));
+    // No such option: the error lists them.
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "fill", "#color", "purple"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("no option \"purple\"") && err.contains("\"g\" (Green)"), "{err}");
+    // A checkbox is clicked, and the error says so.
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "fill", "#agree", "yes"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("mira browser click"), "{err}");
+    browser(&sb, &first, &["click", "#agree"]);
+    assert_eq!(browser(&sb, &first, &["eval", "document.getElementById('agree').checked"]).trim(), "true");
 }
 
 #[test]

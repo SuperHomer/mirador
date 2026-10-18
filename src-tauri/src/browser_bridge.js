@@ -57,12 +57,28 @@
       if (el.href) entry.href = el.href;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA")
         entry.value = String(el.value).slice(0, 100);
+      if (el.tagName === "SELECT") {
+        // The choices, so an agent can `fill` one: its text is the chosen
+        // option's, not every option's run together.
+        entry.text = el.selectedOptions[0] ? optionText(el.selectedOptions[0]) : "";
+        entry.value = String(el.value).slice(0, 100);
+        entry.options = Array.from(el.options)
+          .slice(0, MAX_OPTIONS)
+          .map((o) => ({ value: o.value, text: optionText(o), selected: o.selected }));
+        if (el.options.length > MAX_OPTIONS) entry.moreOptions = el.options.length - MAX_OPTIONS;
+      }
       if (el.checked !== undefined) entry.checked = el.checked;
       if (el.disabled) entry.disabled = true;
       nodes.push(entry);
       if (nodes.length >= 400) break;
     }
     return nodes;
+  }
+
+  const MAX_OPTIONS = 50;
+
+  function optionText(option) {
+    return option.text.replace(/\s+/g, " ").trim().slice(0, 100);
   }
 
   function locate(ref) {
@@ -75,15 +91,44 @@
     }
   }
 
+  // Through the prototype's own setter, as a person typing would: React
+  // and the like track the value by overriding the element's setter.
   function setNativeValue(el, value) {
-    const proto =
-      el.tagName === "TEXTAREA"
-        ? HTMLTextAreaElement.prototype
-        : HTMLInputElement.prototype;
+    const proto = {
+      INPUT: HTMLInputElement.prototype,
+      TEXTAREA: HTMLTextAreaElement.prototype,
+      SELECT: HTMLSelectElement.prototype,
+    }[el.tagName];
     const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
     setter.call(el, value);
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // Fills a field; an answer with `error` when it cannot.
+  function fill(el, value) {
+    const type = (el.type || "").toLowerCase();
+    if (el.tagName === "SELECT") {
+      const options = Array.from(el.options);
+      const option =
+        options.find((o) => o.value === value) ||
+        options.find((o) => optionText(o) === String(value).replace(/\s+/g, " ").trim());
+      if (!option) {
+        const choices = options
+          .slice(0, MAX_OPTIONS)
+          .map((o) => JSON.stringify(o.value) + " (" + optionText(o) + ")")
+          .join(", ");
+        return { error: "no option " + JSON.stringify(value) + " in the select; its options: " + choices };
+      }
+      setNativeValue(el, option.value);
+    } else if (el.tagName === "INPUT" && (type === "checkbox" || type === "radio")) {
+      return { error: "a " + type + " is not filled: `mira browser click` it to check or uncheck it" };
+    } else if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+      setNativeValue(el, value);
+    } else {
+      return { error: "not a field: <" + el.tagName.toLowerCase() + "> takes no value (an input, textarea or select does)" };
+    }
+    return { ok: true };
   }
 
   // Answers by id: a Promise's, until Rust takes it with __miraTake.
@@ -104,8 +149,7 @@
       const el = locate(op.target);
       if (!el) return { error: "element not found: " + op.target };
       el.focus && el.focus();
-      setNativeValue(el, op.value);
-      return { ok: true };
+      return fill(el, op.value);
     } else if (op.op === "eval") {
       const value = (0, eval)(op.js);
       if (value && typeof value.then === "function")

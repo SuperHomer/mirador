@@ -1038,6 +1038,18 @@ fn render_page_snapshot(data: &serde_json::Value) {
             if extras.is_empty() { "" } else { " " },
             extras.join(" ")
         );
+        // A select's choices, under it: what `fill` takes.
+        for option in node["options"].as_array().into_iter().flatten() {
+            println!(
+                "      option \"{}\" value=\"{}\"{}",
+                option["text"].as_str().unwrap_or(""),
+                option["value"].as_str().unwrap_or(""),
+                if option["selected"].as_bool() == Some(true) { " selected" } else { "" }
+            );
+        }
+        if let Some(more) = node["moreOptions"].as_u64() {
+            println!("      … {more} more options");
+        }
     }
 }
 
