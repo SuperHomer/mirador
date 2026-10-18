@@ -6,6 +6,7 @@ const COMMANDS = [
   'mira team start squad "add OAuth"',
   'mira diff main...HEAD',
   'mira browser open localhost:3000',
+  'mira browser console --errors',
   'mira ssh open prod-box',
   'mira notify "build green"',
   'mira hooks setup',
@@ -48,6 +49,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> <span style={{ color: "var(--green)" }}>"add OAuth"</span><span style={{ color: "var(--muted)" }}> # a tab of agents</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser open <span style={{ color: "var(--green)" }}>localhost:3000</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira browser console --errors<span style={{ color: "var(--muted)" }}> # what broke</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira ssh open <span style={{ color: "var(--mauve)" }}>prod-box</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira notify <span style={{ color: "var(--green)" }}>"build green"</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira hooks setup<span style={{ color: "var(--muted)" }}>           # Claude Code</span></div>

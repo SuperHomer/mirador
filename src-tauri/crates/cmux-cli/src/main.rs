@@ -353,14 +353,17 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Go back in the browser pane's history.
     Back {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Go forward in the browser pane's history.
     Forward {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// Reload the browser pane's page (its console log starts empty).
     Reload {
         #[arg(long)]
         pane: Option<String>,

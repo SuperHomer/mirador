@@ -98,46 +98,71 @@ exit code as running it yourself — but the human sees every line live and
 can Ctrl-C in the pane (you'll observe the interrupted exit). Completion
 fires a notification automatically.
 
-## 4. Verify web changes in the browser pane
+## 4. Test the page you are building, in the browser pane
+
+The browser pane is a real browser the human watches while you drive it.
+Use it to check a web change the way a person would: load the page, use
+it, wait for it, read its errors.
 
 ```bash
-mira browser open http://localhost:3000   # returns once the page has loaded (10s at most)
-mira browser snapshot          # element list with stable ids:
-# [2] <button> "Submit" type=submit
-# [3] <input> "email" type=text value=""
-mira browser click 2           # snapshot id — or a CSS selector: "#submit"
-mira browser fill 3 "a@b.c"    # React-safe native setters; a select takes an
-                               # option's value or text (snapshot lists them)
-mira browser type 3 "a@b"      # key by key, appending: for pages that react
-                               # to keys (autocomplete, validate on keyup)
-mira browser press Enter       # or Tab, Escape, Backspace, Shift+Tab, Meta+A…;
-                               # --target 3 to press on an element
-mira browser eval "document.title"
-mira browser navigate /checkout # a path is on the current page's site
-mira browser back|forward|reload
-mira browser wait "#result"     # until shown — instead of sleeping; also
-mira browser wait --text Saved  # --url /checkout, --gone .spinner,
-                               # --timeout <secs> (default 10)
-mira browser console           # what the page logged, threw and failed to
-mira browser console --errors  # load, oldest first; --clear empties it
+mira run "npm run dev"                 # the dev server, in a pane the human sees
+mira browser open localhost:5173       # returns once the page has loaded (10s at most)
+mira browser snapshot                  # what is on the page, with ids to act on:
+# Sign in — http://localhost:5173/
+# [1] <h1> "Sign in"
+# [2] <input> "email" type=email value=""
+# [3] <input> "password" type=password value=""
+# [4] <button> "Sign in" type=submit
+mira browser fill 2 "ada@example.com"  # sets a value at once
+mira browser type 3 "hunter2"          # key by key, for pages that listen to keys
+mira browser press Enter               # submits the form, as a browser does
+mira browser wait --url /dashboard     # instead of sleeping
+mira browser wait --gone .spinner
+mira browser console --errors          # what went wrong on this page
+mira browser eval "document.title"     # anything else, as JSON
 ```
 
-The console log is the current page's (the last 500 entries): a
-navigation or reload starts it empty, so read it before moving on.
-`console` exits 0 whatever it shows; it only reads.
+The commands. All but `open` take `--pane <id>`; without it they go to
+the active tab's browser pane, else the one used last:
 
-`fill` sets a value at once; `type` sends keydown, keypress, input and
-keyup for each character, and `change` only when the field loses focus,
-as a browser does. Enter in a form's field submits the form. The key
-events are synthetic (`isTrusted` is false): a few pages ignore them.
+- `open <url> [--tab]`, `navigate <url>`, `back`, `forward`, `reload`.
+  `localhost:5173`, `127.0.0.1:8000` and other loopback hosts open over
+  http; any other host without a scheme gets https; `/path`, `?query` and
+  `#hash` are taken against the current page.
+- `snapshot`: title, URL and up to 400 elements, each with an id that
+  stays the same on that page. A select lists its options.
+- `click <target>`, `fill <target> <value>`, `type <target> <text>`: a
+  target is a snapshot id or a CSS selector. `fill` sets a value at once
+  (a select takes an option's value or text); `type` sends keydown,
+  keypress, input and keyup per character and appends, with `change` only
+  when the field loses focus.
+- `press <key> [--target <t>]`: Enter, Tab, Escape, Backspace, Delete,
+  Space, the arrows, Home, End, PageUp, PageDown, a letter or digit, with
+  `Shift+`, `Control+`, `Alt+`, `Meta+`. Enter in a form's field submits it
+  by the browser's rule (through its default button, if it has one); Tab
+  moves focus.
+- `wait <selector>`, `wait --text <text>`, `wait --url <part>`,
+  `wait --gone <selector>`, each with `--timeout <secs>` (default 10). On a
+  timeout it says what it waited for and what the page showed instead.
+- `console [--errors] [--clear]`: console output, uncaught errors,
+  unhandled rejections and failed loads, oldest first. Exits 0 whatever
+  it shows.
+- `eval <js>`: the result as JSON; a Promise is awaited.
 
-`localhost:3000`, `127.0.0.1:8000` and other loopback hosts open over
-http without typing it; any other host without a scheme gets https.
+What to know:
 
-Snapshots cap at 400 elements. The page gets **no** IPC access to Mirador —
-automation reads back what a script it runs in the page returns, so a
-malicious page cannot drive your terminal. `eval` awaits a Promise (10s at
-most).
+- The key and mouse events are synthetic (`isTrusted` is false). A few
+  pages ignore them.
+- The console log belongs to the page: a navigation or a reload starts it
+  empty, so read it before moving on. It keeps the last 500 entries.
+- An answer is at most 1 MB, and a command waits 10 s for one (`wait`:
+  its `--timeout`).
+- The URL a pane reports is the last page that finished loading: a
+  single-page app's `pushState` routes do not change it. `eval
+  location.href` does see them.
+- A pane opens web pages only: http, https and `about:blank`, never
+  Mirador's own (`tauri://`, its dev server). The page gets **no** access
+  to Mirador's commands, so a malicious page cannot drive your terminal.
 
 ## 5. Show the human what you changed
 
@@ -391,9 +416,10 @@ Newline-delimited JSON on the socket named in the discovery file:
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session agent_new agent_list
-agent_wall zoom_pane browser_open
-browser_navigate browser_snapshot browser_click browser_fill browser_eval
-browser_history browser_wait browser_console browser_type browser_press ssh_open ssh_hosts ssh_forward diff_open`. Requests are
+agent_wall zoom_pane browser_open browser_navigate browser_snapshot
+browser_click browser_fill browser_type browser_press browser_eval
+browser_history browser_wait browser_console ssh_open ssh_hosts
+ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)
