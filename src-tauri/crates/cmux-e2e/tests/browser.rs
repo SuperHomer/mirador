@@ -405,6 +405,15 @@ fn console_shows_what_the_page_logged_and_threw() {
     let errors = browser(&sb, &first, &["console", "--errors"]);
     assert_eq!(errors.lines().count(), 4, "{errors}");
     assert!(errors.lines().all(|l| l.starts_with("error")), "{errors}");
+    // Of the ACL's refusals, only the notification plugin's own check on
+    // load is left out: one the page provokes is the page's, and shows.
+    browser(&sb, &first, &[
+        "eval",
+        "window.__TAURI_INTERNALS__.invoke('plugin:notification|notify', { options: { title: 'x' } }); 0",
+    ]);
+    browser_until(&sb, &first, &["console", "--errors"], "the page's own refused call", |s| {
+        s.contains("Unhandled rejection: notification.notify not allowed on window")
+    });
 
     let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "console"])).unwrap();
     assert_eq!(raw["console"][0]["level"], "log", "{raw}");

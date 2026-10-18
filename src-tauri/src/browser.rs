@@ -179,7 +179,7 @@ pub fn ensure_webview(
     let nav_pane = pane_id.to_string();
     let dev = dev_origin(app);
     let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parse_url(app, &url, None)?))
-        .initialization_script(BRIDGE_JS)
+        .initialization_script(BRIDGE_JS.replace("__MIRA_WEBVIEW_LABEL__", &label))
         // What the page itself asks for — a link, a script, a redirect —
         // never reaches the app's own origins either. Only those are
         // refused: on macOS this sees the page's frames too, which may

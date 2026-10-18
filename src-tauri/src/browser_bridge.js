@@ -79,13 +79,27 @@
     },
     true,
   );
+  // This webview's label, put in by browser.rs.
+  const OWN_WEBVIEW = "__MIRA_WEBVIEW_LABEL__";
+
+  // Not the page's: Tauri plugins inject their scripts into every webview,
+  // this one too, and the notification plugin's asks whether it may
+  // notify on load — which this webview, rightly, is refused. Exactly
+  // that refusal, as Tauri words it in a debug build (naming this
+  // webview) and in a release one (naming nothing): any other rejection
+  // is the page's.
+  function ourPermissionCheckRefused(message) {
+    return (
+      message === "Command plugin:notification|is_permission_granted not allowed by ACL" ||
+      message.startsWith(
+        'notification.is_permission_granted not allowed on window "main", webview "' + OWN_WEBVIEW + '"',
+      )
+    );
+  }
+
   window.addEventListener("unhandledrejection", (e) => {
     const message = describe(e.reason);
-    // Not the page's: Tauri plugins inject their scripts into every
-    // webview, this one too, and the notification plugin's asks for a
-    // permission on load — which this webview, rightly, is refused. Only
-    // Tauri's ACL words a refusal this way.
-    if (/ not allowed on window "[^"]*", webview "browser-/.test(message)) return;
+    if (ourPermissionCheckRefused(message)) return;
     keep("error", "Unhandled rejection: " + message);
   });
 
