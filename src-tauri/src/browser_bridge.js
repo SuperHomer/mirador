@@ -295,6 +295,26 @@
     return { ok: true };
   }
 
+  const BLOCKS_IMPLICIT_SUBMISSION = /^(text|search|url|tel|email|password|date|month|week|time|datetime-local|number)$/i;
+
+  // HTML's implicit submission (the spec's "Implicit submission", in
+  // §4.10.21.2 Form submission): Enter in a field clicks the form's
+  // default button — its first submit button — so the button's own
+  // handlers and formaction run; a disabled default button means no
+  // submission at all. With no submit button, the form submits itself
+  // unless more than one of its fields blocks implicit submission.
+  function implicitSubmit(form) {
+    const button = Array.from(form.elements).find((e) => e.type === "submit");
+    if (button) {
+      if (!button.disabled) button.click();
+      return;
+    }
+    const blocking = Array.from(form.elements).filter(
+      (e) => e.tagName === "INPUT" && BLOCKS_IMPLICIT_SUBMISSION.test(e.type),
+    );
+    if (blocking.length <= 1) form.requestSubmit();
+  }
+
   // What tabbing visits, in document order (a positive tabindex's order
   // is not modelled).
   function focusable() {
@@ -311,17 +331,18 @@
       const k = chord.key;
       const command = chord.ctrlKey || chord.metaKey;
       if (k === "Tab") {
+        // No wrapping: past the last control (or before the first), focus
+        // leaves the page's controls for the document, as in a browser.
         const all = focusable();
-        const next = all[(all.indexOf(el) + (chord.shiftKey ? -1 : 1) + all.length) % all.length];
+        const at = all.indexOf(el);
+        const next = at === -1 ? all[chord.shiftKey ? all.length - 1 : 0] : all[at + (chord.shiftKey ? -1 : 1)];
         if (next) next.focus();
+        else if (el.blur) el.blur();
       } else if (k === "Enter" && el.tagName === "TEXTAREA") {
         edit(el, "\n", "insertLineBreak");
       } else if (k === "Enter" && isTextField(el) && el.form) {
-        // A browser submits a form when Enter is pressed in one of its
-        // fields (implicit submission); a synthetic key event does not,
-        // so it is done here — through the submit event and validation,
-        // as the browser does.
-        el.form.requestSubmit();
+        // A synthetic Enter submits nothing; a browser's does.
+        implicitSubmit(el.form);
       } else if ((k === "Enter" || k === " ") && (el.tagName === "BUTTON" || el.tagName === "A")) {
         el.click();
       } else if ((k === "Backspace" || k === "Delete") && isTextField(el)) {

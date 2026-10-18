@@ -38,9 +38,30 @@ const KEYS: &str = r#"<!doctype html><title>Keys</title>
 <form action="/page2">
 <input id="q" name="q" onkeyup="document.getElementById('mirror').textContent = this.value">
 <input id="next">
+<button id="go">Go</button>
 </form>
 <p id="mirror"></p><p id="esc"></p>
 <script>document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.getElementById("esc").textContent = "escaped"; });</script>"#;
+
+/// Forms for Enter's implicit submission, each with a different shape.
+/// Each records a `submit` event; one that navigates lands on /page2.
+fn implicit_form(path: &str) -> Option<String> {
+    let fields = match path {
+        // The default button is clicked: its handler and its name/value
+        // go with the submission.
+        "/form-button" => r#"<input id="f" name="q" value="b"><input id="g">
+            <input type="hidden" name="clicked">
+            <button name="via" value="button" onclick="this.form.clicked.value = 'yes'">Send</button>"#,
+        "/form-one" => r#"<input id="f" name="q" value="one">"#,
+        "/form-two" => r#"<input id="f" name="q" value="two"><input id="g" name="r">"#,
+        "/form-disabled" => r#"<input id="f" name="q" value="d"><button disabled>Send</button>"#,
+        _ => return None,
+    };
+    Some(format!(
+        r#"<!doctype html><title>Implicit</title>
+<form action="/page2" onsubmit="window.submitted = true">{fields}</form>"#
+    ))
+}
 
 const SPAM: &str = r#"<!doctype html><title>Spam</title>
 <script>for (let i = 0; i < 5000; i++) console.log("line " + i);</script>"#;
@@ -84,6 +105,14 @@ fn serve_page(mut stream: std::net::TcpStream) {
     };
     if let Some(location) = location {
         let _ = write!(stream, "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
+    if let Some(body) = implicit_form(path) {
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
         return;
     }
     let (status, body) = match path {
@@ -412,6 +441,11 @@ fn type_and_press_keys_like_a_person() {
     assert_eq!(focused(&sb).trim(), "\"next\"");
     browser(&sb, &first, &["press", "Shift+Tab"]);
     assert_eq!(focused(&sb).trim(), "\"q\"");
+    // No wrapping: past the last control, focus is the document's.
+    browser(&sb, &first, &["press", "Tab", "--target", "#go"]);
+    assert_eq!(browser(&sb, &first, &["eval", "document.activeElement === document.body"]).trim(), "true");
+    browser(&sb, &first, &["press", "Shift+Tab", "--target", "#q"]);
+    assert_eq!(browser(&sb, &first, &["eval", "document.activeElement === document.body"]).trim(), "true");
 
     browser(&sb, &first, &["press", "Escape"]);
     assert_eq!(text(&sb, "esc").trim(), "\"escaped\"");
@@ -424,6 +458,33 @@ fn type_and_press_keys_like_a_person() {
     browser(&sb, &first, &["type", "#q", "sent"]);
     browser(&sb, &first, &["press", "Enter", "--target", "#q"]);
     browser(&sb, &first, &["wait", "--url", "/page2?q=sent"]);
+}
+
+/// Enter in a field submits a form only as a browser's would: through
+/// its default button, or — without one — when it has a single text
+/// field.
+#[test]
+fn enter_submits_a_form_as_a_browser_would() {
+    e2e!();
+    let (sb, first) = launched("bimplicit");
+    let pane = open(&sb, &first, &page("/form-button"));
+    browser(&sb, &first, &["press", "Enter", "--target", "#f"]);
+    browser(&sb, &first, &["wait", "--url", "/page2?q=b&clicked=yes&via=button"]);
+
+    browser(&sb, &first, &["navigate", "/form-one"]);
+    browser(&sb, &first, &["wait", "#f"]);
+    browser(&sb, &first, &["press", "Enter", "--target", "#f"]);
+    browser(&sb, &first, &["wait", "--url", "/page2?q=one"]);
+
+    for path in ["/form-two", "/form-disabled"] {
+        browser(&sb, &first, &["navigate", path]);
+        browser(&sb, &first, &["wait", "--url", path]);
+        browser(&sb, &first, &["press", "Enter", "--target", "#f"]);
+        let (code, _, _) = sb.mira(Some(&first), &["browser", "wait", "--url", "/page2", "--timeout", "2"]);
+        assert_ne!(code, 0, "{path} submitted");
+        assert_eq!(reported_url(&sb, &pane), Some(page(path)), "{path} left the page");
+        assert_eq!(browser(&sb, &first, &["eval", "window.submitted === true"]).trim(), "false", "{path}: a submit event");
+    }
 }
 
 /// What a page logs and throws — while it loads, too — with its level and
