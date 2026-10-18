@@ -356,13 +356,7 @@ impl Workspace {
     /// every other: wherever the tab sits in the tab order, a new frame
     /// never lands on top of one already there.
     fn place_frame(&mut self, tab_id: &str) {
-        let others = self
-            .tabs
-            .iter()
-            .filter(|t| t.id != tab_id)
-            .map(Tab::frame_rect)
-            .collect::<Vec<_>>();
-        let origin = board::next_frame_origin(others);
+        let origin = board::next_frame_origin(self.other_frames(tab_id));
         if let Some(tab) = self.tab_mut(tab_id) {
             tab.frame = origin;
         }
@@ -621,26 +615,37 @@ impl Workspace {
         std::mem::replace(&mut self.view, view) != view
     }
 
-    /// Moves or resizes `pane`'s card. Its splits stay as they are.
-    pub fn set_card_rect(&mut self, pane: &str, rect: BoardRect) -> bool {
-        match self.tab_of_pane_mut(pane) {
-            Some(tab) => {
-                tab.cards.insert(pane.to_string(), rect);
-                true
-            }
-            None => false,
-        }
+    /// The frames of every tab but `tab_id`'s.
+    fn other_frames(&self, tab_id: &str) -> Vec<BoardRect> {
+        self.tabs
+            .iter()
+            .filter(|t| t.id != tab_id)
+            .map(Tab::frame_rect)
+            .collect()
     }
 
-    /// Moves a tab's frame, and its cards with it.
-    pub fn set_frame_position(&mut self, tab_id: &str, origin: BoardPoint) -> bool {
-        match self.tab_mut(tab_id) {
-            Some(tab) => {
-                tab.frame = origin;
-                true
-            }
-            None => false,
+    /// Moves or resizes `pane`'s card, if it fits there
+    /// (`board::card_fits`); its splits stay as they are. The card's place
+    /// afterwards — unchanged when refused — or None for no such pane.
+    pub fn set_card_rect(&mut self, pane: &str, rect: BoardRect) -> Option<BoardRect> {
+        let tab_id = self.tab_of_pane(pane)?.id.clone();
+        let others = self.other_frames(&tab_id);
+        let tab = self.tab_mut(&tab_id)?;
+        if board::card_fits(&tab.cards, pane, rect, tab.frame, &others) {
+            tab.cards.insert(pane.to_string(), rect);
         }
+        tab.cards.get(pane).copied()
+    }
+
+    /// Moves a tab's frame, and its cards with it, if no other frame is
+    /// there. Where the frame is afterwards, or None for no such tab.
+    pub fn set_frame_position(&mut self, tab_id: &str, origin: BoardPoint) -> Option<BoardPoint> {
+        let others = self.other_frames(tab_id);
+        let tab = self.tab_mut(tab_id)?;
+        if board::frame_fits(&tab.cards, origin, &others) {
+            tab.frame = origin;
+        }
+        Some(tab.frame)
     }
 
     /// Whether `pane` is still in a tab. A pane leaves its tab before its
@@ -1112,7 +1117,7 @@ mod tests {
         let mut ws = Workspace::default();
         let a = ws.focused_pane();
         let moved = BoardRect { x: 400.0, y: 300.0, w: 500.0, h: 250.0 };
-        assert!(ws.set_card_rect(&a, moved));
+        assert_eq!(ws.set_card_rect(&a, moved), Some(moved));
         let b = ws.split_pane(&a, SplitDir::Row).unwrap();
         let cards = &ws.tabs[0].cards;
         assert_eq!(cards[&a], moved, "the source stays where it was put");
@@ -1121,7 +1126,7 @@ mod tests {
         let root = ws.tabs[0].root.clone();
         ws.set_card_rect(&b, BoardRect { x: 16.0, y: 36.0, w: 200.0, h: 200.0 });
         assert_eq!(ws.tabs[0].root, root);
-        assert!(!ws.set_card_rect("gone", moved));
+        assert_eq!(ws.set_card_rect("gone", moved), None);
     }
 
     #[test]
@@ -1153,15 +1158,38 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_moved_onto_another_covers_its_cards() {
+    fn a_card_or_frame_dropped_on_a_taken_place_stays_put() {
         let mut ws = Workspace::default();
-        let (second, _) = ws.new_tab();
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        ws.new_tab();
+        let was = ws.tabs[0].cards[&b];
+        // Onto its neighbour: refused, and the answer says where it is.
+        let onto_a = BoardRect { x: 100.0, ..was };
+        assert_eq!(ws.set_card_rect(&b, onto_a), Some(was));
+        // Free, below: moved.
+        let below = BoardRect { y: 1000.0, ..was };
+        assert_eq!(ws.set_card_rect(&b, below), Some(below));
+        // A frame onto another frame: refused; clear of it: moved.
+        let first = ws.tabs[0].id.clone();
+        let at = ws.tabs[0].frame;
+        assert_eq!(ws.set_frame_position(&first, BoardPoint { x: 2000.0, y: 100.0 }), Some(at));
+        assert_eq!(ws.set_frame_position(&first, BoardPoint { x: 0.0, y: 3000.0 }), Some(BoardPoint { x: 0.0, y: 3000.0 }));
+        assert_eq!(ws.set_frame_position("gone", at), None);
+    }
+
+    #[test]
+    fn a_split_growing_its_frame_into_the_next_covers_cards() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        ws.new_tab();
         let covered = |ws: &Workspace| -> Vec<bool> {
             ws.snapshot(&HashMap::new()).tabs.iter().flat_map(|t| t.cards.iter().map(|c| c.covered)).collect()
         };
         assert_eq!(covered(&ws), vec![false, false]);
-        ws.set_frame_position(&second, BoardPoint { x: 100.0, y: 100.0 });
-        assert_eq!(covered(&ws), vec![true, true]);
+        // The split's card goes right of `a`, into the second tab's frame.
+        ws.split_pane(&a, SplitDir::Row);
+        assert_eq!(covered(&ws), vec![false, true, true]);
     }
 
     #[test]

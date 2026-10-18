@@ -6,7 +6,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use cmux_core::osc::{OscEvent, OscScanner};
-use cmux_protocol::{BoardRect, Camera, Direction, NotificationDto, SplitDir, View, WorkspaceSnapshot};
+use cmux_protocol::{BoardPoint, BoardRect, Camera, Direction, NotificationDto, SplitDir, View, WorkspaceSnapshot};
 
 use crate::{notify, runs, AppState};
 
@@ -535,13 +535,18 @@ pub fn set_card_rect(
     y: f64,
     w: f64,
     h: f64,
-) -> Result<(), String> {
+) -> Result<BoardRect, String> {
     let rect = cmux_core::board::card(x, y, w, h)?;
-    if !state.workspace.lock().unwrap().set_card_rect(&pane_id, rect) {
-        return Err(format!("no pane {pane_id}"));
-    }
+    let placed = state
+        .workspace
+        .lock()
+        .unwrap()
+        .set_card_rect(&pane_id, rect)
+        .ok_or_else(|| format!("no pane {pane_id}"))?;
+    // Refused or not: a drag that ended on a taken place snaps back to
+    // what this snapshot says.
     emit_workspace(&app);
-    Ok(())
+    Ok(placed)
 }
 
 #[tauri::command]
@@ -551,13 +556,16 @@ pub fn set_frame_position(
     tab_id: String,
     x: f64,
     y: f64,
-) -> Result<(), String> {
+) -> Result<BoardPoint, String> {
     let origin = cmux_core::board::frame_origin(x, y)?;
-    if !state.workspace.lock().unwrap().set_frame_position(&tab_id, origin) {
-        return Err(format!("no tab {tab_id}"));
-    }
+    let placed = state
+        .workspace
+        .lock()
+        .unwrap()
+        .set_frame_position(&tab_id, origin)
+        .ok_or_else(|| format!("no tab {tab_id}"))?;
     emit_workspace(&app);
-    Ok(())
+    Ok(placed)
 }
 
 /// The camera that shows the whole board in a `width` × `height` viewport.

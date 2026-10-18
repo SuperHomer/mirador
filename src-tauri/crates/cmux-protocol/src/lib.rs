@@ -253,7 +253,9 @@ pub enum Request {
         y: f64,
         zoom: f64,
     },
-    /// Moves or resizes a pane's card, relative to its tab's frame.
+    /// Moves or resizes a pane's card, relative to its tab's frame. Refused
+    /// (left where it was) over another card, or growing its frame into
+    /// another frame; answers where the card is.
     SetCardRect {
         pane_id: String,
         x: f64,
@@ -261,7 +263,8 @@ pub enum Request {
         w: f64,
         h: f64,
     },
-    /// Moves a tab's frame, its cards with it.
+    /// Moves a tab's frame, its cards with it; refused onto another frame.
+    /// Answers where the frame is.
     SetFramePosition {
         tab_id: String,
         x: f64,

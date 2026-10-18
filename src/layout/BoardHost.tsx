@@ -1,5 +1,5 @@
-import { ReactNode, useEffect, useRef } from "react";
-import { Camera } from "../bindings";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import { Camera, TabSnapshot, setFramePosition } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { atFullSize, fitBoard, useBoardStore } from "../state/boardStore";
 
@@ -126,7 +126,8 @@ export function BoardHost({ board, children }: { board: boolean; children: React
   // Dragging empty board — anywhere outside a card — pans.
   const onPointerDown = (e: React.PointerEvent) => {
     if (!board || e.button !== 0) return;
-    if ((e.target as Element).closest(".pane-slot")) return;
+    // Cards and frame labels have drags of their own.
+    if ((e.target as Element).closest(".pane-slot, .frame-label")) return;
     const start = useBoardStore.getState().camera;
     if (!start) return;
     e.preventDefault();
@@ -189,6 +190,112 @@ export function BoardHost({ board, children }: { board: boolean; children: React
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Follows a drag on the board that began with `down`: `move` gets the
+ * pointer's travel in board units (the zoom divided out), `end` whether it
+ * was dropped after moving (true) or cancelled — Escape, or never moved
+ * (false). The board counts as moving meanwhile, so browser pages hide.
+ */
+export function boardDrag(
+  down: React.PointerEvent,
+  move: (dx: number, dy: number) => void,
+  end: (dropped: boolean) => void,
+) {
+  if (down.button !== 0) return;
+  down.preventDefault();
+  down.stopPropagation();
+  const zoom = useBoardStore.getState().camera?.zoom ?? 1;
+  const el = down.currentTarget as HTMLElement;
+  const pointer = down.pointerId;
+  el.setPointerCapture(pointer);
+  const [x0, y0] = [down.clientX, down.clientY];
+  let moved = false;
+  useBoardStore.getState().hold(true);
+
+  const onMove = (e: PointerEvent) => {
+    moved = true;
+    move((e.clientX - x0) / zoom, (e.clientY - y0) / zoom);
+  };
+  const finish = (dropped: boolean) => {
+    el.removeEventListener("pointermove", onMove);
+    el.removeEventListener("pointerup", onUp);
+    el.removeEventListener("pointercancel", onCancel);
+    window.removeEventListener("keydown", onKey, { capture: true });
+    if (el.hasPointerCapture(pointer)) el.releasePointerCapture(pointer);
+    useBoardStore.getState().hold(false);
+    end(dropped && moved);
+  };
+  const onUp = () => finish(true);
+  const onCancel = () => finish(false);
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    // Not the keymap's, nor the terminal's: it cancels the drag.
+    e.preventDefault();
+    e.stopPropagation();
+    finish(false);
+  };
+  el.addEventListener("pointermove", onMove);
+  el.addEventListener("pointerup", onUp);
+  el.addEventListener("pointercancel", onCancel);
+  window.addEventListener("keydown", onKey, { capture: true });
+}
+
+/**
+ * One tab's layer: in the tabs view, the whole host, shown when it is the
+ * active tab; on the board, its frame, moved by dragging its label.
+ */
+export function TabLayer({
+  tab,
+  board,
+  current,
+  children,
+}: {
+  tab: TabSnapshot;
+  board: boolean;
+  current: boolean;
+  children: ReactNode;
+}) {
+  // Where the frame is while it is dragged, and until the snapshot says
+  // where Rust put it: there, or back where it was if another frame is.
+  const [held, setHeld] = useState<{ x: number; y: number } | null>(null);
+  const at = held ?? tab.frame;
+
+  const drag = (e: React.PointerEvent) => {
+    let to = { x: tab.frame.x, y: tab.frame.y };
+    boardDrag(
+      e,
+      (dx, dy) => {
+        to = { x: tab.frame.x + dx, y: tab.frame.y + dy };
+        setHeld(to);
+      },
+      (dropped) => {
+        if (!dropped) return setHeld(null);
+        void setFramePosition(tab.id, to.x, to.y).finally(() =>
+          setTimeout(() => setHeld(null), 150),
+        );
+      },
+    );
+  };
+
+  return (
+    <div
+      className={`tab-layer${current ? " current" : ""}${held ? " dragging" : ""}`}
+      style={
+        board
+          ? { left: at.x, top: at.y, width: tab.frame.w, height: tab.frame.h }
+          : { visibility: current ? "visible" : "hidden" }
+      }
+    >
+      {board && (
+        <div className="frame-label" onPointerDown={drag}>
+          {tab.title}
+        </div>
+      )}
+      {children}
     </div>
   );
 }

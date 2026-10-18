@@ -99,6 +99,10 @@ fn the_board_shows_every_pane_and_none_stops_answering() {
     let frames: Vec<&Value> = snap["tabs"].as_array().unwrap().iter().map(|t| &t["frame"]).collect();
     let f = |v: &Value, k: &str| v[k].as_f64().unwrap();
     assert!(f(frames[1], "x") >= f(frames[0], "x") + f(frames[0], "w"), "{frames:?}");
+    // A frame dropped onto another stays where it was.
+    let second_tab = snap["tabs"][1]["id"].as_str().unwrap().to_string();
+    let at = sb.call(Request::SetFramePosition { tab_id: second_tab, x: 100.0, y: 100.0 });
+    assert_eq!((&at["x"], &at["y"]), (&frames[1]["x"], &frames[1]["y"]));
 
     // Every pane, in every tab, still takes input and shows its output
     // with the board shown.
@@ -126,7 +130,8 @@ fn the_board_comes_back_as_it_was_left() {
     let first = sb.first_pane();
     let second = split(&sb, &first);
     sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
-    sb.call(Request::SetCardRect { pane_id: second.clone(), x: 900.0, y: 600.0, w: 420.0, h: 260.0 });
+    // Below the first card: a free place.
+    sb.call(Request::SetCardRect { pane_id: second.clone(), x: 16.0, y: 900.0, w: 420.0, h: 260.0 });
     let tab = sb.snapshot()["tabs"][0]["id"].as_str().unwrap().to_string();
     sb.call(Request::SetFramePosition { tab_id: tab.clone(), x: -300.0, y: 150.0 });
     // Zoom is held to what the board can show.
@@ -146,7 +151,7 @@ fn the_board_comes_back_as_it_was_left() {
     assert_eq!(after["tabs"][0]["frame"], before["tabs"][0]["frame"]);
     assert_eq!(after["tabs"][0]["frame"]["x"], -300.0);
     let moved = card(&after, &second);
-    assert_eq!((&moved["x"], &moved["y"], &moved["w"], &moved["h"]), (&900.0.into(), &600.0.into(), &420.0.into(), &260.0.into()));
+    assert_eq!((&moved["x"], &moved["y"], &moved["w"], &moved["h"]), (&16.0.into(), &900.0.into(), &420.0.into(), &260.0.into()));
     assert_eq!(card(&after, &first), card(&before, &first));
     // The splits were never touched by any of it.
     assert_eq!(after["tabs"][0]["root"], before["tabs"][0]["root"]);
@@ -307,9 +312,10 @@ fn switching_views_resizes_a_terminal_once_each_way() {
 }
 
 /// A browser card shows its page when the board can show it — at 100%,
-/// wholly in view, still — and hides it as soon as another card covers it.
+/// wholly in view, still — and hides it once its card leaves the view. A
+/// card cannot be put over it: that move is refused.
 #[test]
-fn a_browser_card_shows_its_page_only_when_nothing_covers_it() {
+fn a_browser_card_shows_its_page_only_when_in_view() {
     e2e!();
     let mut sb = Sandbox::new("boardshow");
     sb.launch();
@@ -322,17 +328,20 @@ fn a_browser_card_shows_its_page_only_when_nothing_covers_it() {
         let (_, out, _) = sb.mira(None, &["browser", "eval", "document.visibilityState", "--pane", &pane]);
         out.trim().to_string()
     };
-    let place = |p: &str, x: f64, y: f64| {
-        sb.call(Request::SetCardRect { pane_id: p.to_string(), x, y, w: 400.0, h: 260.0 });
+    let place = |p: &str, x: f64, y: f64| -> Value {
+        sb.call(Request::SetCardRect { pane_id: p.to_string(), x, y, w: 400.0, h: 260.0 })
     };
     // Both cards small and apart, in the corner the board opens on.
     place(&first, 16.0, 340.0);
     place(&pane, 16.0, 36.0);
     sb.wait_for("the page to be shown", LONG, || (visibility() == "\"visible\"").then_some(()));
-    // The terminal's card moved over it: hidden.
-    place(&first, 100.0, 100.0);
+    // The terminal's card cannot go over it: it stays where it was.
+    let refused = place(&first, 100.0, 100.0);
+    assert_eq!((&refused["x"], &refused["y"]), (&16.0.into(), &340.0.into()), "{refused}");
+    // Out of view: hidden; back: shown.
+    place(&pane, 3000.0, 36.0);
     sb.wait_for("the page to be hidden", LONG, || (visibility() == "\"hidden\"").then_some(()));
-    place(&first, 16.0, 340.0);
+    place(&pane, 16.0, 36.0);
     sb.wait_for("the page to be shown again", LONG, || (visibility() == "\"visible\"").then_some(()));
     // And in the tabs view it is the app's to show, as before.
     sb.call(Request::View { view: Some(cmux_protocol::View::Tabs) });

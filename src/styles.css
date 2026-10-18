@@ -435,19 +435,84 @@ body,
   border-color: var(--muted);
 }
 
+/* The frame's title bar: its label, and the handle that moves it. */
 .frame-label {
   position: absolute;
-  top: 8px;
-  left: 16px;
-  right: 16px;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  padding: 8px 16px 0;
   font-size: 14px;
   font-weight: 600;
   color: var(--subtext);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: move;
+}
+
+/* A frame or card in the hand: above the rest, lifted. */
+.tabs-host.board .tab-layer.dragging,
+.pane-slot.card.dragging {
+  z-index: 10;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
+.pane-slot.card.dragging {
+  opacity: 0.92;
+}
+
+/* Where a resized card will go: drawn while the card itself keeps its
+   size, so its terminal resizes once, on release. */
+.card-ghost {
+  position: absolute;
+  z-index: 11;
+  border: 2px dashed var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   pointer-events: none;
 }
+
+/* A card's sides and corners, to resize it by. */
+.card-edge {
+  position: absolute;
+  z-index: 2;
+}
+
+.card-edge.n,
+.card-edge.s {
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.card-edge.e,
+.card-edge.w {
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.card-edge.n { top: -3px; }
+.card-edge.s { bottom: -3px; }
+.card-edge.e { right: -3px; }
+.card-edge.w { left: -3px; }
+
+.card-edge.ne,
+.card-edge.nw,
+.card-edge.se,
+.card-edge.sw {
+  width: 12px;
+  height: 12px;
+}
+
+.card-edge.ne { top: -3px; right: -3px; cursor: nesw-resize; }
+.card-edge.sw { bottom: -3px; left: -3px; cursor: nesw-resize; }
+.card-edge.nw { top: -3px; left: -3px; cursor: nwse-resize; }
+.card-edge.se { bottom: -3px; right: -3px; cursor: nwse-resize; }
 
 .tabs-host.board .tab-layer.current .frame-label {
   color: var(--text);
@@ -476,6 +541,7 @@ body,
   color: var(--subtext);
   font-size: 11.5px;
   user-select: none;
+  cursor: move;
 }
 
 .card-header.focused {

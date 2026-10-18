@@ -12,7 +12,7 @@ import { useNotificationStore } from "./state/notificationStore";
 import { useKeymap } from "./keymap/useKeymap";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
-import { BoardHost } from "./layout/BoardHost";
+import { BoardHost, TabLayer } from "./layout/BoardHost";
 import { CommandPalette } from "./palette/CommandPalette";
 import { ActivityPanel } from "./agents/ActivityPanel";
 import { NotificationPanel } from "./notifications/NotificationPanel";
@@ -125,24 +125,12 @@ export default function App() {
       <Sidebar />
       <BoardHost board={board}>
         {snapshot.tabs.map((tab) => (
-          <div
+          <TabLayer
             key={tab.id}
-            className={`tab-layer${tab.id === snapshot.activeTab ? " current" : ""}`}
-            style={
-              board
-                ? {
-                    left: tab.frame.x,
-                    top: tab.frame.y,
-                    width: tab.frame.w,
-                    height: tab.frame.h,
-                  }
-                : {
-                    visibility:
-                      tab.id === snapshot.activeTab ? "visible" : "hidden",
-                  }
-            }
+            tab={tab}
+            board={board}
+            current={tab.id === snapshot.activeTab}
           >
-            {board && <div className="frame-label">{tab.title}</div>}
             <SplitLayer
               tab={tab}
               board={board}
@@ -159,7 +147,7 @@ export default function App() {
               agentWallPanes={snapshot.agentWallPanes}
               agentEditorPanes={snapshot.agentEditorPanes ?? []}
             />
-          </div>
+          </TabLayer>
         ))}
       </BoardHost>
       <CommandPalette />

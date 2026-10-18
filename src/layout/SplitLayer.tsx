@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
   AgentWallPaneInfo,
+  BoardRect,
   CardRect,
   BrowserPaneInfo,
   DiffPaneInfo,
@@ -12,8 +13,10 @@ import {
   TabSnapshot,
   WhatsNewPaneInfo,
   focusPane,
+  setCardRect,
   setSplitRatios,
 } from "../bindings";
+import { boardDrag } from "./BoardHost";
 import { flyToCard } from "../state/boardStore";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { BrowserPane } from "../browser/BrowserPane";
@@ -22,6 +25,17 @@ import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
 import { AgentEditor } from "../agents/AgentEditor";
 import { AgentWall } from "../agents/AgentWall";
+
+// Mirrors `cmux_core::board`, which has the last word when a card is
+// dropped: a card stays inside its frame, below its label, and big enough
+// to show something.
+const FRAME_PADDING = 16;
+const FRAME_HEADER = 36;
+const MIN_CARD_WIDTH = 160;
+const MIN_CARD_HEIGHT = 100;
+
+/** Where a card can be resized from: its sides and corners. */
+const EDGES = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 
 interface Frac {
   x: number;
@@ -150,6 +164,37 @@ export function SplitLayer({
       : null;
   const FULL: Frac = { x: 0, y: 0, w: 1, h: 1 };
 
+  // A card in the hand: where the pointer has it. A move draws the card
+  // there; a resize draws an outline and leaves the card as it is, so its
+  // terminal refits — and its PTY resizes — once, when it is dropped.
+  const [held, setHeld] = useState<{
+    paneId: string;
+    rect: BoardRect;
+    resize: boolean;
+  } | null>(null);
+
+  /** Moves the card by its header (`edges` ""), or resizes it by `edges`. */
+  const dragCard = (e: React.PointerEvent, card: CardRect, edges: string) => {
+    void focusPane(card.paneId);
+    const resize = edges !== "";
+    let rect: BoardRect = card;
+    boardDrag(
+      e,
+      (dx, dy) => {
+        rect = resize ? resized(card, edges, dx, dy) : moved(card, dx, dy);
+        setHeld({ paneId: card.paneId, rect, resize });
+      },
+      (dropped) => {
+        if (!dropped) return setHeld(null);
+        // Held until the snapshot says where Rust put it: there, or back
+        // where it was if the place was taken.
+        void setCardRect(card.paneId, rect).finally(() =>
+          setTimeout(() => setHeld(null), 150),
+        );
+      },
+    );
+  };
+
   return (
     <div className="split-layer" ref={layerRef}>
       {panes.map((p) => {
@@ -161,6 +206,7 @@ export function SplitLayer({
         const card = board
           ? tab.cards.find((c) => c.paneId === p.paneId)
           : undefined;
+        const inHand = held?.paneId === p.paneId;
         const browser = browserPanes.find((b) => b.paneId === p.paneId);
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
@@ -170,10 +216,10 @@ export function SplitLayer({
         return (
           <div
             key={p.paneId}
-            className={`pane-slot${card ? " card" : ""}`}
+            className={`pane-slot${card ? " card" : ""}${inHand ? " dragging" : ""}`}
             style={
               card
-                ? px(card)
+                ? px(inHand && !held.resize ? held.rect : card)
                 : {
                     ...frac(p.paneId === zoomed ? FULL : p.rect),
                     ...(hidden
@@ -191,6 +237,7 @@ export function SplitLayer({
                 focused={focused}
                 unread={unreadPanes.includes(p.paneId)}
                 agent={agents.find((a) => a.paneId === p.paneId)}
+                onPointerDown={(e) => dragCard(e, card, "")}
               />
             )}
             <div className="pane-body">
@@ -254,9 +301,18 @@ export function SplitLayer({
                 />
               )}
             </div>
+            {card &&
+              EDGES.map((edges) => (
+                <div
+                  key={edges}
+                  className={`card-edge ${edges}`}
+                  onPointerDown={(e) => dragCard(e, card, edges)}
+                />
+              ))}
           </div>
         );
       })}
+      {held?.resize && <div className="card-ghost" style={px(held.rect)} />}
       {!zoomed &&
         !board &&
         dividers.map((d) => (
@@ -316,30 +372,62 @@ function frac(r: Frac): React.CSSProperties {
   };
 }
 
-function px(r: CardRect): React.CSSProperties {
+function px(r: BoardRect): React.CSSProperties {
   return { left: r.x, top: r.y, width: r.w, height: r.h };
 }
 
+/** `r` moved by (dx, dy), kept inside its frame. */
+function moved(r: BoardRect, dx: number, dy: number): BoardRect {
+  return {
+    x: Math.max(FRAME_PADDING, r.x + dx),
+    y: Math.max(FRAME_HEADER, r.y + dy),
+    w: r.w,
+    h: r.h,
+  };
+}
+
+/** `r` with its `edges` ("n", "se", …) pulled by (dx, dy). */
+function resized(r: BoardRect, edges: string, dx: number, dy: number): BoardRect {
+  let { x, y, w, h } = r;
+  if (edges.includes("e")) w = Math.max(MIN_CARD_WIDTH, r.w + dx);
+  if (edges.includes("s")) h = Math.max(MIN_CARD_HEIGHT, r.h + dy);
+  if (edges.includes("w")) {
+    const right = r.x + r.w;
+    x = Math.min(Math.max(FRAME_PADDING, r.x + dx), right - MIN_CARD_WIDTH);
+    w = right - x;
+  }
+  if (edges.includes("n")) {
+    const bottom = r.y + r.h;
+    y = Math.min(Math.max(FRAME_HEADER, r.y + dy), bottom - MIN_CARD_HEIGHT);
+    h = bottom - y;
+  }
+  return { x, y, w, h };
+}
+
 /**
- * A card's title bar: what the pane is, and an agent's status. Double-click
- * goes to the card at 100%, where its content takes the pointer.
+ * A card's title bar: what the pane is, and an agent's status. Dragged, it
+ * moves the card; double-clicked, it goes to the card at 100%, where its
+ * content takes the pointer.
  */
 function CardHeader({
   card,
   focused,
   unread,
   agent,
+  onPointerDown,
 }: {
   card: CardRect;
   focused: boolean;
   unread: boolean;
   agent: AgentInfo | undefined;
+  onPointerDown: (e: React.PointerEvent) => void;
 }) {
   const status = agent?.status;
   return (
     <div
       className={`card-header${focused ? " focused" : ""}${unread ? " unread" : ""}${status ? ` ${status}` : ""}`}
       title={card.title}
+      onPointerDown={onPointerDown}
       onDoubleClick={() => flyToCard(card.paneId)}
     >
       {status && <span className="card-dot" />}

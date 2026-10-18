@@ -476,6 +476,15 @@ export const setCamera = (camera: Camera) =>
 /** The camera showing the whole board in a viewport of this size. */
 export const boardFit = (width: number, height: number) =>
   invoke<Camera>("board_fit", { width, height });
+/**
+ * Moves or resizes a card. Refused over another card, or growing its frame
+ * into another frame: the answer is where the card is.
+ */
+export const setCardRect = (paneId: string, r: BoardRect) =>
+  invoke<BoardRect>("set_card_rect", { paneId, x: r.x, y: r.y, w: r.w, h: r.h });
+/** Moves a tab's frame; refused onto another frame. */
+export const setFramePosition = (tabId: string, x: number, y: number) =>
+  invoke<{ x: number; y: number }>("set_frame_position", { tabId, x, y });
 /** The camera showing a pane's card at 100%, centred. */
 export const boardCardCamera = (paneId: string, width: number, height: number) =>
   invoke<Camera>("board_card_camera", { paneId, width, height });

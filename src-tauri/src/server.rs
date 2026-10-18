@@ -153,12 +153,12 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Request::SetCardRect { pane_id, x, y, w, h } => {
-            crate::commands::set_card_rect(app.clone(), app.state(), pane_id, x, y, w, h)?;
-            Ok(Value::Null)
+            let placed = crate::commands::set_card_rect(app.clone(), app.state(), pane_id, x, y, w, h)?;
+            serde_json::to_value(placed).map_err(|e| e.to_string())
         }
         Request::SetFramePosition { tab_id, x, y } => {
-            crate::commands::set_frame_position(app.clone(), app.state(), tab_id, x, y)?;
-            Ok(Value::Null)
+            let placed = crate::commands::set_frame_position(app.clone(), app.state(), tab_id, x, y)?;
+            serde_json::to_value(placed).map_err(|e| e.to_string())
         }
         Request::SendInput { pane_id, data } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
