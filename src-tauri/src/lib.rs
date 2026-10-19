@@ -116,10 +116,10 @@ pub fn run() {
     // runs nothing until you type into it. Not on Windows, which cannot
     // see Claude exit and so would resume closed conversations forever —
     // see `cmux_core::agents::AUTO_RESUME`.
-    // A role's pane resumes on the role's model — looked up where the pane
-    // works, never taken from the session file, which only names the role.
-    // Its prompt is not given again: a resumed conversation keeps the one
-    // it started with.
+    // A role's pane resumes on the role's model and effort — looked up
+    // where the pane works, never taken from the session file, which only
+    // names the role. Its prompt is not given again: a resumed
+    // conversation keeps the one it started with.
     let mut catalogs: HashMap<Option<String>, cmux_protocol::RoleCatalog> = HashMap::new();
     let mut other_harness: HashMap<String, cmux_protocol::Harness> = HashMap::new();
     for (id, m) in meta.iter_mut() {
@@ -135,11 +135,11 @@ pub fn run() {
         if let Some(r) = role.as_ref().filter(|r| r.harness != cmux_protocol::Harness::Claude) {
             other_harness.insert(id.clone(), r.harness);
         }
-        let role_model = role
-            .filter(|r| r.harness == cmux_protocol::Harness::Claude)
-            .and_then(|r| r.model);
+        let role = role.filter(|r| r.harness == cmux_protocol::Harness::Claude);
+        let role_model = role.as_ref().and_then(|r| r.model.clone());
         m.agent_model = role_model.clone();
         let quoted_model = role_model.as_deref().map(cmux_core::pty::shell::quote_arg);
+        let quoted_effort = role.and_then(|r| r.effort).as_deref().map(cmux_core::pty::shell::quote_arg);
         // Its limits too, from the file it started with. A file gone since
         // drops the pane's resume rather than its limits: an agent meant
         // to be held to some tools must not come back with all of them.
@@ -151,6 +151,7 @@ pub fn run() {
             m.remote_host.is_some(),
             m.agent_session.as_deref().filter(|_| !settings_gone),
             quoted_model.as_deref(),
+            quoted_effort.as_deref(),
             quoted_settings.as_deref(),
             cmux_core::agents::AUTO_RESUME,
         );
