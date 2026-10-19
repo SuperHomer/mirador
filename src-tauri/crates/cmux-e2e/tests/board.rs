@@ -333,12 +333,12 @@ fn a_browser_card_shows_its_page_only_when_in_view() {
     let place = |p: &str, x: f64, y: f64| -> Value {
         sb.call(Request::SetCardRect { pane_id: p.to_string(), x, y, w: 400.0, h: 260.0 })
     };
-    // Both cards small and apart. Focusing one brings its card into view
-    // if it is not (the board pans to it), as a person would ask for it.
+    // Both cards small and apart. Focusing a pane brings its card into
+    // view if it is not (the board pans to it) — even the pane that has
+    // the focus already, as this one does since it opened.
     let focus = |p: &str| sb.call(Request::FocusPane { pane_id: p.to_string() });
     place(&first, 16.0, 340.0);
     place(&pane, 16.0, 36.0);
-    focus(&first);
     focus(&pane);
     sb.wait_for("the page to be shown", LONG, || (visibility() == "\"visible\"").then_some(()));
     // The terminal's card cannot go over it: it stays where it was.
@@ -348,7 +348,6 @@ fn a_browser_card_shows_its_page_only_when_in_view() {
     place(&pane, 3000.0, 36.0);
     sb.wait_for("the page to be hidden", LONG, || (visibility() == "\"hidden\"").then_some(()));
     place(&pane, 16.0, 36.0);
-    focus(&first);
     focus(&pane);
     sb.wait_for("the page to be shown again", LONG, || (visibility() == "\"visible\"").then_some(()));
     // And in the tabs view it is the app's to show, as before.

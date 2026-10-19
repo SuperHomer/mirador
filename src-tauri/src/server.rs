@@ -136,7 +136,11 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Request::FocusPane { pane_id } => {
-            crate::commands::focus_pane(app.clone(), app.state(), pane_id);
+            crate::commands::focus_pane(app.clone(), app.state(), pane_id.clone());
+            // Asked for from outside, so on the board its card is brought
+            // into view even when it already had the focus — the snapshot
+            // alone says only that the focus changed, if it did.
+            let _ = app.emit("focus-requested", pane_id);
             Ok(Value::Null)
         }
         Request::ZoomPane { pane_id, zoom } => {

@@ -1,4 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Camera, TabSnapshot, closeTab, newTab, setFramePosition } from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
@@ -22,6 +23,23 @@ function zoomAround(camera: Camera, zoom: number, px: number, py: number): Camer
   const bx = camera.x + px / camera.zoom;
   const by = camera.y + py / camera.zoom;
   return { x: bx - px / zoom, y: by - py / zoom, zoom };
+}
+
+/** Pans to a pane's card unless it is wholly in view already. */
+function bringIntoView(paneId: string) {
+  const snap = useWorkspaceStore.getState().snapshot;
+  const tab = snap?.tabs.find((t) => t.cards.some((c) => c.paneId === paneId));
+  const card = tab?.cards.find((c) => c.paneId === paneId);
+  const { camera: cam, viewport } = useBoardStore.getState();
+  if (!tab || !card || !cam || viewport.width === 0) return;
+  const left = (tab.frame.x + card.x - cam.x) * cam.zoom;
+  const top = (tab.frame.y + card.y - cam.y) * cam.zoom;
+  const inView =
+    left >= 0 &&
+    top >= 0 &&
+    left + card.w * cam.zoom <= viewport.width &&
+    top + card.h * cam.zoom <= viewport.height;
+  if (!inView) panToCard(paneId);
 }
 
 /**
@@ -50,20 +68,16 @@ export function BoardHost({ board, children }: { board: boolean; children: React
   useEffect(() => {
     if (!board || !focused) return;
     if (performance.now() - lastPointerDown.current < 500) return;
-    const snap = useWorkspaceStore.getState().snapshot;
-    const tab = snap?.tabs.find((t) => t.cards.some((c) => c.paneId === focused));
-    const card = tab?.cards.find((c) => c.paneId === focused);
-    const { camera: cam, viewport } = useBoardStore.getState();
-    if (!tab || !card || !cam || viewport.width === 0) return;
-    const left = (tab.frame.x + card.x - cam.x) * cam.zoom;
-    const top = (tab.frame.y + card.y - cam.y) * cam.zoom;
-    const inView =
-      left >= 0 &&
-      top >= 0 &&
-      left + card.w * cam.zoom <= viewport.width &&
-      top + card.h * cam.zoom <= viewport.height;
-    if (!inView) panToCard(focused);
+    bringIntoView(focused);
   }, [board, focused]);
+
+  // `mira focus` on the pane that has the focus already changes nothing
+  // in the snapshot, so the request itself says to look at the card.
+  useEffect(() => {
+    if (!board) return;
+    const unlisten = listen<string>("focus-requested", (e) => bringIntoView(e.payload));
+    return () => void unlisten.then((fn) => fn());
+  }, [board]);
 
   // The saved camera, once; from then on the board owns it.
   useEffect(() => {
