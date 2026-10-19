@@ -35,10 +35,13 @@ downloads, the feature tour and the keybinding reference.
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Board** (`mira view board`, `mod+shift+O`): every tab as a frame and
-  every pane as a card on one canvas. Drag empty board or scroll to pan,
-  pinch or Ctrl+scroll to zoom; double-click a card's header to fly to it
-  at 100%. A frame's **+** adds a pane to it, **New frame** a tab.
-  Terminals and browser pages are live at 100%; other zooms are an overview
+  every pane as a card on one canvas. Drag empty board to pan, or scroll
+  over empty board (anywhere when zoomed out; at 100% a card scrolls its
+  own content); pinch or Ctrl+scroll to zoom; double-click a card's header
+  to fly to it at 100%. A frame's **+** adds a pane to it, **New frame** a
+  tab. Terminals take input only at 100%; other zooms are an overview. A
+  browser page shows only at 100%, while its card is still, wholly in view
+  and nothing (palette, panel, menu) is open over it
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: an agent tests the page it is building —
