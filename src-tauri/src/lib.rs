@@ -214,7 +214,9 @@ pub fn run() {
     // endpoint, which the first one holds, so `mira` in its panes would
     // drive the wrong app. Release only: a dev build may run beside the
     // installed one. It must be the first plugin.
-    #[cfg(not(debug_assertions))]
+    // Not macOS: LaunchServices already keeps one instance there, and the
+    // plugin's fixed /tmp socket would catch sandboxed release builds.
+    #[cfg(all(not(debug_assertions), not(target_os = "macos")))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
         if let Some(window) = app.get_window("main") {
             let _ = window.unminimize();
