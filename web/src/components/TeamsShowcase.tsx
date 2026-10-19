@@ -1,32 +1,25 @@
 /**
- * Agent teams, as a static mock: the built-in `omakase` team on the agent
- * wall, mid-handoff, beside its team file.
+ * Agent teams, as a static mock: the built-in `omakase` team's tab,
+ * mid-handoff, beside its team file.
  *
- * Kept honest to the app: the tiles are headed the way the wall heads them
- * (status dot, member name, role, model, status — "—" for Codex, which has
- * no hooks), three tiles make the wall's two columns, a handed message
- * opens with the line `mira agent send` really prefixes, and the team file
- * is the built-in one (cmux-core/builtin/teams/omakase.md), word for word.
+ * Kept honest to the app: `layout: columns` makes the tab one row split,
+ * its members' panes side by side (cmux-core's teams.rs), so the mock draws
+ * three columns. A pane in a tab has no header; the sidebar names each
+ * agent, with its harness's mark, under the team's ⚑ tab. A handed message
+ * opens with the line `mira agent send` really prefixes. The team file is
+ * the built-in one (cmux-core/builtin/teams/omakase.md) word for word,
+ * except that the charter is one line, so it reflows at phone width.
  */
 
-type Status = "working" | "needsYou" | "idle" | null;
 type Line = { text: string; color?: string };
-type Tile = { member: string; role: string; model: string; status: Status; lines: Line[] };
-
-const STATUS: Record<NonNullable<Status>, { label: string; color: string }> = {
-  working: { label: "working", color: "var(--accent)" },
-  needsYou: { label: "needs you", color: "#fab387" },
-  idle: { label: "idle", color: "var(--green)" },
-};
+type Member = { name: string; harness: "claude" | "codex"; lines: Line[] };
 
 const MESSAGE = "var(--mauve)";
 
-const TILES: Tile[] = [
+const MEMBERS: Member[] = [
   {
-    member: "planner",
-    role: "omakase-planner",
-    model: "claude-opus-5-5",
-    status: "working",
+    name: "planner",
+    harness: "claude",
     lines: [
       { text: "⏺ Bash(mira agent send worker \"Step 2: rotate the refresh token on use\" --wait)" },
       { text: "  ⎿ worker is idle", color: "var(--muted)" },
@@ -37,10 +30,8 @@ const TILES: Tile[] = [
     ],
   },
   {
-    member: "worker",
-    role: "omakase-worker",
-    model: "claude-opus-5-5",
-    status: "idle",
+    name: "worker",
+    harness: "claude",
     lines: [
       { text: "> [message from planner, via mira agent send]", color: MESSAGE },
       { text: "  Step 2: rotate the refresh token on use", color: "var(--text)" },
@@ -51,20 +42,18 @@ const TILES: Tile[] = [
     ],
   },
   {
-    member: "reviewer",
-    role: "omakase-reviewer",
-    model: "gpt-6-luna",
-    status: null,
+    name: "reviewer",
+    harness: "codex",
     lines: [
       { text: "› [message from planner, via mira agent send]", color: MESSAGE },
       { text: "  Step 2 is done: review the diff", color: "var(--text)" },
       { text: "• Ran git diff" },
-      { text: "• Ran mira agent send planner \"APPROVE — …\"" },
+      { text: "• Ran mira agent send planner \"APPROVE — rotation is atomic and the test pins reuse.\"" },
     ],
   },
 ];
 
-/** The built-in team's file, as it ships. */
+/** The built-in team's file, as it ships but for the charter's line breaks. */
 const TEAM_FILE = `---
 description: A planner, a worker and a Codex reviewer, working the Rails doctrine's way
 way: omakase
@@ -78,82 +67,12 @@ members:
   - role: omakase-reviewer
     name: reviewer
 ---
-The planner owns the task: it splits it into small steps and hands them to
-the worker one at a time, waiting for each. When a step is done, the
-planner asks the reviewer, who reads the diff and answers the planner with
-APPROVE or CHANGES. The planner decides what happens next, and tells the
-person when the task is done. Nobody pushes or merges: a person does.`;
+The planner owns the task: it splits it into small steps and hands them to the worker one at a time, waiting for each. When a step is done, the planner asks the reviewer, who reads the diff and answers the planner with APPROVE or CHANGES. The planner decides what happens next, and tells the person when the task is done. Nobody pushes or merges: a person does.`;
 
-function TileView({ tile }: { tile: Tile }) {
-  const status = tile.status ? STATUS[tile.status] : null;
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        minWidth: 0,
-        border: "1px solid var(--surface)",
-        borderRadius: 5,
-        overflow: "hidden",
-        background: "var(--bg)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "3px 8px",
-          background: "var(--bg-alt)",
-          borderBottom: "1px solid var(--surface)",
-          fontSize: 11,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-        }}
-      >
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            flexShrink: 0,
-            background: status?.color ?? "var(--muted)",
-          }}
-        />
-        <span style={{ color: "var(--text)", fontWeight: 600 }}>{tile.member}</span>
-        {[tile.role, tile.model].map((t) => (
-          <span
-            key={t}
-            style={{ color: "var(--subtext)", background: "var(--surface)", borderRadius: 4, padding: "0 5px" }}
-          >
-            {t}
-          </span>
-        ))}
-        <span style={{ marginLeft: "auto", color: status?.color ?? "var(--muted)" }}>
-          {status?.label ?? "—"}
-        </span>
-      </div>
-      <div className="mono" style={{ fontSize: 11.5, lineHeight: 1.7, padding: "8px 10px", minHeight: 150 }}>
-        {tile.lines.map((l, i) => (
-          <div
-            key={i}
-            style={{
-              color: l.color ?? "var(--subtext)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {l.text}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+/** The sidebar's harness marks: Claude Code's spark, Codex's prompt. */
+const MARK = { claude: { text: "✳", color: "#d97757" }, codex: { text: ">_", color: "var(--subtext)" } };
 
 function TeamMockup() {
-  const count = (s: Status) => TILES.filter((t) => t.status === s).length;
   return (
     <div
       style={{
@@ -165,43 +84,76 @@ function TeamMockup() {
         background: "var(--bg)",
         boxShadow: "0 24px 60px rgba(0,0,0,.5)",
         textAlign: "left",
+        display: "flex",
+        height: 330,
       }}
     >
-      {/* the wall's chrome: which tab, and how its agents are doing */}
       <div
+        className="teams-sidebar"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "4px 8px",
-          minHeight: 30,
+          width: 180,
+          flexShrink: 0,
           background: "var(--bg-alt)",
-          borderBottom: "1px solid var(--surface)",
-          fontSize: 11,
-          whiteSpace: "nowrap",
+          borderRight: "1px solid var(--surface)",
+          padding: 6,
+          fontSize: 12.5,
         }}
       >
-        <span
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, borderRadius: 6, background: "var(--surface)" }}>
+          <span style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>1</span>
+          <span style={{ fontWeight: 600 }}>
+            <span style={{ color: "var(--accent)", marginRight: 5, fontSize: 11 }}>⚑</span>api
+          </span>
+        </div>
+        <div
           style={{
-            background: "var(--accent)",
-            color: "var(--bg)",
+            margin: "10px 8px 4px",
             fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: ".04em",
-            padding: "2px 6px",
-            borderRadius: 4,
+            fontWeight: 600,
+            letterSpacing: ".06em",
+            textTransform: "uppercase",
+            color: "var(--muted)",
           }}
         >
-          AGENTS
-        </span>
-        <span style={{ color: "var(--text)", fontWeight: 600, fontSize: 12 }}>omakase</span>
-        <span style={{ color: "var(--accent)" }}>{count("working")} working</span>
-        <span style={{ color: "var(--muted)" }}>{count("idle")} idle</span>
-      </div>
-      <div className="teams-wall" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, padding: 6 }}>
-        {TILES.map((t) => (
-          <TileView key={t.member} tile={t} />
+          Agents
+        </div>
+        {MEMBERS.map((m, i) => (
+          <div key={m.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px" }}>
+            <span style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>{i + 2}</span>
+            <span className="mono" style={{ width: 14, textAlign: "center", fontSize: 11, color: MARK[m.harness].color }}>
+              {MARK[m.harness].text}
+            </span>
+            <span>{m.name}</span>
+          </div>
         ))}
+      </div>
+      {/* the tab, as layout: columns splits it */}
+      <div className="teams-panes" style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
+        <div style={{ display: "flex", gap: 6, padding: 6, height: "100%", minWidth: 600 }}>
+          {MEMBERS.map((m, i) => (
+            <div
+              key={m.name}
+              className="mono"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                border: `1px solid ${i === 0 ? "var(--muted)" : "var(--surface)"}`,
+                borderRadius: 5,
+                background: "var(--crust)",
+                padding: "8px 10px",
+                fontSize: 11,
+                lineHeight: 1.6,
+                overflow: "hidden",
+              }}
+            >
+              {m.lines.map((l, j) => (
+                <div key={j} style={{ color: l.color ?? "var(--subtext)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                  {l.text}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

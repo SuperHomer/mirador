@@ -42,9 +42,9 @@ button { font-family: inherit; cursor: pointer; }
 
 /* At phone width the board mock is too short for the board's controls
    to sit on it, as they do in the app, without hiding it: they go under.
-   And the teams mock's wall tiles stack, too narrow side by side. */
+   The teams mock drops its sidebar, and its columns scroll inside it. */
 @media (max-width: 600px) {
-  .teams-wall { grid-template-columns: 1fr !important; }
+  .teams-sidebar { display: none; }
   .board-mock-controls {
     position: static !important;
     width: fit-content;
