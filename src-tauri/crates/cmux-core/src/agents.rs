@@ -490,6 +490,12 @@ pub fn launch_command(
     let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
     if let Some(role) = role {
         arg("--model", role.model.as_deref().unwrap_or(""));
+        if let Some(effort) = &role.effort {
+            match harness {
+                Harness::Codex => arg("-c", &format!("model_reasoning_effort={}", toml_string(effort))),
+                _ => arg("--effort", effort),
+            }
+        }
         match harness {
             Harness::Codex => {
                 if let Some(prompt) = prompt {
@@ -1038,6 +1044,12 @@ mod tests {
         );
         let bare = AgentRole { name: "plain".into(), ..Default::default() };
         assert_eq!(launch_command(Some(&bare), Some("  "), Some(file), None, Some("  "), None, q), "claude --name 'plain'");
+        // Its effort comes right after its model.
+        let deep = AgentRole { effort: Some("max".into()), ..role.clone() };
+        assert_eq!(
+            launch_command(Some(&deep), None, None, None, Some("go"), None, q),
+            "claude --model 'opus' --effort 'max' --name 'reviewer' 'go'"
+        );
     }
 
     #[test]
@@ -1053,6 +1065,11 @@ mod tests {
         let value: toml::Value = toml::from_str(&format!("v = {}", toml_string("a \"b\"\nc\\d\u{7}"))).unwrap();
         assert_eq!(value["v"].as_str(), Some("a \"b\"\nc\\d\u{7}"));
         assert_eq!(launch_command(Some(&role), None, None, None, None, None, q), "codex --model 'gpt-5'");
+        let deep = AgentRole { effort: Some("xhigh".into()), ..role.clone() };
+        assert_eq!(
+            launch_command(Some(&deep), Some("You build."), None, None, None, None, q),
+            r#"codex --model 'gpt-5' -c 'model_reasoning_effort="xhigh"' -c 'developer_instructions="You build."'"#
+        );
     }
 
     #[test]

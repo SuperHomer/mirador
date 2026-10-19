@@ -351,6 +351,7 @@ fn agent_roles_in(cfg: &Config) -> Vec<AgentRole> {
         roles.push(AgentRole {
             name: name.to_string(),
             model: present(&role.model),
+            effort: present(&role.effort),
             prompt: present(&role.prompt),
             way: present(&role.way),
             description: present(&role.description),
@@ -458,8 +459,8 @@ mod tests {
     fn agent_roles_drop_unnamed_and_repeated_entries() {
         let cfg: Config = serde_json::from_str(
             r#"{ "agentRoles": [
-                { "name": "planner", "model": "opus", "prompt": "Plan, never edit." },
-                { "name": " coder ", "model": " ", "prompt": "" },
+                { "name": "planner", "model": "opus", "effort": " max ", "prompt": "Plan, never edit." },
+                { "name": " coder ", "model": " ", "effort": "", "prompt": "" },
                 { "name": "", "model": "haiku" },
                 { "name": "planner", "model": "haiku" }
             ] }"#,
@@ -469,6 +470,7 @@ mod tests {
         assert_eq!(roles.len(), 2);
         assert_eq!(roles[0].name, "planner");
         assert_eq!(roles[0].model.as_deref(), Some("opus"));
+        assert_eq!(roles[0].effort.as_deref(), Some("max"));
         assert_eq!(roles[1], AgentRole { name: "coder".into(), ..Default::default() });
         assert!(agent_roles_in(&Config::default()).is_empty());
     }
