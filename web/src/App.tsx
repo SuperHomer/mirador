@@ -2,6 +2,7 @@ import Nav from "./components/Nav";
 import Hero from "./components/Hero";
 import Features from "./components/Features";
 import AgentShowcase from "./components/AgentShowcase";
+import BoardShowcase from "./components/BoardShowcase";
 import DiffShowcase from "./components/DiffShowcase";
 import GraphShowcase from "./components/GraphShowcase";
 import PersistShowcase from "./components/PersistShowcase";
@@ -19,6 +20,7 @@ export default function App() {
       <Hero />
       <Features />
       <AgentShowcase />
+      <BoardShowcase />
       <DiffShowcase />
       <GraphShowcase />
       <PersistShowcase />

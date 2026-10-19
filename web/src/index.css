@@ -40,11 +40,21 @@ button { font-family: inherit; cursor: pointer; }
   .cli-grid { grid-template-columns: 1fr !important; }
 }
 
-/* The section links need ~970px (measured with the Agents link); below
+/* At phone width the board mock is too short for the board's controls
+   to sit on it, as they do in the app, without hiding it: they go under. */
+@media (max-width: 600px) {
+  .board-mock-controls {
+    position: static !important;
+    width: fit-content;
+    margin: 0 8px 8px auto;
+  }
+}
+
+/* The section links need ~1035px (measured with the Board link); below
    that they would push the page into a sideways scroll. The logo and
    Download stay — the sections are a scroll away, and Download is what a
    phone visitor came for. */
-@media (max-width: 1000px) {
+@media (max-width: 1060px) {
   .nav-link { display: none; }
 }
 
