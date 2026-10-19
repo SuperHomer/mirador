@@ -288,13 +288,14 @@ restored session keeps each pane's own saved directory.
 ## Agent roles and the agent wall
 
 A role is a named way to start an agent — Claude Code or Codex, its own
-model, and its own instructions — written as a Markdown file: the
+model and effort, and its own instructions — written as a Markdown file: the
 frontmatter says how it starts, the body is its prompt.
 
 ```markdown
 <!-- .mirador/roles/reviewer.md -->
 ---
 model: haiku
+effort: high
 way: our-way
 description: Reviews diffs, never edits
 ---
@@ -310,6 +311,12 @@ way: our-way
 ---
 You implement what the plan says, one step at a time.
 ```
+
+`effort` is how hard the model thinks: Claude Code gets it as `--effort`
+(`low`, `medium`, `high`, `xhigh`, `max`), Codex as
+`model_reasoning_effort` (the same, plus `ultra`, which only some models
+take). Absent, the harness's default. Any other value, upper case
+included, greys the role out with the values it takes.
 
 A **way of working** is a playbook any role can follow — how your team
 branches, tests, commits and hands off — written once in `ways/` and
@@ -393,15 +400,16 @@ are in. Teams (*Start Team…*) and `~/.ssh/config` hosts (*SSH…*) are
 listed the same way. The agent opens in a pane
 beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
-that pane's directory: `claude --model … --append-system-prompt-file …
---name <role>`, or `codex --model … -c developer_instructions=…`. (`mira
+that pane's directory: `claude --model … --effort …
+--append-system-prompt-file … --name <role>`, or `codex --model … -c
+model_reasoning_effort=… -c developer_instructions=…`. (`mira
 agent new --tab` gives it a tab of its own instead.) Codex also gets a
 permissions profile — the one it would run on anyway, plus Mirador's socket
 and nothing else — so `mira agent send` and `wait` work from inside its
 sandbox; not when your Codex config uses `sandbox_mode`, gives full access,
 or cannot be read. Exiting the agent
 leaves the shell; restarting Mirador resumes a Claude conversation on the
-role's model, with its prompt.
+role's model and effort, with its prompt.
 
 ### Teams
 
