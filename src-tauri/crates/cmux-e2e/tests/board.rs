@@ -333,23 +333,39 @@ fn a_browser_card_shows_its_page_only_when_in_view() {
     let place = |p: &str, x: f64, y: f64| -> Value {
         sb.call(Request::SetCardRect { pane_id: p.to_string(), x, y, w: 400.0, h: 260.0 })
     };
-    // Both cards small and apart. Focusing a pane brings its card into
-    // view if it is not (the board pans to it) — even the pane that has
-    // the focus already, as this one does since it opened.
     let focus = |p: &str| sb.call(Request::FocusPane { pane_id: p.to_string() });
+    // The browser pane has had the focus since it opened. Focusing it
+    // again, with its card off in a corner of the board the board is not
+    // looking at, must still bring the board to the card: at 100%, the
+    // card in view — and its page shown, which happens only when the card
+    // is wholly in view.
+    let brought_to = |p: &str, from: &Value| {
+        sb.wait_for("the board at the card", LONG, || {
+            let snap = sb.snapshot();
+            let tab = &snap["tabs"][0];
+            let card = tab["cards"].as_array().unwrap().iter().find(|c| c["paneId"] == p)?;
+            let at = |k: &str| tab["frame"][k].as_f64().unwrap() + card[k].as_f64().unwrap();
+            let cam = |k: &str| snap["camera"][k].as_f64().unwrap();
+            let moved = &snap["camera"] != from;
+            (moved && cam("zoom") == 1.0 && cam("x") <= at("x") && cam("y") <= at("y")).then_some(())
+        });
+        sb.wait_for("the page to be shown", LONG, || (visibility() == "\"visible\"").then_some(()));
+    };
     place(&first, 16.0, 340.0);
-    place(&pane, 16.0, 36.0);
-    focus(&pane);
-    sb.wait_for("the page to be shown", LONG, || (visibility() == "\"visible\"").then_some(()));
-    // The terminal's card cannot go over it: it stays where it was.
-    let refused = place(&first, 100.0, 100.0);
-    assert_eq!((&refused["x"], &refused["y"]), (&16.0.into(), &340.0.into()), "{refused}");
-    // Out of view: hidden; back: shown.
     place(&pane, 3000.0, 36.0);
     sb.wait_for("the page to be hidden", LONG, || (visibility() == "\"hidden\"").then_some(()));
-    place(&pane, 16.0, 36.0);
+    let from = sb.snapshot()["camera"].clone();
     focus(&pane);
-    sb.wait_for("the page to be shown again", LONG, || (visibility() == "\"visible\"").then_some(()));
+    brought_to(&pane, &from);
+    // Moved out of view: hidden; focused again, where it now is: shown.
+    place(&pane, 6000.0, 36.0);
+    sb.wait_for("the page to be hidden again", LONG, || (visibility() == "\"hidden\"").then_some(()));
+    let from = sb.snapshot()["camera"].clone();
+    focus(&pane);
+    brought_to(&pane, &from);
+    // The terminal's card cannot go over it: it stays where it was.
+    let refused = place(&first, 6000.0, 36.0);
+    assert_eq!((&refused["x"], &refused["y"]), (&16.0.into(), &340.0.into()), "{refused}");
     // And in the tabs view it is the app's to show, as before.
     sb.call(Request::View { view: Some(cmux_protocol::View::Tabs) });
     sb.wait_for("the page in its tab", LONG, || (visibility() == "\"visible\"").then_some(()));
