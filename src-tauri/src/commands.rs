@@ -6,7 +6,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use cmux_core::osc::{OscEvent, OscScanner};
-use cmux_protocol::{Direction, NotificationDto, SplitDir, WorkspaceSnapshot};
+use cmux_protocol::{BoardPoint, BoardRect, Camera, Direction, NotificationDto, SplitDir, View, WorkspaceSnapshot};
 
 use crate::{notify, runs, AppState};
 
@@ -503,6 +503,110 @@ pub fn set_split_ratios(
     {
         emit_workspace(&app);
     }
+}
+
+/// Shows the workspace as tabs or as the board.
+#[tauri::command]
+pub fn set_view(app: AppHandle, state: State<'_, AppState>, view: View) {
+    if state.workspace.lock().unwrap().set_view(view) {
+        emit_workspace(&app);
+    }
+}
+
+/// Saved with the session but never broadcast: the board moving it shows
+/// it already, and a snapshot per frame of a pan would re-render every
+/// pane.
+#[tauri::command]
+pub fn set_camera(
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    zoom: f64,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), String> {
+    let camera = cmux_core::board::camera(x, y, zoom)?;
+    let mut ws = state.workspace.lock().unwrap();
+    ws.camera = camera;
+    if let (Some(w), Some(h)) = (width, height) {
+        if w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 {
+            ws.viewport = Some((w, h));
+        }
+    }
+    drop(ws);
+    state
+        .session_dirty
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_card_rect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<BoardRect, String> {
+    let rect = cmux_core::board::card(x, y, w, h)?;
+    let placed = state
+        .workspace
+        .lock()
+        .unwrap()
+        .set_card_rect(&pane_id, rect)
+        .ok_or_else(|| format!("no pane {pane_id}"))?;
+    // Refused or not: a drag that ended on a taken place snaps back to
+    // what this snapshot says.
+    emit_workspace(&app);
+    Ok(placed)
+}
+
+#[tauri::command]
+pub fn set_frame_position(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: String,
+    x: f64,
+    y: f64,
+) -> Result<BoardPoint, String> {
+    let origin = cmux_core::board::frame_origin(x, y)?;
+    let placed = state
+        .workspace
+        .lock()
+        .unwrap()
+        .set_frame_position(&tab_id, origin)
+        .ok_or_else(|| format!("no tab {tab_id}"))?;
+    emit_workspace(&app);
+    Ok(placed)
+}
+
+/// The camera that shows the whole board in a `width` × `height` viewport.
+/// Only answers: the board moves there itself and saves where it ends up.
+#[tauri::command]
+pub fn board_fit(state: State<'_, AppState>, width: f64, height: f64) -> Camera {
+    let ws = state.workspace.lock().unwrap();
+    cmux_core::board::fit(ws.tabs.iter().map(|t| t.frame_rect()), width, height)
+}
+
+/// The camera that shows `pane_id`'s card centred in a `width` × `height`
+/// viewport: at 100% — where double-clicking its header goes — or at
+/// `zoom`, to bring it into view as the board is.
+#[tauri::command]
+pub fn board_card_camera(
+    state: State<'_, AppState>,
+    pane_id: String,
+    width: f64,
+    height: f64,
+    zoom: Option<f64>,
+) -> Result<Camera, String> {
+    let ws = state.workspace.lock().unwrap();
+    let tab = ws.tab_of_pane(&pane_id).ok_or_else(|| format!("no pane {pane_id}"))?;
+    let card = tab.cards.get(&pane_id).ok_or_else(|| format!("no card for {pane_id}"))?;
+    let on_board = BoardRect { x: tab.frame.x + card.x, y: tab.frame.y + card.y, ..*card };
+    let zoom = zoom.unwrap_or(1.0).clamp(cmux_core::board::MIN_ZOOM, cmux_core::board::MAX_ZOOM);
+    Ok(cmux_core::board::centre_on(on_board, width, height, zoom))
 }
 
 /// Serializes attaches. The command is async so a ConPTY spawn (tens to

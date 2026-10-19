@@ -5,7 +5,7 @@
 use std::io::Write;
 
 use clap::{Parser, Subcommand};
-use cmux_protocol::{Request, ResponseEnvelope, SplitDir};
+use cmux_protocol::{Request, ResponseEnvelope, SplitDir, View};
 
 #[derive(Parser)]
 #[command(name = "mira", about = "Automation client for the Mirador terminal")]
@@ -37,6 +37,8 @@ enum Command {
     },
     /// Close a pane.
     ClosePane { pane: String },
+    /// Close a tab and every pane in it.
+    CloseTab { tab: String },
     /// Focus a pane (activates its tab).
     Focus { pane: String },
     /// Show a pane alone, filling its tab (activates it); again, or with
@@ -46,6 +48,9 @@ enum Command {
         #[arg(long)]
         off: bool,
     },
+    /// Show the workspace as `tabs` or as the `board`; without either,
+    /// print which one is shown.
+    View { view: Option<String> },
     /// Type input into a pane's shell.
     SendInput {
         /// Text to send (use --enter to append a newline).
@@ -464,10 +469,14 @@ fn run(cli: Cli) -> Result<(), String> {
             command,
         },
         Command::ClosePane { pane } => Request::ClosePane { pane_id: pane },
+        Command::CloseTab { tab } => Request::CloseTab { tab_id: tab },
         Command::Focus { pane } => Request::FocusPane { pane_id: pane },
         Command::Zoom { pane, off } => Request::ZoomPane {
             pane_id: pane,
             zoom: off.then_some(false),
+        },
+        Command::View { view } => Request::View {
+            view: view.as_deref().map(parse_view).transpose()?,
         },
         Command::SendInput { data, pane, enter } => Request::SendInput {
             pane_id: pane,
@@ -746,6 +755,14 @@ fn parse_dir(s: &str) -> Result<SplitDir, String> {
     }
 }
 
+fn parse_view(s: &str) -> Result<View, String> {
+    match s {
+        "tabs" => Ok(View::Tabs),
+        "board" => Ok(View::Board),
+        other => Err(format!("invalid view `{other}` (tabs|board)")),
+    }
+}
+
 fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     use cmux_protocol::RequestEnvelope;
     use std::io::{BufRead, BufReader};
@@ -845,6 +862,13 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                         m["pane"].as_str().unwrap_or("")
                     );
                 }
+            } else if let Some(view) = map
+                .get("view")
+                .and_then(|v| v.as_str())
+                // A workspace snapshot says its view too.
+                .filter(|_| !map.contains_key("tabs"))
+            {
+                println!("{view}");
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))

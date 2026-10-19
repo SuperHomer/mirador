@@ -4,9 +4,12 @@
 
 use std::collections::HashMap;
 
-use cmux_protocol::{Direction, Node, SplitDir, TabSnapshot, WorkspaceSnapshot};
+use cmux_protocol::{
+    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, View,
+    WorkspaceSnapshot,
+};
 
-use crate::layout;
+use crate::{board, layout};
 
 #[derive(Debug, Default, Clone)]
 pub struct PaneMeta {
@@ -277,6 +280,11 @@ pub struct Tab {
     /// The team running in this tab, if one was started here: who is in
     /// which pane. Persisted, so a team is still a team after a restart.
     pub team: Option<cmux_protocol::TeamRun>,
+    /// Where the tab's frame sits on the board.
+    pub frame: BoardPoint,
+    /// Each pane's card on the board, relative to `frame`. Kept for every
+    /// pane in either view, so the board is ready whenever it is shown.
+    pub cards: board::Cards,
 }
 
 fn new_id() -> String {
@@ -286,19 +294,28 @@ fn new_id() -> String {
 impl Tab {
     fn new() -> (Self, String) {
         let pane = new_id();
-        (
-            Self {
-                id: new_id(),
-                title: None,
-                root: Node::Leaf {
-                    pane_id: pane.clone(),
-                },
-                focused: pane.clone(),
-                zoomed: None,
-                team: None,
-            },
-            pane,
-        )
+        (Self::with_root(Node::Leaf { pane_id: pane.clone() }), pane)
+    }
+
+    /// A tab laid out as `root`, its first pane focused, its cards its
+    /// splits. Its frame is placed by the workspace that takes it in.
+    fn with_root(root: Node) -> Self {
+        let focused = layout::pane_ids(&root).into_iter().next().unwrap_or_default();
+        Self {
+            id: new_id(),
+            title: None,
+            cards: board::default_cards(&root),
+            root,
+            focused,
+            zoomed: None,
+            team: None,
+            frame: BoardPoint::default(),
+        }
+    }
+
+    /// The tab's frame on the board.
+    pub fn frame_rect(&self) -> BoardRect {
+        board::frame_rect(self.frame, &self.cards)
     }
 }
 
@@ -306,6 +323,12 @@ impl Tab {
 pub struct Workspace {
     pub tabs: Vec<Tab>,
     pub active: usize,
+    pub view: View,
+    pub camera: Camera,
+    /// The board's size on screen, in pixels, as the app last said: with
+    /// the camera, where the board is being looked at. Not saved — unknown
+    /// until the app has drawn the board.
+    pub viewport: Option<(f64, f64)>,
 }
 
 impl Default for Workspace {
@@ -314,6 +337,9 @@ impl Default for Workspace {
         Self {
             tabs: vec![tab],
             active: 0,
+            view: View::default(),
+            camera: Camera::default(),
+            viewport: None,
         }
     }
 }
@@ -331,6 +357,29 @@ impl Workspace {
         self.tabs.iter_mut().find(|t| layout::contains(&t.root, pane))
     }
 
+    /// Gives a tab just taken in a frame of its own on the board, never on
+    /// top of one already there: with the board shown, where it is being
+    /// looked at (`board::frame_spot`) — a tab opened there is one to see —
+    /// and otherwise right of every other, wherever it sits in the tab order.
+    fn place_frame(&mut self, tab_id: &str) {
+        let others = self.other_frames(tab_id);
+        let looked_at = match (self.view, self.viewport) {
+            (View::Board, Some((w, h))) => Some(BoardPoint {
+                x: self.camera.x + w / self.camera.zoom / 2.0,
+                y: self.camera.y + h / self.camera.zoom / 2.0,
+            }),
+            _ => None,
+        };
+        let Some(tab) = self.tab_mut(tab_id) else { return };
+        tab.frame = match looked_at {
+            Some(centre) => {
+                let size = tab.frame_rect();
+                board::frame_spot(size.w, size.h, centre, &others)
+            }
+            None => board::next_frame_origin(others),
+        };
+    }
+
     /// Creates a tab (with one fresh pane) after the active one and
     /// activates it. Returns (tab_id, pane_id).
     pub fn new_tab(&mut self) -> (String, String) {
@@ -338,6 +387,7 @@ impl Workspace {
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
+        self.place_frame(&id);
         (id, pane)
     }
 
@@ -349,24 +399,22 @@ impl Workspace {
         let id = tab.id.clone();
         let at = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(at, tab);
+        self.place_frame(&id);
         (id, pane)
     }
 
     /// Opens a team's tab after the active one, its panes laid out as
     /// `root`, the first focused. Returns the tab id.
     pub fn new_team_tab(&mut self, root: Node, team: cmux_protocol::TeamRun, title: &str) -> String {
-        let focused = layout::pane_ids(&root).into_iter().next().unwrap_or_default();
         let tab = Tab {
-            id: new_id(),
             title: Some(title.to_string()),
-            root,
-            focused,
-            zoomed: None,
             team: Some(team),
+            ..Tab::with_root(root)
         };
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
+        self.place_frame(&id);
         id
     }
 
@@ -388,18 +436,12 @@ impl Workspace {
     /// Adds a tab at the end for an existing pane id, leaving the active tab
     /// alone: how a session holder no saved pane names gets a home.
     pub fn adopt_pane(&mut self, pane: &str) -> String {
-        let tab = Tab {
-            id: new_id(),
-            title: None,
-            root: Node::Leaf {
-                pane_id: pane.to_string(),
-            },
-            focused: pane.to_string(),
-            zoomed: None,
-            team: None,
-        };
+        let tab = Tab::with_root(Node::Leaf {
+            pane_id: pane.to_string(),
+        });
         let id = tab.id.clone();
         self.tabs.push(tab);
+        self.place_frame(&id);
         id
     }
 
@@ -409,11 +451,15 @@ impl Workspace {
         let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
             return Vec::new();
         };
-        let tab = self.tabs.remove(idx);
-        let panes = layout::pane_ids(&tab.root);
+        let closed = self.tabs.remove(idx);
+        let panes = layout::pane_ids(&closed.root);
         if self.tabs.is_empty() {
+            // Where the last frame was, which the board is showing.
             let (tab, _) = Tab::new();
-            self.tabs.push(tab);
+            self.tabs.push(Tab {
+                frame: closed.frame,
+                ..tab
+            });
             self.active = 0;
         } else if self.active >= self.tabs.len() {
             self.active = self.tabs.len() - 1;
@@ -467,6 +513,14 @@ impl Workspace {
         if layout::split(&mut tab.root, pane, dir, &new_pane) {
             tab.focused = new_pane.clone();
             tab.zoomed = None;
+            match board::card_spot(&tab.cards, pane, dir) {
+                Some(card) => {
+                    tab.cards.insert(new_pane.clone(), card);
+                }
+                None => board::settle(&tab.root, &mut tab.cards),
+            }
+            let tab_id = tab.id.clone();
+            self.push_frames_clear(&tab_id);
             Some(new_pane)
         } else {
             None
@@ -484,6 +538,7 @@ impl Workspace {
             layout::RemoveOutcome::BecameEmpty => self.close_tab(&tab_id),
             layout::RemoveOutcome::Removed => {
                 tab.zoomed = None;
+                tab.cards.remove(pane);
                 if tab.focused == pane {
                     tab.focused = layout::pane_ids(&tab.root)
                         .first()
@@ -575,6 +630,59 @@ impl Workspace {
         }
     }
 
+    /// Shows the workspace as tabs or as the board. False when it already was.
+    pub fn set_view(&mut self, view: View) -> bool {
+        std::mem::replace(&mut self.view, view) != view
+    }
+
+    /// The frames of every tab but `tab_id`'s.
+    fn other_frames(&self, tab_id: &str) -> Vec<BoardRect> {
+        self.tabs
+            .iter()
+            .filter(|t| t.id != tab_id)
+            .map(Tab::frame_rect)
+            .collect()
+    }
+
+    /// Keeps frames apart after `tab_id`'s frame grew: frames it reaches
+    /// are pushed clear (`board::push_clear`). Every change that can grow a
+    /// frame ends here, so no two frames — and so no two cards — overlap.
+    pub(crate) fn push_frames_clear(&mut self, tab_id: &str) {
+        let Some(grown) = self.tabs.iter().position(|t| t.id == tab_id) else {
+            return;
+        };
+        let mut frames: Vec<BoardRect> = self.tabs.iter().map(Tab::frame_rect).collect();
+        board::push_clear(&mut frames, grown);
+        for (tab, frame) in self.tabs.iter_mut().zip(frames) {
+            tab.frame.x = frame.x;
+        }
+    }
+
+    /// Moves or resizes `pane`'s card, if no other card of its frame is
+    /// there (`board::card_fits`); its splits stay as they are. The card's
+    /// place afterwards — unchanged when refused — or None for no such pane.
+    pub fn set_card_rect(&mut self, pane: &str, rect: BoardRect) -> Option<BoardRect> {
+        let tab_id = self.tab_of_pane(pane)?.id.clone();
+        let tab = self.tab_mut(&tab_id)?;
+        if board::card_fits(&tab.cards, pane, rect) {
+            tab.cards.insert(pane.to_string(), rect);
+        }
+        let placed = tab.cards.get(pane).copied();
+        self.push_frames_clear(&tab_id);
+        placed
+    }
+
+    /// Moves a tab's frame, and its cards with it, if no other frame is
+    /// there. Where the frame is afterwards, or None for no such tab.
+    pub fn set_frame_position(&mut self, tab_id: &str, origin: BoardPoint) -> Option<BoardPoint> {
+        let others = self.other_frames(tab_id);
+        let tab = self.tab_mut(tab_id)?;
+        if board::frame_fits(&tab.cards, origin, &others) {
+            tab.frame = origin;
+        }
+        Some(tab.frame)
+    }
+
     /// Whether `pane` is still in a tab. A pane leaves its tab before its
     /// `PaneMeta` is removed, so a writer that checks this under the
     /// workspace lock never brings a closed pane's meta back.
@@ -636,6 +744,15 @@ impl Workspace {
                             ports
                         },
                         zoomed_pane: t.zoomed.clone(),
+                        frame: t.frame_rect(),
+                        cards: layout::pane_ids(&t.root)
+                            .into_iter()
+                            .filter_map(|pane| {
+                                let rect = *t.cards.get(&pane)?;
+                                let title = pane_title(meta.get(&pane));
+                                Some(CardRect { pane_id: pane, title, rect })
+                            })
+                            .collect(),
                     }
                 })
                 .collect(),
@@ -650,6 +767,8 @@ impl Workspace {
             agent_wall_panes: Vec::new(),
             agent_editor_panes: Vec::new(),
             agents: Vec::new(),
+            view: self.view,
+            camera: self.camera,
         }
     }
 }
@@ -661,6 +780,35 @@ impl Workspace {
 /// that sets a real title (`vim: main.rs`, `user@host:~/src`) still wins.
 pub fn is_meaningful_title(title: &str) -> bool {
     !title.trim().to_ascii_lowercase().ends_with(".exe")
+}
+
+/// What a pane is, in a few words, for its card on the board: what it
+/// shows for the panes that are not shells, else what its program titled
+/// it, else where it works.
+pub fn pane_title(meta: Option<&PaneMeta>) -> String {
+    let Some(m) = meta else {
+        return "shell".to_string();
+    };
+    let name = |path: &str| display_dir(path);
+    if m.agent_wall {
+        "Agents".to_string()
+    } else if m.agent_editor {
+        "Roles, ways & teams".to_string()
+    } else if let Some(version) = &m.whats_new {
+        format!("What's new in {version}")
+    } else if let Some(url) = &m.browser_url {
+        url.clone()
+    } else if let Some(repo) = &m.diff_repo {
+        format!("Diff · {}", name(repo))
+    } else if let Some(repo) = &m.graph_repo {
+        format!("Graph · {}", name(repo))
+    } else if let Some(title) = m.title.as_deref().filter(|t| is_meaningful_title(t)) {
+        title.to_string()
+    } else if let Some(cwd) = &m.cwd {
+        name(cwd)
+    } else {
+        "shell".to_string()
+    }
 }
 
 fn display_dir(path: &str) -> String {
@@ -928,6 +1076,245 @@ mod tests {
         assert_eq!(ws.active, active);
         assert_eq!(ws.focused_pane(), second);
         assert_eq!(ws.all_pane_ids().last().map(String::as_str), Some("orphan-1"));
+    }
+
+    /// Every pane of every tab has a card, and no frame covers another.
+    fn assert_board_consistent(ws: &Workspace) {
+        for t in &ws.tabs {
+            let mut panes = layout::pane_ids(&t.root);
+            let mut cards: Vec<String> = t.cards.keys().cloned().collect();
+            panes.sort();
+            cards.sort();
+            assert_eq!(panes, cards, "tab {}", t.id);
+        }
+        let frames: Vec<BoardRect> = ws.tabs.iter().map(Tab::frame_rect).collect();
+        for (i, a) in frames.iter().enumerate() {
+            for b in &frames[i + 1..] {
+                let apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                assert!(apart, "{a:?} covers {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_pane_has_a_card_however_panes_come_and_go() {
+        let mut ws = Workspace::default();
+        assert_board_consistent(&ws);
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        ws.split_pane(&b, SplitDir::Column).unwrap();
+        ws.new_tab();
+        let first = ws.tabs[0].id.clone();
+        ws.set_active_tab(&first);
+        // Inserted in the tab order before the second tab, its frame still
+        // goes right of every other.
+        ws.new_background_tab();
+        let panes = Workspace::fresh_pane_ids(2);
+        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![] };
+        ws.new_team_tab(crate::teams::layout(&panes, None), team, "t");
+        ws.adopt_pane("orphan");
+        assert_board_consistent(&ws);
+        ws.close_pane(&b);
+        assert!(!ws.tabs[0].cards.contains_key(&b));
+        assert_board_consistent(&ws);
+    }
+
+    #[test]
+    fn on_the_board_a_new_frame_goes_where_it_is_looked_at() {
+        let mut ws = Workspace { view: View::Board, ..Default::default() };
+        // Not drawn yet: where it would go in the tabs view.
+        let (first, _) = ws.new_tab();
+        let right = ws.tabs[0].frame_rect();
+        assert_eq!(ws.tab_mut(&first).unwrap().frame.x, right.x + right.w + board::FRAME_GAP);
+        // Looking at an empty stretch far below: there, centred.
+        ws.viewport = Some((1000.0, 800.0));
+        ws.camera = Camera { x: 0.0, y: 5000.0, zoom: 0.5 };
+        let (id, _) = ws.new_tab();
+        let frame = ws.tabs.iter().find(|t| t.id == id).unwrap().frame_rect();
+        assert_eq!((frame.x + frame.w / 2.0, frame.y + frame.h / 2.0), (1000.0, 5800.0));
+        assert_nothing_overlaps(&ws);
+        // Again, same view: beside it, not on it.
+        ws.new_tab();
+        assert_nothing_overlaps(&ws);
+    }
+
+    #[test]
+    fn a_new_frame_goes_right_of_the_rightmost() {
+        let mut ws = Workspace::default();
+        let first = ws.tabs[0].id.clone();
+        ws.set_frame_position(&first, BoardPoint { x: 5000.0, y: 300.0 });
+        let (second, _) = ws.new_tab();
+        let tab = ws.tabs.iter().find(|t| t.id == second).unwrap();
+        let right = ws.tabs[0].frame_rect();
+        assert_eq!(tab.frame, BoardPoint { x: right.x + right.w + board::FRAME_GAP, y: 0.0 });
+    }
+
+    #[test]
+    fn a_split_adds_a_card_in_its_frame_and_moves_none() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        // Moved down and right: the frame has room above and left of it.
+        let moved = BoardRect { x: 600.0, y: 400.0, w: 500.0, h: 250.0 };
+        assert_eq!(ws.set_card_rect(&a, moved), Some(moved));
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        let cards = &ws.tabs[0].cards;
+        assert_eq!(cards[&a], moved, "the source stays where it was put");
+        let inner = (board::FRAME_PADDING + board::CARD_GAP / 2.0, board::FRAME_HEADER + board::CARD_GAP / 2.0);
+        assert_eq!(cards[&b], BoardRect { x: inner.0, y: inner.1, ..moved }, "the room it had");
+        // The next one in what room is left, beside the last.
+        let c = ws.split_pane(&a, SplitDir::Row).unwrap();
+        assert_eq!(ws.tabs[0].cards[&c], BoardRect { x: inner.0 + moved.w + board::CARD_GAP, y: inner.1, ..moved });
+        assert_nothing_overlaps(&ws);
+        // And moving a card changes no split.
+        let root = ws.tabs[0].root.clone();
+        ws.set_card_rect(&b, BoardRect { x: 16.0, y: 36.0, w: 200.0, h: 200.0 });
+        assert_eq!(ws.tabs[0].root, root);
+        assert_eq!(ws.set_card_rect("gone", moved), None);
+    }
+
+    #[test]
+    fn the_last_tab_closed_comes_back_where_its_frame_was() {
+        let mut ws = Workspace::default();
+        let id = ws.tabs[0].id.clone();
+        ws.set_frame_position(&id, BoardPoint { x: 700.0, y: -40.0 });
+        ws.close_tab(&id);
+        assert_eq!(ws.tabs[0].frame, BoardPoint { x: 700.0, y: -40.0 });
+        assert_board_consistent(&ws);
+    }
+
+    #[test]
+    fn the_snapshot_carries_the_board() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Column).unwrap();
+        assert!(ws.set_view(View::Board));
+        assert!(!ws.set_view(View::Board), "already the board");
+        ws.camera = Camera { x: -20.0, y: 10.0, zoom: 0.5 };
+        let snap = ws.snapshot(&HashMap::new());
+        assert_eq!(snap.view, View::Board);
+        assert_eq!(snap.camera, ws.camera);
+        let tab = &snap.tabs[0];
+        let ids: Vec<&str> = tab.cards.iter().map(|c| c.pane_id.as_str()).collect();
+        assert_eq!(ids, vec![a.as_str(), b.as_str()], "in the tab's pane order");
+        assert_eq!(tab.frame, ws.tabs[0].frame_rect());
+    }
+
+    #[test]
+    fn a_card_or_frame_dropped_on_a_taken_place_stays_put() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        ws.new_tab();
+        let was = ws.tabs[0].cards[&b];
+        // Onto its neighbour: refused, and the answer says where it is.
+        let onto_a = BoardRect { x: 100.0, ..was };
+        assert_eq!(ws.set_card_rect(&b, onto_a), Some(was));
+        // Free, below: moved.
+        let below = BoardRect { y: 1000.0, ..was };
+        assert_eq!(ws.set_card_rect(&b, below), Some(below));
+        // A frame onto another frame: refused; clear of it: moved.
+        let first = ws.tabs[0].id.clone();
+        let at = ws.tabs[0].frame;
+        assert_eq!(ws.set_frame_position(&first, BoardPoint { x: 2000.0, y: 100.0 }), Some(at));
+        assert_eq!(ws.set_frame_position(&first, BoardPoint { x: 0.0, y: 3000.0 }), Some(BoardPoint { x: 0.0, y: 3000.0 }));
+        assert_eq!(ws.set_frame_position("gone", at), None);
+    }
+
+    /// No two frames overlap, and no two cards anywhere on the board.
+    fn assert_nothing_overlaps(ws: &Workspace) {
+        let apart = |a: &BoardRect, b: &BoardRect| {
+            a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y
+        };
+        let frames: Vec<BoardRect> = ws.tabs.iter().map(Tab::frame_rect).collect();
+        let cards: Vec<BoardRect> = ws
+            .tabs
+            .iter()
+            .flat_map(|t| t.cards.values().map(move |c| BoardRect { x: t.frame.x + c.x, y: t.frame.y + c.y, ..*c }))
+            .collect();
+        for rects in [frames, cards] {
+            for (i, a) in rects.iter().enumerate() {
+                for b in &rects[i + 1..] {
+                    assert!(apart(a, b), "{a:?} overlaps {b:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_split_growing_its_frame_pushes_the_next_frame_clear() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let (_, other) = ws.new_tab();
+        // The split's card goes right of `a`, where the second frame was:
+        // that frame moves on, and its card can't be stacked on.
+        ws.split_pane(&a, SplitDir::Row);
+        assert_nothing_overlaps(&ws);
+        // Neither by a card of the first tab moved or resized onto it.
+        let theirs = ws.tabs[1].frame.x + ws.tabs[1].cards[&other].x;
+        let onto = BoardRect { x: theirs, y: 42.0, w: 400.0, h: 300.0 };
+        ws.set_card_rect(&a, onto);
+        assert_nothing_overlaps(&ws);
+    }
+
+    /// A tiny deterministic generator: no `rand` dependency for one test.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self, n: usize) -> usize {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % n
+        }
+    }
+
+    #[test]
+    fn nothing_on_the_board_ever_overlaps() {
+        let mut rng = Lcg(7);
+        let mut ws = Workspace::default();
+        for _ in 0..400 {
+            let panes = ws.all_pane_ids();
+            let pane = panes[rng.next(panes.len())].clone();
+            let tab = ws.tabs[rng.next(ws.tabs.len())].id.clone();
+            let n = |rng: &mut Lcg, max: usize| rng.next(max) as f64;
+            match rng.next(7) {
+                0 => {
+                    ws.new_tab();
+                }
+                1 => {
+                    ws.split_pane(&pane, SplitDir::Row);
+                }
+                2 => {
+                    ws.split_pane(&pane, SplitDir::Column);
+                }
+                3 => {
+                    ws.close_pane(&pane);
+                }
+                4 => {
+                    let rect = board::card(n(&mut rng, 3000), n(&mut rng, 2000), 160.0 + n(&mut rng, 1500), 100.0 + n(&mut rng, 1000)).unwrap();
+                    ws.set_card_rect(&pane, rect);
+                }
+                5 => {
+                    ws.set_frame_position(&tab, BoardPoint { x: n(&mut rng, 20000), y: n(&mut rng, 8000) });
+                }
+                _ => {
+                    ws.adopt_pane(&format!("held-{}", rng.next(1_000_000)));
+                }
+            }
+            assert_nothing_overlaps(&ws);
+        }
+    }
+
+    #[test]
+    fn a_card_says_what_its_pane_is() {
+        assert_eq!(pane_title(None), "shell");
+        let meta = |m: PaneMeta| pane_title(Some(&m));
+        assert_eq!(meta(PaneMeta { cwd: Some("/tmp/project".into()), ..Default::default() }), "project");
+        assert_eq!(
+            meta(PaneMeta { cwd: Some("/tmp/project".into()), title: Some("vim: main.rs".into()), ..Default::default() }),
+            "vim: main.rs"
+        );
+        assert_eq!(meta(PaneMeta { title: Some(r"C:\pwsh.exe".into()), ..Default::default() }), "shell");
+        assert_eq!(meta(PaneMeta { diff_repo: Some("/src/mirador".into()), ..Default::default() }), "Diff · mirador");
+        assert_eq!(meta(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
+        assert_eq!(meta(PaneMeta { agent_wall: true, title: Some("x".into()), ..Default::default() }), "Agents");
     }
 
     #[test]

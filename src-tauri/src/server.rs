@@ -131,8 +131,16 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::commands::close_pane(app.clone(), app.state(), pane_id);
             Ok(Value::Null)
         }
+        Request::CloseTab { tab_id } => {
+            crate::commands::close_tab(app.clone(), app.state(), tab_id);
+            Ok(Value::Null)
+        }
         Request::FocusPane { pane_id } => {
-            crate::commands::focus_pane(app.clone(), app.state(), pane_id);
+            crate::commands::focus_pane(app.clone(), app.state(), pane_id.clone());
+            // Asked for from outside, so on the board its card is brought
+            // into view even when it already had the focus — the snapshot
+            // alone says only that the focus changed, if it did.
+            let _ = app.emit("focus-requested", pane_id);
             Ok(Value::Null)
         }
         Request::ZoomPane { pane_id, zoom } => {
@@ -140,6 +148,25 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let zoomed =
                 crate::commands::zoom_pane(app.clone(), app.state(), pane.clone(), zoom)?;
             Ok(json!({ "paneId": pane, "zoomed": zoomed }))
+        }
+        Request::View { view } => {
+            if let Some(view) = view {
+                crate::commands::set_view(app.clone(), app.state(), view);
+            }
+            let view = state.workspace.lock().unwrap().view;
+            Ok(json!({ "view": view }))
+        }
+        Request::SetCamera { x, y, zoom, width, height } => {
+            crate::commands::set_camera(app.state(), x, y, zoom, width, height)?;
+            Ok(Value::Null)
+        }
+        Request::SetCardRect { pane_id, x, y, w, h } => {
+            let placed = crate::commands::set_card_rect(app.clone(), app.state(), pane_id, x, y, w, h)?;
+            serde_json::to_value(placed).map_err(|e| e.to_string())
+        }
+        Request::SetFramePosition { tab_id, x, y } => {
+            let placed = crate::commands::set_frame_position(app.clone(), app.state(), tab_id, x, y)?;
+            serde_json::to_value(placed).map_err(|e| e.to_string())
         }
         Request::SendInput { pane_id, data } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));

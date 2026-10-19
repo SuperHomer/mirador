@@ -13,6 +13,7 @@ import {
   watchTerminal,
 } from "./registry";
 import { useConfigStore } from "../state/configStore";
+import { atFullSize, useBoardStore } from "../state/boardStore";
 import {
   attachPane,
   writePty,
@@ -36,6 +37,12 @@ const ACK_THRESHOLD = 256 * 1024;
  * forth still finds the renderer warm.
  */
 const WEBGL_RELEASE_DELAY_MS = 30_000;
+/**
+ * On the board, many terminals are shown at once and the pan brings each
+ * in and out of view: one that leaves gives its context back soon, or a
+ * pan across the board would hold one per terminal it passed.
+ */
+const BOARD_WEBGL_RELEASE_DELAY_MS = 1_000;
 
 /**
  * Moves a background pane's terminal out of the viewport. Tabs stack with
@@ -67,6 +74,8 @@ interface Props {
   focused: boolean;
   /** The pane's tab is the active one. */
   visible: boolean;
+  /** Drawn as a card on the board. */
+  onBoard: boolean;
   unread: boolean;
   /** Set when this is a command pane (🤖): the command it runs. */
   agentCommand?: string;
@@ -80,6 +89,7 @@ export const TerminalPane = memo(function TerminalPane({
   paneId,
   focused,
   visible,
+  onBoard,
   unread,
   agentCommand,
   remoteHost,
@@ -342,7 +352,27 @@ export const TerminalPane = memo(function TerminalPane({
     };
   }, [paneId]);
 
-  const onScreen = visible || lent;
+  // On the board every terminal counts as visible, and a browser allows
+  // ~16 WebGL contexts. So there a terminal renders with WebGL only while
+  // its card is in view and the board is at 100%; otherwise xterm
+  // falls back to its DOM renderer, which pauses while out of view and,
+  // being text, stays crisp when the board scales it. At 100% the screen
+  // holds far fewer than 16 cards.
+  const [inView, setInView] = useState(true);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!onBoard || !el) {
+      setInView(true);
+      return;
+    }
+    // Against the window, after the board's own clipping.
+    const observer = new IntersectionObserver(([e]) => setInView(e.isIntersecting));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onBoard]);
+  const fullSize = useBoardStore((s) => atFullSize(s.camera));
+
+  const onScreen = lent || (visible && (!onBoard || (inView && fullSize)));
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
@@ -352,12 +382,15 @@ export const TerminalPane = memo(function TerminalPane({
       });
       return;
     }
-    const timer = setTimeout(() => {
-      webglRef.current?.dispose();
-      webglRef.current = null;
-    }, WEBGL_RELEASE_DELAY_MS);
+    const timer = setTimeout(
+      () => {
+        webglRef.current?.dispose();
+        webglRef.current = null;
+      },
+      onBoard ? BOARD_WEBGL_RELEASE_DELAY_MS : WEBGL_RELEASE_DELAY_MS,
+    );
     return () => clearTimeout(timer);
-  }, [onScreen, paneId]);
+  }, [onScreen, onBoard, paneId]);
 
   // Also on becoming visible, and on coming back from the wall: going to
   // an agent's tab from its tile means typing to it next.

@@ -31,6 +31,34 @@ export interface TabSnapshot {
   zoomedPane: string | null;
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
+  /** Its frame on the board; its cards are placed relative to `x`, `y`. */
+  frame: BoardRect;
+  /** Every pane's card, in the tab's pane order. */
+  cards: CardRect[];
+}
+
+/** Tabs one at a time with their splits, or every pane on one board. */
+export type View = "tabs" | "board";
+
+/** The board point at the viewport's top-left, and screen px per unit. */
+export interface Camera {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface BoardRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** A pane's card, relative to its tab's frame. */
+export interface CardRect extends BoardRect {
+  paneId: string;
+  /** What the card's header says the pane is. */
+  title: string;
 }
 
 /** A team running in a tab (`cmux_protocol::TeamRun`). */
@@ -350,6 +378,8 @@ export interface WorkspaceSnapshot {
   agentEditorPanes: AgentEditorPaneInfo[];
   agentWallPanes: AgentWallPaneInfo[];
   agents: AgentInfo[];
+  view: View;
+  camera: Camera;
 }
 
 export interface NotificationDto {
@@ -437,6 +467,34 @@ export const focusPane = (paneId: string) =>
   invoke<void>("focus_pane", { paneId });
 export const focusDirection = (direction: Direction) =>
   invoke<void>("focus_direction", { direction });
+export const setView = (view: View) => invoke<void>("set_view", { view });
+/**
+ * Saved with the session; sends no snapshot back. With the board's size on
+ * screen, it says where the board is looked at: where a new frame goes.
+ */
+export const setCamera = (
+  camera: Camera,
+  viewport: { width: number; height: number },
+) => invoke<void>("set_camera", { ...camera, ...viewport });
+/** The camera showing the whole board in a viewport of this size. */
+export const boardFit = (width: number, height: number) =>
+  invoke<Camera>("board_fit", { width, height });
+/**
+ * Moves or resizes a card. Refused over another card, or growing its frame
+ * into another frame: the answer is where the card is.
+ */
+export const setCardRect = (paneId: string, r: BoardRect) =>
+  invoke<BoardRect>("set_card_rect", { paneId, x: r.x, y: r.y, w: r.w, h: r.h });
+/** Moves a tab's frame; refused onto another frame. */
+export const setFramePosition = (tabId: string, x: number, y: number) =>
+  invoke<{ x: number; y: number }>("set_frame_position", { tabId, x, y });
+/** The camera showing a pane's card centred: at 100%, or at `zoom`. */
+export const boardCardCamera = (
+  paneId: string,
+  width: number,
+  height: number,
+  zoom: number | null = null,
+) => invoke<Camera>("board_card_camera", { paneId, width, height, zoom });
 export const setSplitRatios = (
   tabId: string,
   path: number[],

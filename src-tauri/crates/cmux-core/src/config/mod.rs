@@ -213,6 +213,8 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+7", "tab_7"),
     ("mod+8", "tab_8"),
     ("mod+9", "tab_9"),
+    ("mod+shift+o", "toggle_board"),
+    ("mod+0", "board_fit"),
 ];
 
 /// Windows/Linux: plain Ctrl belongs to the program in the pane — Ctrl+C
@@ -255,6 +257,8 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("alt+7", "tab_7"),
     ("alt+8", "tab_8"),
     ("alt+9", "tab_9"),
+    ("ctrl+shift+o", "toggle_board"),
+    ("ctrl+shift+0", "board_fit"),
 ];
 
 pub fn default_keybindings() -> HashMap<String, String> {

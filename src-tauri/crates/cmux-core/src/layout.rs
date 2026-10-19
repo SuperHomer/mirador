@@ -166,12 +166,29 @@ pub fn contains(node: &Node, target: &str) -> bool {
     }
 }
 
+/// A pane's place in its tab, in fractions of the tab's width and height.
 #[derive(Debug, Clone, Copy)]
-struct Rect {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Every pane's place in its tab, in the tree's pane order.
+pub fn leaf_rects(root: &Node) -> Vec<(String, Rect)> {
+    let mut rects = Vec::new();
+    collect_rects(
+        root,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 1.0,
+            h: 1.0,
+        },
+        &mut rects,
+    );
+    rects
 }
 
 fn collect_rects(node: &Node, rect: Rect, out: &mut Vec<(String, Rect)>) {
@@ -209,17 +226,7 @@ fn collect_rects(node: &Node, rect: Rect, out: &mut Vec<(String, Rect)>) {
 /// the normalized layout: nearest facing edge, tie-broken by the largest
 /// perpendicular overlap with the current pane.
 pub fn neighbor(root: &Node, from: &str, direction: Direction) -> Option<String> {
-    let mut rects = Vec::new();
-    collect_rects(
-        root,
-        Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 1.0,
-            h: 1.0,
-        },
-        &mut rects,
-    );
+    let rects = leaf_rects(root);
     let cur = rects.iter().find(|(id, _)| id == from)?.1;
     const EPS: f32 = 1e-4;
 

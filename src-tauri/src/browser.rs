@@ -234,13 +234,20 @@ pub fn ensure_webview(
             }
         });
 
-    window
+    let webview = window
         .add_child(
             builder,
             LogicalPosition::new(x, y),
             LogicalSize::new(w.max(1.0), h.max(1.0)),
         )
         .map_err(|e| e.to_string())?;
+    // On the board a page is shown only once its card can show it (at
+    // 100%, in view, the board still), which the board decides and asks for. A
+    // pane opened there must not appear over the board until then.
+    let board = app.state::<AppState>().workspace.lock().unwrap().view == cmux_protocol::View::Board;
+    if board {
+        let _ = webview.hide();
+    }
     Ok(())
 }
 

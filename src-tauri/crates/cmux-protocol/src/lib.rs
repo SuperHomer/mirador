@@ -68,6 +68,64 @@ pub struct TabSnapshot {
     /// The pane shown alone, filling the tab, when one is.
     #[serde(default)]
     pub zoomed_pane: Option<String>,
+    /// Where the tab's frame sits on the board, and its size (derived from
+    /// its cards). Card positions are relative to the frame's `x`, `y`.
+    #[serde(default)]
+    pub frame: BoardRect,
+    /// Every pane's card on the board, in the tab's pane order.
+    #[serde(default)]
+    pub cards: Vec<CardRect>,
+}
+
+/// How the workspace is shown: one tab at a time with its splits, or every
+/// pane of every tab as a card on one board.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum View {
+    #[default]
+    Tabs,
+    Board,
+}
+
+/// The part of the board on screen: `x`, `y` is the board point at the
+/// viewport's top-left corner, `zoom` the screen pixels per board unit.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Camera {
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0, zoom: 1.0 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct BoardPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct BoardRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// A pane's card, relative to its tab's frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardRect {
+    pub pane_id: String,
+    /// What the card's header says the pane is.
+    #[serde(default)]
+    pub title: String,
+    #[serde(flatten)]
+    pub rect: BoardRect,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,6 +174,10 @@ pub struct WorkspaceSnapshot {
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
+    #[serde(default)]
+    pub view: View,
+    #[serde(default)]
+    pub camera: Camera,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +225,10 @@ pub enum Request {
     ClosePane {
         pane_id: String,
     },
+    /// Closes a tab and every pane in it.
+    CloseTab {
+        tab_id: String,
+    },
     FocusPane {
         pane_id: String,
     },
@@ -173,6 +239,42 @@ pub enum Request {
         pane_id: Option<String>,
         #[serde(default)]
         zoom: Option<bool>,
+    },
+    /// Shows the workspace as `view`; without it, only answers which view
+    /// is shown.
+    View {
+        #[serde(default)]
+        view: Option<View>,
+    },
+    /// Where the board is looked at. Saved, never broadcast: the board
+    /// that moved it already shows it.
+    SetCamera {
+        x: f64,
+        y: f64,
+        zoom: f64,
+        /// The board's size on screen: with the camera, where a new frame
+        /// goes (where it is being looked at).
+        #[serde(default)]
+        width: Option<f64>,
+        #[serde(default)]
+        height: Option<f64>,
+    },
+    /// Moves or resizes a pane's card, relative to its tab's frame. Refused
+    /// (left where it was) over another card, or growing its frame into
+    /// another frame; answers where the card is.
+    SetCardRect {
+        pane_id: String,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    },
+    /// Moves a tab's frame, its cards with it; refused onto another frame.
+    /// Answers where the frame is.
+    SetFramePosition {
+        tab_id: String,
+        x: f64,
+        y: f64,
     },
     SendInput {
         #[serde(default)]

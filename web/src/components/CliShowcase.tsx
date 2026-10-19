@@ -5,6 +5,7 @@ const COMMANDS = [
   'mira agent new --role reviewer',
   'mira team start squad "add OAuth"',
   'mira diff main...HEAD',
+  'mira view board',
   'mira browser open localhost:3000',
   'mira browser text main',
   'mira browser console --errors',
@@ -49,6 +50,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent new --role <span style={{ color: "var(--mauve)" }}>reviewer</span><span style={{ color: "var(--muted)" }}> # .mirador/roles/reviewer.md</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> <span style={{ color: "var(--green)" }}>"add OAuth"</span><span style={{ color: "var(--muted)" }}> # a tab of agents</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira view <span style={{ color: "var(--sapphire)" }}>board</span><span style={{ color: "var(--muted)" }}>          # every pane at once</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser open <span style={{ color: "var(--green)" }}>localhost:3000</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser text <span style={{ color: "var(--sapphire)" }}>main</span><span style={{ color: "var(--muted)" }}>      # what it says</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser console --errors<span style={{ color: "var(--muted)" }}> # what broke</span></div>

@@ -373,6 +373,43 @@ body,
   background: var(--surface);
 }
 
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-footer .sidebar-new-tab {
+  flex: 1;
+}
+
+/* Tabs | Board: the view shown, and the way to the other. */
+.view-switch {
+  display: flex;
+  margin-right: 6px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.view-switch button {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.view-switch button:hover {
+  color: var(--text);
+}
+
+.view-switch button.selected {
+  background: var(--surface);
+  color: var(--text);
+  cursor: default;
+}
+
 /* ---------- Split layout ---------- */
 
 .tabs-host {
@@ -389,7 +426,323 @@ body,
 
 .pane-slot {
   position: absolute;
-  padding: 3px;
+}
+
+/* What a pane draws in: the slot less a 3px margin, and on the board less
+   the card's header too. Always there, in both views, so that switching
+   views gives a pane no new parent — a new parent would remount it. */
+.pane-body {
+  position: absolute;
+  inset: 3px;
+}
+
+/* ---------- Board ---------- */
+
+.tabs-host.board {
+  overflow: hidden;
+  cursor: grab;
+  background-color: var(--bg-alt);
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--muted) 35%, transparent) 1px,
+    transparent 1.5px
+  );
+}
+
+.tabs-host.board.panning {
+  cursor: grabbing;
+}
+
+.board-canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+/* A tab's frame: the region its cards sit in. */
+.tabs-host.board .tab-layer {
+  right: auto;
+  bottom: auto;
+  border: 1px solid var(--surface);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.tabs-host.board .tab-layer.current {
+  border-color: var(--muted);
+}
+
+/* The frame's title bar: its label, and the handle that moves it. */
+.frame-label {
+  position: absolute;
+  /* Above the frame's split layer, which spans the whole frame and is
+     drawn after it: under it, a press on the title bar or its buttons
+     landed on the layer instead. */
+  z-index: 1;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  padding: 0 8px 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--subtext);
+  cursor: move;
+}
+
+.frame-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.frame-button,
+.card-close {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--subtext);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.frame-button {
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+}
+
+.card-close {
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.frame-button:hover,
+.card-close:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* What a frame's "+" adds: a short list under it, on screen (placed by
+   FrameMenu), above the board. */
+.frame-menu {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  background: var(--bg-alt);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  cursor: default;
+}
+
+.frame-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.frame-menu button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.frame-menu button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.frame-menu-hint {
+  color: var(--subtext);
+  font-size: 11.5px;
+}
+
+/* A frame or card in the hand: above the rest, lifted. */
+.tabs-host.board .tab-layer.dragging,
+.pane-slot.card.dragging {
+  z-index: 10;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
+.pane-slot.card.dragging {
+  opacity: 0.92;
+}
+
+/* Where a resized card will go: drawn while the card itself keeps its
+   size, so its terminal resizes once, on release. */
+.card-ghost {
+  position: absolute;
+  z-index: 11;
+  border: 2px dashed var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  pointer-events: none;
+}
+
+/* A card's sides and corners, to resize it by. */
+.card-edge {
+  position: absolute;
+  z-index: 2;
+}
+
+.card-edge.n,
+.card-edge.s {
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.card-edge.e,
+.card-edge.w {
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.card-edge.n { top: -3px; }
+.card-edge.s { bottom: -3px; }
+.card-edge.e { right: -3px; }
+.card-edge.w { left: -3px; }
+
+.card-edge.ne,
+.card-edge.nw,
+.card-edge.se,
+.card-edge.sw {
+  width: 12px;
+  height: 12px;
+}
+
+.card-edge.ne { top: -3px; right: -3px; cursor: nesw-resize; }
+.card-edge.sw { bottom: -3px; left: -3px; cursor: nesw-resize; }
+.card-edge.nw { top: -3px; left: -3px; cursor: nwse-resize; }
+.card-edge.se { bottom: -3px; right: -3px; cursor: nwse-resize; }
+
+.tabs-host.board .tab-layer.current .frame-label {
+  color: var(--text);
+}
+
+.pane-slot.card {
+  cursor: default;
+}
+
+.pane-slot.card .pane-body {
+  top: 27px;
+}
+
+.card-header {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  right: 3px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--subtext);
+  font-size: 11.5px;
+  user-select: none;
+  cursor: move;
+}
+
+.card-header.focused {
+  color: var(--text);
+  background: color-mix(in srgb, var(--muted) 45%, var(--surface));
+}
+
+.card-header.unread {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.card-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent);
+}
+
+.card-header.needsYou .card-dot {
+  background: #fab387;
+}
+
+.card-header.idle .card-dot {
+  background: #a6e3a1;
+}
+
+.card-header.working .card-dot {
+  animation: wall-pulse 1.4s ease-in-out infinite;
+}
+
+/* Away from 100%, a card is something to look at: its content takes no
+   pointer (xterm maps the pointer wrongly under a scale), and a click
+   lands on the card, focusing it. The keyboard still types into it. */
+.tabs-host.board.overview .pane-body {
+  pointer-events: none;
+}
+
+.board-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--subtext);
+  font-size: 12px;
+  cursor: default;
+}
+
+.board-controls button {
+  border: none;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.board-controls button:hover {
+  background: var(--muted);
+}
+
+.browser-still {
+  padding: 16px;
+  color: var(--subtext);
+  font-size: 13px;
+  word-break: break-all;
 }
 
 /* Every pane draws its edge: with only the focused one outlined, panes on
@@ -2260,6 +2613,18 @@ body,
   justify-content: center;
   color: var(--muted);
   font-size: 12px;
+}
+
+button.wall-term-go {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+button.wall-term-go:hover {
+  color: var(--text);
 }
 
 /* Agent editor: the role, way and team files, a list beside a text. */

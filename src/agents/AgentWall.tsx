@@ -8,6 +8,7 @@ import {
   AgentStatus,
   Node,
   closePane,
+  focusPane,
   markPaneRead,
   openAgent,
   zoomPane,
@@ -15,6 +16,7 @@ import {
 import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { flyToCard } from "../state/boardStore";
 import {
   fitTerminal,
   isLent,
@@ -29,6 +31,12 @@ type Props = {
   tabId: string | null;
   /** The wall's tab is the one on screen: only then does it borrow. */
   visible: boolean;
+  /**
+   * Drawn as a card on the board, beside every agent's own card. It
+   * borrows nothing there — a terminal is drawn in one place — and a tile
+   * shows the agent's status and takes you to its card.
+   */
+  board: boolean;
 };
 
 function paneIds(node: Node): string[] {
@@ -67,13 +75,14 @@ export const AgentWall = memo(function AgentWall({
   paneId,
   tabId,
   visible,
+  board,
 }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   // The tab it shows; gone if that tab has closed since.
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const now = useNow(visible);
+  const now = useNow(visible || board);
 
   const tiles = useMemo(() => {
     const tabOf = new Map<string, { id: string; title: string }>();
@@ -217,6 +226,7 @@ export const AgentWall = memo(function AgentWall({
               agent={a}
               unread={unread.includes(a.paneId)}
               visible={visible}
+              board={board}
               now={now}
             />
           ))}
@@ -230,11 +240,13 @@ function WallTile({
   agent,
   unread,
   visible,
+  board,
   now,
 }: {
   agent: AgentInfo;
   unread: boolean;
   visible: boolean;
+  board: boolean;
   now: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -294,6 +306,11 @@ function WallTile({
   const tasks = activity?.session.tasks ?? null;
 
   const status = agent.status;
+  // On the board the agent's own card is a click away, at 100%.
+  const goToCard = () => {
+    void focusPane(pane);
+    flyToCard(pane);
+  };
   return (
     <div
       className={`wall-tile${status ? ` ${status}` : ""}${unread ? " unread" : ""}`}
@@ -301,11 +318,10 @@ function WallTile({
       <div
         className="wall-tile-head"
         title={
-          agent.hasActivity
-            ? "Show this agent in its tab — right-click for its subagents"
-            : "Show this agent in its tab"
+          (board ? "Go to this agent's card" : "Show this agent in its tab") +
+          (agent.hasActivity ? " — right-click for its subagents" : "")
         }
-        onClick={() => void zoomPane(pane, true)}
+        onClick={board ? goToCard : () => void zoomPane(pane, true)}
         onContextMenu={(e) => {
           e.preventDefault();
           if (agent.hasActivity) useUiStore.getState().openActivity(pane);
@@ -345,7 +361,13 @@ function WallTile({
           {/* The terminal's element is appended here by `lendTerminal`, so
               React must own nothing inside it. */}
           <div className="wall-term-host" ref={hostRef} />
-          {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+          {board ? (
+            <button className="wall-term-missing wall-term-go" onClick={goToCard}>
+              on the board — go to its card
+            </button>
+          ) : (
+            !shown && <span className="wall-term-missing">shown elsewhere</span>
+          )}
         </div>
         {activity && (activity.subagents.length > 0 || tasks) && (
           <aside className="wall-side">

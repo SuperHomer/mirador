@@ -12,6 +12,7 @@ import { useNotificationStore } from "./state/notificationStore";
 import { useKeymap } from "./keymap/useKeymap";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
+import { BoardHost, TabLayer } from "./layout/BoardHost";
 import { CommandPalette } from "./palette/CommandPalette";
 import { ActivityPanel } from "./agents/ActivityPanel";
 import { NotificationPanel } from "./notifications/NotificationPanel";
@@ -43,9 +44,10 @@ export default function App() {
   useKeymap();
 
   // Native child webviews float above the host webview: hide the ones on
-  // inactive tabs, and all of them while an overlay is open.
+  // inactive tabs, and all of them while an overlay is open. On the board
+  // each browser card decides for itself (`BrowserPane`).
   useEffect(() => {
-    if (!snapshot) return;
+    if (!snapshot || snapshot.view === "board") return;
     const activeTab = snapshot.tabs.find((t) => t.id === snapshot.activeTab);
     // A zoomed tab shows one pane; a browser pane zoomed out of view is
     // hidden like one on another tab.
@@ -111,6 +113,7 @@ export default function App() {
   }, [setSnapshot, setConfig]);
 
   if (!snapshot || !config) return <div className="app" />;
+  const board = snapshot.view === "board";
 
   return (
     <div
@@ -120,18 +123,20 @@ export default function App() {
       style={{ "--term-bg": config.colors.background } as React.CSSProperties}
     >
       <Sidebar />
-      <div className="tabs-host">
+      <BoardHost board={board}>
         {snapshot.tabs.map((tab) => (
-          <div
+          <TabLayer
             key={tab.id}
-            className="tab-layer"
-            style={{
-              visibility: tab.id === snapshot.activeTab ? "visible" : "hidden",
-            }}
+            tab={tab}
+            board={board}
+            current={tab.id === snapshot.activeTab}
           >
             <SplitLayer
               tab={tab}
-              active={tab.id === snapshot.activeTab}
+              board={board}
+              active={board || tab.id === snapshot.activeTab}
+              current={tab.id === snapshot.activeTab}
+              agents={snapshot.agents}
               unreadPanes={snapshot.unreadPanes}
               agentPanes={snapshot.agentPanes}
               browserPanes={snapshot.browserPanes}
@@ -142,9 +147,9 @@ export default function App() {
               agentWallPanes={snapshot.agentWallPanes}
               agentEditorPanes={snapshot.agentEditorPanes ?? []}
             />
-          </div>
+          </TabLayer>
         ))}
-      </div>
+      </BoardHost>
       <CommandPalette />
       <NotificationPanel />
       <ActivityPanel />
