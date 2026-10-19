@@ -209,7 +209,20 @@ pub fn run() {
         .collect();
     cmux_core::session::gc_scrollback(&workspace.all_pane_ids());
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // A second launch on Windows or Linux would run without the automation
+    // endpoint, which the first one holds, so `mira` in its panes would
+    // drive the wrong app. Release only: a dev build may run beside the
+    // installed one. It must be the first plugin.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())

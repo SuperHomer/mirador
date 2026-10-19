@@ -20,9 +20,9 @@ pub fn spawn(app: AppHandle) {
         let path = cmux_core::ipc::default_socket_path();
 
         // Another Mirador owning automation is an ordinary situation (a
-        // second window, a dev build beside the installed app), not a
-        // failure — say so plainly instead of leaking an errno. Binding
-        // still refuses to steal the endpoint if one appears in between.
+        // dev build beside the installed app), not a failure — say so
+        // plainly instead of leaking an errno. Binding still refuses to
+        // steal the endpoint if one appears in between.
         if transport::is_live(&path) {
             eprintln!("mirador: automation socket already served by another instance");
             return;
