@@ -2,7 +2,7 @@
 members = ["crates/cmux-core", "crates/cmux-protocol", "crates/cmux-cli", "crates/cmux-e2e"]
 
 [workspace.package]
-version = "0.1.28"
+version = "0.1.29"
 edition = "2021"
 license = "MIT"
 authors = ["Yoan Marti"]
