@@ -38,8 +38,10 @@ downloads, the feature tour and the keybinding reference.
   every pane as a card on one canvas. Drag empty board to pan, or scroll
   over empty board (anywhere when zoomed out; at 100% a card scrolls its
   own content); pinch or Ctrl+scroll to zoom; double-click a card's header
-  to fly to it at 100%. A frame's **+** adds a pane to it, **New frame** a
-  tab. Terminals take input only at 100%; other zooms are an overview. A
+  to fly to it at 100%. A frame's **+** adds a pane to it (its Agent wall
+  item opens the wall in a frame of its own), **New frame** a tab. Typing
+  goes to the focused pane at any zoom, but the pointer reaches inside
+  cards only at 100%; other zooms are an overview. A
   browser page shows only at 100%, while its card is still, wholly in view
   and nothing (palette, panel, menu) is open over it
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
