@@ -6,6 +6,8 @@ const KEYS: [string, string, string][] = [
   ["Split right / down", "⌘D · ⌘⇧D", "Ctrl+Shift+D · Ctrl+Shift+E"],
   ["Diff pane for this repo", "⌘G", "Ctrl+Shift+G"],
   ["Agent wall", "⌘⇧A", "Ctrl+Shift+A"],
+  ["Board / tabs view", "⌘⇧O", "Ctrl+Shift+O"],
+  ["Board: show everything", "⌘0", "Ctrl+Shift+0"],
   ["Focus pane by direction", "⌘⌥arrows", "Ctrl+Alt+arrows"],
   ["Jump to tab", "⌘1…9", "Alt+1…9"],
   ["Command palette", "⌘K", "Ctrl+Shift+K"],

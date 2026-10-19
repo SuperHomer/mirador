@@ -34,6 +34,11 @@ downloads, the feature tour and the keybinding reference.
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
+- **Board** (`mira view board`, `mod+shift+O`): every tab as a frame and
+  every pane as a card on one canvas. Drag empty board or scroll to pan,
+  pinch or Ctrl+scroll to zoom; double-click a card's header to fly to it
+  at 100%. A frame's **+** adds a pane to it, **New frame** a tab.
+  Terminals and browser pages are live at 100%; other zooms are an overview
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: an agent tests the page it is building —
@@ -232,6 +237,8 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘D / ⌘⇧D | Ctrl+Shift+D / Ctrl+Shift+E | split right / down |
 | ⌘G | Ctrl+Shift+G | diff pane for this repo |
 | ⌘⇧A | Ctrl+Shift+A | agent wall |
+| ⌘⇧O | Ctrl+Shift+O | board / tabs view |
+| ⌘0 | Ctrl+Shift+0 | board: show everything |
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |
