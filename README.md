@@ -34,8 +34,9 @@ downloads, the feature tour and the keybinding reference.
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
-- **Board** (`mira view board`, `mod+shift+O`): every tab as a frame and
-  every pane as a card on one canvas. Drag empty board to pan, or scroll
+- **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
+  in the sidebar): every tab as a frame and every pane as a card on one
+  canvas. Drag empty board to pan, or scroll
   over empty board (anywhere when zoomed out; at 100% a card scrolls its
   own content); pinch or Ctrl+scroll to zoom; double-click a card's header
   to fly to it at 100%. A frame's **+** adds a pane to it (its Agent wall

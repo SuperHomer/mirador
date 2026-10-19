@@ -12,6 +12,7 @@ import {
   closeTab,
   setActiveTab,
   renameTab,
+  setView,
 } from "../bindings";
 import {
   isCurrentEntry,
@@ -81,9 +82,22 @@ export function Sidebar() {
           ),
         )}
       </div>
-      <button className="sidebar-new-tab" onClick={() => void newTab()}>
-        + New Tab
-      </button>
+      <div className="sidebar-footer">
+        <button className="sidebar-new-tab" onClick={() => void newTab()}>
+          + New Tab
+        </button>
+        <div className="view-switch" title="Tabs or board (⌘⇧O / Ctrl+Shift+O)">
+          {(["tabs", "board"] as const).map((view) => (
+            <button
+              key={view}
+              className={snapshot.view === view ? "selected" : undefined}
+              onClick={() => snapshot.view !== view && void setView(view)}
+            >
+              {view === "tabs" ? "Tabs" : "Board"}
+            </button>
+          ))}
+        </div>
+      </div>
       <ClaudeBanner />
       <UpdateBanner />
     </div>

@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Camera, TabSnapshot, closeTab, newTab, setFramePosition } from "../bindings";
+import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView } from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardStore";
@@ -239,6 +239,10 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       {board && (
         <div className="board-controls">
           <span className="board-zoom">{Math.round(cam.zoom * 100)}%</span>
+          {/* The way back, for when the sidebar's switch is hidden (⌘B). */}
+          <button title="Back to tabs (⌘⇧O / Ctrl+Shift+O)" onClick={() => void setView("tabs")}>
+            Tabs
+          </button>
           <button
             title="A new tab, its frame where you are looking"
             onClick={() => void newTab()}

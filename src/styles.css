@@ -373,6 +373,43 @@ body,
   background: var(--surface);
 }
 
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-footer .sidebar-new-tab {
+  flex: 1;
+}
+
+/* Tabs | Board: the view shown, and the way to the other. */
+.view-switch {
+  display: flex;
+  margin-right: 6px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.view-switch button {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.view-switch button:hover {
+  color: var(--text);
+}
+
+.view-switch button.selected {
+  background: var(--surface);
+  color: var(--text);
+  cursor: default;
+}
+
 /* ---------- Split layout ---------- */
 
 .tabs-host {
