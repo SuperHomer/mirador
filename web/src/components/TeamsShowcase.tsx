@@ -11,12 +11,12 @@
  * except that the charter is one line, so it reflows at phone width.
  */
 
-type Line = { text: string; color?: string };
+export type Line = { text: string; color?: string };
 type Member = { name: string; harness: "claude" | "codex"; lines: Line[] };
 
 const MESSAGE = "var(--mauve)";
 
-const MEMBERS: Member[] = [
+export const MEMBERS: Member[] = [
   {
     name: "planner",
     harness: "claude",
