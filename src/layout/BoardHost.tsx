@@ -34,12 +34,27 @@ function nextZoomStop(zoom: number, dir: 1 | -1): number | undefined {
   return stops.find((z) => (z - zoom) * dir > 1e-3);
 }
 
-/** Flies to the next zoom stop, keeping the middle of the board in place. */
-function zoomStep(dir: 1 | -1) {
+/** Flies to `zoom`, keeping the middle of the board in place. */
+function zoomTo(zoom: number) {
   const { camera, viewport, flyTo } = useBoardStore.getState();
-  const zoom = camera && nextZoomStop(camera.zoom, dir);
-  if (!camera || !zoom) return;
+  if (!camera) return;
   flyTo(zoomAround(camera, zoom, viewport.width / 2, viewport.height / 2));
+}
+
+/** Flies to the next zoom stop. */
+function zoomStep(dir: 1 | -1) {
+  const camera = useBoardStore.getState().camera;
+  const zoom = camera && nextZoomStop(camera.zoom, dir);
+  if (zoom) zoomTo(zoom);
+}
+
+/** Flies to a typed percentage ("150", "150%", "33.5"); anything else does
+ *  nothing. No SNAP: someone who types 98 wants 98. */
+function typeZoom(text: string) {
+  const digits = text.trim().replace(/%$/, "");
+  const percent = digits === "" ? NaN : Number(digits);
+  if (!Number.isFinite(percent)) return;
+  zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, percent / 100)));
 }
 
 /** Pans to a pane's card unless it is wholly in view already. */
@@ -77,6 +92,10 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     return snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane ?? null;
   });
   const lastPointerDown = useRef(0);
+  // The percentage being typed, while the zoom is being typed.
+  const [zoomDraft, setZoomDraft] = useState<string | null>(null);
+  // Escape leaves by blurring too; this tells that blur not to apply.
+  const zoomCancelled = useRef(false);
 
   // A pane focused from elsewhere — a card just made, a new frame, a
   // shortcut, `mira focus` — is brought into view when it is not wholly
@@ -263,7 +282,34 @@ export function BoardHost({ board, children }: { board: boolean; children: React
           >
             −
           </button>
-          <span className="board-zoom">{Math.round(cam.zoom * 100)}%</span>
+          {zoomDraft === null ? (
+            <span
+              className="board-zoom"
+              title="Double-click to type a zoom"
+              onDoubleClick={() => {
+                zoomCancelled.current = false;
+                setZoomDraft(String(Math.round(cam.zoom * 100)));
+              }}
+            >
+              {Math.round(cam.zoom * 100)}%
+            </span>
+          ) : (
+            <input
+              className="board-zoom"
+              value={zoomDraft}
+              autoFocus
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => setZoomDraft(e.target.value)}
+              onBlur={() => {
+                if (!zoomCancelled.current) typeZoom(zoomDraft);
+                setZoomDraft(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") zoomCancelled.current = true;
+                if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+              }}
+            />
+          )}
           <button
             className="board-zoom-step"
             title="Zoom in"

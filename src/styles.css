@@ -724,6 +724,25 @@ body,
   cursor: default;
 }
 
+/* One width for the percentage and the input that replaces it, so the
+   controls don't jump when it is typed into, or between 10% and 400%. */
+.board-controls .board-zoom {
+  box-sizing: border-box;
+  width: 5ch;
+  padding: 0;
+  text-align: center;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-controls input.board-zoom {
+  border: none;
+  border-radius: 4px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+}
+
 .board-controls button {
   border: none;
   border-radius: 5px;
