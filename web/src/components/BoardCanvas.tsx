@@ -33,7 +33,14 @@ export type Card = {
   url?: string;
   lines?: Line[];
 };
-export type Frame = { title: string; current?: boolean; cards: Card[] };
+export type Frame = {
+  title: string;
+  current?: boolean;
+  /** Where it sits on the board; by default the frames go side by side
+      in order. */
+  x?: number;
+  cards: Card[];
+};
 
 /** Cards stacked down their frame, CARD_GAP apart, as the board lays them. */
 export function layout(frame: Frame) {
@@ -146,7 +153,7 @@ export default function BoardCanvas({
   onCard?: (frame: number, card?: number) => void;
   onTabs?: () => void;
 }) {
-  const placed = frames.map((frame, i) => ({ frame, x: i * (FRAME_W + FRAME_GAP), ...layout(frame) }));
+  const placed = frames.map((frame, i) => ({ frame, x: frame.x ?? i * (FRAME_W + FRAME_GAP), ...layout(frame) }));
   const view = { w: screen.w / zoom, h: screen.h / zoom };
   return (
     <>

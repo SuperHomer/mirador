@@ -20,9 +20,18 @@
  * current tab's frame instead (board::centre_on) — and
  * a click on a card flies back to its pane, as double-clicking a card's
  * header does in the app.
+ *
+ * Under it, a line types real `mira` commands and the mock does what the
+ * app would: `team start` opens the team's tab after the active one and
+ * focuses its lead (cmux-core's new_team_tab), its frame going right of
+ * the others on the board (board::next_frame_origin); `agent send` from a
+ * shell outside any pane finds the worker in the focused pane's tab, types
+ * the message without a "[message from …]" line, since no agent sent it,
+ * and moves no focus; `view board` and `view tabs` flip the view. A click
+ * or a key on the mock stops it for good, short of replay.
  */
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import BoardCanvas, { FRAME_GAP, FRAME_W, layout, type Card, type Frame } from "./BoardCanvas";
 import { MARK, MEMBERS } from "./TeamsShowcase";
 import TermLines, { type Line } from "./TermLines";
@@ -50,7 +59,13 @@ type Tab = {
   panes: Pane[];
   /** The pane focused when the page loads. */
   focus: number;
+  /** Its frame's place on the board, counted from the left. */
+  slot: number;
 };
+
+/** How far the demo has brought the team: not started yet, started, the
+    worker sent its step, or as the teams section shows it. */
+type Team = "absent" | "started" | "sent" | "full";
 
 const PR = {
   pass: { mark: " ✓", color: "var(--green)", bg: "rgba(166,227,161,.25)" },
@@ -67,6 +82,7 @@ const TABS: Tab[] = [
     port: 3000,
     agents: 1,
     focus: 1,
+    slot: 0,
     panes: [
       {
         attention: true,
@@ -103,6 +119,8 @@ const TABS: Tab[] = [
     branch: "feat/oauth",
     agents: MEMBERS.length,
     focus: 0,
+    // Started last, so its frame went right of the others.
+    slot: 2,
     panes: MEMBERS.map((m, i) => ({ lines: m.lines, agent: m, status: i === 0 ? "working" : "idle" })),
   },
   {
@@ -112,6 +130,7 @@ const TABS: Tab[] = [
     pr: { number: 17, checks: "pending" },
     port: 5173,
     focus: 1,
+    slot: 1,
     panes: [
       {
         flex: 0.85,
@@ -129,13 +148,119 @@ const TABS: Tab[] = [
   },
 ];
 
+const TEAM = TABS.findIndex((t) => t.team);
+const TASK = "rotate refresh tokens";
+const STEP = "Step 2: rotate the refresh token on use";
+
+/** The team's panes just after `team start`: the lead has the task. */
+const STARTED: Line[][] = [
+  [
+    { text: `> ${TASK}`, color: "var(--text)" },
+    { text: "✶ Planning…", color: "var(--accent)" },
+  ],
+  [{ text: "> ", color: "var(--muted)" }],
+  [{ text: "› ", color: "var(--muted)" }],
+];
+/** The worker once a person sent it the step, and it did it. */
+const SENT: Line[] = [{ text: `> ${STEP}`, color: "var(--text)" }, ...MEMBERS[1].lines.slice(2)];
+
+function teamLines(team: Team, pane: number): Line[] {
+  if (team === "full" || team === "absent") return MEMBERS[pane].lines;
+  return team === "sent" && pane === 1 ? SENT : STARTED[pane];
+}
+
+/** Per character, give or take half of JITTER; then the pauses, in ms. */
+const TYPE_MS = 45;
+const JITTER = 30;
+const AFTER_COMMAND = 1600;
+const AFTER_SCRIPT = 4000;
+
 export default function AppMockup() {
+  const reduced = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches)[0];
   const [current, setCurrent] = useState(0);
   const [focus, setFocus] = useState(TABS.map((t) => t.focus));
   // The one pane with an attention ring loses it once it is focused.
   const [attended, setAttended] = useState(false);
   const [view, setView] = useState<"tabs" | "board">("tabs");
+  // The demo starts before the team does; without it, the team is there.
+  const [team, setTeam] = useState<Team>(reduced ? "full" : "absent");
   const tab = TABS[current];
+  // TABS' indices, of the tabs the sidebar shows.
+  const shown = TABS.flatMap((t, i) => (t.team && team === "absent" ? [] : [i]));
+
+  const script = [
+    {
+      command: `mira team start omakase "${TASK}"`,
+      run: () => {
+        setTeam("started");
+        setCurrent(TEAM);
+        setFocus((f) => f.map((p, i) => (i === TEAM ? 0 : p)));
+      },
+    },
+    { command: `mira agent send worker "${STEP}" --wait`, run: () => setTeam("sent") },
+    { command: "mira view board", run: () => setView("board") },
+    { command: "mira view tabs", run: () => setView("tabs") },
+  ];
+  const reset = () => {
+    setCurrent(0);
+    setFocus(TABS.map((t) => t.focus));
+    setAttended(false);
+    setView("tabs");
+    setTeam("absent");
+    setAnnounced("");
+  };
+
+  // Where the demo is, or null once it stopped (or, under reduced motion,
+  // never started).
+  const [demo, setDemo] = useState<{ step: number; typed: number } | null>(reduced ? null : { step: 0, typed: 0 });
+  const [announced, setAnnounced] = useState("");
+  const [inView, setInView] = useState(false);
+  const [pageShown, setPageShown] = useState(!document.hidden);
+  const mockRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.3 });
+    observer.observe(mockRef.current!);
+    const onVisibility = () => setPageShown(!document.hidden);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  // One timer at a time: the next character, the pause after a command,
+  // or the pause before starting over. None while the mock is out of view.
+  useEffect(() => {
+    if (!demo || !inView || !pageShown) return;
+    const { command, run } = script[demo.step];
+    let next: () => void;
+    let delay: number;
+    if (demo.typed < command.length) {
+      delay = TYPE_MS + (Math.random() - 0.5) * JITTER;
+      next = () => {
+        if (demo.typed + 1 === command.length) {
+          run();
+          setAnnounced(command);
+        }
+        setDemo({ ...demo, typed: demo.typed + 1 });
+      };
+    } else if (demo.step < script.length - 1) {
+      delay = AFTER_COMMAND;
+      next = () => setDemo({ step: demo.step + 1, typed: 0 });
+    } else {
+      delay = AFTER_SCRIPT;
+      next = () => {
+        reset();
+        setDemo({ step: 0, typed: 0 });
+      };
+    }
+    const timer = setTimeout(next, delay);
+    return () => clearTimeout(timer);
+  }, [demo, inView, pageShown]);
+
+  // The visitor's click or key takes the mock over.
+  const takeOver = () => demo && setDemo(null);
 
   // From the board, back to tabs on that tab, with that pane focused.
   const fly = (t: number, pane?: number) => {
@@ -147,22 +272,28 @@ export default function AppMockup() {
     setView("tabs");
   };
 
-  const frames: Frame[] = TABS.map((t, ti) => ({
-    title: t.title,
-    current: ti === current,
-    cards: t.panes.map((pane, pi) => ({
-      title: pane.title ?? pane.agent?.name ?? (pane.browser ? `http://${pane.browser}/` : t.title),
-      h: CARD_H,
-      focused: ti === current && focus[ti] === pi,
-      status: pane.status,
-      url: pane.browser && `http://${pane.browser}/`,
-      lines: pane.lines,
-    })),
-  }));
+  const frames: Frame[] = shown.map((ti) => {
+    const t = TABS[ti];
+    return {
+      title: t.title,
+      current: ti === current,
+      x: t.slot * (FRAME_W + FRAME_GAP),
+      cards: t.panes.map((pane, pi) => ({
+        title: pane.title ?? pane.agent?.name ?? (pane.browser ? `http://${pane.browser}/` : t.title),
+        h: CARD_H,
+        focused: ti === current && focus[ti] === pi,
+        status: pane.status,
+        url: pane.browser && `http://${pane.browser}/`,
+        lines: t.team ? teamLines(team, pi) : pane.lines,
+      })),
+    };
+  });
 
   return (
-    <div style={{ marginTop: 56, textAlign: "left" }}>
+    <div ref={mockRef} style={{ marginTop: 56, textAlign: "left" }}>
       <div
+        onPointerDownCapture={takeOver}
+        onKeyDownCapture={takeOver}
         style={{
           maxWidth: 1000,
           margin: "0 auto",
@@ -204,7 +335,8 @@ export default function AppMockup() {
               gap: 2,
             }}
           >
-            {TABS.map((t, i) => {
+            {shown.map((i, n) => {
+              const t = TABS[i];
               const unread = !!t.notification && !attended;
               return (
                 <button
@@ -225,7 +357,7 @@ export default function AppMockup() {
                     background: i === current ? "var(--surface)" : "transparent",
                   }}
                 >
-                  <span className="mock-tab-index" style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>{i + 1}</span>
+                  <span className="mock-tab-index" style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>{n + 1}</span>
                   <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
                     <span style={{ fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: unread ? "var(--accent)" : undefined }}>
                       {t.team && <span style={{ color: "var(--accent)", marginRight: 5, fontSize: 11 }}>⚑</span>}
@@ -302,7 +434,7 @@ export default function AppMockup() {
           {/* keyed by the view, so each switch replays the view's entrance */}
           <div key={view} className="mock-view" style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
             {view === "board" ? (
-              <BoardView frames={frames} onCard={fly} onTabs={() => setView("tabs")} />
+              <BoardView frames={frames} onCard={(f, c) => fly(shown[f], c)} onTabs={() => setView("tabs")} />
             ) : (
             <>
               {tab.team && (
@@ -370,7 +502,7 @@ export default function AppMockup() {
                         <BrowserPane url={pane.browser} />
                       ) : (
                         <div className="mono" style={{ padding: "8px 10px", fontSize: 11, lineHeight: 1.6 }}>
-                          <TermLines lines={pane.lines ?? []} cursor={focused} />
+                          <TermLines lines={tab.team ? teamLines(team, i) : (pane.lines ?? [])} cursor={focused} />
                         </div>
                       )}
                     </div>
@@ -382,9 +514,39 @@ export default function AppMockup() {
           </div>
         </div>
       </div>
-      <p className="mono" style={{ marginTop: 14, textAlign: "center", fontSize: 12, color: "var(--muted)" }}>
-        {view === "tabs" ? "↑ click a tab or a pane, or flip to Board" : "↑ click a card to fly back to it"}
+      {/* two lines' room, so a command that wraps on a phone moves nothing */}
+      <p className="mono" style={{ marginTop: 14, minHeight: "3.2em", lineHeight: 1.6, textAlign: "center", fontSize: 12.5, color: "var(--muted)" }}>
+        {demo ? (
+          <span style={{ color: "var(--text)" }}>
+            <span style={{ color: "var(--muted)" }}>$ </span>
+            {script[demo.step].command.slice(0, demo.typed)}
+            <span className="cursor" style={{ width: 7, height: 14, verticalAlign: "middle", marginLeft: 1 }} />
+          </span>
+        ) : reduced ? (
+          <span style={{ color: "var(--text)" }}>
+            <span style={{ color: "var(--muted)" }}>$ </span>
+            {script[0].command}
+          </span>
+        ) : (
+          <>
+            {view === "tabs" ? "↑ click a tab or a pane, or flip to Board" : "↑ click a card to fly back to it"}
+            {" · "}
+            <button
+              className="mock-replay"
+              onClick={() => {
+                reset();
+                setDemo({ step: 0, typed: 0 });
+              }}
+              style={{ border: "none", background: "none", padding: 0, font: "inherit", color: "var(--muted)" }}
+            >
+              replay ↺
+            </button>
+          </>
+        )}
       </p>
+      <span className="visually-hidden" aria-live="polite">
+        {announced}
+      </span>
     </div>
   );
 }
@@ -411,8 +573,9 @@ function BoardView({ frames, onCard, onTabs }: { frames: Frame[]; onCard: (frame
     return () => observer.disconnect();
   }, []);
 
+  const xs = frames.map((f, i) => f.x ?? i * (FRAME_W + FRAME_GAP));
   const bounds = {
-    w: frames.length * FRAME_W + (frames.length - 1) * FRAME_GAP,
+    w: Math.max(...xs) + FRAME_W,
     h: Math.max(...frames.map((f) => layout(f).h)),
   };
   // Never past 100% nor under the board's 10%.
@@ -424,7 +587,7 @@ function BoardView({ frames, onCard, onTabs }: { frames: Frame[]; onCard: (frame
     const i = Math.max(0, frames.findIndex((f) => f.current));
     view = {
       zoom: clamp(screen.w / (FRAME_W + 2 * (FRAME_GAP + PEEK))),
-      centre: { x: i * (FRAME_W + FRAME_GAP) + FRAME_W / 2, y: layout(frames[i]).h / 2 },
+      centre: { x: xs[i] + FRAME_W / 2, y: layout(frames[i]).h / 2 },
     };
   } else if (screen) {
     // Every frame in view.
