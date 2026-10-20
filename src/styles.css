@@ -738,6 +738,19 @@ body,
   background: var(--muted);
 }
 
+.board-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.board-controls button:disabled:hover {
+  background: var(--bg);
+}
+
+.board-controls .board-zoom-step {
+  padding: 3px 7px;
+}
+
 .browser-still {
   padding: 16px;
   color: var(--subtext);

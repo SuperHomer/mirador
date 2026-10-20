@@ -7,6 +7,8 @@ import { atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardSt
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
+/** Where the − / + buttons stop, MIN_ZOOM to MAX_ZOOM. */
+const ZOOM_STOPS = [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 /** Zooming this close to 100% lands on it: 100% is where cards take the
  *  pointer, and a pinch rarely stops exactly there. */
 const SNAP = 0.04;
@@ -23,6 +25,21 @@ function zoomAround(camera: Camera, zoom: number, px: number, py: number): Camer
   const bx = camera.x + px / camera.zoom;
   const by = camera.y + py / camera.zoom;
   return { x: bx - px / zoom, y: by - py / zoom, zoom };
+}
+
+/** The next stop strictly above (`dir` 1) or below (-1) `zoom`, if any;
+ *  "strictly" with some slack, so 99.9% after a flight counts as 100%. */
+function nextZoomStop(zoom: number, dir: 1 | -1): number | undefined {
+  const stops = dir > 0 ? ZOOM_STOPS : [...ZOOM_STOPS].reverse();
+  return stops.find((z) => (z - zoom) * dir > 1e-3);
+}
+
+/** Flies to the next zoom stop, keeping the middle of the board in place. */
+function zoomStep(dir: 1 | -1) {
+  const { camera, viewport, flyTo } = useBoardStore.getState();
+  const zoom = camera && nextZoomStop(camera.zoom, dir);
+  if (!camera || !zoom) return;
+  flyTo(zoomAround(camera, zoom, viewport.width / 2, viewport.height / 2));
 }
 
 /** Pans to a pane's card unless it is wholly in view already. */
@@ -238,7 +255,23 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       </div>
       {board && (
         <div className="board-controls">
+          <button
+            className="board-zoom-step"
+            title="Zoom out"
+            disabled={!nextZoomStop(cam.zoom, -1)}
+            onClick={() => zoomStep(-1)}
+          >
+            −
+          </button>
           <span className="board-zoom">{Math.round(cam.zoom * 100)}%</span>
+          <button
+            className="board-zoom-step"
+            title="Zoom in"
+            disabled={!nextZoomStop(cam.zoom, 1)}
+            onClick={() => zoomStep(1)}
+          >
+            +
+          </button>
           {/* The way back, for when the sidebar's switch is hidden (⌘B). */}
           <button title="Back to tabs (⌘⇧O / Ctrl+Shift+O)" onClick={() => void setView("tabs")}>
             Tabs
