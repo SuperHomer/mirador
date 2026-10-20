@@ -241,6 +241,7 @@ any role can share:
 ---
 harness: claude        # or codex; Claude Code when absent
 model: haiku
+effort: high           # how hard the model thinks; its default when absent
 way: our-way           # .mirador/ways/our-way.md, appended after this prompt
 description: Reviews diffs, never edits
 ---
@@ -256,6 +257,13 @@ role's source, and warns about anything it could not use — a file that
 does not parse, an unknown field, a way nobody wrote; `--json` gives the
 whole catalog, including `problem` on a role that cannot start.
 
+`effort` goes to Claude Code as `--effort` (`low`, `medium`, `high`,
+`xhigh`, `max`) and to Codex as `-c model_reasoning_effort="…"` (`low`,
+`medium`, `high`, `xhigh`, `max`, `ultra` — Codex itself refuses one the
+model does not support, and only some models take `ultra`). Lower case
+only: any other value is the role's `problem`, which names the accepted
+ones, and the role is listed greyed out until it is fixed.
+
 A Claude Code role may also list what it is allowed: `mcp: [names]`,
 `plugins: [names]`, `skills: [names]` (only those; `[]` is none; absent is
 everything) and `tools: { allow: [...], deny: [...] }` in Claude Code's
@@ -270,9 +278,10 @@ reported as the role's `problem`.
 `agent new` splits the pane it runs in (the focused pane, from outside
 Mirador), opens a shell there and types the agent into it, with the task as
 the first message — so `/exit` leaves a prompt. Claude Code gets the role's
-`--model`, `--name`, and its prompt (the role's, then its way's) through
-`--append-system-prompt-file`; the session resumes like any other, on the
-role's model, and keeps that prompt. Codex gets `--model` and the prompt as
+`--model`, `--effort`, `--name`, and its prompt (the role's, then its
+way's) through `--append-system-prompt-file`; the session resumes like any
+other, on the role's model and effort, and keeps that prompt. Codex gets
+`--model`, `model_reasoning_effort` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
 It also gets `-c` overrides for a permissions profile, `mirador`, that
 extends the one Codex would run on — your `default_permissions`, else

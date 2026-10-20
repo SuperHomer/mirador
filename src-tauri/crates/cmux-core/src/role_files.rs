@@ -183,6 +183,7 @@ pub fn template(kind: Kind) -> &'static str {
              description: What this agent is for, in one line\n\
              # harness: codex          # Claude Code unless set\n\
              # model: sonnet\n\
+             # effort: high            # how hard the model thinks\n\
              # way: our-way            # a way of working, appended to this prompt\n\
              # skills: [pdf]           # only these; [] for none\n\
              # mcp: [github]\n\

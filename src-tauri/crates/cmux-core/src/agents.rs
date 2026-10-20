@@ -490,6 +490,12 @@ pub fn launch_command(
     let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
     if let Some(role) = role {
         arg("--model", role.model.as_deref().unwrap_or(""));
+        if let Some(effort) = &role.effort {
+            match harness {
+                Harness::Codex => arg("-c", &format!("model_reasoning_effort={}", toml_string(effort))),
+                _ => arg("--effort", effort),
+            }
+        }
         match harness {
             Harness::Codex => {
                 if let Some(prompt) = prompt {
@@ -618,12 +624,18 @@ pub fn session_record(session_id: &str, job: Option<&str>) -> Option<String> {
 /// typed into a shell, so anything but a plain id is refused rather than
 /// quoted — the session file is not trusted to hold only what we wrote.
 ///
-/// `model` is a role's `--model` and `settings` its settings file, both
-/// already quoted for the shell: a resumed conversation keeps its system
-/// prompt but neither of those, so a role's pane would otherwise come back
-/// on the default model, with every tool. A daemon session keeps running
+/// `model` is a role's `--model`, `effort` its `--effort` and `settings`
+/// its settings file, all already quoted for the shell: a resumed
+/// conversation keeps its system prompt but none of those, so a role's
+/// pane would otherwise come back on the default model and effort, with
+/// every tool. A daemon session keeps running
 /// on whatever it had, and attaching takes neither.
-pub fn restore_command(agent_session: &str, model: Option<&str>, settings: Option<&str>) -> Option<String> {
+pub fn restore_command(
+    agent_session: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    settings: Option<&str>,
+) -> Option<String> {
     let (agent, id) = agent_session.split_once(':')?;
     if !is_safe_id(id) {
         return None;
@@ -633,6 +645,9 @@ pub fn restore_command(agent_session: &str, model: Option<&str>, settings: Optio
             let mut line = format!("claude --resume {id}");
             if let Some(model) = model {
                 line.push_str(&format!(" --model {model}"));
+            }
+            if let Some(effort) = effort {
+                line.push_str(&format!(" --effort {effort}"));
             }
             if let Some(settings) = settings {
                 line.push_str(&format!(" --settings {settings}"));
@@ -670,14 +685,15 @@ pub struct Restored {
 }
 
 /// Decides how a saved pane is restored, given its saved `command`, whether
-/// it is remote, its `agent_session`, its role's quoted `model` and
-/// `settings` (see [`restore_command`]), and [`AUTO_RESUME`] (a parameter so both
+/// it is remote, its `agent_session`, its role's quoted `model`, `effort`
+/// and `settings` (see [`restore_command`]), and [`AUTO_RESUME`] (a parameter so both
 /// platforms' behavior is tested everywhere).
 pub fn restore_pane(
     command: Option<&str>,
     remote: bool,
     agent_session: Option<&str>,
     model: Option<&str>,
+    effort: Option<&str>,
     settings: Option<&str>,
     auto_resume: bool,
 ) -> Restored {
@@ -695,7 +711,7 @@ pub fn restore_pane(
     let Some(session) = agent_session.filter(|_| command.is_none() && !remote) else {
         return keep;
     };
-    if let Some(input) = restore_command(session, model, settings) {
+    if let Some(input) = restore_command(session, model, effort, settings) {
         if auto_resume {
             Restored { command: None, startup_input: Some(input) }
         } else {
@@ -879,25 +895,30 @@ mod tests {
         assert_eq!(session_record("abc-1", Some("c5b63b09")).as_deref(), Some("claude-bg:c5b63b09"));
         assert_eq!(session_record("x y", None), None);
 
-        assert_eq!(restore_command("claude-fg:abc-1", None, None).as_deref(), Some("claude --resume abc-1"));
-        assert_eq!(restore_command("claude-bg:c5b63b09", None, None).as_deref(), Some("claude attach c5b63b09"));
-        assert_eq!(restore_command("claude-fg:abc; rm -rf ~", None, None), None);
-        assert_eq!(restore_command("claude-bg:$(id)", None, None), None);
-        assert_eq!(restore_command("other:abc", None, None), None);
-        assert_eq!(restore_command("claude-fg:", None, None), None);
+        assert_eq!(restore_command("claude-fg:abc-1", None, None, None).as_deref(), Some("claude --resume abc-1"));
+        assert_eq!(restore_command("claude-bg:c5b63b09", None, None, None).as_deref(), Some("claude attach c5b63b09"));
+        assert_eq!(restore_command("claude-fg:abc; rm -rf ~", None, None, None), None);
+        assert_eq!(restore_command("claude-bg:$(id)", None, None, None), None);
+        assert_eq!(restore_command("other:abc", None, None, None), None);
+        assert_eq!(restore_command("claude-fg:", None, None, None), None);
         // Older records are never auto-typed, only offered on a keypress.
-        assert_eq!(restore_command("claude:abc-1", None, None), None);
-        // A role's model comes back with its conversation; an attach has none.
+        assert_eq!(restore_command("claude:abc-1", None, None, None), None);
+        // A role's model and effort come back with its conversation; an
+        // attach has neither.
         assert_eq!(
-            restore_command("claude-fg:abc-1", Some("'opus'"), None).as_deref(),
+            restore_command("claude-fg:abc-1", Some("'opus'"), None, None).as_deref(),
             Some("claude --resume abc-1 --model 'opus'")
         );
         assert_eq!(
-            restore_command("claude-fg:abc-1", Some("'opus'"), Some("'/p/r.settings.json'")).as_deref(),
-            Some("claude --resume abc-1 --model 'opus' --settings '/p/r.settings.json'")
+            restore_command("claude-fg:abc-1", Some("'opus'"), Some("'max'"), Some("'/p/r.settings.json'")).as_deref(),
+            Some("claude --resume abc-1 --model 'opus' --effort 'max' --settings '/p/r.settings.json'")
         );
         assert_eq!(
-            restore_command("claude-bg:c5b63b09", Some("'opus'"), Some("'/p/r.settings.json'")).as_deref(),
+            restore_command("claude-fg:abc-1", None, Some("'high'"), None).as_deref(),
+            Some("claude --resume abc-1 --effort 'high'")
+        );
+        assert_eq!(
+            restore_command("claude-bg:c5b63b09", Some("'opus'"), Some("'max'"), Some("'/p/r.settings.json'")).as_deref(),
             Some("claude attach c5b63b09")
         );
         assert_eq!(legacy_resume_command("claude:abc-1").as_deref(), Some("claude --resume abc-1"));
@@ -911,19 +932,19 @@ mod tests {
         let idle = |s: &str| Restored { command: Some(s.into()), startup_input: None };
 
         // unix: typed into the shell.
-        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), None, None, true), typed("claude --resume a1"));
-        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), None, None, true), typed("claude attach j9"));
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), None, None, None, true), typed("claude --resume a1"));
+        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), None, None, None, true), typed("claude attach j9"));
         // Windows: idle, a keypress resumes, as before.
-        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), None, None, false), idle("claude --resume a1"));
-        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), None, None, false), idle("claude attach j9"));
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a1"), None, None, None, false), idle("claude --resume a1"));
+        assert_eq!(restore_pane(None, false, Some("claude-bg:j9"), None, None, None, false), idle("claude attach j9"));
         // The command Windows saved back is derived again, not kept: once the
         // session is gone the pane is a plain shell.
         assert_eq!(
-            restore_pane(Some("claude attach j9"), false, Some("claude-bg:j9"), None, None, false),
+            restore_pane(Some("claude attach j9"), false, Some("claude-bg:j9"), None, None, None, false),
             idle("claude attach j9")
         );
-        assert_eq!(restore_pane(Some("claude attach j9"), false, None, None, None, false), Restored::default());
-        assert_eq!(restore_pane(Some("claude --resume a1"), false, None, None, None, true), Restored::default());
+        assert_eq!(restore_pane(Some("claude attach j9"), false, None, None, None, None, false), Restored::default());
+        assert_eq!(restore_pane(Some("claude --resume a1"), false, None, None, None, None, true), Restored::default());
     }
 
     #[test]
@@ -931,19 +952,19 @@ mod tests {
         // Legacy records are offered on a keypress on every platform.
         for auto in [true, false] {
             assert_eq!(
-                restore_pane(Some("claude --resume old"), false, Some("claude:old"), None, None, auto),
+                restore_pane(Some("claude --resume old"), false, Some("claude:old"), None, None, None, auto),
                 Restored { command: Some("claude --resume old".into()), startup_input: None }
             );
         }
         // A real command pane and an SSH pane keep what they had.
         assert_eq!(
-            restore_pane(Some("npm test"), false, Some("claude-fg:a1"), None, None, true),
+            restore_pane(Some("npm test"), false, Some("claude-fg:a1"), None, None, None, true),
             Restored { command: Some("npm test".into()), startup_input: None }
         );
-        assert_eq!(restore_pane(None, true, Some("claude-fg:a1"), None, None, true), Restored::default());
+        assert_eq!(restore_pane(None, true, Some("claude-fg:a1"), None, None, None, true), Restored::default());
         // A plain shell, and a record that is not ours.
-        assert_eq!(restore_pane(None, false, None, None, None, true), Restored::default());
-        assert_eq!(restore_pane(None, false, Some("claude-fg:a;b"), None, None, true), Restored::default());
+        assert_eq!(restore_pane(None, false, None, None, None, None, true), Restored::default());
+        assert_eq!(restore_pane(None, false, Some("claude-fg:a;b"), None, None, None, true), Restored::default());
     }
 
     #[test]
@@ -957,8 +978,12 @@ mod tests {
     #[test]
     fn restores_a_role_pane_on_its_model() {
         assert_eq!(
-            restore_pane(None, false, Some("claude-fg:a1"), Some("'opus'"), None, true),
+            restore_pane(None, false, Some("claude-fg:a1"), Some("'opus'"), None, None, true),
             Restored { command: None, startup_input: Some("claude --resume a1 --model 'opus'".into()) }
+        );
+        assert_eq!(
+            restore_pane(None, false, Some("claude-fg:a1"), Some("'opus'"), Some("'xhigh'"), None, true),
+            Restored { command: None, startup_input: Some("claude --resume a1 --model 'opus' --effort 'xhigh'".into()) }
         );
     }
 
@@ -1038,6 +1063,12 @@ mod tests {
         );
         let bare = AgentRole { name: "plain".into(), ..Default::default() };
         assert_eq!(launch_command(Some(&bare), Some("  "), Some(file), None, Some("  "), None, q), "claude --name 'plain'");
+        // Its effort comes right after its model.
+        let deep = AgentRole { effort: Some("max".into()), ..role.clone() };
+        assert_eq!(
+            launch_command(Some(&deep), None, None, None, Some("go"), None, q),
+            "claude --model 'opus' --effort 'max' --name 'reviewer' 'go'"
+        );
     }
 
     #[test]
@@ -1053,6 +1084,11 @@ mod tests {
         let value: toml::Value = toml::from_str(&format!("v = {}", toml_string("a \"b\"\nc\\d\u{7}"))).unwrap();
         assert_eq!(value["v"].as_str(), Some("a \"b\"\nc\\d\u{7}"));
         assert_eq!(launch_command(Some(&role), None, None, None, None, None, q), "codex --model 'gpt-5'");
+        let deep = AgentRole { effort: Some("xhigh".into()), ..role.clone() };
+        assert_eq!(
+            launch_command(Some(&deep), Some("You build."), None, None, None, None, q),
+            r#"codex --model 'gpt-5' -c 'model_reasoning_effort="xhigh"' -c 'developer_instructions="You build."'"#
+        );
     }
 
     #[test]

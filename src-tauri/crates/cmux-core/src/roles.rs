@@ -11,8 +11,8 @@
 //! <config>/ways/our-way.md
 //! ```
 //!
-//! A role's frontmatter says how it starts (`harness`, `model`, `way`,
-//! `description`) and its body is its prompt; a way's body is its prompt.
+//! A role's frontmatter says how it starts (`harness`, `model`, `effort`,
+//! `way`, `description`) and its body is its prompt; a way's body is its prompt.
 //! The same name in two places means the repository's: a team that commits
 //! a `reviewer` gets that reviewer, whatever its members have of their own.
 //! `agentRoles` entries in mirador.json are roles too, below the files.
@@ -231,6 +231,7 @@ fn display(path: &Path) -> String {
 struct RoleFront {
     harness: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
     way: Option<String>,
     description: Option<String>,
     mcp: Option<Vec<String>>,
@@ -264,6 +265,7 @@ pub(crate) fn parse_role(name: &str, text: &str) -> Result<(AgentRole, Vec<Strin
         name: name.to_string(),
         harness,
         model: present(front.model),
+        effort: present(front.effort),
         prompt: present(Some(body.to_string())),
         way,
         description: present(front.description).map(|d| one_line(&d)),
@@ -327,6 +329,16 @@ fn problem_of(role: &AgentRole, ways: &[AgentWay]) -> Option<String> {
     if !can_start(role.harness) {
         return Some(format!("a role cannot start {} yet, only Claude Code and Codex", role.harness.label()));
     }
+    if let Some(effort) = &role.effort {
+        let efforts = efforts(role.harness);
+        if !efforts.contains(&effort.as_str()) {
+            return Some(format!(
+                "effort `{effort}` is not one {} takes: {}",
+                role.harness.label(),
+                efforts.join(", ")
+            ));
+        }
+    }
     if let Some(way) = role.way.as_ref().filter(|way| !ways.iter().any(|w| &&w.name == way)) {
         return Some(format!("way of working `{way}` is not in any ways/ directory"));
     }
@@ -346,6 +358,17 @@ fn problem_of(role: &AgentRole, ways: &[AgentWay]) -> Option<String> {
         );
     }
     None
+}
+
+/// The efforts a harness takes, as its CLI spells them: Claude Code's
+/// `--effort` (its `--help`), and the ones Codex's models list as supported
+/// (0.163's model catalog). Lower case only: Codex reads any other case as
+/// a name no model supports.
+fn efforts(harness: Harness) -> &'static [&'static str] {
+    match harness {
+        Harness::Codex => &["low", "medium", "high", "xhigh", "max", "ultra"],
+        _ => &["low", "medium", "high", "xhigh", "max"],
+    }
 }
 
 fn present(value: Option<String>) -> Option<String> {
@@ -460,12 +483,13 @@ mod tests {
     fn parses_a_role_file() {
         let (role, ignored) = parse_role(
             "reviewer",
-            "---\nharness: codex\nmodel: gpt-5\nway: our-way\ndescription: |\n  Reviews\n  diffs\nsandbox: read-only\n---\n\nYou review. Never edit.\n",
+            "---\nharness: codex\nmodel: gpt-5\neffort: ' high '\nway: our-way\ndescription: |\n  Reviews\n  diffs\nsandbox: read-only\n---\n\nYou review. Never edit.\n",
         )
         .unwrap();
         assert_eq!(role.name, "reviewer");
         assert_eq!(role.harness, Harness::Codex);
         assert_eq!(role.model.as_deref(), Some("gpt-5"));
+        assert_eq!(role.effort.as_deref(), Some("high"));
         assert_eq!(role.way.as_deref(), Some("our-way"));
         assert_eq!(role.description.as_deref(), Some("Reviews diffs"));
         assert_eq!(role.prompt.as_deref(), Some("You review. Never edit."));
@@ -488,6 +512,8 @@ mod tests {
         // No frontmatter: a Claude Code role that is all prompt.
         let (plain, _) = parse_role("plain", "Be terse.").unwrap();
         assert_eq!((plain.harness, plain.prompt.as_deref(), plain.model), (Harness::Claude, Some("Be terse."), None));
+        assert_eq!(plain.effort, None);
+        assert_eq!(parse_role("x", "---\neffort: ''\n---\n").unwrap().0.effort, None);
 
         assert!(parse_role("x", "---\nharness: vim\n---\n").unwrap_err().contains("unknown harness"));
         assert!(parse_role("x", "---\nway: ../etc\n---\n").is_err());
@@ -579,14 +605,32 @@ mod tests {
         let repo = root.join("repo/.mirador");
         write(&repo.join("roles/theirs.md"), "---\ntools: { allow: [\"Bash(*)\"], deny: [\"Read\"] }\n---\n");
         write(&repo.join("roles/careful.md"), "---\ntools: { deny: [\"Bash(git push *)\"] }\n---\n");
+        // Each harness takes its own efforts, in lower case.
+        write(&global.join("roles/deep.md"), "---\neffort: ultra\n---\n");
+        write(&global.join("roles/loud.md"), "---\neffort: HIGH\n---\n");
+        write(&global.join("roles/codex-deep.md"), "---\nharness: codex\neffort: ultra\n---\n");
+        write(&global.join("roles/codex-odd.md"), "---\nharness: codex\neffort: extreme\n---\n");
 
         let cat = catalog_in(Some(&repo), &global, &[]);
         let names: Vec<_> = cat.roles.iter().filter(|r| r.source != RoleSource::Builtin).map(|r| r.name.as_str()).collect();
-        assert_eq!(names, ["careful", "codex-mcp", "gem", "lost", "mine", "theirs"]);
+        assert_eq!(
+            names,
+            ["careful", "codex-deep", "codex-mcp", "codex-odd", "deep", "gem", "lost", "loud", "mine", "theirs"]
+        );
         let problem = |name: &str| cat.roles.iter().find(|r| r.name == name).unwrap().problem.clone();
         assert!(problem("codex-mcp").is_some_and(|p| p.contains("only Claude Code's can")));
         assert!(problem("theirs").is_some_and(|p| p.contains("cannot allow tools")));
         assert_eq!((problem("mine"), problem("careful")), (None, None));
+        assert_eq!(
+            problem("deep").as_deref(),
+            Some("effort `ultra` is not one Claude Code takes: low, medium, high, xhigh, max")
+        );
+        assert!(problem("loud").is_some_and(|p| p.starts_with("effort `HIGH`")));
+        assert_eq!(problem("codex-deep"), None);
+        assert_eq!(
+            problem("codex-odd").as_deref(),
+            Some("effort `extreme` is not one Codex takes: low, medium, high, xhigh, max, ultra")
+        );
         let has = |needle: &str| cat.problems.iter().any(|p| p.contains(needle));
         assert!(has("never closed"), "{:?}", cat.problems);
         assert!(has("a name is letters"));

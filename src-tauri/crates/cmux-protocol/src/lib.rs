@@ -799,6 +799,9 @@ pub struct AgentRole {
     pub harness: Harness,
     /// `--model`: an alias ("opus", "sonnet") or a full model name.
     pub model: Option<String>,
+    /// How hard its model thinks: Claude Code's `--effort`, Codex's
+    /// `model_reasoning_effort` ("high", "max").
+    pub effort: Option<String>,
     /// The role's own instructions, added to the harness's system prompt.
     pub prompt: Option<String>,
     /// The way of working it follows, by name: its prompt comes after the

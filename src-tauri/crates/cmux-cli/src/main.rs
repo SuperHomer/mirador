@@ -1087,13 +1087,11 @@ fn agent_roles(json: bool) -> Result<(), String> {
         );
     }
     for r in &catalog.roles {
-        let mut line = format!(
-            "{:<14}  {:<12}  {:<14}  {:<12}",
-            r.name,
-            r.harness.label(),
-            r.model.as_deref().unwrap_or("default model"),
-            source(r.source)
-        );
+        let mut model = r.model.clone().unwrap_or_else(|| "default model".into());
+        if let Some(effort) = &r.effort {
+            model.push_str(&format!(" · {effort}"));
+        }
+        let mut line = format!("{:<14}  {:<12}  {model:<21}  {:<12}", r.name, r.harness.label(), source(r.source));
         if let Some(way) = &r.way {
             line.push_str(&format!("  way: {way}"));
         }
