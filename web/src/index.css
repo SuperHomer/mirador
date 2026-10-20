@@ -45,7 +45,7 @@ button { font-family: inherit; cursor: pointer; }
    The teams mock drops its sidebar, and its columns scroll inside it. */
 @media (max-width: 600px) {
   .teams-sidebar { display: none; }
-  .board-mock-controls {
+  #board .board-mock-controls {
     position: static !important;
     width: fit-content;
     margin: 0 8px 8px auto;
@@ -57,8 +57,19 @@ button { font-family: inherit; cursor: pointer; }
 .mock-tab:not([aria-pressed="true"]):hover {
   background: color-mix(in srgb, var(--surface) 55%, transparent) !important;
 }
-.mock-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mock-tab:focus-visible,
+.mock-view-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mock-view-switch:not([aria-pressed="true"]):hover { color: var(--text) !important; }
 .mock-pane:focus { outline: none; }
+.board-card:focus { outline: none; }
+.board-card:focus-visible > rect:first-child { stroke: var(--accent); stroke-width: 2; }
+
+/* Switching Tabs | Board: the new view settles in. */
+.mock-view { animation: mock-view-in 180ms ease-out; }
+@keyframes mock-view-in { from { opacity: 0; transform: scale(.98); } }
+@media (prefers-reduced-motion: reduce) {
+  .mock-view { animation: none; }
+}
 
 /* At phone width the hero mock's sidebar becomes a strip of tabs over the
    panes, which stack: side by side, each would be a few characters wide. */
@@ -70,9 +81,13 @@ button { font-family: inherit; cursor: pointer; }
     border-right: none !important;
     border-bottom: 1px solid var(--surface);
   }
-  .mock-tab { flex: 1; min-width: 0; min-height: 0 !important; }
-  /* The strip keeps each tab's index, title and unread badge. */
-  .mock-tab-detail, .mock-new-tab { display: none !important; }
+  .mock-tab { flex: 1 1 auto; min-width: 0; min-height: 0 !important; }
+  /* The strip keeps each tab's title and unread badge, and ends with the
+     Tabs | Board switch. */
+  .mock-tab-detail, .mock-tab-index, .mock-new-tab { display: none !important; }
+  .mock-sidebar-footer { margin-top: 0 !important; }
+  .mock-sidebar .mock-tab { padding: 6px !important; gap: 5px !important; }
+  .mock-view-switch { padding: 3px 6px !important; }
   .mock-panes { flex-direction: column; }
   /* A team's tab shows its focused member alone, picked from the agents row. */
   .mock-agents { display: flex !important; }

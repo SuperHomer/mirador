@@ -13,13 +13,28 @@
  * At phone width three columns would each be a few characters wide, so
  * the team's tab shows its focused member alone, as pane zoom does, and the
  * agents row under the tabs picks which, as the sidebar's agent list does.
+ *
+ * The sidebar's Tabs | Board switch shows the same tabs as frames on the
+ * board, fitted as the app's Fit fits them (cmux-core's board::fit), and
+ * a click on a card flies back to its pane, as double-clicking a card's
+ * header does in the app.
  */
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import BoardCanvas, { FRAME_GAP, FRAME_W, layout, type Card, type Frame } from "./BoardCanvas";
 import { MARK, MEMBERS } from "./TeamsShowcase";
 import TermLines, { type Line } from "./TermLines";
 
-type Pane = { flex?: number; lines?: Line[]; browser?: string; attention?: boolean; agent?: (typeof MEMBERS)[number] };
+type Pane = {
+  flex?: number;
+  lines?: Line[];
+  browser?: string;
+  attention?: boolean;
+  agent?: (typeof MEMBERS)[number];
+  /** Its card's title on the board, when not the agent's or the tab's. */
+  title?: string;
+  status?: Card["status"];
+};
 type Tab = {
   title: string;
   team?: boolean;
@@ -53,6 +68,8 @@ const TABS: Tab[] = [
     panes: [
       {
         attention: true,
+        title: "claude",
+        status: "needsYou",
         lines: [
           { text: "> wire up the refresh flow", color: "var(--text)" },
           { text: "⏺ Read(src/auth/refresh.ts)" },
@@ -84,7 +101,7 @@ const TABS: Tab[] = [
     branch: "feat/oauth",
     agents: MEMBERS.length,
     focus: 0,
-    panes: MEMBERS.map((m) => ({ lines: m.lines, agent: m })),
+    panes: MEMBERS.map((m, i) => ({ lines: m.lines, agent: m, status: i === 0 ? "working" : "idle" })),
   },
   {
     title: "web",
@@ -115,7 +132,31 @@ export default function AppMockup() {
   const [focus, setFocus] = useState(TABS.map((t) => t.focus));
   // The one pane with an attention ring loses it once it is focused.
   const [attended, setAttended] = useState(false);
+  const [view, setView] = useState<"tabs" | "board">("tabs");
   const tab = TABS[current];
+
+  // From the board, back to tabs on that tab, with that pane focused.
+  const fly = (t: number, pane?: number) => {
+    setCurrent(t);
+    if (pane !== undefined) {
+      setFocus(focus.map((f, i) => (i === t ? pane : f)));
+      if (TABS[t].panes[pane].attention) setAttended(true);
+    }
+    setView("tabs");
+  };
+
+  const frames: Frame[] = TABS.map((t, ti) => ({
+    title: t.title,
+    current: ti === current,
+    cards: t.panes.map((pane, pi) => ({
+      title: pane.title ?? pane.agent?.name ?? (pane.browser ? `http://${pane.browser}/` : t.title),
+      h: CARD_H,
+      focused: ti === current && focus[ti] === pi,
+      status: pane.status,
+      url: pane.browser && `http://${pane.browser}/`,
+      lines: pane.lines,
+    })),
+  }));
 
   return (
     <div style={{ marginTop: 56, textAlign: "left" }}>
@@ -182,9 +223,9 @@ export default function AppMockup() {
                     background: i === current ? "var(--surface)" : "transparent",
                   }}
                 >
-                  <span style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>{i + 1}</span>
+                  <span className="mock-tab-index" style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>{i + 1}</span>
                   <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", color: unread ? "var(--accent)" : undefined }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: unread ? "var(--accent)" : undefined }}>
                       {t.team && <span style={{ color: "var(--accent)", marginRight: 5, fontSize: 11 }}>⚑</span>}
                       {t.title}
                     </span>
@@ -231,87 +272,160 @@ export default function AppMockup() {
                 </button>
               );
             })}
-            <div className="mock-new-tab" style={{ marginTop: 4, padding: "7px 8px", fontSize: 12, color: "var(--muted)" }}>
-              + new tab
-            </div>
-          </div>
-          {tab.team && (
-            <div className="mock-agents" style={{ display: "none", gap: 4, padding: "6px 6px 0" }}>
-              {tab.panes.map((pane, i) =>
-                pane.agent ? (
+            <div className="mock-sidebar-footer" style={{ marginTop: "auto", display: "flex", alignItems: "center" }}>
+              <span className="mock-new-tab" style={{ flex: 1, padding: "7px 8px", fontSize: 12, color: "var(--subtext)" }}>
+                + New Tab
+              </span>
+              <div style={{ display: "flex", border: "1px solid var(--surface)", borderRadius: 6, overflow: "hidden" }}>
+                {(["tabs", "board"] as const).map((v) => (
                   <button
-                    key={pane.agent.name}
-                    className="mock-tab"
-                    aria-pressed={focus[current] === i}
-                    onClick={() => setFocus(focus.map((f, t) => (t === current ? i : f)))}
+                    key={v}
+                    className="mock-view-switch"
+                    aria-pressed={view === v}
+                    onClick={() => setView(v)}
                     style={{
-                      flex: 1,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                      padding: "5px 8px",
-                      borderRadius: 6,
                       border: "none",
-                      fontSize: 12.5,
-                      color: "var(--text)",
-                      background: focus[current] === i ? "var(--surface)" : "transparent",
+                      fontSize: 11,
+                      padding: "3px 8px",
+                      background: view === v ? "var(--surface)" : "transparent",
+                      color: view === v ? "var(--text)" : "var(--subtext)",
                     }}
                   >
-                    <span className="mono" style={{ fontSize: 11, color: MARK[pane.agent.harness].color }}>
-                      {MARK[pane.agent.harness].text}
-                    </span>
-                    {pane.agent.name}
+                    {v === "tabs" ? "Tabs" : "Board"}
                   </button>
-                ) : null,
-              )}
+                ))}
+              </div>
             </div>
-          )}
-          <div
-            className={`mock-panes${tab.team ? " mock-zoomable" : ""}`}
-            style={{ flex: 1, display: "flex", gap: 6, padding: 6, minWidth: 0, minHeight: 0 }}
-          >
-            {tab.panes.map((pane, i) => {
-              const focused = focus[current] === i;
-              const ring = pane.attention && !attended;
-              return (
-                <div
-                  key={`${current}-${i}`}
-                  className={`mock-pane${focused ? " focused" : ""}`}
-                  tabIndex={0}
-                  onFocus={() => {
-                    setFocus(focus.map((f, t) => (t === current ? i : f)));
-                    if (pane.attention) setAttended(true);
-                  }}
-                  style={{
-                    flex: pane.flex ?? 1,
-                    minWidth: 0,
-                    minHeight: 0,
-                    borderRadius: 5,
-                    overflow: "hidden",
-                    border: `1px solid ${ring ? "var(--accent)" : focused ? "var(--muted)" : "var(--surface)"}`,
-                    boxShadow: ring ? "0 0 0 1px var(--accent), 0 0 16px rgba(137,180,250,.45)" : undefined,
-                    background: pane.browser ? "var(--bg-alt)" : "var(--crust)",
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  {pane.browser ? (
-                    <BrowserPane url={pane.browser} />
-                  ) : (
-                    <div className="mono" style={{ padding: "8px 10px", fontSize: 11, lineHeight: 1.6 }}>
-                      <TermLines lines={pane.lines ?? []} cursor={focused} />
-                    </div>
+          </div>
+          {/* keyed by the view, so each switch replays the view's entrance */}
+          <div key={view} className="mock-view" style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            {view === "board" ? (
+              <BoardView frames={frames} onCard={fly} onTabs={() => setView("tabs")} />
+            ) : (
+            <>
+              {tab.team && (
+                <div className="mock-agents" style={{ display: "none", gap: 4, padding: "6px 6px 0" }}>
+                  {tab.panes.map((pane, i) =>
+                    pane.agent ? (
+                      <button
+                        key={pane.agent.name}
+                        className="mock-tab"
+                        aria-pressed={focus[current] === i}
+                        onClick={() => setFocus(focus.map((f, t) => (t === current ? i : f)))}
+                        style={{
+                          flex: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          padding: "5px 8px",
+                          borderRadius: 6,
+                          border: "none",
+                          fontSize: 12.5,
+                          color: "var(--text)",
+                          background: focus[current] === i ? "var(--surface)" : "transparent",
+                        }}
+                      >
+                        <span className="mono" style={{ fontSize: 11, color: MARK[pane.agent.harness].color }}>
+                          {MARK[pane.agent.harness].text}
+                        </span>
+                        {pane.agent.name}
+                      </button>
+                    ) : null,
                   )}
                 </div>
-              );
-            })}
+              )}
+              <div
+                className={`mock-panes${tab.team ? " mock-zoomable" : ""}`}
+                style={{ flex: 1, display: "flex", gap: 6, padding: 6, minWidth: 0, minHeight: 0 }}
+              >
+                {tab.panes.map((pane, i) => {
+                  const focused = focus[current] === i;
+                  const ring = pane.attention && !attended;
+                  return (
+                    <div
+                      key={`${current}-${i}`}
+                      className={`mock-pane${focused ? " focused" : ""}`}
+                      tabIndex={0}
+                      onFocus={() => {
+                        setFocus(focus.map((f, t) => (t === current ? i : f)));
+                        if (pane.attention) setAttended(true);
+                      }}
+                      style={{
+                        flex: pane.flex ?? 1,
+                        minWidth: 0,
+                        minHeight: 0,
+                        borderRadius: 5,
+                        overflow: "hidden",
+                        border: `1px solid ${ring ? "var(--accent)" : focused ? "var(--muted)" : "var(--surface)"}`,
+                        boxShadow: ring ? "0 0 0 1px var(--accent), 0 0 16px rgba(137,180,250,.45)" : undefined,
+                        background: pane.browser ? "var(--bg-alt)" : "var(--crust)",
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      {pane.browser ? (
+                        <BrowserPane url={pane.browser} />
+                      ) : (
+                        <div className="mono" style={{ padding: "8px 10px", fontSize: 11, lineHeight: 1.6 }}>
+                          <TermLines lines={pane.lines ?? []} cursor={focused} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+            )}
           </div>
         </div>
       </div>
       <p className="mono" style={{ marginTop: 14, textAlign: "center", fontSize: 12, color: "var(--muted)" }}>
-        ↑ click a tab, or a pane to focus it
+        {view === "tabs" ? "↑ click a tab or a pane, or flip to Board" : "↑ click a card to fly back to it"}
       </p>
+    </div>
+  );
+}
+
+/** A card's height on the board, in board units. */
+const CARD_H = 180;
+/** Room left around the frames when fitted, in pixels (board::FIT_MARGIN). */
+const FIT_MARGIN = 40;
+
+/** The board, fitted to the mock as the app's Fit would fit it. */
+function BoardView({ frames, onCard, onTabs }: { frames: Frame[]; onCard: (frame: number, card?: number) => void; onTabs: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [screen, setScreen] = useState<{ w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current!;
+    const measure = () => setScreen({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const bounds = {
+    w: frames.length * FRAME_W + (frames.length - 1) * FRAME_GAP,
+    h: Math.max(...frames.map((f) => layout(f).h)),
+  };
+  // Every frame in view, never past 100% nor under the board's 10%.
+  const fits = screen && Math.min((screen.w - 2 * FIT_MARGIN) / bounds.w, (screen.h - 2 * FIT_MARGIN) / bounds.h);
+  const zoom = fits && Math.min(1, Math.max(0.1, fits));
+  return (
+    <div ref={ref} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg-alt)" }}>
+      {screen && zoom && (
+        <BoardCanvas
+          frames={frames}
+          zoom={zoom}
+          camera={{ x: bounds.w / 2 - screen.w / zoom / 2, y: bounds.h / 2 - screen.h / zoom / 2 }}
+          screen={screen}
+          dotsId="hero-board-dots"
+          label="The board: the same three tabs as frames, their panes as cards"
+          onCard={onCard}
+          onTabs={onTabs}
+        />
+      )}
     </div>
   );
 }
