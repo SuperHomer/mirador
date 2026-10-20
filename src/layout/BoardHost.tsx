@@ -96,6 +96,11 @@ export function BoardHost({ board, children }: { board: boolean; children: React
   const [zoomDraft, setZoomDraft] = useState<string | null>(null);
   // Escape leaves by blurring too; this tells that blur not to apply.
   const zoomCancelled = useRef(false);
+  // Leaving the board unmounts the input with no blur to count on, and
+  // leaving is no confirmation: drop the edit, or it comes back stale.
+  useEffect(() => {
+    if (!board) setZoomDraft(null);
+  }, [board]);
 
   // A pane focused from elsewhere — a card just made, a new frame, a
   // shortcut, `mira focus` — is brought into view when it is not wholly
