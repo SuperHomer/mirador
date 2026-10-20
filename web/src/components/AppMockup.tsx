@@ -259,14 +259,30 @@ export default function AppMockup() {
     return () => clearTimeout(timer);
   }, [demo, inView, pageShown]);
 
-  // The visitor's click or key takes the mock over.
-  const takeOver = () => demo && setDemo(null);
+  // The visitor's click or key takes the mock over. The demo stops and
+  // jumps to where its script ends, so stopping early never loses the
+  // team: the team started and the worker's step landed. Where the
+  // visitor clicked a tab, a pane, a card or a control, their own handler
+  // has already run and says where they are; anywhere else the mock goes
+  // to the script's last state, tabs on the team's tab with the planner
+  // focused. This runs as the event bubbles out, after those handlers: a
+  // capturing handler re-renders before them and can take away the very
+  // element that was clicked.
+  const takeOver = (e: React.SyntheticEvent) => {
+    if (!demo) return;
+    setDemo(null);
+    setTeam("sent");
+    if ((e.target as Element).closest(".mock-tab, .mock-view-switch, .mock-pane, .board-frame, .board-mock-controls button")) return;
+    setView("tabs");
+    setCurrent(TEAM);
+    setFocus((f) => f.map((p, i) => (i === TEAM ? 0 : p)));
+  };
 
   // From the board, back to tabs on that tab, with that pane focused.
   const fly = (t: number, pane?: number) => {
     setCurrent(t);
     if (pane !== undefined) {
-      setFocus(focus.map((f, i) => (i === t ? pane : f)));
+      setFocus((f) => f.map((p, i) => (i === t ? pane : p)));
       if (TABS[t].panes[pane].attention) setAttended(true);
     }
     setView("tabs");
@@ -292,8 +308,8 @@ export default function AppMockup() {
   return (
     <div ref={mockRef} style={{ marginTop: 56, textAlign: "left" }}>
       <div
-        onPointerDownCapture={takeOver}
-        onKeyDownCapture={takeOver}
+        onClick={takeOver}
+        onKeyDown={takeOver}
         style={{
           maxWidth: 1000,
           margin: "0 auto",
@@ -445,7 +461,7 @@ export default function AppMockup() {
                         key={pane.agent.name}
                         className="mock-tab"
                         aria-pressed={focus[current] === i}
-                        onClick={() => setFocus(focus.map((f, t) => (t === current ? i : f)))}
+                        onClick={() => setFocus((f) => f.map((p, t) => (t === current ? i : p)))}
                         style={{
                           flex: 1,
                           display: "flex",
@@ -482,7 +498,7 @@ export default function AppMockup() {
                       className={`mock-pane${focused ? " focused" : ""}`}
                       tabIndex={0}
                       onFocus={() => {
-                        setFocus(focus.map((f, t) => (t === current ? i : f)));
+                        setFocus((f) => f.map((p, t) => (t === current ? i : p)));
                         if (pane.attention) setAttended(true);
                       }}
                       style={{

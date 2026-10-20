@@ -69,10 +69,7 @@ function CardView({ card, at, onClick }: ReturnType<typeof layout>["cards"][numb
         "aria-label": `Go to ${card.title}`,
         className: "board-card",
         style: { cursor: "pointer" },
-        onClick: (e: React.MouseEvent) => {
-          e.stopPropagation();
-          onClick();
-        },
+        onClick,
         onKeyDown: (e: React.KeyboardEvent) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -173,7 +170,9 @@ export default function BoardCanvas({
           <g
             key={frame.title}
             transform={`translate(${x} 0)`}
-            onClick={onCard && (() => onCard(fi))}
+            className={onCard && "board-frame"}
+            // a card's click is the card's; the frame takes the rest
+            onClick={onCard && ((e) => !(e.target as Element).closest(".board-card") && onCard(fi))}
             style={onCard && { cursor: "pointer" }}
           >
             <rect
