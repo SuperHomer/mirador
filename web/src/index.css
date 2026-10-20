@@ -44,6 +44,8 @@ button { font-family: inherit; cursor: pointer; }
    to sit on it, as they do in the app, without hiding it: they go under.
    The teams mock drops its sidebar, and its columns scroll inside it. */
 @media (max-width: 600px) {
+  /* The hero's mock needs the width more than the page needs a margin. */
+  .hero { padding-left: 16px !important; padding-right: 16px !important; }
   .teams-sidebar { display: none; }
   #board .board-mock-controls {
     position: static !important;

@@ -4,6 +4,7 @@ import { GITHUB_URL, DOWNLOAD_MACOS, DOWNLOAD_WINDOWS, SHOW_APP_MOCKUP } from ".
 export default function Hero() {
   return (
     <header
+      className="hero"
       style={{
         position: "relative",
         padding: "78px 48px 64px",
