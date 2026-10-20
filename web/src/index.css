@@ -74,6 +74,9 @@ button { font-family: inherit; cursor: pointer; }
   /* The strip keeps each tab's index, title and unread badge. */
   .mock-tab-detail, .mock-new-tab { display: none !important; }
   .mock-panes { flex-direction: column; }
+  /* A team's tab shows its focused member alone, picked from the agents row. */
+  .mock-agents { display: flex !important; }
+  .mock-zoomable .mock-pane:not(.focused) { display: none !important; }
 }
 
 /* The section links need ~1035px (measured with the Board link); below

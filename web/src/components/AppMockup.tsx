@@ -9,12 +9,17 @@
  * (.pane.focused, .pane.unread in the app's styles.css), and focusing that
  * pane clears its ring, as it does in the app. The omakase tab's columns
  * are the teams section's, line for line.
+ *
+ * At phone width three columns would each be a few characters wide, so
+ * the team's tab shows its focused member alone, as pane zoom does, and the
+ * agents row under the tabs picks which, as the sidebar's agent list does.
  */
 
 import { useState } from "react";
-import { MEMBERS, type Line } from "./TeamsShowcase";
+import { MARK, MEMBERS } from "./TeamsShowcase";
+import TermLines, { type Line } from "./TermLines";
 
-type Pane = { flex?: number; lines?: Line[]; browser?: string; attention?: boolean };
+type Pane = { flex?: number; lines?: Line[]; browser?: string; attention?: boolean; agent?: (typeof MEMBERS)[number] };
 type Tab = {
   title: string;
   team?: boolean;
@@ -79,7 +84,7 @@ const TABS: Tab[] = [
     branch: "feat/oauth",
     agents: MEMBERS.length,
     focus: 0,
-    panes: MEMBERS.map((m) => ({ lines: m.lines })),
+    panes: MEMBERS.map((m) => ({ lines: m.lines, agent: m })),
   },
   {
     title: "web",
@@ -230,14 +235,49 @@ export default function AppMockup() {
               + new tab
             </div>
           </div>
-          <div className="mock-panes" style={{ flex: 1, display: "flex", gap: 6, padding: 6, minWidth: 0, minHeight: 0 }}>
+          {tab.team && (
+            <div className="mock-agents" style={{ display: "none", gap: 4, padding: "6px 6px 0" }}>
+              {tab.panes.map((pane, i) =>
+                pane.agent ? (
+                  <button
+                    key={pane.agent.name}
+                    className="mock-tab"
+                    aria-pressed={focus[current] === i}
+                    onClick={() => setFocus(focus.map((f, t) => (t === current ? i : f)))}
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      padding: "5px 8px",
+                      borderRadius: 6,
+                      border: "none",
+                      fontSize: 12.5,
+                      color: "var(--text)",
+                      background: focus[current] === i ? "var(--surface)" : "transparent",
+                    }}
+                  >
+                    <span className="mono" style={{ fontSize: 11, color: MARK[pane.agent.harness].color }}>
+                      {MARK[pane.agent.harness].text}
+                    </span>
+                    {pane.agent.name}
+                  </button>
+                ) : null,
+              )}
+            </div>
+          )}
+          <div
+            className={`mock-panes${tab.team ? " mock-zoomable" : ""}`}
+            style={{ flex: 1, display: "flex", gap: 6, padding: 6, minWidth: 0, minHeight: 0 }}
+          >
             {tab.panes.map((pane, i) => {
               const focused = focus[current] === i;
               const ring = pane.attention && !attended;
               return (
                 <div
                   key={`${current}-${i}`}
-                  className="mock-pane"
+                  className={`mock-pane${focused ? " focused" : ""}`}
                   tabIndex={0}
                   onFocus={() => {
                     setFocus(focus.map((f, t) => (t === current ? i : f)));
@@ -256,7 +296,13 @@ export default function AppMockup() {
                     flexDirection: "column",
                   }}
                 >
-                  {pane.browser ? <BrowserPane url={pane.browser} /> : <Terminal lines={pane.lines ?? []} cursor={focused} />}
+                  {pane.browser ? (
+                    <BrowserPane url={pane.browser} />
+                  ) : (
+                    <div className="mono" style={{ padding: "8px 10px", fontSize: 11, lineHeight: 1.6 }}>
+                      <TermLines lines={pane.lines ?? []} cursor={focused} />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -264,7 +310,7 @@ export default function AppMockup() {
         </div>
       </div>
       <p className="mono" style={{ marginTop: 14, textAlign: "center", fontSize: 12, color: "var(--muted)" }}>
-        ↑ click a tab in the sidebar, or a pane to focus it
+        ↑ click a tab, or a pane to focus it
       </p>
     </div>
   );
@@ -279,21 +325,6 @@ const chip = (bg: string, color: string): React.CSSProperties => ({
   background: bg,
   color,
 });
-
-function Terminal({ lines, cursor }: { lines: Line[]; cursor: boolean }) {
-  return (
-    <div className="mono" style={{ padding: "8px 10px", fontSize: 11, lineHeight: 1.6 }}>
-      {lines.map((l, j) => (
-        <div key={j} style={{ color: l.color ?? "var(--subtext)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-          {l.text}
-          {cursor && j === lines.length - 1 && (
-            <span className="cursor" style={{ width: 7, height: 13, verticalAlign: "middle", marginLeft: 2 }} />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /** A browser pane on the dev server's page. The page is someone's app, not
     Mirador, so it keeps its own light colors rather than the theme's. */
