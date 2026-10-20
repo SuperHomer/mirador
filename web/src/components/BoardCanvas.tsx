@@ -153,7 +153,7 @@ export default function BoardCanvas({
       <svg
         viewBox={`${camera.x} ${camera.y} ${view.w} ${view.h}`}
         style={{ display: "block", width: "100%", height: "auto", fontFamily: "var(--sans)" }}
-        role="img"
+        role={onCard ? "group" : "img"}
         aria-label={label}
       >
         <defs>
