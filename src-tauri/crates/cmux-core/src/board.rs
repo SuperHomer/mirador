@@ -291,6 +291,52 @@ pub fn fit(frames: impl IntoIterator<Item = BoardRect>, width: f64, height: f64)
     centre_on(bounds, width, height, zoom)
 }
 
+/// Where frames of `sizes` go, packed: in rows left to right, top-aligned,
+/// `FRAME_GAP` apart, the first at `origin`. Of every row width that ends
+/// on a frame, the packing that `fit` would show biggest in a `width` ×
+/// `height` viewport: the board takes the least space as it will be looked
+/// at, in the window's shape. The frames keep their tab order, row by row,
+/// so each is found where its tab says.
+pub fn arrange(sizes: &[(f64, f64)], origin: BoardPoint, width: f64, height: f64) -> Vec<BoardPoint> {
+    let (mut room_w, mut room_h) = (width - 2.0 * FIT_MARGIN, height - 2.0 * FIT_MARGIN);
+    // A viewport not laid out yet: square, as good a guess as any.
+    if room_w <= 0.0 || room_h <= 0.0 {
+        (room_w, room_h) = (1.0, 1.0);
+    }
+    let mut best: Option<(f64, Vec<BoardPoint>)> = None;
+    let mut limit = -FRAME_GAP;
+    for &(w, _) in sizes {
+        limit += w + FRAME_GAP;
+        let (spots, bounds_w, bounds_h) = pack(sizes, origin, limit);
+        // Not capped at 1 as `fit` is, so that small boards still compare.
+        let zoom = (room_w / bounds_w).min(room_h / bounds_h);
+        if best.as_ref().is_none_or(|(z, _)| zoom > *z) {
+            best = Some((zoom, spots));
+        }
+    }
+    best.map(|(_, spots)| spots).unwrap_or_default()
+}
+
+/// `sizes` in rows no wider than `limit`, each frame on the row unless it
+/// would pass it: where each goes, and the width and height of them all.
+fn pack(sizes: &[(f64, f64)], origin: BoardPoint, limit: f64) -> (Vec<BoardPoint>, f64, f64) {
+    let (mut row_w, mut row_h, mut top, mut widest) = (0.0, 0.0, 0.0, 0.0_f64);
+    let mut spots = Vec::with_capacity(sizes.len());
+    for &(w, h) in sizes {
+        // The slack: `limit` was summed in another order.
+        if row_w > 0.0 && row_w + FRAME_GAP + w > limit + 1e-6 {
+            top += row_h + FRAME_GAP;
+            (row_w, row_h) = (0.0, 0.0);
+        }
+        let x = if row_w > 0.0 { row_w + FRAME_GAP } else { 0.0 };
+        spots.push(BoardPoint { x: origin.x + x, y: origin.y + top });
+        row_w = x + w;
+        row_h = f64::max(row_h, h);
+        widest = widest.max(row_w);
+    }
+    (spots, widest, top + row_h)
+}
+
 /// The camera that puts `rect`'s centre in the middle of a `width` ×
 /// `height` viewport, at `zoom`.
 pub fn centre_on(rect: BoardRect, width: f64, height: f64, zoom: f64) -> Camera {
@@ -541,6 +587,45 @@ mod tests {
         // One small frame is shown at its own size.
         assert_eq!(fit([rect(0.0, 0.0, 200.0, 100.0)], 1080.0, 620.0).zoom, 1.0);
         assert_eq!(fit([], 1080.0, 620.0), Camera::default());
+    }
+
+    #[test]
+    fn arranging_packs_frames_to_the_windows_shape() {
+        let origin = BoardPoint { x: 100.0, y: -50.0 };
+        let three = [(1000.0, 800.0); 3];
+        // Wide: one row.
+        let row = arrange(&three, origin, 3600.0, 900.0);
+        assert!(row.iter().all(|p| p.y == origin.y), "{row:?}");
+        // Tall: one column.
+        let column = arrange(&three, origin, 1100.0, 2800.0);
+        assert!(column.iter().all(|p| p.x == origin.x), "{column:?}");
+        // A single frame stays where it is.
+        assert_eq!(arrange(&[(500.0, 300.0)], origin, 1080.0, 620.0), vec![origin]);
+        assert!(arrange(&[], origin, 1080.0, 620.0).is_empty());
+        // A viewport not laid out yet still arranges.
+        assert_eq!(arrange(&three, origin, 0.0, 0.0).len(), 3);
+    }
+
+    #[test]
+    fn arranged_frames_keep_their_order_and_their_gaps() {
+        let sizes = [(1200.0, 800.0), (500.0, 400.0), (900.0, 1000.0), (700.0, 300.0), (1300.0, 600.0)];
+        let origin = BoardPoint { x: 0.0, y: 0.0 };
+        let spots = arrange(&sizes, origin, 1600.0, 1000.0);
+        assert_eq!(spots[0], origin);
+        let frames: Vec<BoardRect> = spots.iter().zip(sizes).map(|(p, (w, h))| rect(p.x, p.y, w, h)).collect();
+        // Row-major: each frame is right of the one before on its row, or
+        // starts a row below it.
+        for pair in frames.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            assert!((b.y == a.y && b.x >= a.x + a.w + FRAME_GAP) || (b.y > a.y && b.x == origin.x), "{a:?} then {b:?}");
+        }
+        for (i, a) in frames.iter().enumerate() {
+            for b in &frames[i + 1..] {
+                assert!(!overlaps(&inflate(a, FRAME_GAP / 2.0 - 1e-6), &inflate(b, FRAME_GAP / 2.0 - 1e-6)), "{a:?} {b:?}");
+            }
+        }
+        // Arranged again from where it is: the same.
+        assert_eq!(arrange(&sizes, spots[0], 1600.0, 1000.0), spots);
     }
 
     #[test]

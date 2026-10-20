@@ -683,6 +683,22 @@ impl Workspace {
         Some(tab.frame)
     }
 
+    /// Packs every frame, and their cards with them, in tab order for a
+    /// `width` × `height` viewport (`board::arrange`), from the frames'
+    /// top-left as it is, so the board stays about where it was.
+    pub fn arrange_frames(&mut self, width: f64, height: f64) {
+        let frames: Vec<BoardRect> = self.tabs.iter().map(Tab::frame_rect).collect();
+        let origin = BoardPoint {
+            x: frames.iter().map(|f| f.x).fold(f64::INFINITY, f64::min),
+            y: frames.iter().map(|f| f.y).fold(f64::INFINITY, f64::min),
+        };
+        let sizes: Vec<(f64, f64)> = frames.iter().map(|f| (f.w, f.h)).collect();
+        let spots = board::arrange(&sizes, origin, width, height);
+        for (tab, spot) in self.tabs.iter_mut().zip(spots) {
+            tab.frame = spot;
+        }
+    }
+
     /// Whether `pane` is still in a tab. A pane leaves its tab before its
     /// `PaneMeta` is removed, so a writer that checks this under the
     /// workspace lock never brings a closed pane's meta back.
@@ -1218,6 +1234,29 @@ mod tests {
         assert_eq!(ws.set_frame_position(&first, BoardPoint { x: 2000.0, y: 100.0 }), Some(at));
         assert_eq!(ws.set_frame_position(&first, BoardPoint { x: 0.0, y: 3000.0 }), Some(BoardPoint { x: 0.0, y: 3000.0 }));
         assert_eq!(ws.set_frame_position("gone", at), None);
+    }
+
+    #[test]
+    fn arranging_moves_frames_with_their_cards() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        ws.split_pane(&a, SplitDir::Row).unwrap();
+        ws.new_tab();
+        ws.new_tab();
+        let ids: Vec<String> = ws.tabs.iter().map(|t| t.id.clone()).collect();
+        // Strewn about, one far off. The first moves last, once the others
+        // are out of its way.
+        ws.set_frame_position(&ids[1], BoardPoint { x: 9000.0, y: 7000.0 });
+        ws.set_frame_position(&ids[2], BoardPoint { x: 4000.0, y: -400.0 });
+        ws.set_frame_position(&ids[0], BoardPoint { x: 300.0, y: 200.0 });
+        assert_eq!(ws.tabs[0].frame, BoardPoint { x: 300.0, y: 200.0 });
+        let cards = ws.tabs[0].cards.clone();
+        ws.arrange_frames(1600.0, 1000.0);
+        assert_eq!(ws.tabs[0].frame, BoardPoint { x: 300.0, y: -400.0 }, "from the frames' top-left");
+        assert_eq!(ws.tabs[0].cards, cards, "cards stay put in their frame");
+        assert_nothing_overlaps(&ws);
+        let far = ws.tabs.iter().map(|t| t.frame.x.max(t.frame.y)).fold(f64::MIN, f64::max);
+        assert!(far < 4000.0, "packed: {far}");
     }
 
     /// No two frames overlap, and no two cards anywhere on the board.
