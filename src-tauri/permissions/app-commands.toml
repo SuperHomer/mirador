@@ -25,6 +25,7 @@ permissions = [
   "allow-set-card-rect",
   "allow-set-frame-position",
   "allow-board-fit",
+  "allow-board-arrange",
   "allow-board-card-camera",
   "allow-attach-pane",
   "allow-list-notifications",

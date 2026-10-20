@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView } from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardStore";
+import { arrangeBoard, atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -335,6 +335,12 @@ export function BoardHost({ board, children }: { board: boolean; children: React
           </button>
           <button title="Show the whole board" onClick={fitBoard}>
             Fit
+          </button>
+          <button
+            title="Pack the frames into rows, in tab order, to fit the window"
+            onClick={arrangeBoard}
+          >
+            Arrange
           </button>
         </div>
       )}

@@ -482,6 +482,10 @@ export const setCamera = (
 /** The camera showing the whole board in a viewport of this size. */
 export const boardFit = (width: number, height: number) =>
   invoke<Camera>("board_fit", { width, height });
+/** Packs the frames into rows for a viewport of this size: the camera
+ *  showing them all there. */
+export const boardArrange = (width: number, height: number) =>
+  invoke<Camera>("board_arrange", { width, height });
 /**
  * Moves or resizes a card. Refused over another card, or growing its frame
  * into another frame: the answer is where the card is.
