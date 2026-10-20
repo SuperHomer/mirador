@@ -11,12 +11,13 @@
  * except that the charter is one line, so it reflows at phone width.
  */
 
-type Line = { text: string; color?: string };
+import TermLines, { type Line } from "./TermLines";
+
 type Member = { name: string; harness: "claude" | "codex"; lines: Line[] };
 
 const MESSAGE = "var(--mauve)";
 
-const MEMBERS: Member[] = [
+export const MEMBERS: Member[] = [
   {
     name: "planner",
     harness: "claude",
@@ -70,7 +71,7 @@ members:
 The planner owns the task: it splits it into small steps and hands them to the worker one at a time, waiting for each. When a step is done, the planner asks the reviewer, who reads the diff and answers the planner with APPROVE or CHANGES. The planner decides what happens next, and tells the person when the task is done. Nobody pushes or merges: a person does.`;
 
 /** The sidebar's harness marks: Claude Code's spark, Codex's prompt. */
-const MARK = { claude: { text: "✳", color: "#d97757" }, codex: { text: ">_", color: "var(--subtext)" } };
+export const MARK = { claude: { text: "✳", color: "#d97757" }, codex: { text: ">_", color: "var(--subtext)" } };
 
 function TeamMockup() {
   return (
@@ -146,11 +147,7 @@ function TeamMockup() {
                 overflow: "hidden",
               }}
             >
-              {m.lines.map((l, j) => (
-                <div key={j} style={{ color: l.color ?? "var(--subtext)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-                  {l.text}
-                </div>
-              ))}
+              <TermLines lines={m.lines} />
             </div>
           ))}
         </div>
