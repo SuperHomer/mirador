@@ -15,7 +15,9 @@
  * agents row under the tabs picks which, as the sidebar's agent list does.
  *
  * The sidebar's Tabs | Board switch shows the same tabs as frames on the
- * board, fitted as the app's Fit fits them (cmux-core's board::fit), and
+ * board, fitted as the app's Fit fits them (cmux-core's board::fit) — on a
+ * phone, where Fit would draw them too small to read, centred on the
+ * current tab's frame instead (board::centre_on) — and
  * a click on a card flies back to its pane, as double-clicking a card's
  * header does in the app.
  */
@@ -391,6 +393,10 @@ export default function AppMockup() {
 const CARD_H = 180;
 /** Room left around the frames when fitted, in pixels (board::FIT_MARGIN). */
 const FIT_MARGIN = 40;
+/** Narrower than this, in pixels, the board opens on the current frame. */
+const PHONE_W = 600;
+/** How much of each neighbouring frame shows then, in board units. */
+const PEEK = 40;
 
 /** The board, fitted to the mock as the app's Fit would fit it. */
 function BoardView({ frames, onCard, onTabs }: { frames: Frame[]; onCard: (frame: number, card?: number) => void; onTabs: () => void }) {
@@ -409,16 +415,31 @@ function BoardView({ frames, onCard, onTabs }: { frames: Frame[]; onCard: (frame
     w: frames.length * FRAME_W + (frames.length - 1) * FRAME_GAP,
     h: Math.max(...frames.map((f) => layout(f).h)),
   };
-  // Every frame in view, never past 100% nor under the board's 10%.
-  const fits = screen && Math.min((screen.w - 2 * FIT_MARGIN) / bounds.w, (screen.h - 2 * FIT_MARGIN) / bounds.h);
-  const zoom = fits && Math.min(1, Math.max(0.1, fits));
+  // Never past 100% nor under the board's 10%.
+  const clamp = (zoom: number) => Math.min(1, Math.max(0.1, zoom));
+  let view: { zoom: number; centre: { x: number; y: number } } | null = null;
+  if (screen && screen.w < PHONE_W) {
+    // The current frame across the screen, its gaps and a sliver of each
+    // neighbour beside it, so the board reads as one you could pan.
+    const i = Math.max(0, frames.findIndex((f) => f.current));
+    view = {
+      zoom: clamp(screen.w / (FRAME_W + 2 * (FRAME_GAP + PEEK))),
+      centre: { x: i * (FRAME_W + FRAME_GAP) + FRAME_W / 2, y: layout(frames[i]).h / 2 },
+    };
+  } else if (screen) {
+    // Every frame in view.
+    view = {
+      zoom: clamp(Math.min((screen.w - 2 * FIT_MARGIN) / bounds.w, (screen.h - 2 * FIT_MARGIN) / bounds.h)),
+      centre: { x: bounds.w / 2, y: bounds.h / 2 },
+    };
+  }
   return (
     <div ref={ref} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg-alt)" }}>
-      {screen && zoom && (
+      {screen && view && (
         <BoardCanvas
           frames={frames}
-          zoom={zoom}
-          camera={{ x: bounds.w / 2 - screen.w / zoom / 2, y: bounds.h / 2 - screen.h / zoom / 2 }}
+          zoom={view.zoom}
+          camera={{ x: view.centre.x - screen.w / view.zoom / 2, y: view.centre.y - screen.h / view.zoom / 2 }}
           screen={screen}
           dotsId="hero-board-dots"
           label="The board: the same three tabs as frames, their panes as cards"
