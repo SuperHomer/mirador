@@ -40,7 +40,10 @@ downloads, the feature tour and the keybinding reference.
   over empty board (anywhere when zoomed out; at 100% a card scrolls its
   own content); pinch or Ctrl+scroll to zoom; double-click a card's header
   to fly to it at 100%. A frame's **+** adds a pane to it (its Agent wall
-  item opens the wall in a frame of its own), **New frame** a tab. Typing
+  item opens the wall in a frame of its own), **New frame** a tab. In the
+  corner, **−** and **+** step the zoom (10% to 400%), double-clicking the
+  percentage types one in, **Fit** shows everything, and **Arrange** packs
+  the frames into rows, in tab order, to the window's shape. Typing
   goes to the focused pane at any zoom, but the pointer reaches inside
   cards only at 100%; other zooms are an overview. A
   browser page shows only at 100%, while its card is still, wholly in view

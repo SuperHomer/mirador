@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Camera, boardCardCamera, boardFit, setCamera } from "../bindings";
+import { Camera, boardArrange, boardCardCamera, boardFit, setCamera } from "../bindings";
 
 /** How long a fly-to (fit, a card at 100%) takes. */
 const FLY_MS = 220;
@@ -105,6 +105,13 @@ export function fitBoard() {
   const { viewport, flyTo } = useBoardStore.getState();
   if (viewport.width === 0) return;
   void boardFit(viewport.width, viewport.height).then(flyTo);
+}
+
+/** Packs the frames into rows, in tab order, and shows them all. */
+export function arrangeBoard() {
+  const { viewport, flyTo } = useBoardStore.getState();
+  if (viewport.width === 0) return;
+  void boardArrange(viewport.width, viewport.height).then(flyTo);
 }
 
 /** Shows a pane's card at 100%, where its content takes the pointer. */

@@ -30,6 +30,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "set_card_rect",
     "set_frame_position",
     "board_fit",
+    "board_arrange",
     "board_card_camera",
     "attach_pane",
     "list_notifications",

@@ -310,6 +310,7 @@ pub fn run() {
             commands::set_card_rect,
             commands::set_frame_position,
             commands::board_fit,
+            commands::board_arrange,
             commands::board_card_camera,
             commands::attach_pane,
             commands::list_notifications,

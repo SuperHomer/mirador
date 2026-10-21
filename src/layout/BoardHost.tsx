@@ -3,10 +3,12 @@ import { listen } from "@tauri-apps/api/event";
 import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView } from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardStore";
+import { arrangeBoard, atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
+/** Where the − / + buttons stop, MIN_ZOOM to MAX_ZOOM. */
+const ZOOM_STOPS = [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 /** Zooming this close to 100% lands on it: 100% is where cards take the
  *  pointer, and a pinch rarely stops exactly there. */
 const SNAP = 0.04;
@@ -23,6 +25,36 @@ function zoomAround(camera: Camera, zoom: number, px: number, py: number): Camer
   const bx = camera.x + px / camera.zoom;
   const by = camera.y + py / camera.zoom;
   return { x: bx - px / zoom, y: by - py / zoom, zoom };
+}
+
+/** The next stop strictly above (`dir` 1) or below (-1) `zoom`, if any;
+ *  "strictly" with some slack, so 99.9% after a flight counts as 100%. */
+function nextZoomStop(zoom: number, dir: 1 | -1): number | undefined {
+  const stops = dir > 0 ? ZOOM_STOPS : [...ZOOM_STOPS].reverse();
+  return stops.find((z) => (z - zoom) * dir > 1e-3);
+}
+
+/** Flies to `zoom`, keeping the middle of the board in place. */
+function zoomTo(zoom: number) {
+  const { camera, viewport, flyTo } = useBoardStore.getState();
+  if (!camera) return;
+  flyTo(zoomAround(camera, zoom, viewport.width / 2, viewport.height / 2));
+}
+
+/** Flies to the next zoom stop. */
+function zoomStep(dir: 1 | -1) {
+  const camera = useBoardStore.getState().camera;
+  const zoom = camera && nextZoomStop(camera.zoom, dir);
+  if (zoom) zoomTo(zoom);
+}
+
+/** Flies to a typed percentage ("150", "150%", "33.5"); anything else does
+ *  nothing. No SNAP: someone who types 98 wants 98. */
+function typeZoom(text: string) {
+  const digits = text.trim().replace(/%$/, "");
+  const percent = digits === "" ? NaN : Number(digits);
+  if (!Number.isFinite(percent)) return;
+  zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, percent / 100)));
 }
 
 /** Pans to a pane's card unless it is wholly in view already. */
@@ -60,6 +92,15 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     return snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane ?? null;
   });
   const lastPointerDown = useRef(0);
+  // The percentage being typed, while the zoom is being typed.
+  const [zoomDraft, setZoomDraft] = useState<string | null>(null);
+  // Escape leaves by blurring too; this tells that blur not to apply.
+  const zoomCancelled = useRef(false);
+  // Leaving the board unmounts the input with no blur to count on, and
+  // leaving is no confirmation: drop the edit, or it comes back stale.
+  useEffect(() => {
+    if (!board) setZoomDraft(null);
+  }, [board]);
 
   // A pane focused from elsewhere — a card just made, a new frame, a
   // shortcut, `mira focus` — is brought into view when it is not wholly
@@ -238,7 +279,50 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       </div>
       {board && (
         <div className="board-controls">
-          <span className="board-zoom">{Math.round(cam.zoom * 100)}%</span>
+          <button
+            className="board-zoom-step"
+            title="Zoom out"
+            disabled={!nextZoomStop(cam.zoom, -1)}
+            onClick={() => zoomStep(-1)}
+          >
+            −
+          </button>
+          {zoomDraft === null ? (
+            <span
+              className="board-zoom"
+              title="Double-click to type a zoom"
+              onDoubleClick={() => {
+                zoomCancelled.current = false;
+                setZoomDraft(String(Math.round(cam.zoom * 100)));
+              }}
+            >
+              {Math.round(cam.zoom * 100)}%
+            </span>
+          ) : (
+            <input
+              className="board-zoom"
+              value={zoomDraft}
+              autoFocus
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => setZoomDraft(e.target.value)}
+              onBlur={() => {
+                if (!zoomCancelled.current) typeZoom(zoomDraft);
+                setZoomDraft(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") zoomCancelled.current = true;
+                if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+              }}
+            />
+          )}
+          <button
+            className="board-zoom-step"
+            title="Zoom in"
+            disabled={!nextZoomStop(cam.zoom, 1)}
+            onClick={() => zoomStep(1)}
+          >
+            +
+          </button>
           {/* The way back, for when the sidebar's switch is hidden (⌘B). */}
           <button title="Back to tabs (⌘⇧O / Ctrl+Shift+O)" onClick={() => void setView("tabs")}>
             Tabs
@@ -251,6 +335,12 @@ export function BoardHost({ board, children }: { board: boolean; children: React
           </button>
           <button title="Show the whole board" onClick={fitBoard}>
             Fit
+          </button>
+          <button
+            title="Pack the frames into rows, in tab order, to fit the window"
+            onClick={arrangeBoard}
+          >
+            Arrange
           </button>
         </div>
       )}

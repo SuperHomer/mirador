@@ -410,7 +410,9 @@ card sits on the board and how its tab is split are separate layouts, and
 neither changes the other. A pane created with `mira` lands in a free spot
 of its tab's frame, and a new tab's frame lands at the centre of the view
 if that is free, else in the free place beside a frame nearest to it,
-else right of every frame.
+else right of every frame. A person can repack every frame into rows,
+in tab order, with Arrange, so a frame's place on the board is not
+something to rely on.
 
 ## 8. Remote workspaces (SSH)
 

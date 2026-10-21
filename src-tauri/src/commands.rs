@@ -590,6 +590,20 @@ pub fn board_fit(state: State<'_, AppState>, width: f64, height: f64) -> Camera 
     cmux_core::board::fit(ws.tabs.iter().map(|t| t.frame_rect()), width, height)
 }
 
+/// Packs the frames into rows, in tab order, for a `width` × `height`
+/// viewport (`Workspace::arrange_frames`), and answers the camera that
+/// shows them all there — the board flies to it, as to Fit's.
+#[tauri::command]
+pub fn board_arrange(app: AppHandle, state: State<'_, AppState>, width: f64, height: f64) -> Camera {
+    let camera = {
+        let mut ws = state.workspace.lock().unwrap();
+        ws.arrange_frames(width, height);
+        cmux_core::board::fit(ws.tabs.iter().map(|t| t.frame_rect()), width, height)
+    };
+    emit_workspace(&app);
+    camera
+}
+
 /// The camera that shows `pane_id`'s card centred in a `width` × `height`
 /// viewport: at 100% — where double-clicking its header goes — or at
 /// `zoom`, to bring it into view as the board is.

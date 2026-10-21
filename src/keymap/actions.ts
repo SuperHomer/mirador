@@ -31,7 +31,7 @@ import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal, terminalWithFocus } from "../terminal/registry";
-import { fitBoard } from "../state/boardStore";
+import { arrangeBoard, fitBoard } from "../state/boardStore";
 
 export interface ActionDef {
   id: string;
@@ -212,6 +212,13 @@ export const actions: ActionDef[] = [
     title: "Board: Show Everything",
     run: () => {
       if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
+    },
+  },
+  {
+    id: "board_arrange",
+    title: "Board: Arrange Frames",
+    run: () => {
+      if (useWorkspaceStore.getState().snapshot?.view === "board") arrangeBoard();
     },
   },
   {
