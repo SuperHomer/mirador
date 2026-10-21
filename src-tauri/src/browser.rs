@@ -245,40 +245,45 @@ pub fn ensure_webview(
             }
         });
 
-    let webview = window
-        .add_child(
-            builder,
-            LogicalPosition::new(x, y),
-            LogicalSize::new(w.max(1.0), h.max(1.0)),
-        )
-        .map_err(|e| e.to_string())?;
-    // A bounds call the frontend sent before the pane closed can get here
-    // after it. `close_pane` removes the meta before `destroy` looks for the
-    // webview, so a creation in flight is either found by `destroy` or sees
-    // the pane gone here. `destroy` takes no lock: it runs on the main
-    // thread, which `add_child` may need.
-    if !is_browser_pane(app, pane_id) {
-        let _ = webview.close();
-        return Err(format!("no browser pane {pane_id}"));
-    }
-    // Read what was asked on the main thread, where `set_visible` runs: a
-    // hide queued from here on a read made here could land after a show
-    // asked for in between, and hide the page for good.
+    // Built and its visibility settled in one main-thread task, as the sync
+    // command used to: a page hidden only by a later task could paint at its
+    // place in between, over the board. `add_child` runs inline there (Tauri
+    // runs a main-thread task in place when already on it), and nothing is
+    // drawn until the task returns. `set_visible` and `destroy` run on the
+    // main thread too, so neither lands between the checks and the build.
+    let (tx, rx) = mpsc::channel();
     let main_app = app.clone();
     let main_pane = pane_id.to_string();
-    app.run_on_main_thread(move || apply_initial_visibility(&main_app, &main_pane))
-        .map_err(|e| e.to_string())
+    let position = LogicalPosition::new(x, y);
+    let size = LogicalSize::new(w.max(1.0), h.max(1.0));
+    app.run_on_main_thread(move || {
+        let _ = tx.send(create_on_main_thread(&main_app, &window, &main_pane, builder, position, size));
+    })
+    .map_err(|e| e.to_string())?;
+    rx.recv().map_err(|e| e.to_string())?
 }
 
-fn apply_initial_visibility(app: &AppHandle, pane_id: &str) {
+fn create_on_main_thread(
+    app: &AppHandle,
+    window: &tauri::Window,
+    pane_id: &str,
+    builder: tauri::webview::WebviewBuilder<tauri::Wry>,
+    position: LogicalPosition<f64>,
+    size: LogicalSize<f64>,
+) -> Result<(), String> {
+    // A bounds call the frontend sent before the pane closed can get here
+    // after it, and would make a webview nobody owns.
+    if !is_browser_pane(app, pane_id) {
+        return Err(format!("no browser pane {pane_id}"));
+    }
+    let webview = window.add_child(builder, position, size).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
     let asked = state.browser_bridge.shown.lock().unwrap().get(pane_id).copied();
     let board = state.workspace.lock().unwrap().view == cmux_protocol::View::Board;
-    if let Some(webview) = app.get_webview(&label_for(pane_id)) {
-        if hidden_when_created(asked, board) {
-            let _ = webview.hide();
-        }
+    if hidden_when_created(asked, board) {
+        let _ = webview.hide();
     }
+    Ok(())
 }
 
 /// Whether a just-created webview starts hidden: as the frontend last
