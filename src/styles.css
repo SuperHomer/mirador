@@ -704,7 +704,8 @@ body,
 
 /* Away from 100%, a card is something to look at: its content takes no
    pointer (xterm maps the pointer wrongly under a scale), and a click
-   lands on the card, focusing it. The keyboard still types into it. */
+   lands on the card, focusing it. The keyboard still types into it, and
+   the wheel still scrolls it: BoardHost hands it over (`handWheel`). */
 .tabs-host.board.overview .pane-body {
   pointer-events: none;
 }

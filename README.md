@@ -36,16 +36,18 @@ downloads, the feature tour and the keybinding reference.
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
   in the sidebar): every tab as a frame and every pane as a card on one
-  canvas. Drag empty board to pan, or scroll
-  over empty board (anywhere when zoomed out; at 100% a card scrolls its
-  own content); pinch or Ctrl+scroll to zoom; double-click a card's header
+  canvas. Scroll over a card to scroll its content, at any zoom (a
+  browser card pans away from 100%, where its page is not drawn); drag or
+  scroll over empty board, a gap or a card's header to pan, or hold ⌥
+  (Alt) to pan from anywhere but a browser page at 100%, which keeps its
+  own scroll; pinch or Ctrl+scroll to zoom; double-click a card's header
   to fly to it at 100%. A frame's **+** adds a pane to it (its Agent wall
   item opens the wall in a frame of its own), **New frame** a tab. In the
   corner, **−** and **+** step the zoom (10% to 400%), double-clicking the
   percentage types one in, **Fit** shows everything, and **Arrange** packs
   the frames into rows, in tab order, to the window's shape. Typing
   goes to the focused pane at any zoom, but the pointer reaches inside
-  cards only at 100%; other zooms are an overview. A
+  cards only at 100% (the wheel aside); other zooms are an overview. A
   browser page shows only at 100%, while its card is still, wholly in view
   and nothing (palette, panel, menu) is open over it
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
