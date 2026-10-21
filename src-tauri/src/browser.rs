@@ -32,6 +32,14 @@ pub struct BrowserBridge {
     /// Browser panes by when they were last opened or driven, latest last:
     /// the pane a command goes to when it names none.
     recent: Mutex<Vec<String>>,
+    /// Held while `ensure_webview` looks for a pane's webview and creates
+    /// it: a pane reports its bounds two or three times as it mounts, and
+    /// those calls run at once, each finding no webview yet.
+    creating: Mutex<()>,
+    /// Whether the frontend last asked for each pane's page to be shown.
+    /// A request can come before the webview exists, and the frontend asks
+    /// only when that changes, so creation applies it.
+    shown: Mutex<HashMap<String, bool>>,
 }
 
 impl BrowserBridge {
@@ -164,7 +172,9 @@ fn measure_host_origin(window: &tauri::Window) -> (f64, f64) {
     }
 }
 
-/// Creates the pane's child webview if needed and applies bounds.
+/// Creates the pane's child webview if needed and applies bounds. Never
+/// from a sync command: on Windows creating a webview there deadlocks
+/// (see `commands::set_browser_bounds`).
 pub fn ensure_webview(
     app: &AppHandle,
     pane_id: &str,
@@ -180,6 +190,8 @@ pub fn ensure_webview(
     let (origin_x, origin_y) = host_origin(app, &window);
     let (x, y) = (x + origin_x, y + origin_y);
 
+    let state = app.state::<AppState>();
+    let _creating = state.browser_bridge.creating.lock().unwrap();
     if let Some(webview) = app.get_webview(&label) {
         let _ = webview.set_position(LogicalPosition::new(x, y));
         let _ = webview.set_size(LogicalSize::new(w.max(1.0), h.max(1.0)));
@@ -187,11 +199,10 @@ pub fn ensure_webview(
     }
 
     let url = {
-        let state = app.state::<AppState>();
         let meta = state.meta.lock().unwrap();
         meta.get(pane_id)
             .and_then(|m| m.browser_url.clone())
-            .unwrap_or_else(|| "about:blank".to_string())
+            .ok_or_else(|| format!("no browser pane {pane_id}"))?
     };
 
     let nav_pane = pane_id.to_string();
@@ -241,14 +252,51 @@ pub fn ensure_webview(
             LogicalSize::new(w.max(1.0), h.max(1.0)),
         )
         .map_err(|e| e.to_string())?;
-    // On the board a page is shown only once its card can show it (at
-    // 100%, in view, the board still), which the board decides and asks for. A
-    // pane opened there must not appear over the board until then.
-    let board = app.state::<AppState>().workspace.lock().unwrap().view == cmux_protocol::View::Board;
-    if board {
-        let _ = webview.hide();
+    // A bounds call the frontend sent before the pane closed can get here
+    // after it. `close_pane` removes the meta before `destroy` looks for the
+    // webview, so a creation in flight is either found by `destroy` or sees
+    // the pane gone here. `destroy` takes no lock: it runs on the main
+    // thread, which `add_child` may need.
+    if !is_browser_pane(app, pane_id) {
+        let _ = webview.close();
+        return Err(format!("no browser pane {pane_id}"));
     }
-    Ok(())
+    // Read what was asked on the main thread, where `set_visible` runs: a
+    // hide queued from here on a read made here could land after a show
+    // asked for in between, and hide the page for good.
+    let main_app = app.clone();
+    let main_pane = pane_id.to_string();
+    app.run_on_main_thread(move || apply_initial_visibility(&main_app, &main_pane))
+        .map_err(|e| e.to_string())
+}
+
+fn apply_initial_visibility(app: &AppHandle, pane_id: &str) {
+    let state = app.state::<AppState>();
+    let asked = state.browser_bridge.shown.lock().unwrap().get(pane_id).copied();
+    let board = state.workspace.lock().unwrap().view == cmux_protocol::View::Board;
+    if let Some(webview) = app.get_webview(&label_for(pane_id)) {
+        if hidden_when_created(asked, board) {
+            let _ = webview.hide();
+        }
+    }
+}
+
+/// Whether a just-created webview starts hidden: as the frontend last
+/// asked, when it has. Otherwise, on the board a page is shown only once
+/// its card can show it (at 100%, in view, the board still), which the
+/// board decides and asks for. A pane opened there must not appear over
+/// the board until then.
+fn hidden_when_created(asked: Option<bool>, board: bool) -> bool {
+    match asked {
+        Some(shown) => !shown,
+        None => board,
+    }
+}
+
+fn is_browser_pane(app: &AppHandle, pane_id: &str) -> bool {
+    let state = app.state::<AppState>();
+    let meta = state.meta.lock().unwrap();
+    meta.get(pane_id).is_some_and(|m| m.browser_url.is_some())
 }
 
 fn count_load(app: &AppHandle, pane_id: &str, count: impl FnOnce(&mut Loads)) {
@@ -295,20 +343,25 @@ pub fn wait_for_new_page(app: &AppHandle, pane_id: &str, before: Loads) -> Optio
 
 fn track_navigation(app: &AppHandle, pane_id: &str, url: &Url) {
     let state = app.state::<AppState>();
-    let changed = {
-        let mut meta = state.meta.lock().unwrap();
-        let entry = meta.entry(pane_id.to_string()).or_default();
-        let new = Some(url.to_string());
-        if entry.browser_url != new {
-            entry.browser_url = new;
-            true
-        } else {
-            false
-        }
-    };
+    let changed = record_navigation(&mut state.meta.lock().unwrap(), pane_id, url);
     if changed {
         crate::commands::emit_workspace(app);
     }
+}
+
+/// Sets a browser pane's URL; true when it changed. A page finishing in a
+/// webview being closed must not bring its pane back, so a pane with no
+/// meta, or one that is not a browser pane, is left as it is.
+fn record_navigation(meta: &mut HashMap<String, cmux_core::state::PaneMeta>, pane_id: &str, url: &Url) -> bool {
+    let Some(entry) = meta.get_mut(pane_id).filter(|m| m.browser_url.is_some()) else {
+        return false;
+    };
+    let new = Some(url.to_string());
+    if entry.browser_url == new {
+        return false;
+    }
+    entry.browser_url = new;
+    true
 }
 
 /// The pane's webview, waiting a moment for it: the frontend creates it
@@ -318,12 +371,7 @@ fn track_navigation(app: &AppHandle, pane_id: &str, url: &Url) {
 /// Gives up at `deadline` too, when there is one sooner: `wait --timeout
 /// 1` means one second, the wait for a pane to be drawn included.
 fn webview(app: &AppHandle, pane_id: &str, deadline: Option<Instant>) -> Result<Webview, String> {
-    let is_browser = |app: &AppHandle| {
-        let state = app.state::<AppState>();
-        let meta = state.meta.lock().unwrap();
-        meta.get(pane_id).is_some_and(|m| m.browser_url.is_some())
-    };
-    if !is_browser(app) {
+    if !is_browser_pane(app, pane_id) {
         return Err(format!("no browser pane {pane_id}"));
     }
     let own = Instant::now() + WEBVIEW_WAIT;
@@ -559,6 +607,10 @@ pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<Loads, St
 }
 
 pub fn set_visible(app: &AppHandle, pane_id: &str, visible: bool) {
+    // Recorded before looking for the webview: a creation that reads it
+    // after this either sees it or made the webview this then finds.
+    let bridge = &app.state::<AppState>().browser_bridge;
+    bridge.shown.lock().unwrap().insert(pane_id.to_string(), visible);
     if let Some(webview) = app.get_webview(&label_for(pane_id)) {
         let _ = if visible {
             webview.show()
@@ -574,7 +626,51 @@ pub fn destroy(app: &AppHandle, pane_id: &str) {
     bridge.not_loaded.lock().unwrap().remove(pane_id);
     bridge.loads.lock().unwrap().remove(pane_id);
     bridge.recent.lock().unwrap().retain(|p| p != pane_id);
+    bridge.shown.lock().unwrap().remove(pane_id);
     if let Some(webview) = app.get_webview(&label_for(pane_id)) {
         let _ = webview.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hidden_when_created, record_navigation};
+    use cmux_core::state::PaneMeta;
+    use std::collections::HashMap;
+    use tauri::Url;
+
+    fn url(s: &str) -> Url {
+        Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn a_closed_pane_is_not_brought_back() {
+        let mut meta = HashMap::new();
+        assert!(!record_navigation(&mut meta, "p1", &url("https://example.com/")));
+        assert!(meta.is_empty());
+    }
+
+    #[test]
+    fn a_pane_that_is_not_a_browser_is_left_alone() {
+        let mut meta = HashMap::from([("p1".to_string(), PaneMeta::default())]);
+        assert!(!record_navigation(&mut meta, "p1", &url("https://example.com/")));
+        assert_eq!(meta["p1"].browser_url, None);
+    }
+
+    #[test]
+    fn a_browser_pane_records_where_it_went() {
+        let pane = PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() };
+        let mut meta = HashMap::from([("p1".to_string(), pane)]);
+        assert!(record_navigation(&mut meta, "p1", &url("https://example.org/next")));
+        assert_eq!(meta["p1"].browser_url.as_deref(), Some("https://example.org/next"));
+        assert!(!record_navigation(&mut meta, "p1", &url("https://example.org/next")), "the same url again");
+    }
+
+    #[test]
+    fn a_webview_starts_as_the_frontend_last_asked() {
+        assert!(!hidden_when_created(Some(true), true), "shown, though on the board");
+        assert!(hidden_when_created(Some(false), false), "hidden, though not on the board");
+        assert!(hidden_when_created(None, true), "on the board, until its card asks");
+        assert!(!hidden_when_created(None, false));
     }
 }
