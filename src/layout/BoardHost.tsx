@@ -57,6 +57,67 @@ function typeZoom(text: string) {
   zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, percent / 100)));
 }
 
+/** The body of the card under the pointer, if it is over one: not its
+ *  header, nor a gap. Away from 100% the body takes no pointer, so the
+ *  event's target is its card, and the body is found by where it is. */
+function bodyUnder(e: WheelEvent): HTMLElement | null {
+  const card = (e.target as Element).closest?.(".pane-slot");
+  const body = card?.querySelector<HTMLElement>(":scope > .pane-body");
+  if (!body) return null;
+  const r = body.getBoundingClientRect();
+  const inside = e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom;
+  return inside ? body : null;
+}
+
+/**
+ * Hands a wheel to what is under the pointer in a card's `body`, which
+ * away from 100% takes no pointer of its own: a copy of it, dispatched
+ * there, so a terminal does what it does at 100% — scrollback, or the
+ * wheel or arrow keys sent to a full-screen program. A copy scrolls no
+ * element by itself, so when nothing took it, the nearest scrollable
+ * element in the body scrolls by its deltas. Not scaled by the zoom: a
+ * notch scrolls as much content as at 100%.
+ */
+function handWheel(e: WheelEvent, body: HTMLElement, zoom: number) {
+  body.style.pointerEvents = "auto";
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  body.style.pointerEvents = "";
+  if (!under || !body.contains(under)) return;
+  const legacy = e as WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number };
+  // Where the pointer is in the body unscaled: xterm reports the wheel at
+  // a cell, which it works out in unscaled cells from here.
+  const r = body.getBoundingClientRect();
+  const copy = new WheelEvent("wheel", {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    clientX: r.left + (e.clientX - r.left) / zoom,
+    clientY: r.top + (e.clientY - r.top) / zoom,
+    screenX: e.screenX,
+    screenY: e.screenY,
+    deltaX: e.deltaX,
+    deltaY: e.deltaY,
+    deltaZ: e.deltaZ,
+    deltaMode: e.deltaMode,
+    shiftKey: e.shiftKey,
+    metaKey: e.metaKey,
+    // WebKit's own: xterm reads its scrollback steps from these there.
+    wheelDeltaX: legacy.wheelDeltaX,
+    wheelDeltaY: legacy.wheelDeltaY,
+  } as WheelEventInit);
+  if (!under.dispatchEvent(copy)) return;
+  const scale = e.deltaMode === 1 ? LINE_PX : 1;
+  for (let el: Element | null = under; el && body.contains(el); el = el.parentElement) {
+    const style = getComputedStyle(el);
+    const canY = /auto|scroll/.test(style.overflowY) && el.scrollHeight > el.clientHeight;
+    const canX = /auto|scroll/.test(style.overflowX) && el.scrollWidth > el.clientWidth;
+    if (canY || canX) {
+      el.scrollBy(e.deltaX * scale, e.deltaY * scale);
+      return;
+    }
+  }
+}
+
 /** Pans to a pane's card unless it is wholly in view already. */
 function bringIntoView(paneId: string) {
   const snap = useWorkspaceStore.getState().snapshot;
@@ -148,6 +209,8 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     let pinching: { zoom: number } | null = null;
 
     const onWheel = (e: WheelEvent) => {
+      // Ours, handed to a card's content: on its way there.
+      if (!e.isTrusted) return;
       const cam = store().camera;
       if (!cam) return;
       if (e.ctrlKey) {
@@ -160,10 +223,23 @@ export function BoardHost({ board, children }: { board: boolean; children: React
         store().moveTo(zoomAround(cam, clampZoom(cam.zoom * Math.exp(-step * 0.01)), px, py));
         return;
       }
-      // At 100% a card's content scrolls itself (a terminal's scrollback).
-      const inCard = (e.target as Element).closest?.(".pane-body");
-      if (inCard && atFullSize(cam)) return;
+      // Over a card's content the wheel is the content's, at any zoom;
+      // Alt pans from anywhere.
+      const body = bodyUnder(e);
+      if (body && !e.altKey) {
+        // At 100% the content takes the pointer, and scrolls itself.
+        if (atFullSize(cam)) return;
+        // A browser page is not drawn away from 100%: nothing to scroll.
+        if (!body.querySelector(".browser-pane")) {
+          e.preventDefault();
+          e.stopPropagation();
+          handWheel(e, body, cam.zoom);
+          return;
+        }
+      }
       e.preventDefault();
+      // Alt over a terminal at 100%: the board's, not xterm's too.
+      if (body) e.stopPropagation();
       const scale = e.deltaMode === 1 ? LINE_PX : 1;
       store().moveTo({
         ...cam,
