@@ -224,7 +224,8 @@ export function BoardHost({ board, children }: { board: boolean; children: React
         return;
       }
       // Over a card's content the wheel is the content's, at any zoom;
-      // Alt pans from anywhere.
+      // Alt pans from anywhere — but a browser page shown at 100% is a
+      // native webview over its card, and its wheel never comes here.
       const body = bodyUnder(e);
       if (body && !e.altKey) {
         // At 100% the content takes the pointer, and scrolls itself.
