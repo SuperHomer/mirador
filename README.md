@@ -36,7 +36,8 @@ downloads, the feature tour and the keybinding reference.
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
   in the sidebar): every tab as a frame and every pane as a card on one
-  canvas. Scroll over a card to scroll its content, at any zoom; drag or
+  canvas. Scroll over a card to scroll its content, at any zoom (a
+  browser card pans away from 100%, where its page is not drawn); drag or
   scroll over empty board, a gap or a card's header to pan, or hold ⌥
   (Alt) to pan from anywhere but a browser page at 100%, which keeps its
   own scroll; pinch or Ctrl+scroll to zoom; double-click a card's header

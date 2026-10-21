@@ -143,7 +143,7 @@ export default function BoardShowcase() {
           and a browser page shows while its card is still, wholly in view and nothing
           (palette, panel, menu) is open over it. Any other zoom is an overview, though
           typing still goes to the focused pane and the wheel still scrolls the card
-          under it.
+          under it, unless that is a browser, which pans the board.
         </p>
         <div
           style={{
