@@ -142,7 +142,8 @@ export default function BoardShowcase() {
           is split are two separate layouts. At 100% the pointer reaches into the cards,
           and a browser page shows while its card is still, wholly in view and nothing
           (palette, panel, menu) is open over it. Any other zoom is an overview, though
-          typing still goes to the focused pane.
+          typing still goes to the focused pane and the wheel still scrolls the card
+          under it.
         </p>
         <div
           style={{
