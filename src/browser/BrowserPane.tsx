@@ -182,42 +182,31 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
   // after every render. It only measures, and acts on a change.
   useEffect(() => updateRef.current());
 
-  // While its page is hidden, a card shows a picture of it: taken when the
-  // page goes (what the person just saw), when it navigates, when the card
-  // mounts hidden, and every few seconds while the card is on screen, so a
-  // page that changes itself stays fresh. One capture at a time.
+  // While its page is hidden, a card shows a picture of it, taken while
+  // the card is at least partly on screen: when the page goes (what the
+  // person just saw), when it navigates, when the card comes into view
+  // with no picture yet, and every few seconds after, so a page that
+  // changes itself stays fresh. One capture at a time per pane.
   const [still, setStill] = useState<string | null>(null);
   const stillRef = useRef<string | null>(null);
   const capturing = useRef(false);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
+  // Each run of the effect below is a generation, ended by the next run,
+  // the page going live, or unmount. A capture answers for the page as it
+  // was when it started: from an ended generation it would put an older
+  // page, or one now shown live, over the card, so it is dropped.
+  const generation = useRef(0);
+  // The current generation's capture, for one that ends stale to hand on to.
+  const retry = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
       if (stillRef.current) URL.revokeObjectURL(stillRef.current);
       stillRef.current = null;
-    };
-  }, []);
+    },
+    [],
+  );
   useEffect(() => {
     if (!board || live) return;
-    const capture = () => {
-      if (capturing.current) return;
-      capturing.current = true;
-      browserScreenshot(paneId)
-        .then((png) => {
-          if (!mounted.current) return;
-          const next = URL.createObjectURL(new Blob([png], { type: "image/png" }));
-          if (stillRef.current) URL.revokeObjectURL(stillRef.current);
-          stillRef.current = next;
-          setStill(next);
-        })
-        // A failed capture keeps the picture before it: on Windows a hidden
-        // page may not capture at all.
-        .catch(() => {})
-        .finally(() => {
-          capturing.current = false;
-        });
-    };
+    const gen = generation.current;
     const onScreen = () => {
       const r = placeholderRef.current?.getBoundingClientRect();
       const host = placeholderRef.current?.closest(".tabs-host")?.getBoundingClientRect();
@@ -231,11 +220,39 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
         r.top < host.bottom
       );
     };
+    const capture = () => {
+      if (capturing.current || !onScreen()) return;
+      capturing.current = true;
+      browserScreenshot(paneId)
+        .then((png) => {
+          if (gen !== generation.current) return;
+          const next = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+          if (stillRef.current) URL.revokeObjectURL(stillRef.current);
+          stillRef.current = next;
+          setStill(next);
+        })
+        // A failed capture keeps the picture before it: on Windows a hidden
+        // page may not capture at all.
+        .catch(() => {})
+        .finally(() => {
+          capturing.current = false;
+          // This one held off the capture of the generation that ended it.
+          if (gen !== generation.current) retry.current?.();
+        });
+    };
+    retry.current = capture;
     capture();
-    const refresh = setInterval(() => {
-      if (onScreen()) capture();
-    }, 5000);
-    return () => clearInterval(refresh);
+    const refresh = setInterval(capture, 5000);
+    // Coming into view with no picture yet: at once, not at the next tick.
+    const unsubscribe = useBoardStore.subscribe(() => {
+      if (!stillRef.current) capture();
+    });
+    return () => {
+      generation.current += 1;
+      retry.current = null;
+      clearInterval(refresh);
+      unsubscribe();
+    };
   }, [board, live, url, paneId]);
 
   const commit = () => {
