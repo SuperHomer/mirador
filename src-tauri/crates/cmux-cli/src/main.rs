@@ -770,14 +770,43 @@ fn browser_screenshot(pane: Option<String>, out: Option<std::path::PathBuf>, jso
     let png = base64::engine::general_purpose::STANDARD
         .decode(data["png"].as_str().unwrap_or_default())
         .map_err(|e| format!("bad screenshot from the app: {e}"))?;
-    let path = out.unwrap_or_else(|| std::env::temp_dir().join(format!("mira-screenshot-{pane}-{}.png", now_ms())));
-    std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
+    let path = match out {
+        // Named by the caller, so theirs to overwrite.
+        Some(path) => {
+            std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
+            path
+        }
+        None => {
+            let dir = std::env::temp_dir();
+            let (path, mut file) = new_file(&dir, &format!("mira-screenshot-{pane}-{}", now_ms()), "png")
+                .map_err(|e| format!("{}: {e}", dir.display()))?;
+            file.write_all(&png).map_err(|e| format!("{}: {e}", path.display()))?;
+            path
+        }
+    };
     if json {
         println!("{}", serde_json::json!({ "paneId": pane, "path": path }));
     } else {
         println!("{}", path.display());
     }
     Ok(())
+}
+
+/// A file in `dir` that did not exist before: `<stem>.<ext>`, else
+/// `<stem>-2.<ext>`, `-3`… Two screenshots of a pane in the same
+/// millisecond would otherwise share a path, one caller reading the
+/// other's image.
+fn new_file(dir: &std::path::Path, stem: &str, ext: &str) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    for n in 1.. {
+        let name = if n == 1 { format!("{stem}.{ext}") } else { format!("{stem}-{n}.{ext}") };
+        let path = dir.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("a free name")
 }
 
 fn parse_dir(s: &str) -> Result<SplitDir, String> {
@@ -1538,5 +1567,17 @@ mod tests {
 
         std::env::remove_var(cmux_core::pty::PANE_ENV);
         assert_eq!(own_pane(), None);
+    }
+
+    /// Screenshots taken in the same millisecond each get a file of their
+    /// own, and none is overwritten.
+    #[test]
+    fn new_file_never_reuses_a_path() {
+        let dir = std::env::temp_dir().join(format!("mira-new-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths: Vec<_> = (0..3).map(|_| new_file(&dir, "shot", "png").unwrap().0).collect();
+        let names: Vec<_> = paths.iter().map(|p| p.file_name().unwrap().to_str().unwrap()).collect();
+        assert_eq!(names, ["shot.png", "shot-2.png", "shot-3.png"]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
