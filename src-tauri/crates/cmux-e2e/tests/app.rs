@@ -22,7 +22,8 @@ fn a_pane_mounts_and_its_terminal_echoes() {
     let pane = &panes[0];
 
     // `read-screen` answers only once the pane's terminal is drawn: a
-    // render throw shows as this never happening.
+    // render throw shows as this never happening. Its PTY comes a moment
+    // after, and `type_into` waits for that.
     sb.wait_for("the pane to mount", LONG, || sb.screen(pane));
     // The arithmetic is the shell's: the line typed says `$((6*7))`, so
     // only the shell's answer prints `e2e-42`.
@@ -61,10 +62,7 @@ fn the_apps_own_webview_keeps_its_plugins() {
         .unwrap()
         .to_string();
     sb.wait_for("the split pane to mount", LONG, || sb.screen(&split));
-    // Its shell starts a moment after it is drawn.
-    sb.wait_for("the split pane to take input", LONG, || {
-        sb.request(Request::SendInput { pane_id: Some(split.clone()), data: "echo host-$((6*7))\r".into() }).ok()
-    });
+    sb.type_into(&split, "echo host-$((6*7))\r");
     sb.wait_for("the split pane's shell", LONG, || {
         sb.screen(&split).filter(|s| s.lines().any(|l| l.trim() == "host-42"))
     });
