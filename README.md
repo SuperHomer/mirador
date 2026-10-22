@@ -46,10 +46,12 @@ downloads, the feature tour and the keybinding reference.
   corner, **−** and **+** step the zoom (10% to 400%), double-clicking the
   percentage types one in, **Fit** shows everything, and **Arrange** packs
   the frames into rows, in tab order, to the window's shape. Typing
-  goes to the focused pane at any zoom, but the pointer reaches inside
-  cards only at 100% (the wheel aside); other zooms are an overview. A
-  browser page shows only at 100%, while its card is still, wholly in view
-  and nothing (palette, panel, menu) is open over it
+  goes to the focused pane at any zoom, and from 50% up the pointer
+  reaches inside cards too: click, select text, use the mouse in a
+  program. Below 50% the board is an overview, where a click focuses a
+  card (the wheel still scrolls it). A browser page shows only at 100%,
+  while its card is still, wholly in view and nothing (palette, panel,
+  menu) is open over it
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: an agent tests the page it is building —
