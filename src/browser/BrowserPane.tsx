@@ -244,8 +244,14 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
     capture();
     const refresh = setInterval(capture, 5000);
     // Coming into view with no picture yet: at once, not at the next tick.
+    // Only on the way in — the store changes every frame of a pan, and a
+    // capture that fails fast would otherwise start again each frame; a
+    // failure waits for the tick.
+    let wasOnScreen = onScreen();
     const unsubscribe = useBoardStore.subscribe(() => {
-      if (!stillRef.current) capture();
+      const now = onScreen();
+      if (now && !wasOnScreen && !stillRef.current) capture();
+      wasOnScreen = now;
     });
     return () => {
       generation.current += 1;
