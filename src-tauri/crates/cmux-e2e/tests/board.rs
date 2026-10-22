@@ -58,10 +58,7 @@ fn split(sb: &Sandbox, pane: &str) -> String {
 fn assert_panes_answer(sb: &Sandbox, panes: &[String]) {
     for (i, pane) in panes.iter().enumerate() {
         sb.wait_for("the pane to mount", LONG, || sb.screen(pane));
-        sb.wait_for("the pane to take input", LONG, || {
-            sb.request(Request::SendInput { pane_id: Some(pane.clone()), data: format!("echo board-{i}-$((6*7))\r") })
-                .ok()
-        });
+        sb.type_into(pane, &format!("echo board-{i}-$((6*7))\r"));
         let want = format!("board-{i}-42");
         sb.wait_for("the pane's shell", LONG, || {
             sb.screen(pane).filter(|s| s.lines().any(|l| l.trim() == want))
@@ -170,7 +167,7 @@ fn switching_views_keeps_what_a_terminal_shows() {
     let first = sb.first_pane();
     let other = sb.call(Request::NewTab { command: None })["paneId"].as_str().unwrap().to_string();
     for (pane, word) in [(&first, "alpha"), (&other, "beta")] {
-        sb.wait_for("the pane to take input", LONG, || sb.screen(pane));
+        sb.wait_for("the pane to mount", LONG, || sb.screen(pane));
         sb.type_into(pane, &format!("for i in 1 2 3; do echo {word}-$((i*7)); done\r"));
         let last = format!("{word}-21");
         sb.wait_for("the shell's output", LONG, || sb.screen(pane).filter(|s| s.lines().any(|l| l.trim() == last)));

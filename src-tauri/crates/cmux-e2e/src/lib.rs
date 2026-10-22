@@ -563,8 +563,15 @@ impl Sandbox {
             .and_then(|v| v["text"].as_str().map(String::from))
     }
 
-    /// Types `text` into `pane`.
+    /// Types `text` into `pane`, once its PTY exists. A terminal is drawn,
+    /// and answers `read-screen`, before the app has spawned its PTY, and
+    /// input sent in between is refused ("no pane"). An empty write is
+    /// refused the same way until the PTY is there, and reaches no one
+    /// after: it says when typing can start.
     pub fn type_into(&self, pane: &str, text: &str) {
+        self.wait_for("the pane's PTY", Duration::from_secs(45), || {
+            self.request(Request::SendInput { pane_id: Some(pane.to_string()), data: String::new() }).ok()
+        });
         self.call(Request::SendInput { pane_id: Some(pane.to_string()), data: text.to_string() });
     }
 
