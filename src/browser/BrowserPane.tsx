@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   browserHistory,
   browserNavigate,
+  browserScreenshot,
   closePane,
   focusPane,
   setBrowserBounds,
@@ -181,6 +182,62 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
   // after every render. It only measures, and acts on a change.
   useEffect(() => updateRef.current());
 
+  // While its page is hidden, a card shows a picture of it: taken when the
+  // page goes (what the person just saw), when it navigates, when the card
+  // mounts hidden, and every few seconds while the card is on screen, so a
+  // page that changes itself stays fresh. One capture at a time.
+  const [still, setStill] = useState<string | null>(null);
+  const stillRef = useRef<string | null>(null);
+  const capturing = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (stillRef.current) URL.revokeObjectURL(stillRef.current);
+      stillRef.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    if (!board || live) return;
+    const capture = () => {
+      if (capturing.current) return;
+      capturing.current = true;
+      browserScreenshot(paneId)
+        .then((png) => {
+          if (!mounted.current) return;
+          const next = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+          if (stillRef.current) URL.revokeObjectURL(stillRef.current);
+          stillRef.current = next;
+          setStill(next);
+        })
+        // A failed capture keeps the picture before it: on Windows a hidden
+        // page may not capture at all.
+        .catch(() => {})
+        .finally(() => {
+          capturing.current = false;
+        });
+    };
+    const onScreen = () => {
+      const r = placeholderRef.current?.getBoundingClientRect();
+      const host = placeholderRef.current?.closest(".tabs-host")?.getBoundingClientRect();
+      return (
+        document.visibilityState === "visible" &&
+        !!r &&
+        !!host &&
+        r.right > host.left &&
+        r.left < host.right &&
+        r.bottom > host.top &&
+        r.top < host.bottom
+      );
+    };
+    capture();
+    const refresh = setInterval(() => {
+      if (onScreen()) capture();
+    }, 5000);
+    return () => clearInterval(refresh);
+  }, [board, live, url, paneId]);
+
   const commit = () => {
     setEditing(false);
     if (draft.trim() && draft !== url) {
@@ -233,7 +290,12 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
         </button>
       </div>
       <div className="browser-placeholder" ref={placeholderRef}>
-        {!live && <div className="browser-still">{url}</div>}
+        {!live &&
+          (still ? (
+            <img className="browser-shot" src={still} alt="" draggable={false} />
+          ) : (
+            <div className="browser-still">{url}</div>
+          ))}
       </div>
     </div>
   );

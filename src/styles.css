@@ -781,6 +781,19 @@ body,
   word-break: break-all;
 }
 
+/* The hidden page's picture, where the page draws: its top left at the
+   placeholder's, as the page lays out, never stretched if the card was
+   resized since. Clicks go to the card, as on the placeholder. */
+.browser-shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: left top;
+  pointer-events: none;
+}
+
 /* Every pane draws its edge: with only the focused one outlined, panes on
    the same background ran together and a split had no visible limit. The
    focused pane is marked by a brighter edge instead; the accent stays
@@ -882,6 +895,8 @@ body,
 
 .browser-placeholder {
   flex: 1;
+  position: relative;
+  overflow: hidden;
   background: #ffffff10;
 }
 

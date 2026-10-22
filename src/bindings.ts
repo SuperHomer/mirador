@@ -664,6 +664,9 @@ export const setBrowserBounds = (
   w: number,
   h: number,
 ) => invoke<void>("set_browser_bounds", { paneId, x, y, w, h });
+/** The page as PNG bytes, raw: for a board card whose page is hidden. */
+export const browserScreenshot = (paneId: string) =>
+  invoke<ArrayBuffer>("browser_screenshot", { paneId });
 export const setBrowserVisible = (paneId: string, visible: boolean) =>
   invoke<void>("set_browser_visible", { paneId, visible });
 export const browserNavigate = (paneId: string, url: string) =>

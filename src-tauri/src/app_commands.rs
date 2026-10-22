@@ -70,6 +70,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "open_ssh",
     "ssh_hosts",
     "set_browser_bounds",
+    "browser_screenshot",
     "set_browser_visible",
     "browser_navigate",
     "browser_history",

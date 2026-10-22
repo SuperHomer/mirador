@@ -65,6 +65,7 @@ permissions = [
   "allow-open-ssh",
   "allow-ssh-hosts",
   "allow-set-browser-bounds",
+  "allow-browser-screenshot",
   "allow-set-browser-visible",
   "allow-browser-navigate",
   "allow-browser-history",
