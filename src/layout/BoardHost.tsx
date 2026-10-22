@@ -302,6 +302,8 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       if (!cam || atFullSize(cam)) return;
       const under = (e.target as Element).closest?.(".xterm")?.querySelector(".xterm-screen") ?? null;
       if (e.type === "mousedown") held = under;
+      // A press released outside the window sends no mouseup here.
+      else if (e.buttons === 0 && e.type !== "mouseup") held = null;
       const screen = held ?? under;
       if (e.type === "mouseup") held = null;
       if (!screen) return;
