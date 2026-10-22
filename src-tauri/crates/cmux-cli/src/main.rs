@@ -337,6 +337,16 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// A PNG of the page, written to a file whose path it prints: the
+    /// part of the page the pane shows, at screen resolution — what a
+    /// person would see there, even while the pane is hidden. Without
+    /// --out, a new file in the temp directory.
+    Screenshot {
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// Click an element by snapshot id or CSS selector.
     Click {
         target: String,
@@ -638,6 +648,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 url,
             },
             BrowserAction::Snapshot { pane } => Request::BrowserSnapshot { pane_id: pane },
+            BrowserAction::Screenshot { out, pane } => return browser_screenshot(pane, out, cli.json),
             BrowserAction::Click { target, pane } => Request::BrowserClick {
                 pane_id: pane,
                 target,
@@ -745,6 +756,28 @@ fn run(cli: Cli) -> Result<(), String> {
 
     let response = send_request(req)?;
     render(response, cli.json, quiet_output, empty_note.as_deref())
+}
+
+/// The app sends the PNG; the CLI writes it, so the app writes nowhere.
+fn browser_screenshot(pane: Option<String>, out: Option<std::path::PathBuf>, json: bool) -> Result<(), String> {
+    use base64::Engine;
+    let resp = send_request(Request::BrowserScreenshot { pane_id: pane })?;
+    if !resp.ok {
+        return render(resp, json, false, None);
+    }
+    let data = resp.data.unwrap_or_default();
+    let pane = data["paneId"].as_str().unwrap_or("browser");
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(data["png"].as_str().unwrap_or_default())
+        .map_err(|e| format!("bad screenshot from the app: {e}"))?;
+    let path = out.unwrap_or_else(|| std::env::temp_dir().join(format!("mira-screenshot-{pane}-{}.png", now_ms())));
+    std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
+    if json {
+        println!("{}", serde_json::json!({ "paneId": pane, "path": path }));
+    } else {
+        println!("{}", path.display());
+    }
+    Ok(())
 }
 
 fn parse_dir(s: &str) -> Result<SplitDir, String> {

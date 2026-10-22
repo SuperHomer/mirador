@@ -7,6 +7,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 use cmux_e2e::{e2e, Sandbox};
+use cmux_protocol::{Request, View};
 
 const LONG: Duration = Duration::from_secs(45);
 
@@ -74,6 +75,14 @@ const LATE: &str = r#"<!doctype html><title>Late</title>
 <script>setTimeout(() => { document.body.innerHTML = "<h1 id='arrived'>Arrived late</h1>"; }, 1500);</script>
 <div id="spinner">Loading…</div>"#;
 
+/// Red, with a blue band across its top: a screenshot drawn upside down
+/// shows it at the bottom.
+const RED: &str = r#"<!doctype html><title>Red</title>
+<style>html, body { margin: 0; height: 100%; background: #ff0000; } div { height: 40px; background: #0000ff; }</style><div></div>"#;
+
+const BLUE: &str = r#"<!doctype html><title>Blue</title>
+<style>html, body { margin: 0; height: 100%; background: #0000ff; }</style>"#;
+
 /// Serves the fixture pages on an ephemeral port for the life of the test
 /// process, and gives the port.
 fn serve_fixture() -> u16 {
@@ -137,6 +146,8 @@ fn serve_page(mut stream: std::net::TcpStream) {
         "/spam" => ("200 OK", SPAM),
         "/keys" => ("200 OK", KEYS),
         "/late" => ("200 OK", LATE),
+        "/red" => ("200 OK", RED),
+        "/blue" => ("200 OK", BLUE),
         _ => ("404 Not Found", "not found"),
     };
     let _ = write!(
@@ -1060,4 +1071,73 @@ fn snapshot_right_after_navigate() {
     browser(&sb, &first, &["navigate", &page("/page2")]);
     let snap = browser(&sb, &first, &["snapshot"]);
     assert!(snap.starts_with("Page two — "), "the new page, not the old one:\n{snap}");
+}
+
+/// A screenshot's size and its pixels, as RGB.
+fn decode_png(path: &std::path::Path) -> (u32, u32, impl Fn(u32, u32) -> [u8; 3]) {
+    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let mut reader = png::Decoder::new(std::io::BufReader::new(file)).read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let channels = info.color_type.samples() as u32;
+    let width = info.width;
+    let pixel = move |x: u32, y: u32| {
+        let i = ((y * width + x) * channels) as usize;
+        [buf[i], buf[i + 1], buf[i + 2]]
+    };
+    (info.width, info.height, pixel)
+}
+
+fn is_red([r, g, b]: [u8; 3]) -> bool {
+    r > 220 && g < 40 && b < 40
+}
+
+fn is_blue([r, g, b]: [u8; 3]) -> bool {
+    b > 220 && r < 40 && g < 40
+}
+
+/// A screenshot is the page as the pane shows it, the right way up, at
+/// the display's resolution — and without --out lands in a new file in
+/// the temp directory.
+#[test]
+fn screenshot_shows_the_page_at_screen_resolution() {
+    e2e!();
+    let (sb, first) = launched("bshot");
+    let pane = browser(&sb, &first, &["open", "--tab", &page("/red")]).trim().to_string();
+    let out = sb.project.join("red.png");
+    let printed = browser(&sb, &first, &["screenshot", "--pane", &pane, "--out", out.to_str().unwrap()]);
+    assert_eq!(printed.trim(), out.to_str().unwrap());
+    let (width, height, pixel) = decode_png(&out);
+    let size: Vec<f64> = serde_json::from_str(&browser(&sb, &first, &["eval", "--pane", &pane, "[innerWidth, innerHeight, devicePixelRatio]"])).unwrap();
+    let (w, h) = ((size[0] * size[2]) as u32, (size[1] * size[2]) as u32);
+    assert_eq!((width, height), (w, h), "the pane's {}x{} points at {}x", size[0], size[1], size[2]);
+    assert!(is_red(pixel(width / 2, height / 2)), "the middle: {:?}", pixel(width / 2, height / 2));
+    assert!(is_blue(pixel(width / 2, 2)), "the band at the top: {:?}", pixel(width / 2, 2));
+
+    let printed = browser(&sb, &first, &["screenshot", "--pane", &pane]);
+    let default = std::path::PathBuf::from(printed.trim());
+    assert!(default.starts_with(std::env::temp_dir()) && printed.contains(&pane), "{printed}");
+    let (_, _, pixel) = decode_png(&default);
+    assert!(is_red(pixel(width / 2, height / 2)));
+    std::fs::remove_file(&default).unwrap();
+}
+
+/// What the board needs: a pane it has never shown — made on a zoomed-out
+/// board — captured as it is now, after a navigation it never showed.
+#[test]
+fn screenshot_shows_a_hidden_page_as_it_is_now() {
+    e2e!();
+    let (sb, first) = launched("bshothidden");
+    sb.call(Request::View { view: Some(View::Board) });
+    let camera = sb.snapshot()["camera"].clone();
+    let (x, y) = (camera["x"].as_f64().unwrap(), camera["y"].as_f64().unwrap());
+    sb.call(Request::SetCamera { x, y, zoom: 0.5, width: None, height: None });
+    let pane = browser(&sb, &first, &["open", "--tab", &page("/red")]).trim().to_string();
+    assert_eq!(browser(&sb, &first, &["eval", "--pane", &pane, "document.visibilityState"]).trim(), "\"hidden\"");
+    browser(&sb, &first, &["navigate", "--pane", &pane, &page("/blue")]);
+    let out = sb.project.join("blue.png");
+    browser(&sb, &first, &["screenshot", "--pane", &pane, "--out", out.to_str().unwrap()]);
+    let (width, height, pixel) = decode_png(&out);
+    assert!(is_blue(pixel(width / 2, height / 2)), "the page it went to: {:?}", pixel(width / 2, height / 2));
+    assert_eq!(browser(&sb, &first, &["eval", "--pane", &pane, "document.visibilityState"]).trim(), "\"hidden\"", "never shown");
 }

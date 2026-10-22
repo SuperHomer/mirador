@@ -416,6 +416,12 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let result = crate::browser::execute(app, &pane, json!({ "op": "snapshot" }))?;
             parse_bridge_result(&pane, &result)
         }
+        Request::BrowserScreenshot { pane_id } => {
+            use base64::Engine;
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let png = crate::browser::screenshot(app, &pane)?;
+            Ok(json!({ "paneId": pane, "png": base64::engine::general_purpose::STANDARD.encode(png) }))
+        }
         Request::BrowserClick { pane_id, target } => {
             let pane = resolve_browser_pane(&state, pane_id)?;
             let result =

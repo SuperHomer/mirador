@@ -122,6 +122,7 @@ mira browser text main                 # what the page says (a snapshot lists
                                        # only what you can act on)
 mira browser console --errors          # what went wrong on this page
 mira browser eval "document.title"     # anything else, as JSON
+mira browser screenshot                # a PNG of what the pane shows; prints its path
 ```
 
 The commands. All but `open` take `--pane <id>`; without it they go to
@@ -160,6 +161,11 @@ the active tab's browser pane, else the one used last:
   unhandled rejections and failed loads, oldest first, or "(no errors)" /
   "(no console output)". Exits 0 whatever it shows.
 - `eval <js>`: the result as JSON; a Promise is awaited.
+- `screenshot [--out <path>]`: a PNG of the part of the page the pane
+  shows, at screen resolution, written to `--out` or else to a new file
+  in the temp directory; prints the path. A pane that is hidden — on the
+  board, in another tab, the window minimised — is captured as its page
+  is now. macOS and Windows only.
 
 What to know:
 
@@ -452,7 +458,7 @@ Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session agent_new agent_list
 agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
-browser_history browser_wait browser_console ssh_open ssh_hosts
+browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 

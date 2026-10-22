@@ -611,6 +611,157 @@ pub fn history(app: &AppHandle, pane_id: &str, action: &str) -> Result<Loads, St
     Ok(before)
 }
 
+/// The pane's page as a PNG: the part of it the pane shows, at the
+/// display's resolution. A hidden page is captured as it is now, not as
+/// it last showed — on the board, in another tab, the window minimised.
+pub fn screenshot(app: &AppHandle, pane_id: &str) -> Result<Vec<u8>, String> {
+    let webview = webview(app, pane_id, None)?;
+    // A page that never loads is captured as it shows: the error page.
+    let _ = first_load(app, pane_id, None);
+    capture(&webview, Instant::now() + ANSWER_WAIT)
+}
+
+const CAPTURE_TIMED_OUT: &str = "the browser did not capture the page in time";
+
+/// WebKit's snapshot is taken on the main thread, which WebKit requires,
+/// and it answers there; only the image is taken there. Drawing it into
+/// pixels and encoding the PNG, 30–50 ms for a pane, happen on this
+/// thread instead, so the app does not stall for them.
+#[cfg(target_os = "macos")]
+fn capture(webview: &Webview, deadline: Instant) -> Result<Vec<u8>, String> {
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSImage;
+    use objc2_core_graphics::CGImage;
+    use objc2_foundation::NSError;
+    use objc2_web_kit::{WKSnapshotConfiguration, WKWebView};
+
+    let (tx, rx) = mpsc::channel::<Result<Retained<CGImage>, String>>();
+    webview
+        .with_webview(move |platform| {
+            let mtm = MainThreadMarker::new().expect("with_webview runs on the main thread");
+            // SAFETY: on macOS the platform webview is the WKWebView, alive
+            // for this call.
+            let wk: &WKWebView = unsafe { &*platform.inner().cast() };
+            let done = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+                // SAFETY: WebKit hands a valid image, or null and an error.
+                let image = match unsafe { (image.as_ref(), error.as_ref()) } {
+                    (Some(image), _) => unsafe {
+                        image.CGImageForProposedRect_context_hints(std::ptr::null_mut(), None, None)
+                    }
+                    .ok_or_else(|| "the page's snapshot has no image".to_string()),
+                    (None, Some(error)) => Err(format!("the browser could not capture the page: {}", error.localizedDescription())),
+                    (None, None) => Err("the browser could not capture the page".to_string()),
+                };
+                let _ = tx.send(image);
+            });
+            unsafe {
+                let config = WKSnapshotConfiguration::new(mtm);
+                wk.takeSnapshotWithConfiguration_completionHandler(Some(&config), &done);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    let image = rx
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .map_err(|_| CAPTURE_TIMED_OUT.to_string())??;
+    encode_png(&image)
+}
+
+/// The image drawn into sRGB pixels, its alpha dropped — a page is
+/// opaque — and encoded.
+#[cfg(target_os = "macos")]
+fn encode_png(image: &objc2_core_graphics::CGImage) -> Result<Vec<u8>, String> {
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+    use objc2_core_graphics::{
+        kCGColorSpaceSRGB, CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
+    };
+
+    let (width, height) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
+    let mut rgbx = vec![0u8; width * height * 4];
+    let srgb = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }));
+    // SAFETY: `rgbx` holds `height` rows of `width * 4` bytes and outlives
+    // the context, which is dropped before it is read.
+    let context = unsafe {
+        CGBitmapContextCreate(
+            rgbx.as_mut_ptr().cast(),
+            width,
+            height,
+            8,
+            width * 4,
+            srgb.as_deref(),
+            CGImageAlphaInfo::NoneSkipLast.0,
+        )
+    }
+    .ok_or("could not draw the page's snapshot")?;
+    let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width as f64, height as f64));
+    CGContext::draw_image(Some(&context), rect, Some(image));
+    drop(context);
+    let rgb: Vec<u8> = rgbx.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, _]| [r, g, b]).collect();
+
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    writer.write_image_data(&rgb).map_err(|e| e.to_string())?;
+    writer.finish().map_err(|e| e.to_string())?;
+    Ok(png)
+}
+
+/// WebView2 encodes the PNG itself, into a memory stream, and calls back
+/// on the main thread once it is written.
+#[cfg(windows)]
+fn capture(webview: &Webview, deadline: Instant) -> Result<Vec<u8>, String> {
+    use webview2_com::CapturePreviewCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
+    use windows::Win32::UI::Shell::SHCreateMemStream;
+
+    let (tx, rx) = mpsc::channel::<Result<Vec<u8>, String>>();
+    webview
+        .with_webview(move |platform| unsafe {
+            // Each failure here drops `tx`, which the wait reports.
+            let Ok(core) = platform.controller().CoreWebView2() else { return };
+            let Some(stream) = SHCreateMemStream(None) else { return };
+            let written = stream.clone();
+            let done = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+                let _ = tx.send(result.map_err(|e| e.to_string()).and_then(|()| read_stream(&written)));
+                Ok(())
+            }));
+            let _ = core.CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, &stream, &done);
+        })
+        .map_err(|e| e.to_string())?;
+    match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(png) => png,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(CAPTURE_TIMED_OUT.to_string()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err("the browser could not capture the page".to_string()),
+    }
+}
+
+#[cfg(windows)]
+unsafe fn read_stream(stream: &windows::Win32::System::Com::IStream) -> Result<Vec<u8>, String> {
+    use windows::Win32::System::Com::STREAM_SEEK_SET;
+
+    unsafe { stream.Seek(0, STREAM_SEEK_SET, None) }.map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        let mut read = 0;
+        unsafe { stream.Read(chunk.as_mut_ptr().cast(), chunk.len() as u32, Some(&mut read)) }
+            .ok()
+            .map_err(|e| e.to_string())?;
+        if read == 0 {
+            return Ok(bytes);
+        }
+        bytes.extend_from_slice(&chunk[..read as usize]);
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn capture(_webview: &Webview, _deadline: Instant) -> Result<Vec<u8>, String> {
+    Err("browser screenshots are not supported on this platform yet".to_string())
+}
+
 pub fn set_visible(app: &AppHandle, pane_id: &str, visible: bool) {
     // Recorded before looking for the webview: a creation that reads it
     // after this either sees it or made the webview this then finds.
