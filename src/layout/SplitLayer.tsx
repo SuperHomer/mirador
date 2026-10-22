@@ -420,8 +420,13 @@ function pressCard(e: React.MouseEvent, paneId: string) {
   // prop. So the press blurs nothing, and the card hands over the keyboard.
   e.preventDefault();
   const term = isLent(paneId) ? undefined : getTerminal(paneId);
-  if (term) term.focus();
-  else (document.activeElement as HTMLElement | null)?.blur();
+  if (term) return term.focus();
+  // A pane with no terminal keeps what holds the keyboard in its own
+  // content (a search box); anything else's is let go, or keys would go
+  // on to another card's terminal.
+  const holder = document.activeElement as HTMLElement | null;
+  const body = e.currentTarget.querySelector(".pane-body");
+  if (holder && !body?.contains(holder)) holder.blur();
 }
 
 /**
