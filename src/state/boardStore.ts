@@ -95,9 +95,18 @@ export const useBoardStore = create<BoardStore>((set, get) => {
   };
 });
 
-/** Zoom 100% (within rounding): card content takes the pointer. */
+/** Zoom 100% (within rounding): a browser card shows its page. */
 export function atFullSize(camera: Camera | null): boolean {
   return !camera || Math.abs(camera.zoom - 1) < 1e-3;
+}
+
+/** Below this zoom the board is an overview: card content takes no
+ *  pointer, and a click on a card only focuses it. */
+const POINTER_ZOOM = 0.5;
+
+/** Zoom 50% and up (within rounding): card content takes the pointer. */
+export function takesPointer(camera: Camera | null): boolean {
+  return !camera || camera.zoom > POINTER_ZOOM - 1e-3;
 }
 
 /** Shows the whole board. */

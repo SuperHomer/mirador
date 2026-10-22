@@ -20,6 +20,7 @@ import {
 import { boardDrag } from "./BoardHost";
 import { flyToCard } from "../state/boardStore";
 import { TerminalPane } from "../terminal/TerminalPane";
+import { getTerminal, isLent } from "../terminal/registry";
 import { BrowserPane } from "../browser/BrowserPane";
 import { DiffPane } from "../diff/DiffPane";
 import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
@@ -228,9 +229,9 @@ export function SplitLayer({
                       : {}),
                   }
             }
-            // Below 100% a card's content takes no pointer; a click on it
+            // Below 50% a card's content takes no pointer; a click on it
             // still lands here, and makes it the pane the keyboard types to.
-            onMouseDown={card ? () => void focusPane(p.paneId) : undefined}
+            onMouseDown={card ? (e) => pressCard(e, p.paneId) : undefined}
           >
             {card && (
               <CardHeader
@@ -241,7 +242,7 @@ export function SplitLayer({
                 onPointerDown={(e) => dragCard(e, card, "")}
               />
             )}
-            <div className="pane-body">
+            <div className={`pane-body${browser ? " browser" : ""}`}>
               {wall ? (
                 // On the board the wall borrows no terminal: each agent's own
                 // card is on screen already, and a terminal is drawn in one
@@ -405,9 +406,32 @@ function resized(r: BoardRect, edges: string, dx: number, dy: number): BoardRect
 }
 
 /**
+ * A press on a card makes it the focused pane, and leaves its content
+ * holding the keyboard.
+ */
+function pressCard(e: React.MouseEvent, paneId: string) {
+  void focusPane(paneId);
+  // From 50% up a press in the content is the content's: a terminal takes
+  // the keyboard itself, and a selection starts there.
+  if ((e.target as Element).closest(".pane-body")) return;
+  // Anywhere else — all of the card, below 50% — the press's default
+  // blurs whatever holds the keyboard. When that is this card's own
+  // terminal, nothing gives it back: focusing the focused pane changes no
+  // prop. So the press blurs nothing, and the card hands over the keyboard.
+  e.preventDefault();
+  const term = isLent(paneId) ? undefined : getTerminal(paneId);
+  if (term) return term.focus();
+  // A pane with no terminal keeps what holds the keyboard in its own
+  // content (a search box); anything else's is let go, or keys would go
+  // on to another card's terminal.
+  const holder = document.activeElement as HTMLElement | null;
+  const body = e.currentTarget.querySelector(".pane-body");
+  if (holder && !body?.contains(holder)) holder.blur();
+}
+
+/**
  * A card's title bar: what the pane is, and an agent's status. Dragged, it
- * moves the card; double-clicked, it goes to the card at 100%, where its
- * content takes the pointer.
+ * moves the card; double-clicked, it goes to the card at 100%.
  */
 function CardHeader({
   card,

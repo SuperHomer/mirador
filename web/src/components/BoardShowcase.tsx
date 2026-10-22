@@ -139,11 +139,12 @@ export default function BoardShowcase() {
           pinch to zoom, and double-click a card’s header to fly to it at 100%. A
           frame’s + adds a pane to it (its Agent wall item opens the wall in a frame of
           its own); New frame adds a tab. Where a card sits on the board and how its tab
-          is split are two separate layouts. At 100% the pointer reaches into the cards,
-          and a browser page shows while its card is still, wholly in view and nothing
-          (palette, panel, menu) is open over it. Any other zoom is an overview, though
-          typing still goes to the focused pane and the wheel still scrolls the card
-          under it, unless that is a browser, which pans the board.
+          is split are two separate layouts. From 50% up the pointer reaches into the
+          cards — click, select text, use the mouse in a program — and at 100% a browser
+          page shows while its card is still, wholly in view and nothing (palette, panel,
+          menu) is open over it. Below 50% is an overview, where a click focuses a card,
+          though typing still goes to the focused pane and the wheel still scrolls the
+          card under it, unless that is a browser, which pans the board.
         </p>
         <div
           style={{
