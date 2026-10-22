@@ -1701,8 +1701,15 @@ pub fn ssh_hosts() -> Vec<String> {
 
 /// Frontend reports a browser pane's rect; creates or repositions the
 /// native child webview.
+///
+/// Async, so off the main thread: a sync command runs there, inside the
+/// host webview's IPC handler, and on Windows WebView2 cannot create a
+/// webview from in there (tauri-apps/wry#583). `add_child` waited forever
+/// for a page that never came, and every IPC call queued behind it — the
+/// board still panned, being the frontend's alone, but no button or
+/// palette action reached Rust again.
 #[tauri::command]
-pub fn set_browser_bounds(
+pub async fn set_browser_bounds(
     app: AppHandle,
     pane_id: String,
     x: f64,

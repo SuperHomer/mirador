@@ -970,6 +970,42 @@ fn navigate_while_the_pane_is_being_created_lands_where_it_was_sent() {
     opening.wait().unwrap();
 }
 
+/// A pane closed while it opens stays closed, as far as a running app
+/// shows: smoke coverage only. Whether a late page load can bring it back
+/// is timing this cannot force; `record_navigation`'s unit tests in
+/// `browser.rs` pin that.
+#[test]
+fn a_pane_closed_while_it_opens_stays_closed() {
+    e2e!();
+    let (sb, first) = launched("bcloseearly");
+    let url = page("/slow/page2");
+    let mut opening = sb
+        .mira_command(Some(&first), &["browser", "open", "--tab", &url])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pane = sb.wait_for("the pane to be listed", LONG, || {
+        sb.snapshot()["browserPanes"]
+            .as_array()?
+            .iter()
+            .find(|b| b["url"] == url.as_str())
+            .and_then(|b| b["paneId"].as_str().map(String::from))
+    });
+    let (code, _, err) = sb.mira(Some(&first), &["close-pane", &pane]);
+    assert_eq!(code, 0, "{err}");
+    opening.wait().unwrap();
+    // Gives a late callback for the closed pane a chance to land, no more:
+    // separate connections can finish in any order, and `open` returns
+    // even when its first load times out.
+    browser(&sb, &first, &["open", "--tab", &page("/slow/page2")]);
+    let listed = sb.snapshot()["browserPanes"].as_array().unwrap().iter().any(|b| b["paneId"] == pane.as_str());
+    assert!(!listed, "the closed pane is listed again");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "snapshot", "--pane", &pane]);
+    assert_ne!(code, 0);
+    assert!(err.contains("no browser pane"), "{err}");
+}
+
 /// Without `--pane`, a command goes to the active tab's browser pane;
 /// with none there, to the one opened or driven last — never an arbitrary
 /// one.
