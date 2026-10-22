@@ -229,7 +229,7 @@ export function SplitLayer({
                       : {}),
                   }
             }
-            // Below 100% a card's content takes no pointer; a click on it
+            // Below 50% a card's content takes no pointer; a click on it
             // still lands here, and makes it the pane the keyboard types to.
             onMouseDown={card ? (e) => pressCard(e, p.paneId) : undefined}
           >
@@ -242,7 +242,7 @@ export function SplitLayer({
                 onPointerDown={(e) => dragCard(e, card, "")}
               />
             )}
-            <div className="pane-body">
+            <div className={`pane-body${browser ? " browser" : ""}`}>
               {wall ? (
                 // On the board the wall borrows no terminal: each agent's own
                 // card is on screen already, and a terminal is drawn in one
@@ -411,10 +411,10 @@ function resized(r: BoardRect, edges: string, dx: number, dy: number): BoardRect
  */
 function pressCard(e: React.MouseEvent, paneId: string) {
   void focusPane(paneId);
-  // At 100% a press in the content is the content's: a terminal takes the
-  // keyboard itself, and a selection starts there.
+  // From 50% up a press in the content is the content's: a terminal takes
+  // the keyboard itself, and a selection starts there.
   if ((e.target as Element).closest(".pane-body")) return;
-  // Anywhere else — all of the card, below 100% — the press's default
+  // Anywhere else — all of the card, below 50% — the press's default
   // blurs whatever holds the keyboard. When that is this card's own
   // terminal, nothing gives it back: focusing the focused pane changes no
   // prop. So the press blurs nothing, and the card hands over the keyboard.
@@ -431,8 +431,7 @@ function pressCard(e: React.MouseEvent, paneId: string) {
 
 /**
  * A card's title bar: what the pane is, and an agent's status. Dragged, it
- * moves the card; double-clicked, it goes to the card at 100%, where its
- * content takes the pointer.
+ * moves the card; double-clicked, it goes to the card at 100%.
  */
 function CardHeader({
   card,

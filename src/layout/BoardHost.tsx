@@ -3,14 +3,14 @@ import { listen } from "@tauri-apps/api/event";
 import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView } from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { arrangeBoard, atFullSize, fitBoard, panToCard, useBoardStore } from "../state/boardStore";
+import { arrangeBoard, atFullSize, fitBoard, panToCard, takesPointer, useBoardStore } from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
 /** Where the − / + buttons stop, MIN_ZOOM to MAX_ZOOM. */
 const ZOOM_STOPS = [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
-/** Zooming this close to 100% lands on it: 100% is where cards take the
- *  pointer, and a pinch rarely stops exactly there. */
+/** Zooming this close to 100% lands on it: 100% is where a browser card
+ *  shows its page, and a pinch rarely stops exactly there. */
 const SNAP = 0.04;
 /** Wheel line steps, in pixels (Firefox-style `deltaMode` 1). */
 const LINE_PX = 16;
@@ -58,9 +58,12 @@ function typeZoom(text: string) {
 }
 
 /** The body of the card under the pointer, if it is over one: not its
- *  header, nor a gap. Away from 100% the body takes no pointer, so the
- *  event's target is its card, and the body is found by where it is. */
+ *  header, nor a gap. A body taking the pointer holds the event's target;
+ *  one taking none (below 50%, or a browser card's away from 100%) leaves
+ *  its card the target, and is found by where it is. */
 function bodyUnder(e: WheelEvent): HTMLElement | null {
+  const own = (e.target as Element).closest?.<HTMLElement>(".pane-slot > .pane-body");
+  if (own) return own;
   const card = (e.target as Element).closest?.(".pane-slot");
   const body = card?.querySelector<HTMLElement>(":scope > .pane-body");
   if (!body) return null;
@@ -71,28 +74,27 @@ function bodyUnder(e: WheelEvent): HTMLElement | null {
 
 /**
  * Hands a wheel to what is under the pointer in a card's `body`, which
- * away from 100% takes no pointer of its own: a copy of it, dispatched
- * there, so a terminal does what it does at 100% — scrollback, or the
- * wheel or arrow keys sent to a full-screen program. A copy scrolls no
- * element by itself, so when nothing took it, the nearest scrollable
- * element in the body scrolls by its deltas. Not scaled by the zoom: a
- * notch scrolls as much content as at 100%.
+ * below 50% takes no pointer of its own: a copy of it, dispatched there,
+ * so a terminal does what it does at 100% — scrollback, or the wheel or
+ * arrow keys sent to a full-screen program. A copy scrolls no element by
+ * itself, so when nothing took it, the nearest scrollable element in the
+ * body scrolls by its deltas. Not scaled by the zoom: a notch scrolls as
+ * much content as at 100%.
  */
-function handWheel(e: WheelEvent, body: HTMLElement, zoom: number) {
+function handWheel(e: WheelEvent, body: HTMLElement) {
   body.style.pointerEvents = "auto";
   const under = document.elementFromPoint(e.clientX, e.clientY);
   body.style.pointerEvents = "";
   if (!under || !body.contains(under)) return;
   const legacy = e as WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number };
-  // Where the pointer is in the body unscaled: xterm reports the wheel at
-  // a cell, which it works out in unscaled cells from here.
-  const r = body.getBoundingClientRect();
+  // Where it is on screen: on its way to a terminal, `unscale` makes it
+  // where it is in the terminal.
   const copy = new WheelEvent("wheel", {
     bubbles: true,
     cancelable: true,
     composed: true,
-    clientX: r.left + (e.clientX - r.left) / zoom,
-    clientY: r.top + (e.clientY - r.top) / zoom,
+    clientX: e.clientX,
+    clientY: e.clientY,
     screenX: e.screenX,
     screenY: e.screenY,
     deltaX: e.deltaX,
@@ -228,18 +230,18 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       // native webview over its card, and its wheel never comes here.
       const body = bodyUnder(e);
       if (body && !e.altKey) {
-        // At 100% the content takes the pointer, and scrolls itself.
-        if (atFullSize(cam)) return;
+        // From 50% up the content takes the pointer, and scrolls itself.
+        if (body.contains(e.target as Node)) return;
         // A browser page is not drawn away from 100%: nothing to scroll.
         if (!body.querySelector(".browser-pane")) {
           e.preventDefault();
           e.stopPropagation();
-          handWheel(e, body, cam.zoom);
+          handWheel(e, body);
           return;
         }
       }
       e.preventDefault();
-      // Alt over a terminal at 100%: the board's, not xterm's too.
+      // Alt over a card's content: the board's, not the content's too.
       if (body) e.stopPropagation();
       const scale = e.deltaMode === 1 ? LINE_PX : 1;
       store().moveTo({
@@ -281,6 +283,37 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       host.removeEventListener("gesturechange", onGestureChange, { capture: true });
       host.removeEventListener("gestureend", onGestureEnd, { capture: true });
     };
+  }, [board]);
+
+  // xterm works out the cell under the pointer from clientX/Y less its
+  // screen's bounding rect, which the zoom scales, in cells it does not:
+  // under a zoom z it lands z times as far from the corner as it should.
+  // So a mouse event for a terminal has its point unscaled about that
+  // screen before anything reads it. A selection, or a drag reported to a
+  // program, goes on in mousemove and mouseup on the document, off the
+  // terminal: the terminal pressed keeps the correction until mouseup.
+  // The event itself is corrected, not a copy re-dispatched: a copy is
+  // untrusted, and would lose the press's own work (focus, selection).
+  useEffect(() => {
+    if (!board) return;
+    let held: Element | null = null;
+    const unscale = (e: MouseEvent) => {
+      const cam = useBoardStore.getState().camera;
+      if (!cam || atFullSize(cam)) return;
+      const under = (e.target as Element).closest?.(".xterm")?.querySelector(".xterm-screen") ?? null;
+      if (e.type === "mousedown") held = under;
+      const screen = held ?? under;
+      if (e.type === "mouseup") held = null;
+      if (!screen) return;
+      const r = screen.getBoundingClientRect();
+      Object.defineProperties(e, {
+        clientX: { value: r.left + (e.clientX - r.left) / cam.zoom },
+        clientY: { value: r.top + (e.clientY - r.top) / cam.zoom },
+      });
+    };
+    const types = ["mousedown", "mousemove", "mouseup", "click", "dblclick", "contextmenu", "wheel"] as const;
+    types.forEach((t) => window.addEventListener(t, unscale, { capture: true }));
+    return () => types.forEach((t) => window.removeEventListener(t, unscale, { capture: true }));
   }, [board]);
 
   // Dragging empty board pans: the board itself, or a frame's background.
@@ -325,7 +358,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
   return (
     <div
       ref={hostRef}
-      className={`tabs-host${board ? " board" : ""}${board && !atFullSize(camera) ? " overview" : ""}`}
+      className={`tabs-host${board ? " board" : ""}${board && !atFullSize(camera) ? " overview" : ""}${board && !takesPointer(camera) ? " distant" : ""}`}
       style={
         board
           ? {
