@@ -237,7 +237,9 @@ enum TaskAction {
     /// Write a card in this tab, in To do, and print its id. It moves only
     /// when moved: `task move`, `task done`.
     Add {
-        #[arg(trailing_var_arg = true, required = true)]
+        // Not trailing_var_arg: `--to` after the title is an option, not
+        // more title.
+        #[arg(required = true)]
         title: Vec<String>,
         /// The agent it is for: a teammate's name in this tab, as
         /// `agent send` takes it.
@@ -283,7 +285,9 @@ enum AgentAction {
     /// waiting on a person (a permission prompt) unless --force.
     Send {
         to: String,
-        #[arg(trailing_var_arg = true, required = true)]
+        // Not trailing_var_arg: `--card`, `--wait` after the message are
+        // options, not more message.
+        #[arg(required = true)]
         message: Vec<String>,
         /// Answer a prompt the agent is waiting on anyway.
         #[arg(long)]
@@ -1679,6 +1683,40 @@ fn install() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse(args: &[&str]) -> Command {
+        Cli::try_parse_from(["mira"].iter().chain(args)).unwrap_or_else(|e| panic!("{args:?}: {e}")).command
+    }
+
+    #[test]
+    fn options_go_before_or_after_a_title_or_a_message() {
+        for args in [
+            &["task", "add", "Step", "1:", "the", "model", "--to", "worker"][..],
+            &["task", "add", "--to", "worker", "Step", "1:", "the", "model"],
+            &["task", "add", "Step 1: the model", "--to", "worker"],
+        ] {
+            let Command::Task { action: TaskAction::Add { title, to } } = parse(args) else { panic!("{args:?}") };
+            assert_eq!((title.join(" ").as_str(), to.as_deref()), ("Step 1: the model", Some("worker")), "{args:?}");
+        }
+        for args in [
+            &["agent", "send", "worker", "Step 2", "go", "--card", "ab12", "--wait"][..],
+            &["agent", "send", "worker", "--card", "ab12", "--wait", "Step 2", "go"],
+        ] {
+            let Command::Agent { action: AgentAction::Send { to, message, card, wait, .. } } = parse(args) else {
+                panic!("{args:?}")
+            };
+            assert_eq!(
+                (to.as_str(), message.join(" ").as_str(), card.as_deref(), wait),
+                ("worker", "Step 2 go", Some("ab12"), true),
+                "{args:?}"
+            );
+        }
+        // A word that looks like an option is still text after `--`.
+        let Command::Task { action: TaskAction::Add { title, to } } = parse(&["task", "add", "--", "drop", "--to"]) else {
+            panic!()
+        };
+        assert_eq!((title.join(" ").as_str(), to), ("drop --to", None));
+    }
 
     /// How a hook knows which pane its agent runs in. The tty fallback is
     /// unix-only, so on Windows this environment variable is the only

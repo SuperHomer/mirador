@@ -441,6 +441,10 @@ Done:
   unknown id, an ambiguous prefix or a card Mirador made refuses the send
   before anything is typed.
 
+Options go before or after a title or a message, in `task add` as in
+`agent send`; words after `--` are text, so a message or title with a
+word that starts with `-` goes there: `mira agent send worker -- "- fix A"`.
+
 A card's id is 8 hex characters; `move`, `done`, `--card` and
 `history --card` take any prefix that names one card only. `--to` and
 `agent history NAME` find the agent as `agent send` does. `task list` and
