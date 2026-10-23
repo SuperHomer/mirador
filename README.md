@@ -34,6 +34,16 @@ downloads, the feature tour and the keybinding reference.
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
+- **Task board** (`mira agent board`, the palette's *Agents: Task Board*,
+  or the wall's **Task board** button): what each agent was given and where
+  it stands, in To do, Doing, Needs you and Done, for this team or every
+  tab. Mirador adds a card whenever it gives an agent a task (`team start`,
+  `agent new`, `mira agent send`) and, for Claude Code, moves it as the
+  agent's turns end; agents write their own with `mira task add` and move
+  them with `mira task move`. A card's title opens its history — who sent
+  what, how each turn ended and how long it took — and `mira agent
+  history` prints the same in the terminal. Kept across restarts, 30 days
+  deep (docs/AGENTS.md)
 - **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
   in the sidebar): every tab as a frame and every pane as a card on one
   canvas. Scroll over a card to scroll its content, at any zoom (a
@@ -471,9 +481,9 @@ role that cannot start, two members of the same name — opens nothing.
 Claude Code (Opus 5.5) and a reviewer on Codex (`gpt-6-luna`), working in
 the Rails doctrine's taste: the codebase's conventions, the simplest thing
 that works, small steps that ship with their tests, nothing pushed. The
-planner splits the task and hands the worker one step at a time (`--wait`),
-then asks the reviewer, who answers it with APPROVE or CHANGES; the
-planner's edit tools are off. Start it with the palette's *Start Team…* ›
+planner splits the task, puts each step on the task board, and hands the
+worker one step at a time (`--wait`), then asks the reviewer, who answers
+it with APPROVE or CHANGES; the planner's edit tools are off. Start it with the palette's *Start Team…* ›
 *omakase*, or `mira team start omakase "…"`. Its roles
 (`omakase-planner`, `-worker`, `-reviewer`), its way of working and the
 team are *built-in*: the same for everyone, read-only, and replaced by any

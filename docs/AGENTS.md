@@ -401,6 +401,73 @@ right after a `send` does not end on the idle from before the message. It
 reads status from Claude Code's hooks; an agent without them only ends a
 wait by exiting.
 
+### Tasks, the board and history
+
+```bash
+mira task add <title…> [--to <name>]          # a card in this tab, in To do; prints its id
+mira task move <id> <todo|doing|needs-you|done>
+mira task done <id>                            # same as move <id> done
+mira task list [--all]                         # this tab's cards by column; every tab's
+mira agent send <name> --card <id> <message…>  # the message is that card's
+mira agent history [NAME | --pane <id> | --card <id> | --all]
+mira agent board [--tab]                       # the board, beside this pane
+```
+
+Mirador keeps a log of tasks: one line per event, kept across restarts.
+It logs a task given once the start or the send has worked — `team start`
+(the task, to the lead), `agent new` with a task, `agent send` — each with who sent it (the calling agent's
+name, or `you`), the agent it went to (its team member name, else its
+session's, else its role's, else its harness's: `claude`, `codex`), and
+its tab and team. It logs an agent's turn ending when its status changes:
+working or needs-you to idle is done, anything to needs-you is needs-you,
+needs-you back to working is a resume. That status is Claude Code's, from
+its hooks or else its session file; **Codex and every other harness have
+no status, so their turns are not logged**. An agent's exit is logged
+when its pane or tab is closed, and on macOS and Linux when its process
+is gone from the pane.
+
+The log folds into cards, in four columns — To do, Doing, Needs you,
+Done:
+
+- A task Mirador gives is a card in Doing that follows its agent: Needs
+  you when it asks a person, Doing again when it resumes, Done when its
+  turn ends or it exits. A newer task to the same agent puts the older
+  card in Done — which is how a Codex agent's card closes.
+- A card written with `task add` starts in To do and moves only with
+  `task move` / `task done`. A card Mirador made is not moved by hand
+  (refused: its agent moves it).
+- `agent send --card <id>` logs the message on that written card, in its
+  history, and makes no card of its own; the card stays in its column. An
+  unknown id, an ambiguous prefix or a card Mirador made refuses the send
+  before anything is typed.
+
+A card's id is 8 hex characters; `move`, `done`, `--card` and
+`history --card` take any prefix that names one card only. `--to` and
+`agent history NAME` find the agent as `agent send` does. `task list` and
+the board belong to the calling pane's tab (its team's, in a team's tab),
+`--all` to every tab, and show of the Done cards only the 20 most recently
+moved. `agent history` prints one line per event, oldest first: how long
+ago, who to whom, how it was given and the text's first line, or how a
+turn ended and how long it took (since the task, or since it resumed).
+Without a name it is this tab's; with one, the tasks given to that agent
+or sent by it, the moves of its cards, and its turns.
+
+`agent board` opens a task-board pane showing the tab it was opened from
+(or, opened from the agent wall's *Task board* button, the tab the wall
+shows) — also the palette's *Agents: Task Board*. It switches between
+this team and all agents, and between Cards and History (newest first);
+a card's title opens its history, its agent's name goes to its pane. It
+reads the log again whenever something is appended, and comes back after
+a relaunch.
+
+The log is `tasks.jsonl` in the data directory (on macOS
+`~/Library/Application Support/Mirador/`, on Linux `$XDG_DATA_HOME/mirador`
+or `~/.local/share/mirador`, on Windows `%APPDATA%\mirador`). The app is
+its only writer; at each start it keeps the last 30 days and at most the
+newest 10,000 events, and a line a crash left half-written is skipped.
+The built-in `omakase` planner puts each step up as a card for the worker
+and hands it over with `--card`.
+
 ## 7. Workspace control
 
 ```bash
@@ -467,7 +534,7 @@ read_screen notify run list_runs agent_session agent_new agent_list
 agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
-ssh_forward diff_open`. Requests are
+ssh_forward diff_open task_list task_add task_move agent_history agent_board`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)
