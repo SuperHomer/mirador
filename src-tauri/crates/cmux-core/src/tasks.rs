@@ -117,6 +117,7 @@ pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
                     for older in cards.iter_mut().filter(|c| following(c) && c.pane == *pane) {
                         older.column = TaskColumn::Done;
                         older.updated_ms = at;
+                        older.history.push(event.clone());
                     }
                     TaskColumn::Doing
                 };
@@ -153,6 +154,17 @@ pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
                         TurnEnd::NeedsYou => TaskColumn::NeedsYou,
                         TurnEnd::Done | TurnEnd::Exited => TaskColumn::Done,
                     };
+                    c.updated_ms = at;
+                    c.history.push(event.clone());
+                }
+            }
+            TaskEventKind::Resumed { pane } => {
+                let latest = cards
+                    .iter_mut()
+                    .rev()
+                    .find(|c| following(c) && c.pane.as_deref() == Some(pane.as_str()));
+                if let Some(c) = latest.filter(|c| c.column == TaskColumn::NeedsYou) {
+                    c.column = TaskColumn::Doing;
                     c.updated_ms = at;
                     c.history.push(event.clone());
                 }
@@ -234,6 +246,8 @@ mod tests {
             [("a", TaskColumn::Done), ("other", TaskColumn::Doing), ("b", TaskColumn::Doing)]
         );
         assert_eq!(cards[0].updated_ms, 200);
+        // Its history says what closed it.
+        assert_eq!(cards[0].history.last(), cards[2].history.first());
     }
 
     #[test]
@@ -255,6 +269,30 @@ mod tests {
         // An agent that exits ends its card too.
         let exited = cards_after(&log[..1], ended(250, "worker", TurnEnd::Exited));
         assert_eq!(columns(&exited), [("a", TaskColumn::Done)]);
+    }
+
+    #[test]
+    fn a_card_goes_back_to_doing_when_its_agent_resumes() {
+        let log = [
+            given(100, "a", TaskSource::AgentSend, "worker", "do it"),
+            given(110, "m", TaskSource::Manual, "worker", "written"),
+            ended(200, "worker", TurnEnd::NeedsYou),
+            resumed(250, "worker"),
+        ];
+        let cards = cards(&log);
+        assert_eq!(columns(&cards), [("a", TaskColumn::Doing), ("m", TaskColumn::Todo)]);
+        assert_eq!(cards[0].updated_ms, 250);
+        assert_eq!(cards[0].history, [log[0].clone(), log[2].clone(), log[3].clone()]);
+        let done = cards_after(&log, ended(300, "worker", TurnEnd::Done));
+        assert_eq!(columns(&done), [("a", TaskColumn::Done), ("m", TaskColumn::Todo)]);
+        assert_eq!(done[0].history.len(), 4);
+        // Resuming touches no card that was not waiting on a person.
+        let busy = super::cards(&[log[0].clone(), resumed(150, "worker")]);
+        assert_eq!((busy[0].column, busy[0].history.len()), (TaskColumn::Doing, 1));
+    }
+
+    fn resumed(at_ms: u64, to: &str) -> TaskEvent {
+        TaskEvent { at_ms, what: TaskEventKind::Resumed { pane: format!("pane-{to}") } }
     }
 
     fn cards_after(log: &[TaskEvent], event: TaskEvent) -> Vec<TaskCard> {

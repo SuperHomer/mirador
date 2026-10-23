@@ -1022,6 +1022,8 @@ pub enum TaskEventKind {
     },
     /// The agent in `pane` stopped.
     TurnEnded { pane: String, end: TurnEnd },
+    /// The agent in `pane` went back to work after needing a person.
+    Resumed { pane: String },
 }
 
 /// A card of the task board: the log folded up, one card per task given.
