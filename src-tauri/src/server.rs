@@ -338,8 +338,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::tasks::move_card(app, &card, column, by)?;
             Ok(Value::Null)
         }
-        Request::AgentHistory { name, all, pane_id } => {
-            Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id)? }))
+        Request::AgentHistory { name, all, pane_id, card } => {
+            Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id, card)? }))
         }
         Request::TeamAdd { role, name, pane_id } => {
             let pane = crate::teams::team_add(app.clone(), app.state(), role, name, pane_id)?;

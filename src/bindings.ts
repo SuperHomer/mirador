@@ -340,6 +340,23 @@ export interface TaskCard {
   updatedMs: number;
 }
 
+/** One line of the task log (`cmux_protocol::TaskHistoryEntry`): the
+ *  event's fields, flattened, and the line `mira agent history` prints. */
+export interface TaskHistoryEntry {
+  atMs: number;
+  kind: "given" | "moved" | "turnEnded" | "resumed";
+  card?: string;
+  /** A task given: its whole text. */
+  text?: string;
+  agent: string | null;
+  turnMs: number | null;
+  summary: string;
+}
+
+/** The history of a card, else of a tab, else of every tab; oldest first. */
+export const taskHistory = (tabId: string | null, card: string | null) =>
+  invoke<TaskHistoryEntry[]>("task_history", { tabId, card });
+
 /** The cards of a tab, or of every tab when `tabId` is null; of the done
  *  ones, only the latest. */
 export const taskCards = (tabId: string | null) =>

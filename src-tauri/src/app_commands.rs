@@ -61,6 +61,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "open_agent_wall",
     "open_task_board",
     "task_cards",
+    "task_history",
     "get_agent_activity",
     "mark_pane_read",
     "zoom_pane",

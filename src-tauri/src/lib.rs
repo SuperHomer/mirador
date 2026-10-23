@@ -350,6 +350,7 @@ pub fn run() {
             commands::open_agent_wall,
             tasks::open_task_board,
             tasks::task_cards,
+            tasks::task_history,
             commands::get_agent_activity,
             commands::mark_pane_read,
             commands::zoom_pane,

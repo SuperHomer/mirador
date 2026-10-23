@@ -4,9 +4,11 @@ import {
   Node,
   TaskCard,
   TaskColumn,
+  TaskHistoryEntry,
   closePane,
   focusPane,
   taskCards,
+  taskHistory,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { flyToCard } from "../state/boardStore";
@@ -28,11 +30,14 @@ const COLUMNS: [TaskColumn, string][] = [
   ["done", "Done"],
 ];
 
+const NO_CARDS: TaskCard[] = [];
+const NO_HISTORY: TaskHistoryEntry[] = [];
+
 function paneIds(node: Node): string[] {
   return node.type === "leaf" ? [node.paneId] : node.children.flatMap(paneIds);
 }
 
-/** "42s", "3m", "1h", "2d" — how long since a card last moved. */
+/** "42s", "3m", "1h", "2d" — how long ago. */
 function age(ms: number, now: number): string {
   const s = Math.max(0, Math.floor((now - ms) / 1000));
   if (s < 60) return `${s}s`;
@@ -41,10 +46,13 @@ function age(ms: number, now: number): string {
   return `${Math.floor(s / 86400)}d`;
 }
 
+/** What the board reads: every tab's ("*"), one tab's, or nothing (""). */
+const scopeOf = (key: string) => (key === "*" ? null : key);
+
 /**
- * The cards of the task log (`cmux_core::tasks`), in four columns: the
- * tasks given to a tab's agents — its team's, in a team's tab — or, at a
- * switch, every tab's. Read again whenever the log is appended to.
+ * The task log's cards (`cmux_core::tasks`), in four columns — the tasks
+ * given to a tab's agents, its team's in a team's tab, or every tab's —
+ * or the log itself, newest first. Read again whenever it is appended to.
  */
 export const TaskBoard = memo(function TaskBoard({
   paneId,
@@ -55,67 +63,24 @@ export const TaskBoard = memo(function TaskBoard({
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [all, setAll] = useState(false);
-  const [cards, setCards] = useState<TaskCard[]>([]);
+  const [view, setView] = useState<"cards" | "history">("cards");
   const live = visible || board;
   const now = useNow(live);
 
-  // What it reads: every tab's cards ("*"), this tab's, or none when this
-  // tab has closed (""). Kept in a ref the read takes it from, so a switch
-  // is one more reason to read rather than a second reader.
+  // With its tab closed, only every tab's is left to show.
   const scope = all ? "*" : (tabId ?? "");
-  const scopeRef = useRef(scope);
-  const readRef = useRef<() => void>(() => {});
-
-  // One read at a time, as `useAgentActivity` does: an append or a switch
-  // during a read marks the board dirty, and that read's answer, no longer
-  // the latest, is dropped for exactly one more read when it returns.
-  useEffect(() => {
-    if (!live) return;
-    let cancelled = false;
-    let reading = false;
-    let dirty = false;
-    const read = () => {
-      if (cancelled) return;
-      if (reading) {
-        dirty = true;
-        return;
-      }
-      dirty = false;
-      const want = scopeRef.current;
-      if (want === "") {
-        setCards([]);
-        return;
-      }
-      reading = true;
-      void taskCards(want === "*" ? null : want)
-        .then(
-          (c) => {
-            if (!cancelled && !dirty) setCards(c);
-          },
-          (e) => console.error(`mirador: task board: ${e}`),
-        )
-        .finally(() => {
-          reading = false;
-          if (!cancelled && dirty) read();
-        });
-    };
-    readRef.current = read;
-    // Listening first: an append between the first read and the
-    // subscription would otherwise leave the board stale.
-    const unlisten = listen("tasks-changed", read);
-    void unlisten.then(read);
-    return () => {
-      cancelled = true;
-      readRef.current = () => {};
-      void unlisten.then((f) => f());
-    };
-  }, [live]);
-
-  useEffect(() => {
-    if (scopeRef.current === scope) return;
-    scopeRef.current = scope;
-    readRef.current();
-  }, [scope]);
+  const cards = useLogRead(
+    live,
+    view === "cards" ? scope : "",
+    (k) => taskCards(scopeOf(k)),
+    NO_CARDS,
+  );
+  const history = useLogRead(
+    live,
+    view === "history" ? scope : "",
+    (k) => taskHistory(scopeOf(k), null),
+    NO_HISTORY,
+  );
 
   // Where each pane is, for a card's agent and, across tabs, its place.
   const { panes, placeOf } = useMemo(() => {
@@ -128,11 +93,9 @@ export const TaskBoard = memo(function TaskBoard({
     return { panes, placeOf };
   }, [snapshot]);
 
-  const scopeLabel = shown?.team ? "This team" : "This tab";
-  const open = (card: TaskCard) => {
-    if (!card.pane || !panes.has(card.pane)) return;
-    void focusPane(card.pane);
-    if (board) flyToCard(card.pane);
+  const goTo = (pane: string) => {
+    void focusPane(pane);
+    if (board) flyToCard(pane);
   };
 
   return (
@@ -143,8 +106,23 @@ export const TaskBoard = memo(function TaskBoard({
           {shown ? (shown.team?.name ?? shown.title) : "closed tab"}
         </span>
         <div className="tb-switch" role="group">
+          <button
+            className={view === "cards" ? "on" : ""}
+            onClick={() => setView("cards")}
+          >
+            Cards
+          </button>
+          <button
+            className={view === "history" ? "on" : ""}
+            title="Every task given and every turn ended, newest first"
+            onClick={() => setView("history")}
+          >
+            History
+          </button>
+        </div>
+        <div className="tb-switch" role="group">
           <button className={all ? "" : "on"} onClick={() => setAll(false)}>
-            {scopeLabel}
+            {shown?.team ? "This team" : "This tab"}
           </button>
           <button className={all ? "on" : ""} onClick={() => setAll(true)}>
             All agents
@@ -159,14 +137,16 @@ export const TaskBoard = memo(function TaskBoard({
         </button>
       </div>
 
-      {cards.length === 0 ? (
-        <div className="wall-empty">
-          <p className="wall-empty-hint">
-            No cards yet: giving an agent a task (<code>mira agent send</code>,{" "}
-            <code>team start</code>) adds one, and <code>mira task add</code>{" "}
-            writes one.
-          </p>
-        </div>
+      {view === "history" ? (
+        history.length === 0 ? (
+          <Empty />
+        ) : (
+          <div className="tb-history">
+            <HistoryLines entries={[...history].reverse()} now={now} />
+          </div>
+        )
+      ) : cards.length === 0 ? (
+        <Empty />
       ) : (
         <div className="tb-columns">
           {COLUMNS.map(([column, label]) => {
@@ -180,40 +160,19 @@ export const TaskBoard = memo(function TaskBoard({
                   <span className="tb-count">{here.length}</span>
                 </h3>
                 <div className="tb-cards">
-                  {here.map((c) => {
-                    const reachable = !!c.pane && panes.has(c.pane);
-                    return (
-                      <div
-                        key={c.id}
-                        className={`tb-card${reachable ? " reachable" : ""}`}
-                        title={reachable ? "Go to this agent" : undefined}
-                        onClick={() => open(c)}
-                      >
-                        <div className="tb-title">{c.title}</div>
-                        <div className="tb-meta">
-                          <span
-                            className="tb-mark"
-                            title={
-                              c.source === "manual"
-                                ? `Written with mira task add (${c.id})`
-                                : "Given to its agent: follows its turns"
-                            }
-                          >
-                            {c.source === "manual" ? "✎" : "⇢"}
-                          </span>
-                          <span className="tb-assignee">
-                            {c.assignee ?? "nobody yet"}
-                          </span>
-                          {all && (
-                            <span className="tb-place">
-                              {(c.tab && placeOf.get(c.tab)) ?? "closed tab"}
-                            </span>
-                          )}
-                          <span className="tb-age">{age(c.updatedMs, now)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {here.map((c) => (
+                    <Card
+                      key={c.id}
+                      card={c}
+                      place={
+                        all ? ((c.tab && placeOf.get(c.tab)) ?? "closed tab") : null
+                      }
+                      reachable={!!c.pane && panes.has(c.pane)}
+                      live={live}
+                      now={now}
+                      onGoTo={goTo}
+                    />
+                  ))}
                 </div>
               </section>
             );
@@ -223,6 +182,203 @@ export const TaskBoard = memo(function TaskBoard({
     </div>
   );
 });
+
+function Empty() {
+  return (
+    <div className="wall-empty">
+      <p className="wall-empty-hint">
+        No cards yet: giving an agent a task (<code>mira agent send</code>,{" "}
+        <code>team start</code>) adds one, and <code>mira task add</code>{" "}
+        writes one.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * One card: its title opens its history under it; its agent's name, when
+ * that agent's pane is still open, goes to it.
+ */
+function Card({
+  card,
+  place,
+  reachable,
+  live,
+  now,
+  onGoTo,
+}: {
+  card: TaskCard;
+  place: string | null;
+  reachable: boolean;
+  live: boolean;
+  now: number;
+  onGoTo: (pane: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const history = useLogRead(
+    live,
+    open ? card.id : "",
+    (id) => taskHistory(null, id),
+    NO_HISTORY,
+  );
+  const manual = card.source === "manual";
+  return (
+    <div className={`tb-card${open ? " open" : ""}`}>
+      <button
+        className="tb-title"
+        title={open ? "Hide its history" : "Show its history"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {card.title}
+      </button>
+      <div className="tb-meta">
+        <span
+          className="tb-mark"
+          title={
+            manual
+              ? `Written with mira task add (${card.id})`
+              : "Given to its agent: follows its turns"
+          }
+        >
+          {manual ? "✎" : "⇢"}
+        </span>
+        {reachable && card.pane ? (
+          <button
+            className="tb-assignee reachable"
+            title="Go to this agent"
+            onClick={() => onGoTo(card.pane!)}
+          >
+            {card.assignee ?? "its agent"}
+          </button>
+        ) : (
+          <span className="tb-assignee">{card.assignee ?? "nobody yet"}</span>
+        )}
+        {place && <span className="tb-place">{place}</span>}
+        <span className="tb-age">{age(card.updatedMs, now)}</span>
+      </div>
+      {open && (
+        <div className="tb-card-history">
+          <HistoryLines entries={history} now={now} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Lines of the log as `mira agent history` prints them (each entry's
+ * `summary`, made in Rust); a task given opens to its whole text.
+ */
+function HistoryLines({
+  entries,
+  now,
+}: {
+  entries: TaskHistoryEntry[];
+  now: number;
+}) {
+  return (
+    <ol className="tb-lines">
+      {entries.map((e, i) => {
+        const when = (
+          <span className="tb-when" title={new Date(e.atMs).toLocaleString()}>
+            {age(e.atMs, now)}
+          </span>
+        );
+        return (
+          <li key={`${e.atMs}-${i}`} className={`tb-line ${e.kind}`}>
+            {e.kind === "given" && e.text ? (
+              <details>
+                <summary>
+                  {when}
+                  <span className="tb-what">{e.summary}</span>
+                </summary>
+                <pre className="tb-text">{e.text}</pre>
+              </details>
+            ) : (
+              <>
+                {when}
+                <span className="tb-what">{e.summary}</span>
+              </>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/**
+ * `read(key)`, again whenever the task log is appended to, while `live`;
+ * `empty` for the key "", which reads nothing. One read at a time, as
+ * `useAgentActivity` does: an append or a new key during a read marks it
+ * dirty, and that read's answer, no longer the latest, is dropped for
+ * exactly one more read when it returns. The key is kept in a ref the
+ * read takes it from, so a new one is one more reason to read rather than
+ * a second reader.
+ */
+function useLogRead<T>(
+  live: boolean,
+  key: string,
+  read: (key: string) => Promise<T>,
+  empty: T,
+): T {
+  const [value, setValue] = useState<T>(empty);
+  const keyRef = useRef(key);
+  const readRef = useRef(read);
+  readRef.current = read;
+  const kickRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    if (!live) return;
+    let cancelled = false;
+    let reading = false;
+    let dirty = false;
+    const kick = () => {
+      if (cancelled) return;
+      if (reading) {
+        dirty = true;
+        return;
+      }
+      dirty = false;
+      const want = keyRef.current;
+      if (want === "") {
+        setValue(empty);
+        return;
+      }
+      reading = true;
+      void readRef
+        .current(want)
+        .then(
+          (v) => {
+            if (!cancelled && !dirty) setValue(v);
+          },
+          (e) => console.error(`mirador: task board: ${e}`),
+        )
+        .finally(() => {
+          reading = false;
+          if (!cancelled && dirty) kick();
+        });
+    };
+    kickRef.current = kick;
+    // Listening first: an append between the first read and the
+    // subscription would otherwise go unseen.
+    const unlisten = listen("tasks-changed", kick);
+    void unlisten.then(kick);
+    return () => {
+      cancelled = true;
+      kickRef.current = () => {};
+      void unlisten.then((f) => f());
+    };
+  }, [live, empty]);
+
+  useEffect(() => {
+    if (keyRef.current === key) return;
+    keyRef.current = key;
+    kickRef.current();
+  }, [key]);
+
+  return value;
+}
 
 /** The current time, ticking every ten seconds while `active`. */
 function useNow(active: boolean): number {

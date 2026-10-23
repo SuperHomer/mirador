@@ -143,6 +143,19 @@ fn tasks_are_logged_as_agents_work() {
     let card = cards["cards"].as_array().unwrap().iter().find(|c| c["id"] == step3.as_str()).unwrap().clone();
     let texts: Vec<&str> = card["history"].as_array().unwrap().iter().filter_map(|e| e["text"].as_str()).collect();
     assert_eq!(texts, ["Step 3: the board", text.as_str()], "{card}");
+    // The card's history, as its board opens it: the send is on it.
+    let lines = mira(&sb, &planner, &["agent", "history", "--card", &step3]);
+    let lines: Vec<&str> = lines.lines().map(|l| l.split_once(" ago  ").map_or(l, |(_, what)| what)).collect();
+    assert_eq!(
+        lines,
+        ["planner → reviewer  manual  Step 3: the board", &format!("planner → reviewer  agent-send  {text}")],
+        "{lines:?}"
+    );
+    // The tab's history, as its board's History view reads it: the sends
+    // between the two members, and how the turns ended.
+    let tab_lines = mira(&sb, &planner, &["agent", "history"]);
+    assert!(tab_lines.contains("planner → reviewer  agent-send  Review step 1"), "{tab_lines}");
+    assert!(tab_lines.contains("reviewer done after"), "{tab_lines}");
 
     // A card that is not one written by hand refuses the send: nothing typed.
     let before = sb.events("message", &reviewer).len();
@@ -188,6 +201,15 @@ fn the_task_board_opens_and_comes_back() {
     let pane = sb.wait_for("the board pane", LONG, || listed(&sb));
     assert_eq!(pane["tabId"], tab.as_str(), "{pane}");
     assert_eq!(sb.panes(), [first.clone(), board.clone()]);
+    // A plain agent, with no team, session or role name, is called by its
+    // harness, as `agent list` calls it.
+    mira(&sb, &first, &["agent", "new", "Upgrade the logging library"]);
+    let list = sb.wait_for("the plain agent's card", LONG, || {
+        let list = mira(&sb, &first, &["task", "list"]);
+        list.contains("Upgrade the logging library").then_some(list)
+    });
+    let line = list.lines().find(|l| l.ends_with("Upgrade the logging library")).unwrap();
+    assert_eq!(line.split_whitespace().nth(1), Some("claude"), "{list}");
     // A render throw in the board takes the whole tree down with it: the
     // terminal beside it still answering says the page survived it.
     sb.type_into(&first, "echo still-$((40+2))\r");
@@ -197,7 +219,7 @@ fn the_task_board_opens_and_comes_back() {
     // Asked from the board itself, its tab is still the one it shows.
     let cards = sb.call(Request::TaskList { all: false, pane_id: Some(board.clone()) });
     let titles: Vec<&str> = cards["cards"].as_array().unwrap().iter().filter_map(|c| c["title"].as_str()).collect();
-    assert_eq!(titles, ["Step 1: the pane"]);
+    assert_eq!(titles, ["Step 1: the pane", "Upgrade the logging library"]);
 
     // One of its own, in a tab of its own, still showing this tab.
     let other = mira(&sb, &first, &["agent", "board", "--tab"]).trim().to_string();

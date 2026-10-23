@@ -262,7 +262,8 @@ pub fn history(events: &[TaskEvent], scope: Scope) -> Vec<TaskHistoryEntry> {
             }
         };
         if keep {
-            out.push(TaskHistoryEntry { event: event.clone(), agent, turn_ms });
+            let summary = summary(&event.what, agent.as_deref(), turn_ms);
+            out.push(TaskHistoryEntry { event: event.clone(), agent, turn_ms, summary });
         }
     }
     out
@@ -273,6 +274,19 @@ pub fn history(events: &[TaskEvent], scope: Scope) -> Vec<TaskHistoryEntry> {
 /// tasks sent for them. A card Mirador made follows its agent: a move
 /// would only be undone by its next turn.
 pub fn written<'a>(cards: &'a [TaskCard], id: &str) -> Result<&'a TaskCard, String> {
+    let card = find(cards, id)?;
+    if card.source != TaskSource::Manual {
+        return Err(format!(
+            "card {} follows {}: only a card written with `mira task add` is moved or sent for by hand",
+            card.id,
+            card.assignee.as_deref().unwrap_or("its agent")
+        ));
+    }
+    Ok(card)
+}
+
+/// The card `id` names: the whole id, or a prefix of one card's only.
+pub fn find<'a>(cards: &'a [TaskCard], id: &str) -> Result<&'a TaskCard, String> {
     let id = id.trim();
     let hits: Vec<&TaskCard> = match cards.iter().find(|c| c.id == id) {
         Some(exact) => vec![exact],
@@ -287,14 +301,58 @@ pub fn written<'a>(cards: &'a [TaskCard], id: &str) -> Result<&'a TaskCard, Stri
             return Err(format!("`{id}` is more than one card: {}", ids.join(", ")));
         }
     };
-    if card.source != TaskSource::Manual {
-        return Err(format!(
-            "card {} follows {}: only a card written with `mira task add` is moved or sent for by hand",
-            card.id,
-            card.assignee.as_deref().unwrap_or("its agent")
-        ));
-    }
     Ok(card)
+}
+
+/// The history of the card `id` names: the lines of [`history`] for the
+/// events that touched it, oldest first.
+pub fn card_history(events: &[TaskEvent], id: &str) -> Result<Vec<TaskHistoryEntry>, String> {
+    let cards = cards(events);
+    let card = find(&cards, id)?;
+    Ok(history(events, Scope::All).into_iter().filter(|e| card.history.contains(&e.event)).collect())
+}
+
+/// One event in a line, after its age: who to whom and what, or how a
+/// turn ended and how long it took.
+fn summary(what: &TaskEventKind, agent: Option<&str>, turn_ms: Option<u64>) -> String {
+    let agent = agent.unwrap_or("-");
+    match what {
+        TaskEventKind::Given { source, from, to, text, .. } => {
+            let source = match source {
+                TaskSource::TeamStart => "team-start",
+                TaskSource::AgentNew => "agent-new",
+                TaskSource::AgentSend => "agent-send",
+                TaskSource::Manual => "manual",
+            };
+            let title = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+            format!("{from} → {}  {source}  {title}", to.as_deref().unwrap_or("-"))
+        }
+        TaskEventKind::Moved { card, column, by } => format!("{by} moved {card} to {}", column_name(*column)),
+        TaskEventKind::TurnEnded { end, .. } => {
+            let end = match end {
+                TurnEnd::Done => "done",
+                TurnEnd::NeedsYou => "needs-you",
+                TurnEnd::Exited => "exited",
+            };
+            match turn_ms {
+                Some(ms) => format!("{agent} {end} after {}", span(ms)),
+                None => format!("{agent} {end}"),
+            }
+        }
+        TaskEventKind::Resumed { .. } => format!("{agent} resumed"),
+    }
+}
+
+/// What a card calls the agent in a pane, as `agent list` does: its name
+/// in its team, its session's, its role's — or, for a plain agent with
+/// none of those, its harness's (`claude`, `codex`).
+pub fn agent_name(member: Option<String>, meta: Option<&crate::state::PaneMeta>) -> Option<String> {
+    member.or_else(|| {
+        let m = meta?;
+        m.agent_name.clone().or_else(|| m.agent_role.clone()).or_else(|| {
+            serde_json::to_value(m.harness()?).ok()?.as_str().map(String::from)
+        })
+    })
 }
 
 /// A column by the name the CLI takes and shows: `todo`, `doing`,
@@ -645,6 +703,63 @@ mod tests {
             ended(9_000, "worker", TurnEnd::Done),
         ];
         assert_eq!(history(&log, Scope::All)[2].turn_ms, Some(8_000));
+    }
+
+    #[test]
+    fn history_lines_read_as_the_cli_prints_them() {
+        let log = [
+            given(1_000, "a", TaskSource::AgentSend, "worker", "\nStep 2: the board\nwith tests"),
+            moved(2_000, "a", TaskColumn::Done),
+            ended(64_000, "worker", TurnEnd::Done),
+            resumed(65_000, "worker"),
+            ended(66_000, "nobody", TurnEnd::Exited),
+        ];
+        let lines: Vec<String> = history(&log, Scope::All).into_iter().map(|e| e.summary).collect();
+        assert_eq!(
+            lines,
+            [
+                "you → worker  agent-send  Step 2: the board",
+                "planner moved a to done",
+                "worker done after 1m",
+                "worker resumed",
+                "- exited",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_cards_history_is_the_events_that_touched_it() {
+        let log = [
+            given(1_000, "m", TaskSource::Manual, "worker", "Step 2"),
+            given(2_000, "other", TaskSource::AgentSend, "reviewer", "look"),
+            given(3_000, "m", TaskSource::AgentSend, "worker", "Step 2 (card m): go"),
+            ended(9_000, "worker", TurnEnd::Done),
+            moved(10_000, "m", TaskColumn::Done),
+        ];
+        let lines: Vec<String> = card_history(&log, "m").unwrap().into_iter().map(|e| e.summary).collect();
+        assert_eq!(
+            lines,
+            ["you → worker  manual  Step 2", "you → worker  agent-send  Step 2 (card m): go", "planner moved m to done"]
+        );
+        // The automatic card it was sent on would have had the turn end;
+        // the written card does not follow turns.
+        let auto = card_history(&log, "oth").unwrap();
+        assert_eq!(auto.len(), 1);
+        assert!(card_history(&log, "zz").unwrap_err().contains("no card `zz`"));
+    }
+
+    #[test]
+    fn a_plain_agent_is_called_by_its_harness() {
+        use crate::state::PaneMeta;
+        let plain = PaneMeta { agent_launched: true, ..Default::default() };
+        assert_eq!(agent_name(None, Some(&plain)).as_deref(), Some("claude"));
+        let codex = PaneMeta { agent_harness: Some(cmux_protocol::Harness::Codex), ..Default::default() };
+        assert_eq!(agent_name(None, Some(&codex)).as_deref(), Some("codex"));
+        let named = PaneMeta { agent_name: Some("fix-login".into()), agent_role: Some("dev".into()), ..plain.clone() };
+        assert_eq!(agent_name(None, Some(&named)).as_deref(), Some("fix-login"));
+        assert_eq!(agent_name(Some("worker".into()), Some(&named)).as_deref(), Some("worker"));
+        assert_eq!(agent_name(None, Some(&PaneMeta::default())), None);
+        assert_eq!(agent_name(None, None), None);
     }
 
     #[test]

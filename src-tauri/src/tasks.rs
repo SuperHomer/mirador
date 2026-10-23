@@ -111,11 +111,7 @@ fn whereabouts(state: &AppState, pane: &str) -> (Option<String>, Option<String>,
             run.and_then(|r| r.members.iter().find(|s| s.pane == pane)).map(|s| s.name.clone()),
         )
     };
-    let to = member.or_else(|| {
-        let meta = state.meta.lock().unwrap();
-        let m = meta.get(pane)?;
-        m.agent_name.clone().or_else(|| m.agent_role.clone())
-    });
+    let to = cmux_core::tasks::agent_name(member, state.meta.lock().unwrap().get(pane));
     (tab, team, to)
 }
 
@@ -148,27 +144,51 @@ fn board(state: &AppState, tab: Option<String>) -> Vec<TaskCard> {
     cmux_core::tasks::recent(cards, BOARD_DONE)
 }
 
-/// The log of the agent `name` from `pane_id`'s tab, else of that tab,
-/// or all of it with `all`.
+/// The log of the card `card`, else of the agent `name` from `pane_id`'s
+/// tab, else of that tab — what its board's History shows — or all of it
+/// with `all`.
 pub fn history(
     state: &AppState,
     name: Option<String>,
     all: bool,
     pane_id: Option<String>,
+    card: Option<String>,
 ) -> Result<Vec<TaskHistoryEntry>, String> {
-    let events = events(state);
-    if all {
-        return Ok(cmux_core::tasks::history(&events, cmux_core::tasks::Scope::All));
-    }
-    let Some(name) = name else {
-        let tab = tab_of(state, pane_id)?;
-        return Ok(cmux_core::tasks::history(&events, cmux_core::tasks::Scope::Tab(&tab)));
+    let name = match name {
+        Some(name) if card.is_none() && !all => name,
+        _ => {
+            let tab = if card.is_some() || all { None } else { Some(tab_of(state, pane_id)?) };
+            return lines(state, card, tab);
+        }
     };
+    let events = events(state);
     let pane = crate::handoff::find(state, &name, pane_id)?;
     let tab = tab_of(state, Some(pane.clone())).ok();
     let sender = crate::handoff::sender(state, &pane);
     let scope = cmux_core::tasks::Scope::Agent { pane: &pane, name: sender.as_deref(), tab: tab.as_deref() };
     Ok(cmux_core::tasks::history(&events, scope))
+}
+
+/// The history a board pane shows, as `agent history` gives it: of the
+/// card `card`, else of the tab `tab_id`, or of every tab when both are
+/// absent. Oldest first.
+#[tauri::command(async)]
+pub fn task_history(
+    state: State<'_, AppState>,
+    tab_id: Option<String>,
+    card: Option<String>,
+) -> Result<Vec<TaskHistoryEntry>, String> {
+    lines(&state, card, tab_id)
+}
+
+/// The log of the card `card`, else of the tab `tab`, else all of it.
+fn lines(state: &AppState, card: Option<String>, tab: Option<String>) -> Result<Vec<TaskHistoryEntry>, String> {
+    let events = events(state);
+    match (card, tab) {
+        (Some(card), _) => cmux_core::tasks::card_history(&events, &card),
+        (None, Some(tab)) => Ok(cmux_core::tasks::history(&events, cmux_core::tasks::Scope::Tab(&tab))),
+        (None, None) => Ok(cmux_core::tasks::history(&events, cmux_core::tasks::Scope::All)),
+    }
 }
 
 /// The cards a board pane shows, as `task list` does: of the tab

@@ -458,6 +458,9 @@ pub enum Request {
         all: bool,
         #[serde(default)]
         pane_id: Option<String>,
+        /// The history of one card instead, by id or a prefix of one.
+        #[serde(default)]
+        card: Option<String>,
     },
     /// Adds a member to the team of `pane_id`'s tab, beside the others.
     TeamAdd {
@@ -1097,6 +1100,11 @@ pub struct TaskHistoryEntry {
     pub agent: Option<String>,
     /// For a turn end: how long since the task or the resume it ends.
     pub turn_ms: Option<u64>,
+    /// The event in one line, as `mira agent history` prints it after its
+    /// age: `planner → worker  agent-send  Step 2: …`, `worker done after
+    /// 3m`.
+    #[serde(default)]
+    pub summary: String,
 }
 
 /// A card of the task board: the log folded up, one card per task given.

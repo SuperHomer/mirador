@@ -328,6 +328,9 @@ enum AgentAction {
         pane: Option<String>,
         #[arg(long, conflicts_with_all = ["name", "pane"])]
         all: bool,
+        /// One card's history instead: its id, or the start of it.
+        #[arg(long, conflicts_with_all = ["name", "pane", "all"])]
+        card: Option<String>,
     },
     /// Open the task board for this tab beside this pane: its agents' cards
     /// in To do, Doing, Needs you and Done, and every tab's at a switch.
@@ -660,10 +663,11 @@ fn run(cli: Cli) -> Result<(), String> {
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&name, &pane, started, timeout);
             }
-            AgentAction::History { name, pane, all } => Request::AgentHistory {
+            AgentAction::History { name, pane, all, card } => Request::AgentHistory {
                 name: name.or(pane),
                 all,
                 pane_id: own_pane(),
+                card,
             },
             AgentAction::Board { tab } => Request::AgentBoard {
                 pane_id: own_pane(),
@@ -1092,40 +1096,13 @@ fn render_cards(cards: Vec<cmux_protocol::TaskCard>) {
 
 /// The log: a line per event, oldest first, with how long ago it was.
 fn render_history(history: Vec<cmux_protocol::TaskHistoryEntry>) {
-    use cmux_protocol::{TaskEventKind::*, TaskSource, TurnEnd};
     if history.is_empty() {
         println!("(no tasks yet)");
         return;
     }
     let now = now_ms();
     for entry in history {
-        let agent = entry.agent.as_deref().unwrap_or("-");
-        let what = match &entry.event.what {
-            Given { source, from, to, text, .. } => {
-                let source = match source {
-                    TaskSource::TeamStart => "team-start",
-                    TaskSource::AgentNew => "agent-new",
-                    TaskSource::AgentSend => "agent-send",
-                    TaskSource::Manual => "manual",
-                };
-                let title = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-                format!("{from} → {}  {source}  {title}", to.as_deref().unwrap_or("-"))
-            }
-            Moved { card, column, by } => format!("{by} moved {card} to {}", cmux_core::tasks::column_name(*column)),
-            TurnEnded { end, .. } => {
-                let end = match end {
-                    TurnEnd::Done => "done",
-                    TurnEnd::NeedsYou => "needs-you",
-                    TurnEnd::Exited => "exited",
-                };
-                match entry.turn_ms {
-                    Some(ms) => format!("{agent} {end} after {}", cmux_core::tasks::span(ms)),
-                    None => format!("{agent} {end}"),
-                }
-            }
-            Resumed { .. } => format!("{agent} resumed"),
-        };
-        println!("{:>4} ago  {what}", cmux_core::tasks::span(now.saturating_sub(entry.event.at_ms)));
+        println!("{:>4} ago  {}", cmux_core::tasks::span(now.saturating_sub(entry.event.at_ms)), entry.summary);
     }
 }
 
