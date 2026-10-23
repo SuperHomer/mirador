@@ -92,7 +92,13 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
       // The page's size is its card's, whatever the board's zoom: a page
       // read by `mira browser` while hidden lays out as it will be shown.
       const zoom = boardRef.current ? (useBoardStore.getState().camera?.zoom ?? 1) : 1;
-      void setBrowserBounds(paneId, rect.x, rect.y + inset, rect.width / zoom, rect.height / zoom);
+      // WebKit takes whatever of a view is under the titlebar off its
+      // page's viewport, shown or not: a hidden card above the window laid
+      // its page out short, or at a negative height. A shown page is never
+      // up there, and a hidden one's place doesn't matter, so it stops at
+      // the top.
+      const y = Math.max(rect.y, 0);
+      void setBrowserBounds(paneId, rect.x, y + inset, rect.width / zoom, rect.height / zoom);
     };
     reportRef.current = report;
 

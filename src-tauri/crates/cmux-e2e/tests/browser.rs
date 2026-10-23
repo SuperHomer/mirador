@@ -1141,3 +1141,39 @@ fn screenshot_shows_a_hidden_page_as_it_is_now() {
     assert!(is_blue(pixel(width / 2, height / 2)), "the page it went to: {:?}", pixel(width / 2, height / 2));
     assert_eq!(browser(&sb, &first, &["eval", "--pane", &pane, "document.visibilityState"]).trim(), "\"hidden\"", "never shown");
 }
+
+/// WebKit takes whatever of a view is under the window's titlebar off its
+/// page's viewport, shown or not. A hidden card goes wherever the board
+/// puts it — far above the window, too — and its page must still lay out
+/// at the card's size, not short or at a negative height.
+#[test]
+fn a_hidden_card_above_the_window_keeps_its_page_full_height() {
+    e2e!();
+    let (sb, first) = launched("babove");
+    let pane = browser(&sb, &first, &["open", "--tab", &page("/red")]).trim().to_string();
+    sb.call(Request::View { view: Some(View::Board) });
+    let size = |sb: &Sandbox| -> Vec<f64> {
+        serde_json::from_str(&browser(sb, &first, &["eval", "--pane", &pane, "[innerWidth, innerHeight]"])).unwrap()
+    };
+    let snap = sb.snapshot();
+    let tab = snap["tabs"].as_array().unwrap().iter().find(|t| t["cards"].as_array().unwrap().iter().any(|c| c["paneId"] == pane.as_str())).unwrap().clone();
+    let card = tab["cards"].as_array().unwrap().iter().find(|c| c["paneId"] == pane.as_str()).unwrap().clone();
+    let f = |v: &serde_json::Value, k: &str| v[k].as_f64().unwrap();
+    let resize = |w: f64| {
+        sb.call(Request::SetCardRect { pane_id: pane.clone(), x: f(&card, "x"), y: f(&card, "y"), w, h: 400.0 });
+    };
+    // A size nothing else has, so the page saying it means the bounds
+    // came through.
+    resize(600.0);
+    let before = sb.wait_for("the card's size", LONG, || Some(size(&sb)).filter(|s| s[0] > 500.0 && s[0] < 600.0));
+    sb.call(Request::SetFramePosition { tab_id: tab["id"].as_str().unwrap().into(), x: f(&tab["frame"], "x"), y: f(&tab["frame"], "y") - 3000.0 });
+    // Wider after the move: the page has the bounds from above the window.
+    resize(700.0);
+    sb.wait_for("the moved card's size", LONG, || Some(size(&sb)).filter(|s| s[0] == before[0] + 100.0));
+    browser(&sb, &first, &["navigate", "--pane", &pane, &page("/red?moved")]);
+    assert_eq!(size(&sb)[1], before[1], "the page's height above the window");
+    let out = sb.project.join("above.png");
+    browser(&sb, &first, &["screenshot", "--pane", &pane, "--out", out.to_str().unwrap()]);
+    let (width, _, pixel) = decode_png(&out);
+    assert!(is_blue(pixel(width / 2, 2)), "the band at the top: {:?}", pixel(width / 2, 2));
+}
