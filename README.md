@@ -51,10 +51,11 @@ downloads, the feature tour and the keybinding reference.
   program. Below 50% the board is an overview, where a click focuses a
   card (the wheel still scrolls it). A browser page shows only at 100%,
   while its card is still, wholly in view and nothing (palette, panel,
-  menu) is open over it. Away from that, a card on screen shows a recent
-  picture of its page rather than its URL, refreshed when it navigates
-  and every few seconds. That is on macOS; Windows tries, and keeps the
-  last picture (or the URL) when it can't; elsewhere the card shows the URL
+  menu) is open over it. Away from that, a card shows a recent picture
+  of its page rather than its URL, refreshed after it navigates and every
+  few seconds while the card and the window are visible. That is on
+  macOS; Windows tries, and keeps the last picture (or the URL) when it
+  can't; elsewhere the card shows the URL
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
 - **Scriptable browser pane**: an agent tests the page it is building —
