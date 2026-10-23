@@ -264,6 +264,13 @@ model does not support, and only some models take `ultra`). Lower case
 only: any other value is the role's `problem`, which names the accepted
 ones, and the role is listed greyed out until it is fixed.
 
+`profile` (Codex only) goes to Codex as `--profile`: your own
+`<name>.config.toml` beside Codex's `config.toml` (Codex 0.164 refuses the
+older `[profiles.<name>]` table), for what a role cannot say itself — an
+approval policy, a sandbox, a provider. A Claude Code role with one, and
+a repository's role with one (a profile can turn the sandbox off, so it is
+yours to pick), report it as their `problem`.
+
 A Claude Code role may also list what it is allowed: `mcp: [names]`,
 `plugins: [names]`, `skills: [names]` (only those; `[]` is none; absent is
 everything) and `tools: { allow: [...], deny: [...] }` in Claude Code's
@@ -281,7 +288,7 @@ the first message — so `/exit` leaves a prompt. Claude Code gets the role's
 `--model`, `--effort`, `--name`, and its prompt (the role's, then its
 way's) through `--append-system-prompt-file`; the session resumes like any
 other, on the role's model and effort, and keeps that prompt. Codex gets
-`--model`, `model_reasoning_effort` and the prompt as
+`--model`, `model_reasoning_effort`, `--profile` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
 It also gets `-c` overrides for a permissions profile, `mirador`, that
 extends the one Codex would run on — your `default_permissions`, else
@@ -289,7 +296,8 @@ extends the one Codex would run on — your `default_permissions`, else
 Mirador's socket and nothing else (network only through Codex's proxy),
 so its `mira` reaches the app. They are left out when your Codex config
 uses `sandbox_mode` (Codex then ignores profiles), gives full access, or
-cannot be read or parsed.
+cannot be read or parsed — the role's profile file first, then
+`config.toml`, as Codex reads them.
 A `-c` override makes Codex run in its embedded mode rather than on its
 shared background server, which it says once at startup ("Running without
 the shared background server"); the agent works the same, but `codex

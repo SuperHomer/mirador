@@ -802,6 +802,10 @@ pub struct AgentRole {
     /// How hard its model thinks: Claude Code's `--effort`, Codex's
     /// `model_reasoning_effort` ("high", "max").
     pub effort: Option<String>,
+    /// Codex's `--profile`: the person's own `<name>.config.toml` beside
+    /// Codex's config.toml, for what a role cannot say itself (approvals,
+    /// sandbox).
+    pub profile: Option<String>,
     /// The role's own instructions, added to the harness's system prompt.
     pub prompt: Option<String>,
     /// The way of working it follows, by name: its prompt comes after the

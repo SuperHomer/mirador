@@ -325,6 +325,18 @@ You implement what the plan says, one step at a time.
 take). Absent, the harness's default. Any other value, upper case
 included, greys the role out with the values it takes.
 
+A Codex role can also name one of your Codex **profiles** —
+`profile: yolo` starts it with `--profile yolo` — for what a role cannot
+say itself, such as an approval policy or the sandbox. Only in a role of
+your own: a profile can turn the sandbox off, so `.mirador/roles` may not
+pick one.
+
+```toml
+# ~/.codex/yolo.config.toml — Codex 0.164 keeps each profile in its own file
+approval_policy = "never"
+sandbox_mode = "danger-full-access"   # --dangerously-bypass-approvals-and-sandbox
+```
+
 A **way of working** is a playbook any role can follow — how your team
 branches, tests, commits and hands off — written once in `ways/` and
 appended after the prompt of every role that names it:
@@ -409,7 +421,7 @@ beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
 that pane's directory: `claude --model … --effort …
 --append-system-prompt-file … --name <role>`, or `codex --model … -c
-model_reasoning_effort=… -c developer_instructions=…`. (`mira
+model_reasoning_effort=… --profile … -c developer_instructions=…`. (`mira
 agent new --tab` gives it a tab of its own instead.) Codex also gets a
 permissions profile — the one it would run on anyway, plus Mirador's socket
 and nothing else — so `mira agent send` and `wait` work from inside its
