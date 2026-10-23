@@ -953,6 +953,97 @@ pub enum SeatState {
     Closed,
 }
 
+/// A column of the task board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskColumn {
+    Todo,
+    Doing,
+    NeedsYou,
+    Done,
+}
+
+/// How a task was given: by Mirador starting a team or an agent, by
+/// `mira agent send`, or written as a card with `mira task add`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskSource {
+    TeamStart,
+    AgentNew,
+    AgentSend,
+    Manual,
+}
+
+/// How an agent's turn ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TurnEnd {
+    /// It stopped and waits for its next prompt.
+    Done,
+    /// It stopped to ask a person something.
+    NeedsYou,
+    /// Its agent is gone: the pane is a shell again, or closed.
+    Exited,
+}
+
+/// One line of the task log: something that happened to a task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskEvent {
+    /// Unix millis.
+    pub at_ms: u64,
+    #[serde(flatten)]
+    pub what: TaskEventKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum TaskEventKind {
+    /// A task given to an agent, or a card written.
+    Given {
+        card: String,
+        source: TaskSource,
+        /// The sender's name, or `you` for a person.
+        from: String,
+        /// The agent it was given to, by name and pane; a card written
+        /// for nobody yet has neither.
+        to: Option<String>,
+        pane: Option<String>,
+        team: Option<String>,
+        tab: Option<String>,
+        text: String,
+    },
+    /// A card put in a column by hand.
+    Moved {
+        card: String,
+        column: TaskColumn,
+        /// Who moved it, as in `from`.
+        by: String,
+    },
+    /// The agent in `pane` stopped.
+    TurnEnded { pane: String, end: TurnEnd },
+}
+
+/// A card of the task board: the log folded up, one card per task given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskCard {
+    pub id: String,
+    /// The first line of the task's text.
+    pub title: String,
+    pub source: TaskSource,
+    pub from: String,
+    pub assignee: Option<String>,
+    pub pane: Option<String>,
+    pub team: Option<String>,
+    pub tab: Option<String>,
+    pub column: TaskColumn,
+    pub created_ms: u64,
+    pub updated_ms: u64,
+    /// The events that touched it, oldest first.
+    pub history: Vec<TaskEvent>,
+}
+
 /// Where a role or a way of working was defined. A repository's wins over
 /// the user's, a file over an `agentRoles` entry of the same name, and any
 /// of them over one that ships with Mirador.
