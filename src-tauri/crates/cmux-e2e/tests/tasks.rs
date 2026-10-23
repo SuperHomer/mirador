@@ -167,3 +167,48 @@ fn tasks_are_logged_as_agents_work() {
     assert_eq!(column_of(&board, "Review step 1").as_deref(), Some("Done"), "{board}");
     assert!(mira(&sb, &planner, &["agent", "history", "--all"]).contains("you → planner  team-start  plan the chart"));
 }
+
+/// The board pane opens beside the pane it is asked from, showing that
+/// tab's cards, and is still a board after a relaunch. What it draws is
+/// the webview's, out of reach here; the cards it reads are the ones
+/// `task list` prints, from the same function.
+#[test]
+fn the_task_board_opens_and_comes_back() {
+    e2e!();
+    let mut sb = Sandbox::new("task-board");
+    sb.launch();
+    let first = sb.first_pane();
+    let tab = sb.snapshot()["activeTab"].as_str().unwrap().to_string();
+    mira(&sb, &first, &["task", "add", "Step 1: the pane"]);
+
+    let board = mira(&sb, &first, &["agent", "board"]).trim().to_string();
+    let listed = |sb: &Sandbox| -> Option<serde_json::Value> {
+        sb.snapshot()["taskBoardPanes"].as_array()?.iter().find(|b| b["paneId"] == board.as_str()).cloned()
+    };
+    let pane = sb.wait_for("the board pane", LONG, || listed(&sb));
+    assert_eq!(pane["tabId"], tab.as_str(), "{pane}");
+    assert_eq!(sb.panes(), [first.clone(), board.clone()]);
+    // A render throw in the board takes the whole tree down with it: the
+    // terminal beside it still answering says the page survived it.
+    sb.type_into(&first, "echo still-$((40+2))\r");
+    sb.wait_for("the terminal beside the board", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
+    });
+    // Asked from the board itself, its tab is still the one it shows.
+    let cards = sb.call(Request::TaskList { all: false, pane_id: Some(board.clone()) });
+    let titles: Vec<&str> = cards["cards"].as_array().unwrap().iter().filter_map(|c| c["title"].as_str()).collect();
+    assert_eq!(titles, ["Step 1: the pane"]);
+
+    // One of its own, in a tab of its own, still showing this tab.
+    let other = mira(&sb, &first, &["agent", "board", "--tab"]).trim().to_string();
+    let other_pane = sb.wait_for("the board in a tab", LONG, || {
+        sb.snapshot()["taskBoardPanes"].as_array()?.iter().find(|b| b["paneId"] == other.as_str()).cloned()
+    });
+    assert_eq!(other_pane["tabId"], tab.as_str());
+    assert_eq!(sb.snapshot()["tabs"].as_array().unwrap().len(), 2);
+
+    sb.quit();
+    sb.launch();
+    let pane = listed(&sb).expect("the board comes back as a board, not a shell");
+    assert_eq!(pane["tabId"], tab.as_str());
+}

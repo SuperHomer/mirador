@@ -315,6 +315,38 @@ export interface AgentActivity {
   subagents: SubagentInfo[];
 }
 
+/** A task-board pane, and the tab whose cards it shows. */
+export interface TaskBoardPaneInfo {
+  paneId: string;
+  /** The tab it was opened from. */
+  tabId: string | null;
+}
+
+export type TaskColumn = "todo" | "doing" | "needsYou" | "done";
+export type TaskSource = "teamStart" | "agentNew" | "agentSend" | "manual";
+
+/** A card of the task board (`cmux_protocol::TaskCard`). */
+export interface TaskCard {
+  id: string;
+  title: string;
+  source: TaskSource;
+  from: string;
+  assignee: string | null;
+  pane: string | null;
+  team: string | null;
+  tab: string | null;
+  column: TaskColumn;
+  createdMs: number;
+  updatedMs: number;
+}
+
+/** The cards of a tab, or of every tab when `tabId` is null; of the done
+ *  ones, only the latest. */
+export const taskCards = (tabId: string | null) =>
+  invoke<TaskCard[]>("task_cards", { tabId });
+export const openTaskBoard = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_task_board", { paneId, tab });
+
 export interface AgentWallPaneInfo {
   paneId: string;
   /** The tab whose agents it shows: the one it was opened from. */
@@ -382,6 +414,7 @@ export interface WorkspaceSnapshot {
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   agentWallPanes: AgentWallPaneInfo[];
+  taskBoardPanes: TaskBoardPaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;

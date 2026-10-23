@@ -95,6 +95,11 @@ pub struct PaneMeta {
     /// Agent-editor pane: the role, way and team files its directory sees,
     /// for editing.
     pub agent_editor: bool,
+    /// Task-board pane: the cards of one tab's agents, or of every tab's.
+    pub task_board: bool,
+    /// The tab a task-board pane shows the cards of: the tab it was opened
+    /// from.
+    pub task_board_tab: Option<String>,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
@@ -724,10 +729,13 @@ impl Workspace {
                     let pane_meta = meta.get(&t.focused);
                     let cwd = pane_meta.and_then(|m| m.cwd.clone());
                     let osc_title = pane_meta.and_then(|m| m.title.clone());
-                    // The wall runs no shell: nothing would ever title it.
-                    let wall_title = pane_meta
-                        .filter(|m| m.agent_wall)
-                        .map(|_| "Agents".to_string());
+                    // The wall and the board run no shell: nothing would
+                    // ever title them.
+                    let wall_title = pane_meta.and_then(|m| {
+                        m.agent_wall
+                            .then(|| "Agents".to_string())
+                            .or_else(|| m.task_board.then(|| "Tasks".to_string()))
+                    });
                     let title = t
                         .title
                         .clone()
@@ -782,6 +790,7 @@ impl Workspace {
             graph_panes: Vec::new(),
             agent_wall_panes: Vec::new(),
             agent_editor_panes: Vec::new(),
+            task_board_panes: Vec::new(),
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
@@ -810,6 +819,8 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
         "Agents".to_string()
     } else if m.agent_editor {
         "Roles, ways & teams".to_string()
+    } else if m.task_board {
+        "Tasks".to_string()
     } else if let Some(version) = &m.whats_new {
         format!("What's new in {version}")
     } else if let Some(url) = &m.browser_url {
@@ -1354,6 +1365,7 @@ mod tests {
         assert_eq!(meta(PaneMeta { diff_repo: Some("/src/mirador".into()), ..Default::default() }), "Diff · mirador");
         assert_eq!(meta(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
         assert_eq!(meta(PaneMeta { agent_wall: true, title: Some("x".into()), ..Default::default() }), "Agents");
+        assert_eq!(meta(PaneMeta { task_board: true, ..Default::default() }), "Tasks");
     }
 
     #[test]

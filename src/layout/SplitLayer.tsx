@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
   AgentWallPaneInfo,
+  TaskBoardPaneInfo,
   BoardRect,
   CardRect,
   BrowserPaneInfo,
@@ -27,6 +28,7 @@ import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
 import { AgentEditor } from "../agents/AgentEditor";
 import { AgentWall } from "../agents/AgentWall";
+import { TaskBoard } from "../agents/TaskBoard";
 
 // Mirrors `cmux_core::board`, which has the last word when a card is
 // dropped: a card stays inside its frame, below its label, and big enough
@@ -89,6 +91,7 @@ export function SplitLayer({
   graphPanes,
   agentWallPanes,
   agentEditorPanes,
+  taskBoardPanes,
 }: {
   tab: TabSnapshot;
   /** Drawn as cards on the board. */
@@ -107,6 +110,7 @@ export function SplitLayer({
   graphPanes: GraphPaneInfo[];
   agentWallPanes: AgentWallPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
+  taskBoardPanes: TaskBoardPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -215,6 +219,7 @@ export function SplitLayer({
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
         const wall = agentWallPanes.find((w) => w.paneId === p.paneId);
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
+        const tasks = taskBoardPanes.find((t) => t.paneId === p.paneId);
         return (
           <div
             key={p.paneId}
@@ -251,6 +256,13 @@ export function SplitLayer({
                   paneId={p.paneId}
                   tabId={wall.tabId}
                   visible={shown && !board}
+                  board={board}
+                />
+              ) : tasks ? (
+                <TaskBoard
+                  paneId={p.paneId}
+                  tabId={tasks.tabId}
+                  visible={shown}
                   board={board}
                 />
               ) : editor ? (

@@ -98,7 +98,7 @@ pub fn start_team_from(
     emit_workspace(&app);
     let lead = seats.iter().zip(&panes).find(|(s, _)| s.lead).map(|(_, p)| p);
     if let (Some(lead), Some(task)) = (lead, &task) {
-        crate::tasks::given(&state, cmux_protocol::TaskSource::TeamStart, from, lead, task, None);
+        crate::tasks::given(&app, cmux_protocol::TaskSource::TeamStart, from, lead, task, None);
     }
     Ok(tab)
 }

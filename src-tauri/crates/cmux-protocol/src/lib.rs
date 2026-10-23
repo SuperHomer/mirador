@@ -171,6 +171,9 @@ pub struct WorkspaceSnapshot {
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
+    /// Task-board panes: each shows the cards of a tab's agents.
+    #[serde(default)]
+    pub task_board_panes: Vec<TaskBoardPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -370,6 +373,14 @@ pub enum Request {
     AgentWall {
         #[serde(default)]
         pane_id: Option<String>,
+    },
+    /// Opens the task board of `pane_id`'s tab (the focused pane's when
+    /// absent) beside it, or in a tab of its own with `target` "tab".
+    AgentBoard {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
     },
     /// Opens the editor for the role, way and team files `pane_id`'s
     /// directory sees: a split of that pane, or a tab with `target` "tab".
@@ -820,6 +831,16 @@ pub struct AgentActivity {
     pub session: TranscriptSummary,
     /// Running ones first, then the rest, latest activity first.
     pub subagents: Vec<SubagentInfo>,
+}
+
+/// A pane drawing the task board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBoardPane {
+    pub pane_id: String,
+    /// The tab whose cards it shows: the one it was opened from.
+    #[serde(default)]
+    pub tab_id: Option<String>,
 }
 
 /// A pane drawing the agent wall.

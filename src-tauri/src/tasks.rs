@@ -2,30 +2,40 @@
 //! answers with. The log's format and the fold into cards are
 //! `cmux_core::tasks`'s; this is where they meet panes, tabs and teams.
 
-use cmux_protocol::{TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource};
+use cmux_protocol::{SplitDir, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::AppState;
 
-/// Adds `what` to the log, now. The log's lock is held for the append
-/// alone, so events go in one at a time and in order.
-pub fn record(state: &AppState, what: TaskEventKind) {
+/// How many done cards a board and `task list` show: the most recently
+/// moved.
+const BOARD_DONE: usize = 20;
+
+/// Adds `what` to the log, now, and tells the boards. The log's lock is
+/// held for the append alone, so events go in one at a time and in order.
+pub fn record(app: &AppHandle, what: TaskEventKind) {
     let event = TaskEvent { at_ms: crate::runs::now_ms(), what };
-    let path = state.task_log.lock().unwrap();
-    if let Err(e) = cmux_core::tasks::append(&path, &event) {
-        eprintln!("mirador: could not log a task: {e}");
+    {
+        let state = app.state::<AppState>();
+        let path = state.task_log.lock().unwrap();
+        if let Err(e) = cmux_core::tasks::append(&path, &event) {
+            eprintln!("mirador: could not log a task: {e}");
+            return;
+        }
     }
+    let _ = app.emit("tasks-changed", ());
 }
 
 /// Logs `text` as given to the agent in `pane` by `from`, with its name as
 /// `agent list` shows it, and its tab and team: on `card`, a card written
 /// by hand, or else a card of its own. Nothing for an empty text.
-pub fn given(state: &AppState, source: TaskSource, from: String, pane: &str, text: &str, card: Option<String>) {
+pub fn given(app: &AppHandle, source: TaskSource, from: String, pane: &str, text: &str, card: Option<String>) {
     if text.trim().is_empty() {
         return;
     }
-    let (tab, team, to) = whereabouts(state, pane);
+    let (tab, team, to) = whereabouts(&app.state::<AppState>(), pane);
     record(
-        state,
+        app,
         TaskEventKind::Given {
             card: card.unwrap_or_else(cmux_core::tasks::new_id),
             source,
@@ -42,7 +52,7 @@ pub fn given(state: &AppState, source: TaskSource, from: String, pane: &str, tex
 /// Writes a card titled `title` in `caller`'s tab, for the agent `to`
 /// names there — which must be one — or for nobody yet. Its id.
 pub fn add(
-    state: &AppState,
+    app: &AppHandle,
     title: &str,
     to: Option<String>,
     caller: Option<String>,
@@ -51,6 +61,8 @@ pub fn add(
     if title.trim().is_empty() {
         return Err("the card has no title".into());
     }
+    let state = app.state::<AppState>();
+    let state = &*state;
     let caller = caller.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
     let pane = match to {
         Some(to) => Some(crate::handoff::find(state, &to, Some(caller.clone()))?),
@@ -60,7 +72,7 @@ pub fn add(
     let to = pane.as_deref().and_then(|p| whereabouts(state, p).2);
     let card = cmux_core::tasks::new_id();
     record(
-        state,
+        app,
         TaskEventKind::Given {
             card: card.clone(),
             source: TaskSource::Manual,
@@ -76,9 +88,9 @@ pub fn add(
 }
 
 /// Puts the card written by hand that `id` names in `column`.
-pub fn move_card(state: &AppState, id: &str, column: TaskColumn, by: String) -> Result<(), String> {
-    let card = written(state, id)?;
-    record(state, TaskEventKind::Moved { card, column, by });
+pub fn move_card(app: &AppHandle, id: &str, column: TaskColumn, by: String) -> Result<(), String> {
+    let card = written(&app.state::<AppState>(), id)?;
+    record(app, TaskEventKind::Moved { card, column, by });
     Ok(())
 }
 
@@ -120,13 +132,20 @@ fn events(state: &AppState) -> Vec<TaskEvent> {
 }
 
 /// The cards of `pane_id`'s tab — its team's, if it is a team's — or
-/// every card with `all`.
+/// every card with `all`, as a board shows them.
 pub fn list(state: &AppState, all: bool, pane_id: Option<String>) -> Result<Vec<TaskCard>, String> {
     let tab = if all { None } else { Some(tab_of(state, pane_id)?) };
-    Ok(cmux_core::tasks::cards(&events(state))
+    Ok(board(state, tab))
+}
+
+/// The cards of the tab `tab`, or of every tab: every one not done, and
+/// the latest done.
+fn board(state: &AppState, tab: Option<String>) -> Vec<TaskCard> {
+    let cards = cmux_core::tasks::cards(&events(state))
         .into_iter()
         .filter(|c| tab.is_none() || c.tab == tab)
-        .collect())
+        .collect();
+    cmux_core::tasks::recent(cards, BOARD_DONE)
 }
 
 /// The log of the agent `name` from `pane_id`'s tab, else of that tab,
@@ -150,4 +169,49 @@ pub fn history(
     let sender = crate::handoff::sender(state, &pane);
     let scope = cmux_core::tasks::Scope::Agent { pane: &pane, name: sender.as_deref(), tab: tab.as_deref() };
     Ok(cmux_core::tasks::history(&events, scope))
+}
+
+/// The cards a board pane shows, as `task list` does: of the tab
+/// `tab_id`, or of every tab when absent.
+#[tauri::command(async)]
+pub fn task_cards(state: State<'_, AppState>, tab_id: Option<String>) -> Vec<TaskCard> {
+    board(&state, tab_id)
+}
+
+/// Opens a task board for the tab of `pane_id` (the focused pane when
+/// absent): a split of it, or a tab of its own. Opened from the agent
+/// wall, it shows the tab the wall does.
+#[tauri::command]
+pub fn open_task_board(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+) -> Result<String, String> {
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let wall_shows = state.meta.lock().unwrap().get(&source).filter(|m| m.agent_wall).map(|m| m.agent_wall_tab.clone());
+    let target = match wall_shows {
+        Some(shown) => shown,
+        None => tab_of(&state, Some(source.clone())).ok(),
+    };
+    let pane = if tab {
+        state.workspace.lock().unwrap().new_tab().1
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(pane.clone()).or_default();
+        entry.task_board = true;
+        entry.task_board_tab = target;
+    }
+    crate::commands::emit_workspace(&app);
+    Ok(pane)
 }

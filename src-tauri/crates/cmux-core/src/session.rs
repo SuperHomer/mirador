@@ -55,6 +55,10 @@ pub struct SessionPane {
     pub agent_wall_tab: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub agent_editor: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub task_board: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_board_tab: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +161,8 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_wall: m.is_some_and(|m| m.agent_wall),
                         agent_wall_tab: m.and_then(|m| m.agent_wall_tab.clone()),
                         agent_editor: m.is_some_and(|m| m.agent_editor),
+                        task_board: m.is_some_and(|m| m.task_board),
+                        task_board_tab: m.and_then(|m| m.task_board_tab.clone()),
                     },
                 )
             })
@@ -261,6 +267,8 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_wall: p.agent_wall,
                     agent_wall_tab: p.agent_wall_tab,
                     agent_editor: p.agent_editor,
+                    task_board: p.task_board,
+                    task_board_tab: p.task_board_tab,
                     ..Default::default()
                 },
             )
@@ -344,6 +352,8 @@ mod tests {
             c.clone(),
             PaneMeta {
                 command: Some("npm test".into()),
+                task_board: true,
+                task_board_tab: Some("tab-1".into()),
                 ..Default::default()
             },
         );
@@ -380,6 +390,8 @@ mod tests {
         assert_eq!(rmeta[&b].agent_status, None);
         assert!(!rmeta[&a].agent_wall);
         assert_eq!(rmeta[&c].command.as_deref(), Some("npm test"));
+        assert!(rmeta[&c].task_board && !rmeta[&a].task_board);
+        assert_eq!(rmeta[&c].task_board_tab.as_deref(), Some("tab-1"));
     }
 
     #[test]

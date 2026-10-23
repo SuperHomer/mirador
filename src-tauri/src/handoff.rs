@@ -39,13 +39,15 @@ pub fn find(state: &AppState, name: &str, caller: Option<String>) -> Result<Stri
 /// the caller is an agent, and logs it on `card` — a card written by hand
 /// — when given one. Returns the recipient's pane.
 pub fn send(
-    state: &AppState,
+    app: &tauri::AppHandle,
     to: &str,
     message: &str,
     caller: Option<String>,
     force: bool,
     card: Option<String>,
 ) -> Result<String, String> {
+    use tauri::Manager;
+    let state = &*app.state::<AppState>();
     let card = card.map(|id| crate::tasks::written(state, &id)).transpose()?;
     let pane = find(state, to, caller.clone())?;
     if caller.as_deref() == Some(pane.as_str()) {
@@ -71,7 +73,7 @@ pub fn send(
     std::thread::sleep(std::time::Duration::from_millis(120));
     state.pty.write(&pane, &enter)?;
     let from = from.unwrap_or_else(|| "you".into());
-    crate::tasks::given(state, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card);
+    crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card);
     Ok(pane)
 }
 

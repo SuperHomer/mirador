@@ -348,6 +348,8 @@ pub fn run() {
             teams::team_add,
             teams::team_restart,
             commands::open_agent_wall,
+            tasks::open_task_board,
+            tasks::task_cards,
             commands::get_agent_activity,
             commands::mark_pane_read,
             commands::zoom_pane,

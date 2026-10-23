@@ -11,6 +11,7 @@ import {
   focusPane,
   markPaneRead,
   openAgent,
+  openTaskBoard,
   zoomPane,
 } from "../bindings";
 import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
@@ -157,6 +158,13 @@ export const AgentWall = memo(function AgentWall({
             </>
           )}
         </span>
+        <button
+          className="wall-new-button"
+          title="The cards of the tasks this tab's agents were given, beside the wall"
+          onClick={() => void openTaskBoard(paneId, false)}
+        >
+          Task board
+        </button>
         <div className="wall-new">
           <button
             className="wall-new-button"

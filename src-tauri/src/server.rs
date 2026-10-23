@@ -267,7 +267,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 cmux_core::tasks::status_event(&pane, before, entry.status())
             };
             if let Some(turn) = turn {
-                crate::tasks::record(&state, turn);
+                crate::tasks::record(app, turn);
             }
             state
                 .session_dirty
@@ -315,7 +315,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentSend { to, message, pane_id, force, card } => {
-            let pane = crate::handoff::send(&state, &to, &message, pane_id, force, card)?;
+            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentFind { name, pane_id } => {
@@ -331,11 +331,11 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::TaskList { all, pane_id } => Ok(json!({ "cards": crate::tasks::list(&state, all, pane_id)? })),
         Request::TaskAdd { title, to, pane_id } => {
             let from = sender(&state, pane_id.as_deref());
-            Ok(json!({ "cardId": crate::tasks::add(&state, &title, to, pane_id, from)? }))
+            Ok(json!({ "cardId": crate::tasks::add(app, &title, to, pane_id, from)? }))
         }
         Request::TaskMove { card, column, pane_id } => {
             let by = sender(&state, pane_id.as_deref());
-            crate::tasks::move_card(&state, &card, column, by)?;
+            crate::tasks::move_card(app, &card, column, by)?;
             Ok(Value::Null)
         }
         Request::AgentHistory { name, all, pane_id } => {
@@ -348,6 +348,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::TeamRestart { members, pane_id } => {
             let done = crate::teams::team_restart(app.clone(), app.state(), members, pane_id)?;
             Ok(json!({ "members": done }))
+        }
+        Request::AgentBoard { pane_id, target } => {
+            let pane = crate::tasks::open_task_board(app.clone(), app.state(), pane_id, target.as_deref() == Some("tab"))?;
+            Ok(json!({ "paneId": pane }))
         }
         Request::AgentWall { pane_id } => {
             let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;

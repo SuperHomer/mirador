@@ -158,7 +158,7 @@ pub fn spawn(handle: tauri::AppHandle) {
                 }
                 drop(meta);
                 for turn in turns {
-                    crate::tasks::record(&state, turn);
+                    crate::tasks::record(&handle, turn);
                 }
             }
 

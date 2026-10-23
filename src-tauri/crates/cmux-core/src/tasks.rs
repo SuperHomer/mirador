@@ -315,6 +315,19 @@ pub fn parse_column(name: &str) -> Result<TaskColumn, String> {
         .ok_or_else(|| format!("no column `{name}` (todo, doing, needs-you, done)"))
 }
 
+/// `cards` as a board shows them: every card not done, and of those done
+/// the `done` most recently moved, so the column does not grow forever.
+pub fn recent(cards: Vec<TaskCard>, done: usize) -> Vec<TaskCard> {
+    let mut finished: Vec<(u64, String)> =
+        cards.iter().filter(|c| c.column == TaskColumn::Done).map(|c| (c.updated_ms, c.id.clone())).collect();
+    finished.sort_unstable_by(|a, b| b.cmp(a));
+    finished.truncate(done);
+    cards
+        .into_iter()
+        .filter(|c| c.column != TaskColumn::Done || finished.iter().any(|(_, id)| *id == c.id))
+        .collect()
+}
+
 /// A length of time as the CLI shows it: `45s`, `12m`, `3h`, `2d`.
 pub fn span(ms: u64) -> String {
     let s = ms / 1000;
@@ -603,6 +616,17 @@ mod tests {
         let m = &cards[1];
         assert_eq!((m.title.as_str(), m.source, m.updated_ms), ("Step 2: the board", TaskSource::Manual, 400));
         assert_eq!(m.history, log[1..4]);
+    }
+
+    #[test]
+    fn a_board_shows_only_the_latest_done() {
+        let log: Vec<TaskEvent> = (0..5)
+            .map(|i| given(i * 10, &format!("m{i}"), TaskSource::Manual, "worker", "step"))
+            .chain([moved(100, "m3", TaskColumn::Done), moved(200, "m0", TaskColumn::Done), moved(300, "m1", TaskColumn::Done)])
+            .collect();
+        let shown: Vec<String> = recent(cards(&log), 2).into_iter().map(|c| c.id).collect();
+        assert_eq!(shown, ["m0", "m1", "m2", "m4"]);
+        assert_eq!(recent(cards(&log), 20).len(), 5);
     }
 
     #[test]

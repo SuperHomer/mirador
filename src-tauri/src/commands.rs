@@ -111,6 +111,16 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .map(|(pane, m)| cmux_protocol::AgentEditorPane { pane_id: pane.clone(), cwd: m.cwd.clone() })
             .collect()
     };
+    snapshot.task_board_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter(|(_, m)| m.task_board)
+            .map(|(pane, m)| cmux_protocol::TaskBoardPane {
+                pane_id: pane.clone(),
+                tab_id: m.task_board_tab.clone(),
+            })
+            .collect()
+    };
     snapshot.agent_wall_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -1464,7 +1474,7 @@ pub fn open_agent_from(
     }
     emit_workspace(&app);
     if let Some(task) = &task {
-        crate::tasks::given(&state, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None);
+        crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None);
     }
     Ok(new_pane)
 }
@@ -1835,7 +1845,7 @@ fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
     drop(meta);
     for pane in agents {
         let end = cmux_protocol::TurnEnd::Exited;
-        crate::tasks::record(state, cmux_protocol::TaskEventKind::TurnEnded { pane, end });
+        crate::tasks::record(app, cmux_protocol::TaskEventKind::TurnEnded { pane, end });
     }
     notify::forget_panes(state, panes);
     for pane in panes {

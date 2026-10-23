@@ -54,6 +54,8 @@ permissions = [
   "allow-team-add",
   "allow-team-restart",
   "allow-open-agent-wall",
+  "allow-open-task-board",
+  "allow-task-cards",
   "allow-get-agent-activity",
   "allow-mark-pane-read",
   "allow-zoom-pane",

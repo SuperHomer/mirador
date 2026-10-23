@@ -146,6 +146,7 @@ export default function App() {
               graphPanes={snapshot.graphPanes}
               agentWallPanes={snapshot.agentWallPanes}
               agentEditorPanes={snapshot.agentEditorPanes ?? []}
+              taskBoardPanes={snapshot.taskBoardPanes ?? []}
             />
           </TabLayer>
         ))}

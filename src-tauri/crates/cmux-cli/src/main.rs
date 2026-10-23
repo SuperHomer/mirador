@@ -329,6 +329,13 @@ enum AgentAction {
         #[arg(long, conflicts_with_all = ["name", "pane"])]
         all: bool,
     },
+    /// Open the task board for this tab beside this pane: its agents' cards
+    /// in To do, Doing, Needs you and Done, and every tab's at a switch.
+    Board {
+        /// Open a new tab instead of splitting this pane.
+        #[arg(long)]
+        tab: bool,
+    },
     /// Open the agent wall for this tab: its agents' terminals in one
     /// grid, in a tab of its own (the existing wall, if there is one).
     Wall,
@@ -657,6 +664,10 @@ fn run(cli: Cli) -> Result<(), String> {
                 name: name.or(pane),
                 all,
                 pane_id: own_pane(),
+            },
+            AgentAction::Board { tab } => Request::AgentBoard {
+                pane_id: own_pane(),
+                target: tab.then(|| "tab".to_string()),
             },
             AgentAction::Wall => Request::AgentWall {
                 pane_id: own_pane(),
