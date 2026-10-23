@@ -350,6 +350,7 @@ pub fn run() {
             commands::open_ssh,
             commands::ssh_hosts,
             commands::set_browser_bounds,
+            commands::browser_screenshot,
             commands::set_browser_visible,
             commands::browser_navigate,
             commands::browser_history,

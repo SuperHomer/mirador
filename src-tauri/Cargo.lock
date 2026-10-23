@@ -575,9 +575,18 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "cmux-app"
 version = "0.1.32"
 dependencies = [
+ "base64 0.22.1",
+ "block2",
  "cmux-core",
  "cmux-protocol",
  "notify",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation",
+ "objc2-web-kit",
+ "png 0.18.1",
  "portable-pty",
  "reqwest",
  "rustls",
@@ -591,12 +600,15 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "uuid",
+ "webview2-com",
+ "windows 0.62.2",
 ]
 
 [[package]]
 name = "cmux-cli"
 version = "0.1.32"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "cmux-core",
  "cmux-protocol",
@@ -625,6 +637,7 @@ version = "0.1.32"
 dependencies = [
  "cmux-core",
  "cmux-protocol",
+ "png 0.18.1",
  "serde_json",
  "toml 1.1.2+spec-1.1.0",
 ]
@@ -2473,6 +2486,7 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation",
  "objc2-quartz-core",
 ]

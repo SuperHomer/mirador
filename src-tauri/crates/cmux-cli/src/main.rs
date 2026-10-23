@@ -337,6 +337,16 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// A PNG of the page, written to a file whose path it prints: the
+    /// part of the page the pane shows, at screen resolution — what a
+    /// person would see there, even while the pane is hidden. Without
+    /// --out, a new file in the temp directory.
+    Screenshot {
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// Click an element by snapshot id or CSS selector.
     Click {
         target: String,
@@ -638,6 +648,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 url,
             },
             BrowserAction::Snapshot { pane } => Request::BrowserSnapshot { pane_id: pane },
+            BrowserAction::Screenshot { out, pane } => return browser_screenshot(pane, out, cli.json),
             BrowserAction::Click { target, pane } => Request::BrowserClick {
                 pane_id: pane,
                 target,
@@ -745,6 +756,57 @@ fn run(cli: Cli) -> Result<(), String> {
 
     let response = send_request(req)?;
     render(response, cli.json, quiet_output, empty_note.as_deref())
+}
+
+/// The app sends the PNG; the CLI writes it, so the app writes nowhere.
+fn browser_screenshot(pane: Option<String>, out: Option<std::path::PathBuf>, json: bool) -> Result<(), String> {
+    use base64::Engine;
+    let resp = send_request(Request::BrowserScreenshot { pane_id: pane })?;
+    if !resp.ok {
+        return render(resp, json, false, None);
+    }
+    let data = resp.data.unwrap_or_default();
+    let pane = data["paneId"].as_str().unwrap_or("browser");
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(data["png"].as_str().unwrap_or_default())
+        .map_err(|e| format!("bad screenshot from the app: {e}"))?;
+    let path = match out {
+        // Named by the caller, so theirs to overwrite.
+        Some(path) => {
+            std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
+            path
+        }
+        None => {
+            let dir = std::env::temp_dir();
+            let (path, mut file) = new_file(&dir, &format!("mira-screenshot-{pane}-{}", now_ms()), "png")
+                .map_err(|e| format!("{}: {e}", dir.display()))?;
+            file.write_all(&png).map_err(|e| format!("{}: {e}", path.display()))?;
+            path
+        }
+    };
+    if json {
+        println!("{}", serde_json::json!({ "paneId": pane, "path": path }));
+    } else {
+        println!("{}", path.display());
+    }
+    Ok(())
+}
+
+/// A file in `dir` that did not exist before: `<stem>.<ext>`, else
+/// `<stem>-2.<ext>`, `-3`… Two screenshots of a pane in the same
+/// millisecond would otherwise share a path, one caller reading the
+/// other's image.
+fn new_file(dir: &std::path::Path, stem: &str, ext: &str) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    for n in 1.. {
+        let name = if n == 1 { format!("{stem}.{ext}") } else { format!("{stem}-{n}.{ext}") };
+        let path = dir.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("a free name")
 }
 
 fn parse_dir(s: &str) -> Result<SplitDir, String> {
@@ -1505,5 +1567,17 @@ mod tests {
 
         std::env::remove_var(cmux_core::pty::PANE_ENV);
         assert_eq!(own_pane(), None);
+    }
+
+    /// Screenshots taken in the same millisecond each get a file of their
+    /// own, and none is overwritten.
+    #[test]
+    fn new_file_never_reuses_a_path() {
+        let dir = std::env::temp_dir().join(format!("mira-new-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths: Vec<_> = (0..3).map(|_| new_file(&dir, "shot", "png").unwrap().0).collect();
+        let names: Vec<_> = paths.iter().map(|p| p.file_name().unwrap().to_str().unwrap()).collect();
+        assert_eq!(names, ["shot.png", "shot-2.png", "shot-3.png"]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -17,3 +17,5 @@ path = "src/bin/fake_agent.rs"
 
 [dev-dependencies]
 toml = "1.1"
+# Decodes `browser screenshot`s; the version tauri already pulls in.
+png = "0.18"

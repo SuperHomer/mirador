@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   browserHistory,
   browserNavigate,
+  browserScreenshot,
   closePane,
   focusPane,
   setBrowserBounds,
@@ -91,7 +92,13 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
       // The page's size is its card's, whatever the board's zoom: a page
       // read by `mira browser` while hidden lays out as it will be shown.
       const zoom = boardRef.current ? (useBoardStore.getState().camera?.zoom ?? 1) : 1;
-      void setBrowserBounds(paneId, rect.x, rect.y + inset, rect.width / zoom, rect.height / zoom);
+      // WebKit takes whatever of a view is under the titlebar off its
+      // page's viewport, shown or not: a hidden card above the window laid
+      // its page out short, or at a negative height. A shown page is never
+      // up there, and a hidden one's place doesn't matter, so it stops at
+      // the top.
+      const y = Math.max(rect.y, 0);
+      void setBrowserBounds(paneId, rect.x, y + inset, rect.width / zoom, rect.height / zoom);
     };
     reportRef.current = report;
 
@@ -181,6 +188,85 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
   // after every render. It only measures, and acts on a change.
   useEffect(() => updateRef.current());
 
+  // While its page is hidden, a card shows a picture of it, taken while
+  // the card is at least partly on screen: when the page goes (what the
+  // person just saw), when it navigates, when the card comes into view
+  // with no picture yet, and every few seconds after, so a page that
+  // changes itself stays fresh. One capture at a time per pane.
+  const [still, setStill] = useState<string | null>(null);
+  const stillRef = useRef<string | null>(null);
+  const capturing = useRef(false);
+  // Each run of the effect below is a generation, ended by the next run,
+  // the page going live, or unmount. A capture answers for the page as it
+  // was when it started: from an ended generation it would put an older
+  // page, or one now shown live, over the card, so it is dropped.
+  const generation = useRef(0);
+  // The current generation's capture, for one that ends stale to hand on to.
+  const retry = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      if (stillRef.current) URL.revokeObjectURL(stillRef.current);
+      stillRef.current = null;
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!board || live) return;
+    const gen = generation.current;
+    const onScreen = () => {
+      const r = placeholderRef.current?.getBoundingClientRect();
+      const host = placeholderRef.current?.closest(".tabs-host")?.getBoundingClientRect();
+      return (
+        document.visibilityState === "visible" &&
+        !!r &&
+        !!host &&
+        r.right > host.left &&
+        r.left < host.right &&
+        r.bottom > host.top &&
+        r.top < host.bottom
+      );
+    };
+    const capture = () => {
+      if (capturing.current || !onScreen()) return;
+      capturing.current = true;
+      browserScreenshot(paneId)
+        .then((png) => {
+          if (gen !== generation.current) return;
+          const next = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+          if (stillRef.current) URL.revokeObjectURL(stillRef.current);
+          stillRef.current = next;
+          setStill(next);
+        })
+        // A failed capture keeps the picture before it: on Windows a hidden
+        // page may not capture at all.
+        .catch(() => {})
+        .finally(() => {
+          capturing.current = false;
+          // This one held off the capture of the generation that ended it.
+          if (gen !== generation.current) retry.current?.();
+        });
+    };
+    retry.current = capture;
+    capture();
+    const refresh = setInterval(capture, 5000);
+    // Coming into view with no picture yet: at once, not at the next tick.
+    // Only on the way in — the store changes every frame of a pan, and a
+    // capture that fails fast would otherwise start again each frame; a
+    // failure waits for the tick.
+    let wasOnScreen = onScreen();
+    const unsubscribe = useBoardStore.subscribe(() => {
+      const now = onScreen();
+      if (now && !wasOnScreen && !stillRef.current) capture();
+      wasOnScreen = now;
+    });
+    return () => {
+      generation.current += 1;
+      retry.current = null;
+      clearInterval(refresh);
+      unsubscribe();
+    };
+  }, [board, live, url, paneId]);
+
   const commit = () => {
     setEditing(false);
     if (draft.trim() && draft !== url) {
@@ -233,7 +319,12 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
         </button>
       </div>
       <div className="browser-placeholder" ref={placeholderRef}>
-        {!live && <div className="browser-still">{url}</div>}
+        {!live &&
+          (still ? (
+            <img className="browser-shot" src={still} alt="" draggable={false} />
+          ) : (
+            <div className="browser-still">{url}</div>
+          ))}
       </div>
     </div>
   );

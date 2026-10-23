@@ -459,6 +459,12 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// The page as a PNG, base64 in `png`: the part the pane shows, at
+    /// the display's resolution.
+    BrowserScreenshot {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     BrowserClick {
         #[serde(default)]
         pane_id: Option<String>,

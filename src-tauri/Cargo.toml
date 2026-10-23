@@ -55,3 +55,25 @@ serde.workspace = true
 serde_json.workspace = true
 cmux-core = { path = "crates/cmux-core" }
 cmux-protocol = { path = "crates/cmux-protocol" }
+# Screenshots reach the CLI as base64 in the socket's JSON. Already in the
+# tree (via reqwest's hyper-util).
+base64 = "0.22"
+
+# A browser pane's screenshot: WebKit's snapshot, drawn and encoded here.
+# All already in the tree through wry and muda, at these versions.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+# Without their default features, which would pull in every framework
+# they bind (Metal, CoreVideo, Security…) as new crates.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "NSGraphicsContext", "NSImage", "NSImageRep"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
+png = "0.18"
+
+# WebView2's CapturePreview, into a memory stream.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }

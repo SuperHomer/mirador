@@ -1720,6 +1720,17 @@ pub async fn set_browser_bounds(
     crate::browser::ensure_webview(&app, &pane_id, x, y, w, h)
 }
 
+/// The pane's page as PNG bytes, for its card on the board to show while
+/// the page itself is hidden. On a blocking thread: the capture waits on
+/// the main thread, which takes the snapshot.
+#[tauri::command]
+pub async fn browser_screenshot(app: AppHandle, pane_id: String) -> Result<tauri::ipc::Response, String> {
+    let png = tauri::async_runtime::spawn_blocking(move || crate::browser::screenshot(&app, &pane_id))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(png))
+}
+
 #[tauri::command]
 pub fn set_browser_visible(app: AppHandle, pane_id: String, visible: bool) {
     crate::browser::set_visible(&app, &pane_id, visible);
