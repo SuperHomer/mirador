@@ -17,8 +17,9 @@ pub fn record(state: &AppState, what: TaskEventKind) {
 }
 
 /// Logs `text` as given to the agent in `pane` by `from`, with its name as
-/// `agent list` shows it, and its tab and team. Nothing for an empty text.
-pub fn given(state: &AppState, source: TaskSource, from: String, pane: &str, text: &str) {
+/// `agent list` shows it, and its tab and team: on `card`, a card written
+/// by hand, or else a card of its own. Nothing for an empty text.
+pub fn given(state: &AppState, source: TaskSource, from: String, pane: &str, text: &str, card: Option<String>) {
     if text.trim().is_empty() {
         return;
     }
@@ -26,7 +27,7 @@ pub fn given(state: &AppState, source: TaskSource, from: String, pane: &str, tex
     record(
         state,
         TaskEventKind::Given {
-            card: cmux_core::tasks::new_id(),
+            card: card.unwrap_or_else(cmux_core::tasks::new_id),
             source,
             from,
             to,
@@ -76,9 +77,14 @@ pub fn add(
 
 /// Puts the card written by hand that `id` names in `column`.
 pub fn move_card(state: &AppState, id: &str, column: TaskColumn, by: String) -> Result<(), String> {
-    let card = cmux_core::tasks::movable(&cmux_core::tasks::cards(&events(state)), id)?.id.clone();
+    let card = written(state, id)?;
     record(state, TaskEventKind::Moved { card, column, by });
     Ok(())
+}
+
+/// The whole id of the card written by hand that `id` names.
+pub fn written(state: &AppState, id: &str) -> Result<String, String> {
+    Ok(cmux_core::tasks::written(&cmux_core::tasks::cards(&events(state)), id)?.id.clone())
 }
 
 /// The tab and team of `pane`, and its name as `agent list` shows it.

@@ -127,6 +127,39 @@ fn tasks_are_logged_as_agents_work() {
     let (code, _, err) = sb.mira(Some(&planner), &["task", "move", &auto, "todo"]);
     assert!(code != 0 && err.contains("follows reviewer"), "{err}");
 
+    // A message sent for a written card is that card's: in its history,
+    // with no card of its own, and the card stays where it was put.
+    let step3 = mira(&sb, &planner, &["task", "add", "--to", "reviewer", "Step 3: the board"]).trim().to_string();
+    let text = format!("Step 3 (card {step3}): build it");
+    mira(&sb, &planner, &["agent", "send", "reviewer", "--card", &step3[..6], &text]);
+    sb.wait_for("the reviewer's turn on step 3", LONG, || {
+        let history = mira(&sb, &planner, &["agent", "history", "reviewer"]);
+        history.lines().last().filter(|l| l.contains("reviewer done after")).map(|_| ())
+    });
+    let board = mira(&sb, &planner, &["task", "list"]);
+    assert_eq!(column_of(&board, "Step 3: the board").as_deref(), Some("To do"), "{board}");
+    assert_eq!(column_of(&board, &text), None, "no card of its own: {board}");
+    let cards = sb.call(Request::TaskList { all: true, pane_id: None });
+    let card = cards["cards"].as_array().unwrap().iter().find(|c| c["id"] == step3.as_str()).unwrap().clone();
+    let texts: Vec<&str> = card["history"].as_array().unwrap().iter().filter_map(|e| e["text"].as_str()).collect();
+    assert_eq!(texts, ["Step 3: the board", text.as_str()], "{card}");
+
+    // A card that is not one written by hand refuses the send: nothing typed.
+    let before = sb.events("message", &reviewer).len();
+    let (code, _, err) = sb.mira(Some(&planner), &["agent", "send", "reviewer", "--card", "zzzz", "hello"]);
+    assert!(code != 0 && err.contains("no card `zzzz`"), "{err}");
+    let (code, _, err) = sb.mira(Some(&planner), &["agent", "send", "reviewer", "--card", &auto, "hello"]);
+    assert!(code != 0 && err.contains("follows reviewer"), "{err}");
+    // A message sent after them is the next the reviewer gets.
+    mira(&sb, &planner, &["agent", "send", "reviewer", "after the refusals"]);
+    let got = sb.wait_for("the message after the refusals", LONG, || {
+        let got = sb.events("message", &reviewer);
+        (got.len() > before).then_some(got)
+    });
+    let texts: Vec<&str> = got[before..].iter().filter_map(|m| m["text"].as_str()).collect();
+    assert_eq!(texts.len(), 1, "the refused sends typed nothing: {texts:?}");
+    assert!(texts[0].ends_with("after the refusals"), "{texts:?}");
+
     // The log outlives the app.
     sb.quit();
     sb.launch();

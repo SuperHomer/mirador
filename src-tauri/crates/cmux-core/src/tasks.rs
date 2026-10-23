@@ -107,20 +107,22 @@ pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
         let at = event.at_ms;
         match &event.what {
             TaskEventKind::Given { card, source, from, to, pane, team, tab, text } => {
-                if by_id.contains_key(card) {
-                    continue;
-                }
-                let column = if *source == TaskSource::Manual {
-                    TaskColumn::Todo
-                } else {
+                if *source != TaskSource::Manual {
                     // The agent has moved on: whatever it was given before is over.
                     for older in cards.iter_mut().filter(|c| following(c) && c.pane == *pane) {
                         older.column = TaskColumn::Done;
                         older.updated_ms = at;
                         older.history.push(event.clone());
                     }
-                    TaskColumn::Doing
-                };
+                }
+                // A task sent for a card written by hand (`agent send
+                // --card`) is that card's, which stays where it was put.
+                if let Some(&i) = by_id.get(card) {
+                    cards[i].updated_ms = at;
+                    cards[i].history.push(event.clone());
+                    continue;
+                }
+                let column = if *source == TaskSource::Manual { TaskColumn::Todo } else { TaskColumn::Doing };
                 by_id.insert(card.clone(), cards.len());
                 cards.push(TaskCard {
                     id: card.clone(),
@@ -267,9 +269,10 @@ pub fn history(events: &[TaskEvent], scope: Scope) -> Vec<TaskHistoryEntry> {
 }
 
 /// The card `id` names — the whole id, or a prefix of one card's only —
-/// if it may be moved by hand: one written by hand. A card Mirador made
-/// follows its agent, and a move would only be undone by its next turn.
-pub fn movable<'a>(cards: &'a [TaskCard], id: &str) -> Result<&'a TaskCard, String> {
+/// if it was written by hand, as only those are moved by hand or have
+/// tasks sent for them. A card Mirador made follows its agent: a move
+/// would only be undone by its next turn.
+pub fn written<'a>(cards: &'a [TaskCard], id: &str) -> Result<&'a TaskCard, String> {
     let id = id.trim();
     let hits: Vec<&TaskCard> = match cards.iter().find(|c| c.id == id) {
         Some(exact) => vec![exact],
@@ -286,7 +289,7 @@ pub fn movable<'a>(cards: &'a [TaskCard], id: &str) -> Result<&'a TaskCard, Stri
     };
     if card.source != TaskSource::Manual {
         return Err(format!(
-            "card {} follows {}: it moves as its agent works, not by hand",
+            "card {} follows {}: only a card written with `mira task add` is moved or sent for by hand",
             card.id,
             card.assignee.as_deref().unwrap_or("its agent")
         ));
@@ -570,20 +573,36 @@ mod tests {
     }
 
     #[test]
-    fn only_a_written_card_is_moved_by_hand() {
+    fn only_a_written_card_is_moved_or_sent_for() {
         let cards = cards(&[
             given(1, "ab12cd34", TaskSource::Manual, "worker", "Step 1"),
             given(2, "ab99ffff", TaskSource::Manual, "worker", "Step 2"),
             given(3, "77777777", TaskSource::AgentSend, "worker", "go"),
         ]);
-        assert_eq!(movable(&cards, "ab12cd34").unwrap().title, "Step 1");
-        assert_eq!(movable(&cards, " ab9 ").unwrap().title, "Step 2");
-        let two = movable(&cards, "ab").unwrap_err();
+        assert_eq!(written(&cards, "ab12cd34").unwrap().title, "Step 1");
+        assert_eq!(written(&cards, " ab9 ").unwrap().title, "Step 2");
+        let two = written(&cards, "ab").unwrap_err();
         assert!(two.contains("more than one") && two.contains("ab12cd34, ab99ffff"), "{two}");
-        assert!(movable(&cards, "zz").unwrap_err().contains("no card `zz`"));
-        assert!(movable(&cards, "").unwrap_err().contains("no card"));
-        let auto = movable(&cards, "777").unwrap_err();
+        assert!(written(&cards, "zz").unwrap_err().contains("no card `zz`"));
+        assert!(written(&cards, "").unwrap_err().contains("no card"));
+        let auto = written(&cards, "777").unwrap_err();
         assert!(auto.contains("follows worker"), "{auto}");
+    }
+
+    #[test]
+    fn a_task_sent_for_a_written_card_is_that_cards() {
+        let log = [
+            given(100, "auto", TaskSource::AgentSend, "worker", "earlier"),
+            given(200, "m", TaskSource::Manual, "worker", "Step 2: the board"),
+            moved(300, "m", TaskColumn::Doing),
+            given(400, "m", TaskSource::AgentSend, "worker", "Step 2 (card m): build the board"),
+            ended(500, "worker", TurnEnd::Done),
+        ];
+        let cards = cards(&log);
+        assert_eq!(columns(&cards), [("auto", TaskColumn::Done), ("m", TaskColumn::Doing)]);
+        let m = &cards[1];
+        assert_eq!((m.title.as_str(), m.source, m.updated_ms), ("Step 2: the board", TaskSource::Manual, 400));
+        assert_eq!(m.history, log[1..4]);
     }
 
     #[test]

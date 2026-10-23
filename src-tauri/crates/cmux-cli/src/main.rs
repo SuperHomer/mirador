@@ -288,6 +288,10 @@ enum AgentAction {
         /// Answer a prompt the agent is waiting on anyway.
         #[arg(long)]
         force: bool,
+        /// The card the message is for, written with `task add` (its id,
+        /// or the start of it): logged on that card, not on a new one.
+        #[arg(long)]
+        card: Option<String>,
         /// Then wait for it to finish, as `agent wait` does.
         #[arg(long)]
         wait: bool,
@@ -625,13 +629,14 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
                 target: tab.then(|| "tab".to_string()),
             },
-            AgentAction::Send { to, message, force, wait, timeout } => {
+            AgentAction::Send { to, message, force, card, wait, timeout } => {
                 let started = now_ms();
                 let resp = send_request(Request::AgentSend {
                     to: to.clone(),
                     message: message.join(" "),
                     pane_id: own_pane(),
                     force,
+                    card,
                 })?;
                 if !wait || !resp.ok {
                     return render(resp, cli.json, false, None);

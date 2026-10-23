@@ -1464,7 +1464,7 @@ pub fn open_agent_from(
     }
     emit_workspace(&app);
     if let Some(task) = &task {
-        crate::tasks::given(&state, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task);
+        crate::tasks::given(&state, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None);
     }
     Ok(new_pane)
 }

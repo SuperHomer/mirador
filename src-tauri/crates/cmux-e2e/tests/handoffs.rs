@@ -19,6 +19,7 @@ fn send(sb: &Sandbox, from: &str, to: &str, message: &str) -> Result<serde_json:
         message: message.into(),
         pane_id: Some(from.into()),
         force: false,
+        card: None,
     })
 }
 
@@ -92,6 +93,7 @@ fn agents_hand_each_other_work() {
         message: "yes, go ahead".into(),
         pane_id: Some(r1.clone()),
         force: true,
+        card: None,
     })
     .unwrap();
     sb.wait_for("the forced message", LONG, || {

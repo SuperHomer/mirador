@@ -391,6 +391,10 @@ pub enum Request {
         pane_id: Option<String>,
         #[serde(default)]
         force: bool,
+        /// A card written by hand the message is for, by id or a prefix of
+        /// one: it is logged on that card rather than on one of its own.
+        #[serde(default)]
+        card: Option<String>,
     },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {

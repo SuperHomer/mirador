@@ -314,8 +314,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::AgentSend { to, message, pane_id, force } => {
-            let pane = crate::handoff::send(&state, &to, &message, pane_id, force)?;
+        Request::AgentSend { to, message, pane_id, force, card } => {
+            let pane = crate::handoff::send(&state, &to, &message, pane_id, force, card)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentFind { name, pane_id } => {
