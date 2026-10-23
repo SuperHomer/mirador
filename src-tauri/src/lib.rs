@@ -10,6 +10,7 @@ mod intel;
 mod notify;
 mod runs;
 mod server;
+mod tasks;
 mod teams;
 mod update;
 mod whatsnew;
@@ -60,6 +61,9 @@ pub struct AppState {
     pub emit_coalescer: commands::EmitCoalescer,
     /// Claude Code transcripts read so far, for agent activity.
     pub transcripts: Mutex<cmux_core::transcript::Cache>,
+    /// The task log's path, locked while it is appended to or read: the
+    /// app is its one writer.
+    pub task_log: Mutex<std::path::PathBuf>,
 }
 
 pub fn save_session(state: &AppState) {
@@ -209,6 +213,10 @@ pub fn run() {
         .map(|(id, _)| id.clone())
         .collect();
     cmux_core::session::gc_scrollback(&workspace.all_pane_ids());
+    let task_log = cmux_core::tasks::log_path();
+    if let Err(e) = cmux_core::tasks::compact(&task_log, runs::now_ms()) {
+        eprintln!("mirador: could not compact the task log: {e}");
+    }
 
     let builder = tauri::Builder::default();
     // A second launch on Windows or Linux would run without the automation
@@ -249,6 +257,7 @@ pub fn run() {
             browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
             transcripts: Mutex::new(Default::default()),
+            task_log: Mutex::new(task_log),
             update: update::UpdateState::default(),
             emit_coalescer: commands::EmitCoalescer::default(),
         })

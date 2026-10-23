@@ -136,6 +136,11 @@ enum Command {
         #[command(subcommand)]
         action: TeamAction,
     },
+    /// Tasks: what agents were given and where each stands, as a board.
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -222,6 +227,16 @@ enum TeamAction {
 }
 
 #[derive(Subcommand)]
+enum TaskAction {
+    /// The board of this tab — its team's, in a team's tab — by column:
+    /// each card's agent, age and title. Every tab's with --all.
+    List {
+        #[arg(long)]
+        all: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum AgentAction {
     /// Start an agent in a pane beside this one: Claude Code, or a role's
     /// harness, model and prompt (its own, then its way of working's).
@@ -283,6 +298,17 @@ enum AgentAction {
     /// The roles `agent new --role` accepts here — this repository's
     /// `.mirador/roles`, then yours — and the ways of working they follow.
     Roles,
+    /// The tasks given in this tab and how each turn ended, oldest first:
+    /// of the agent NAME (a teammate's name, or a pane id) when given, of
+    /// every tab with --all.
+    History {
+        name: Option<String>,
+        /// The agent's pane, instead of a name.
+        #[arg(long, conflicts_with = "name")]
+        pane: Option<String>,
+        #[arg(long, conflicts_with_all = ["name", "pane"])]
+        all: bool,
+    },
     /// Open the agent wall for this tab: its agents' terminals in one
     /// grid, in a tab of its own (the existing wall, if there is one).
     Wall,
@@ -606,6 +632,11 @@ fn run(cli: Cli) -> Result<(), String> {
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&name, &pane, started, timeout);
             }
+            AgentAction::History { name, pane, all } => Request::AgentHistory {
+                name: name.or(pane),
+                all,
+                pane_id: own_pane(),
+            },
             AgentAction::Wall => Request::AgentWall {
                 pane_id: own_pane(),
             },
@@ -620,6 +651,9 @@ fn run(cli: Cli) -> Result<(), String> {
             TeamAction::List { defined: false } => Request::TeamList,
             TeamAction::Add { role, name } => Request::TeamAdd { role, name, pane_id: own_pane() },
             TeamAction::Restart { members } => Request::TeamRestart { members, pane_id: own_pane() },
+        },
+        Command::Task { action } => match action {
+            TaskAction::List { all } => Request::TaskList { all, pane_id: own_pane() },
         },
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab } => Request::SshOpen {
@@ -915,6 +949,10 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 render_activity(&data);
             } else if let Some(teams) = map.get("teams").and_then(|v| v.as_array()) {
                 render_teams(teams);
+            } else if let Some(cards) = map.get("cards") {
+                render_cards(serde_json::from_value(cards.clone()).map_err(|e| format!("bad response: {e}"))?);
+            } else if let Some(history) = map.get("history") {
+                render_history(serde_json::from_value(history.clone()).map_err(|e| format!("bad response: {e}"))?);
             } else if let Some(members) = map.get("members").and_then(|v| v.as_array()) {
                 for m in members {
                     println!(
@@ -978,6 +1016,71 @@ fn render_teams(teams: &[serde_json::Value]) {
                 m["pane"].as_str().unwrap_or(""),
             );
         }
+    }
+}
+
+/// The board: a heading per column that has cards, then a line per card
+/// with its agent, how long ago it last moved, and its title.
+fn render_cards(cards: Vec<cmux_protocol::TaskCard>) {
+    use cmux_protocol::TaskColumn::*;
+    if cards.is_empty() {
+        println!("(no tasks — they appear as agents are given them: `mira agent send`, `team start`)");
+        return;
+    }
+    let now = now_ms();
+    for (column, heading) in [(Todo, "To do"), (Doing, "Doing"), (NeedsYou, "Needs you"), (Done, "Done")] {
+        let mut here = cards.iter().filter(|c| c.column == column).peekable();
+        if here.peek().is_none() {
+            continue;
+        }
+        println!("{heading}");
+        for c in here {
+            println!(
+                "  {:<14}  {:>4}  {}",
+                c.assignee.as_deref().unwrap_or("-"),
+                cmux_core::tasks::span(now.saturating_sub(c.updated_ms)),
+                c.title,
+            );
+        }
+    }
+}
+
+/// The log: a line per event, oldest first, with how long ago it was.
+fn render_history(history: Vec<cmux_protocol::TaskHistoryEntry>) {
+    use cmux_protocol::{TaskEventKind::*, TaskSource, TurnEnd};
+    if history.is_empty() {
+        println!("(no tasks yet)");
+        return;
+    }
+    let now = now_ms();
+    for entry in history {
+        let agent = entry.agent.as_deref().unwrap_or("-");
+        let what = match &entry.event.what {
+            Given { source, from, to, text, .. } => {
+                let source = match source {
+                    TaskSource::TeamStart => "team-start",
+                    TaskSource::AgentNew => "agent-new",
+                    TaskSource::AgentSend => "agent-send",
+                    TaskSource::Manual => "manual",
+                };
+                let title = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+                format!("{from} → {}  {source}  {title}", to.as_deref().unwrap_or("-"))
+            }
+            Moved { card, column, by } => format!("{by} moved {card} to {column:?}"),
+            TurnEnded { end, .. } => {
+                let end = match end {
+                    TurnEnd::Done => "done",
+                    TurnEnd::NeedsYou => "needs-you",
+                    TurnEnd::Exited => "exited",
+                };
+                match entry.turn_ms {
+                    Some(ms) => format!("{agent} {end} after {}", cmux_core::tasks::span(ms)),
+                    None => format!("{agent} {end}"),
+                }
+            }
+            Resumed { .. } => format!("{agent} resumed"),
+        };
+        println!("{:>4} ago  {what}", cmux_core::tasks::span(now.saturating_sub(entry.event.at_ms)));
     }
 }
 

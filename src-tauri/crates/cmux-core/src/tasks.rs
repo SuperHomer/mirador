@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskSource, TurnEnd};
+use cmux_protocol::{AgentStatus, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource, TurnEnd};
 
 use crate::session::{atomic_write, data_dir};
 
@@ -172,6 +172,105 @@ pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
         }
     }
     cards
+}
+
+/// What an agent's status going from `before` to `after` adds to the log:
+/// a turn ending as it stops or asks a person, a resume as it goes back to
+/// work after asking. Starting work on a task is logged when the task is
+/// given, not here.
+pub fn status_event(pane: &str, before: Option<AgentStatus>, after: Option<AgentStatus>) -> Option<TaskEventKind> {
+    use AgentStatus::*;
+    let end = |end| Some(TaskEventKind::TurnEnded { pane: pane.to_string(), end });
+    match (before?, after?) {
+        (Working | NeedsYou, Idle) => end(TurnEnd::Done),
+        (Working | Idle, NeedsYou) => end(TurnEnd::NeedsYou),
+        (NeedsYou, Working) => Some(TaskEventKind::Resumed { pane: pane.to_string() }),
+        _ => None,
+    }
+}
+
+/// Which events a history is of.
+#[derive(Debug, Clone, Copy)]
+pub enum Scope<'a> {
+    All,
+    /// The tasks given in a tab, and what came of them.
+    Tab(&'a str),
+    /// The tasks given to the agent in `pane` or sent by it — by `name`,
+    /// in `tab` — and its turns.
+    Agent { pane: &'a str, name: Option<&'a str>, tab: Option<&'a str> },
+}
+
+/// The events of `scope`, oldest first, each turn end with how long the
+/// turn took: since the task it worked on was given, or since it resumed.
+pub fn history(events: &[TaskEvent], scope: Scope) -> Vec<TaskHistoryEntry> {
+    let mut name_of: HashMap<&str, &str> = HashMap::new();
+    let mut tab_of_pane: HashMap<&str, &str> = HashMap::new();
+    let mut card_at: HashMap<&str, (Option<&str>, Option<&str>)> = HashMap::new();
+    let mut started: HashMap<&str, u64> = HashMap::new();
+    let mut out = Vec::new();
+    for event in events {
+        let (agent, turn_ms, keep) = match &event.what {
+            TaskEventKind::Given { card, from, to, pane, tab, .. } => {
+                let pane = pane.as_deref();
+                card_at.insert(card, (pane, tab.as_deref()));
+                if let Some(p) = pane {
+                    started.insert(p, event.at_ms);
+                    if let Some(to) = to {
+                        name_of.insert(p, to);
+                    }
+                    if let Some(t) = tab {
+                        tab_of_pane.insert(p, t);
+                    }
+                }
+                let keep = match scope {
+                    Scope::All => true,
+                    Scope::Tab(t) => tab.as_deref() == Some(t),
+                    Scope::Agent { pane: p, name, tab: t } => {
+                        pane == Some(p) || (name == Some(from.as_str()) && tab.as_deref() == t)
+                    }
+                };
+                (None, None, keep)
+            }
+            TaskEventKind::Moved { card, .. } => {
+                let (pane, tab) = card_at.get(card.as_str()).copied().unwrap_or_default();
+                let keep = match scope {
+                    Scope::All => true,
+                    Scope::Tab(t) => tab == Some(t),
+                    Scope::Agent { pane: p, .. } => pane == Some(p),
+                };
+                (None, None, keep)
+            }
+            TaskEventKind::TurnEnded { pane, .. } | TaskEventKind::Resumed { pane } => {
+                let turn_ms = if matches!(event.what, TaskEventKind::Resumed { .. }) {
+                    started.insert(pane, event.at_ms);
+                    None
+                } else {
+                    started.remove(pane.as_str()).map(|s| event.at_ms.saturating_sub(s))
+                };
+                let keep = match scope {
+                    Scope::All => true,
+                    Scope::Tab(t) => tab_of_pane.get(pane.as_str()) == Some(&t),
+                    Scope::Agent { pane: p, .. } => pane == p,
+                };
+                (name_of.get(pane.as_str()).map(|n| n.to_string()), turn_ms, keep)
+            }
+        };
+        if keep {
+            out.push(TaskHistoryEntry { event: event.clone(), agent, turn_ms });
+        }
+    }
+    out
+}
+
+/// A length of time as the CLI shows it: `45s`, `12m`, `3h`, `2d`.
+pub fn span(ms: u64) -> String {
+    let s = ms / 1000;
+    match s {
+        0..60 => format!("{s}s"),
+        60..3600 => format!("{}m", s / 60),
+        3600..86400 => format!("{}h", s / 3600),
+        _ => format!("{}d", s / 86400),
+    }
 }
 
 /// Whether `card` still follows its agent: given by Mirador, and not over.
@@ -362,5 +461,70 @@ mod tests {
         let line = serde_json::to_string(&moved(6, "m", TaskColumn::NeedsYou)).unwrap();
         assert_eq!(line, r#"{"atMs":6,"kind":"moved","card":"m","column":"needsYou","by":"planner"}"#);
         assert_eq!(serde_json::from_str::<TaskEvent>(&line).unwrap(), moved(6, "m", TaskColumn::NeedsYou));
+    }
+
+    #[test]
+    fn a_status_change_ends_or_resumes_a_turn() {
+        use AgentStatus::*;
+        let at = |before, after| status_event("p", before, after);
+        let ended = |end| Some(TaskEventKind::TurnEnded { pane: "p".into(), end });
+        assert_eq!(at(Some(Working), Some(Idle)), ended(TurnEnd::Done));
+        assert_eq!(at(Some(NeedsYou), Some(Idle)), ended(TurnEnd::Done));
+        assert_eq!(at(Some(Working), Some(NeedsYou)), ended(TurnEnd::NeedsYou));
+        assert_eq!(at(Some(NeedsYou), Some(Working)), Some(TaskEventKind::Resumed { pane: "p".into() }));
+        // Starting a turn is the task's; an unknown status says nothing.
+        assert_eq!(at(Some(Idle), Some(Working)), None);
+        assert_eq!(at(None, Some(Idle)), None);
+        assert_eq!(at(Some(Working), None), None);
+    }
+
+    #[test]
+    fn history_says_how_long_each_turn_took() {
+        let mut sent = given(5_000, "b", TaskSource::AgentSend, "reviewer", "Review 3505520\nplease");
+        if let TaskEventKind::Given { from, .. } = &mut sent.what {
+            *from = "worker".into();
+        }
+        let log = [
+            given(1_000, "a", TaskSource::TeamStart, "worker", "Step 1"),
+            ended(3_000, "worker", TurnEnd::NeedsYou),
+            resumed(4_000, "worker"),
+            sent,
+            ended(64_000, "worker", TurnEnd::Done),
+            ended(70_000, "reviewer", TurnEnd::Done),
+            given(80_000, "x", TaskSource::AgentSend, "elsewhere", "other tab"),
+        ];
+        let mut other = log.to_vec();
+        if let TaskEventKind::Given { tab, .. } = &mut other[6].what {
+            *tab = Some("tab-2".into());
+        }
+        let all = history(&other, Scope::All);
+        assert_eq!(all.len(), 7);
+        let turns: Vec<(Option<&str>, Option<u64>)> = all.iter().map(|e| (e.agent.as_deref(), e.turn_ms)).collect();
+        assert_eq!(
+            turns,
+            [
+                (None, None),
+                (Some("worker"), Some(2_000)),
+                (Some("worker"), None),
+                (None, None),
+                (Some("worker"), Some(60_000)),
+                (Some("reviewer"), Some(65_000)),
+                (None, None),
+            ]
+        );
+        assert_eq!(history(&other, Scope::Tab("tab-1")).len(), 6);
+        // An agent's: what it was given, what it sent, its own turns.
+        let worker = history(&other, Scope::Agent { pane: "pane-worker", name: Some("worker"), tab: Some("tab-1") });
+        let at: Vec<u64> = worker.iter().map(|e| e.event.at_ms).collect();
+        assert_eq!(at, [1_000, 3_000, 4_000, 5_000, 64_000]);
+    }
+
+    #[test]
+    fn spans_are_short() {
+        assert_eq!(span(999), "0s");
+        assert_eq!(span(59_000), "59s");
+        assert_eq!(span(60_000), "1m");
+        assert_eq!(span(3 * 3_600_000 + 1), "3h");
+        assert_eq!(span(50 * 3_600_000), "2d");
     }
 }

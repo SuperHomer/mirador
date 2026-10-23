@@ -97,10 +97,22 @@ pub fn spawn(handle: tauri::AppHandle) {
                 let procs = cmux_core::agents::process_table();
                 let running = cmux_core::agents::panes_running_agents(&procs, &pids);
                 let mut meta = state.meta.lock().unwrap();
+                // What the task log learns on the way: agents gone, turns
+                // ended. Logged once the lock is let go.
+                let mut turns = Vec::new();
                 for (pane, _) in &pids {
                     let Some(entry) = meta.get_mut(pane) else { continue };
+                    let was_agent = entry.is_agent();
+                    let live = entry.agent_harness.filter(|_| entry.agent_live);
                     if entry.observe_agent(running.get(pane), cmux_core::agents::AUTO_RESUME) {
                         changed = true;
+                    }
+                    // Forgotten, or another agent in its place.
+                    if was_agent && (!entry.is_agent() || live.is_some_and(|h| entry.agent_harness != Some(h))) {
+                        turns.push(cmux_protocol::TaskEventKind::TurnEnded {
+                            pane: pane.clone(),
+                            end: cmux_protocol::TurnEnd::Exited,
+                        });
                     }
                 }
                 // Claude Code's own record of each session — its name, and
@@ -135,9 +147,18 @@ pub fn spawn(handle: tauri::AppHandle) {
                         session.as_deref(),
                         running.get(pane).map(|r| r.args.as_str()),
                     );
-                    if meta.get_mut(pane).is_some_and(|m| m.apply_claude_session(found)) {
+                    let Some(m) = meta.get_mut(pane) else { continue };
+                    let before = m.status();
+                    if m.apply_claude_session(found) {
                         changed = true;
                     }
+                    // Its hooks' status, when it has one, wins: this only
+                    // tells a turn of an agent without them.
+                    turns.extend(cmux_core::tasks::status_event(pane, before, m.status()));
+                }
+                drop(meta);
+                for turn in turns {
+                    crate::tasks::record(&state, turn);
                 }
             }
 

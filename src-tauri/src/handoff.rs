@@ -54,18 +54,24 @@ pub fn send(state: &AppState, to: &str, message: &str, caller: Option<String>, f
     if !state.pty.is_running(&pane) {
         return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
     }
-    let from = caller.and_then(|c| {
-        candidates(state, &c)
-            .ok()?
-            .into_iter()
-            .find(|x| x.pane == c)
-            .and_then(|x| cmux_core::handoff::sender_name(&x))
-    });
+    let from = caller.as_deref().and_then(|c| sender(state, c));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
     state.pty.write(&pane, &paste)?;
     // Enter on its own read: a TUI that gets it with the paste can take it
     // as part of the paste and leave the message unsent.
     std::thread::sleep(std::time::Duration::from_millis(120));
     state.pty.write(&pane, &enter)?;
+    let from = from.unwrap_or_else(|| "you".into());
+    crate::tasks::given(state, cmux_protocol::TaskSource::AgentSend, from, &pane, message);
     Ok(pane)
+}
+
+/// What the agent in `pane` calls itself in a message; none when it is no
+/// agent — a person, then.
+pub fn sender(state: &AppState, pane: &str) -> Option<String> {
+    candidates(state, pane)
+        .ok()?
+        .into_iter()
+        .find(|x| x.pane == pane)
+        .and_then(|x| cmux_core::handoff::sender_name(&x))
 }

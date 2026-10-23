@@ -410,6 +410,23 @@ pub enum Request {
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,
+    /// The task board of `pane_id`'s tab, or of every tab with `all`.
+    TaskList {
+        #[serde(default)]
+        all: bool,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// The task log, oldest first: of the agent `name` (as `AgentSend`
+    /// finds it), else of `pane_id`'s tab, or all of it with `all`.
+    AgentHistory {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        all: bool,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Adds a member to the team of `pane_id`'s tab, beside the others.
     TeamAdd {
         role: String,
@@ -1024,6 +1041,20 @@ pub enum TaskEventKind {
     TurnEnded { pane: String, end: TurnEnd },
     /// The agent in `pane` went back to work after needing a person.
     Resumed { pane: String },
+}
+
+/// One line of `mira agent history`: an event of the log, with what the
+/// rest of the log says about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskHistoryEntry {
+    #[serde(flatten)]
+    pub event: TaskEvent,
+    /// The agent a turn end or a resume is about, by the name it was last
+    /// given a task under.
+    pub agent: Option<String>,
+    /// For a turn end: how long since the task or the resume it ends.
+    pub turn_ms: Option<u64>,
 }
 
 /// A card of the task board: the log folded up, one card per task given.

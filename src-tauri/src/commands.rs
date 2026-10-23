@@ -1412,6 +1412,22 @@ pub fn open_agent(
     tab: bool,
     background: bool,
 ) -> Result<String, String> {
+    open_agent_from(app, state, role, task, pane_id, tab, background, "you".into())
+}
+
+/// [`open_agent`], its task logged as given by `from`: a person, from the
+/// app; whoever ran `mira agent new`, from the socket.
+#[allow(clippy::too_many_arguments)]
+pub fn open_agent_from(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    role: Option<String>,
+    task: Option<String>,
+    pane_id: Option<String>,
+    tab: bool,
+    background: bool,
+    from: String,
+) -> Result<String, String> {
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
@@ -1447,6 +1463,9 @@ pub fn open_agent(
         mark_launched(meta.entry(new_pane.clone()).or_default(), launch, cwd);
     }
     emit_workspace(&app);
+    if let Some(task) = &task {
+        crate::tasks::given(&state, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task);
+    }
     Ok(new_pane)
 }
 
@@ -1806,11 +1825,18 @@ pub async fn ack_pty(app: AppHandle, pane_id: String, bytes: u64) {
 
 fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
     let mut meta = state.meta.lock().unwrap();
+    let mut agents = Vec::new();
     for pane in panes {
         let _ = state.pty.close(pane);
-        meta.remove(pane);
+        if meta.remove(pane).is_some_and(|m| m.is_agent()) {
+            agents.push(pane.clone());
+        }
     }
     drop(meta);
+    for pane in agents {
+        let end = cmux_protocol::TurnEnd::Exited;
+        crate::tasks::record(state, cmux_protocol::TaskEventKind::TurnEnded { pane, end });
+    }
     notify::forget_panes(state, panes);
     for pane in panes {
         crate::browser::destroy(app, pane);
