@@ -417,6 +417,23 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// Writes a card in `pane_id`'s tab, for the agent `to` (as
+    /// `AgentSend` finds it) or nobody yet. Answers its id.
+    TaskAdd {
+        title: String,
+        #[serde(default)]
+        to: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Puts a card written by hand in `column`; `card` is its id, or a
+    /// prefix of one card's only.
+    TaskMove {
+        card: String,
+        column: TaskColumn,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// The task log, oldest first: of the agent `name` (as `AgentSend`
     /// finds it), else of `pane_id`'s tab, or all of it with `all`.
     AgentHistory {

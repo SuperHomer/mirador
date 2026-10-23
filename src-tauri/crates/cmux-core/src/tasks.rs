@@ -210,11 +210,15 @@ pub fn history(events: &[TaskEvent], scope: Scope) -> Vec<TaskHistoryEntry> {
     let mut out = Vec::new();
     for event in events {
         let (agent, turn_ms, keep) = match &event.what {
-            TaskEventKind::Given { card, from, to, pane, tab, .. } => {
+            TaskEventKind::Given { card, source, from, to, pane, tab, .. } => {
                 let pane = pane.as_deref();
                 card_at.insert(card, (pane, tab.as_deref()));
                 if let Some(p) = pane {
-                    started.insert(p, event.at_ms);
+                    // A card written for an agent is not typed into it: its
+                    // turn has not started.
+                    if *source != TaskSource::Manual {
+                        started.insert(p, event.at_ms);
+                    }
                     if let Some(to) = to {
                         name_of.insert(p, to);
                     }
@@ -260,6 +264,52 @@ pub fn history(events: &[TaskEvent], scope: Scope) -> Vec<TaskHistoryEntry> {
         }
     }
     out
+}
+
+/// The card `id` names — the whole id, or a prefix of one card's only —
+/// if it may be moved by hand: one written by hand. A card Mirador made
+/// follows its agent, and a move would only be undone by its next turn.
+pub fn movable<'a>(cards: &'a [TaskCard], id: &str) -> Result<&'a TaskCard, String> {
+    let id = id.trim();
+    let hits: Vec<&TaskCard> = match cards.iter().find(|c| c.id == id) {
+        Some(exact) => vec![exact],
+        None if id.is_empty() => Vec::new(),
+        None => cards.iter().filter(|c| c.id.starts_with(id)).collect(),
+    };
+    let card = match hits.as_slice() {
+        [] => return Err(format!("no card `{id}` (`mira task list` shows each card's id)")),
+        [one] => *one,
+        many => {
+            let ids: Vec<&str> = many.iter().map(|c| c.id.as_str()).collect();
+            return Err(format!("`{id}` is more than one card: {}", ids.join(", ")));
+        }
+    };
+    if card.source != TaskSource::Manual {
+        return Err(format!(
+            "card {} follows {}: it moves as its agent works, not by hand",
+            card.id,
+            card.assignee.as_deref().unwrap_or("its agent")
+        ));
+    }
+    Ok(card)
+}
+
+/// A column by the name the CLI takes and shows: `todo`, `doing`,
+/// `needs-you`, `done`.
+pub fn column_name(column: TaskColumn) -> &'static str {
+    match column {
+        TaskColumn::Todo => "todo",
+        TaskColumn::Doing => "doing",
+        TaskColumn::NeedsYou => "needs-you",
+        TaskColumn::Done => "done",
+    }
+}
+
+pub fn parse_column(name: &str) -> Result<TaskColumn, String> {
+    [TaskColumn::Todo, TaskColumn::Doing, TaskColumn::NeedsYou, TaskColumn::Done]
+        .into_iter()
+        .find(|c| column_name(*c) == name)
+        .ok_or_else(|| format!("no column `{name}` (todo, doing, needs-you, done)"))
 }
 
 /// A length of time as the CLI shows it: `45s`, `12m`, `3h`, `2d`.
@@ -517,6 +567,41 @@ mod tests {
         let worker = history(&other, Scope::Agent { pane: "pane-worker", name: Some("worker"), tab: Some("tab-1") });
         let at: Vec<u64> = worker.iter().map(|e| e.event.at_ms).collect();
         assert_eq!(at, [1_000, 3_000, 4_000, 5_000, 64_000]);
+    }
+
+    #[test]
+    fn only_a_written_card_is_moved_by_hand() {
+        let cards = cards(&[
+            given(1, "ab12cd34", TaskSource::Manual, "worker", "Step 1"),
+            given(2, "ab99ffff", TaskSource::Manual, "worker", "Step 2"),
+            given(3, "77777777", TaskSource::AgentSend, "worker", "go"),
+        ]);
+        assert_eq!(movable(&cards, "ab12cd34").unwrap().title, "Step 1");
+        assert_eq!(movable(&cards, " ab9 ").unwrap().title, "Step 2");
+        let two = movable(&cards, "ab").unwrap_err();
+        assert!(two.contains("more than one") && two.contains("ab12cd34, ab99ffff"), "{two}");
+        assert!(movable(&cards, "zz").unwrap_err().contains("no card `zz`"));
+        assert!(movable(&cards, "").unwrap_err().contains("no card"));
+        let auto = movable(&cards, "777").unwrap_err();
+        assert!(auto.contains("follows worker"), "{auto}");
+    }
+
+    #[test]
+    fn columns_go_by_their_cli_names() {
+        for column in [TaskColumn::Todo, TaskColumn::Doing, TaskColumn::NeedsYou, TaskColumn::Done] {
+            assert_eq!(parse_column(column_name(column)), Ok(column));
+        }
+        assert!(parse_column("Doing").unwrap_err().contains("todo, doing, needs-you, done"));
+    }
+
+    #[test]
+    fn a_card_written_for_an_agent_starts_no_turn() {
+        let log = [
+            given(1_000, "a", TaskSource::AgentSend, "worker", "go"),
+            given(5_000, "m", TaskSource::Manual, "worker", "Step 2"),
+            ended(9_000, "worker", TurnEnd::Done),
+        ];
+        assert_eq!(history(&log, Scope::All)[2].turn_ms, Some(8_000));
     }
 
     #[test]

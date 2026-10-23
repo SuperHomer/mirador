@@ -2,7 +2,7 @@
 //! answers with. The log's format and the fold into cards are
 //! `cmux_core::tasks`'s; this is where they meet panes, tabs and teams.
 
-use cmux_protocol::{TaskCard, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource};
+use cmux_protocol::{TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource};
 
 use crate::AppState;
 
@@ -22,6 +22,67 @@ pub fn given(state: &AppState, source: TaskSource, from: String, pane: &str, tex
     if text.trim().is_empty() {
         return;
     }
+    let (tab, team, to) = whereabouts(state, pane);
+    record(
+        state,
+        TaskEventKind::Given {
+            card: cmux_core::tasks::new_id(),
+            source,
+            from,
+            to,
+            pane: Some(pane.to_string()),
+            team,
+            tab,
+            text: text.to_string(),
+        },
+    );
+}
+
+/// Writes a card titled `title` in `caller`'s tab, for the agent `to`
+/// names there — which must be one — or for nobody yet. Its id.
+pub fn add(
+    state: &AppState,
+    title: &str,
+    to: Option<String>,
+    caller: Option<String>,
+    from: String,
+) -> Result<String, String> {
+    if title.trim().is_empty() {
+        return Err("the card has no title".into());
+    }
+    let caller = caller.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let pane = match to {
+        Some(to) => Some(crate::handoff::find(state, &to, Some(caller.clone()))?),
+        None => None,
+    };
+    let (tab, team, _) = whereabouts(state, &caller);
+    let to = pane.as_deref().and_then(|p| whereabouts(state, p).2);
+    let card = cmux_core::tasks::new_id();
+    record(
+        state,
+        TaskEventKind::Given {
+            card: card.clone(),
+            source: TaskSource::Manual,
+            from,
+            to,
+            pane,
+            team,
+            tab,
+            text: title.trim().to_string(),
+        },
+    );
+    Ok(card)
+}
+
+/// Puts the card written by hand that `id` names in `column`.
+pub fn move_card(state: &AppState, id: &str, column: TaskColumn, by: String) -> Result<(), String> {
+    let card = cmux_core::tasks::movable(&cmux_core::tasks::cards(&events(state)), id)?.id.clone();
+    record(state, TaskEventKind::Moved { card, column, by });
+    Ok(())
+}
+
+/// The tab and team of `pane`, and its name as `agent list` shows it.
+fn whereabouts(state: &AppState, pane: &str) -> (Option<String>, Option<String>, Option<String>) {
     let (tab, team, member) = {
         let ws = state.workspace.lock().unwrap();
         let tab = ws.tab_of_pane(pane);
@@ -37,19 +98,7 @@ pub fn given(state: &AppState, source: TaskSource, from: String, pane: &str, tex
         let m = meta.get(pane)?;
         m.agent_name.clone().or_else(|| m.agent_role.clone())
     });
-    record(
-        state,
-        TaskEventKind::Given {
-            card: cmux_core::tasks::new_id(),
-            source,
-            from,
-            to,
-            pane: Some(pane.to_string()),
-            team,
-            tab,
-            text: text.to_string(),
-        },
-    );
+    (tab, team, to)
 }
 
 /// The tab `pane_id` (the focused pane when absent) is in.

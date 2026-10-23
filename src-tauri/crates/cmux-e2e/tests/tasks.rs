@@ -35,6 +35,12 @@ fn column_of(board: &str, title: &str) -> Option<String> {
     None
 }
 
+/// The id `mira task list` shows for the card titled `title`.
+fn id_of(board: &str, title: &str) -> String {
+    let line = board.lines().find(|l| l.starts_with(' ') && l.ends_with(title)).expect(title);
+    line.split_whitespace().next().unwrap().to_string()
+}
+
 #[test]
 fn tasks_are_logged_as_agents_work() {
     e2e!();
@@ -96,6 +102,30 @@ fn tasks_are_logged_as_agents_work() {
     assert_eq!(column_of(&board, "!ask may I run the tests").as_deref(), Some("Doing"), "{board}");
     let history = mira(&sb, &planner, &["agent", "history"]);
     assert!(history.contains("reviewer needs-you after") && history.contains("reviewer resumed"), "{history}");
+
+    // A card written by hand, for a teammate, moved by hand.
+    let id = mira(&sb, &planner, &["task", "add", "--to", "reviewer", "Step 2: write the docs"]).trim().to_string();
+    let board = mira(&sb, &planner, &["task", "list"]);
+    assert_eq!(column_of(&board, "Step 2: write the docs").as_deref(), Some("To do"), "{board}");
+    assert_eq!(id_of(&board, "Step 2: write the docs"), id, "{board}");
+    assert!(board.contains(&format!("{id}  reviewer ")), "{board}");
+    mira(&sb, &planner, &["task", "move", &id, "doing"]);
+    let board = mira(&sb, &planner, &["task", "list"]);
+    assert_eq!(column_of(&board, "Step 2: write the docs").as_deref(), Some("Doing"), "{board}");
+    mira(&sb, &planner, &["task", "done", &id[..5]]);
+    let board = mira(&sb, &planner, &["task", "list"]);
+    assert_eq!(column_of(&board, "Step 2: write the docs").as_deref(), Some("Done"), "{board}");
+    let history = mira(&sb, &planner, &["agent", "history"]);
+    assert!(history.contains(&format!("planner moved {id} to doing")), "{history}");
+
+    // A name that is no teammate is no card; a card that follows its agent
+    // is not moved by hand.
+    let (code, _, err) = sb.mira(Some(&planner), &["task", "add", "--to", "reveiwer", "typo"]);
+    assert!(code != 0 && err.contains("no agent `reveiwer`"), "{err}");
+    assert!(!mira(&sb, &planner, &["task", "list"]).contains("typo"));
+    let auto = id_of(&mira(&sb, &planner, &["task", "list"]), "Review step 1");
+    let (code, _, err) = sb.mira(Some(&planner), &["task", "move", &auto, "todo"]);
+    assert!(code != 0 && err.contains("follows reviewer"), "{err}");
 
     // The log outlives the app.
     sb.quit();

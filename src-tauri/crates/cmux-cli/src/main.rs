@@ -234,6 +234,22 @@ enum TaskAction {
         #[arg(long)]
         all: bool,
     },
+    /// Write a card in this tab, in To do, and print its id. It moves only
+    /// when moved: `task move`, `task done`.
+    Add {
+        #[arg(trailing_var_arg = true, required = true)]
+        title: Vec<String>,
+        /// The agent it is for: a teammate's name in this tab, as
+        /// `agent send` takes it.
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Put a card written with `task add` in a column: todo, doing,
+    /// needs-you or done. ID may be the start of one card's id. A card
+    /// Mirador made follows its agent and is not moved by hand.
+    Move { id: String, column: String },
+    /// Put a card written with `task add` in Done.
+    Done { id: String },
 }
 
 #[derive(Subcommand)]
@@ -654,6 +670,17 @@ fn run(cli: Cli) -> Result<(), String> {
         },
         Command::Task { action } => match action {
             TaskAction::List { all } => Request::TaskList { all, pane_id: own_pane() },
+            TaskAction::Add { title, to } => Request::TaskAdd { title: title.join(" "), to, pane_id: own_pane() },
+            TaskAction::Move { id, column } => Request::TaskMove {
+                card: id,
+                column: cmux_core::tasks::parse_column(&column)?,
+                pane_id: own_pane(),
+            },
+            TaskAction::Done { id } => Request::TaskMove {
+                card: id,
+                column: cmux_protocol::TaskColumn::Done,
+                pane_id: own_pane(),
+            },
         },
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab } => Request::SshOpen {
@@ -972,6 +999,7 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
+                .or_else(|| map.get("cardId"))
                 .and_then(|v| v.as_str())
             {
                 println!("{id}");
@@ -1036,7 +1064,8 @@ fn render_cards(cards: Vec<cmux_protocol::TaskCard>) {
         println!("{heading}");
         for c in here {
             println!(
-                "  {:<14}  {:>4}  {}",
+                "  {}  {:<14}  {:>4}  {}",
+                c.id,
                 c.assignee.as_deref().unwrap_or("-"),
                 cmux_core::tasks::span(now.saturating_sub(c.updated_ms)),
                 c.title,
@@ -1066,7 +1095,7 @@ fn render_history(history: Vec<cmux_protocol::TaskHistoryEntry>) {
                 let title = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
                 format!("{from} → {}  {source}  {title}", to.as_deref().unwrap_or("-"))
             }
-            Moved { card, column, by } => format!("{by} moved {card} to {column:?}"),
+            Moved { card, column, by } => format!("{by} moved {card} to {}", cmux_core::tasks::column_name(*column)),
             TurnEnded { end, .. } => {
                 let end = match end {
                     TurnEnd::Done => "done",

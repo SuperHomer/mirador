@@ -329,6 +329,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
         Request::TaskList { all, pane_id } => Ok(json!({ "cards": crate::tasks::list(&state, all, pane_id)? })),
+        Request::TaskAdd { title, to, pane_id } => {
+            let from = sender(&state, pane_id.as_deref());
+            Ok(json!({ "cardId": crate::tasks::add(&state, &title, to, pane_id, from)? }))
+        }
+        Request::TaskMove { card, column, pane_id } => {
+            let by = sender(&state, pane_id.as_deref());
+            crate::tasks::move_card(&state, &card, column, by)?;
+            Ok(Value::Null)
+        }
         Request::AgentHistory { name, all, pane_id } => {
             Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id)? }))
         }
