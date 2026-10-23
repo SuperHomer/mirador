@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   Node,
@@ -59,25 +59,63 @@ export const TaskBoard = memo(function TaskBoard({
   const live = visible || board;
   const now = useNow(live);
 
+  // What it reads: every tab's cards ("*"), this tab's, or none when this
+  // tab has closed (""). Kept in a ref the read takes it from, so a switch
+  // is one more reason to read rather than a second reader.
+  const scope = all ? "*" : (tabId ?? "");
+  const scopeRef = useRef(scope);
+  const readRef = useRef<() => void>(() => {});
+
+  // One read at a time, as `useAgentActivity` does: an append or a switch
+  // during a read marks the board dirty, and that read's answer, no longer
+  // the latest, is dropped for exactly one more read when it returns.
   useEffect(() => {
     if (!live) return;
-    // With its tab closed, only every tab's cards are left to show.
-    if (!all && !tabId) {
-      setCards([]);
-      return;
-    }
-    let alive = true;
-    const load = () =>
-      taskCards(all ? null : tabId)
-        .then((c) => alive && setCards(c))
-        .catch((e) => console.error(`mirador: task board: ${e}`));
-    load();
-    const unlisten = listen("tasks-changed", load);
+    let cancelled = false;
+    let reading = false;
+    let dirty = false;
+    const read = () => {
+      if (cancelled) return;
+      if (reading) {
+        dirty = true;
+        return;
+      }
+      dirty = false;
+      const want = scopeRef.current;
+      if (want === "") {
+        setCards([]);
+        return;
+      }
+      reading = true;
+      void taskCards(want === "*" ? null : want)
+        .then(
+          (c) => {
+            if (!cancelled && !dirty) setCards(c);
+          },
+          (e) => console.error(`mirador: task board: ${e}`),
+        )
+        .finally(() => {
+          reading = false;
+          if (!cancelled && dirty) read();
+        });
+    };
+    readRef.current = read;
+    // Listening first: an append between the first read and the
+    // subscription would otherwise leave the board stale.
+    const unlisten = listen("tasks-changed", read);
+    void unlisten.then(read);
     return () => {
-      alive = false;
+      cancelled = true;
+      readRef.current = () => {};
       void unlisten.then((f) => f());
     };
-  }, [live, all, tabId]);
+  }, [live]);
+
+  useEffect(() => {
+    if (scopeRef.current === scope) return;
+    scopeRef.current = scope;
+    readRef.current();
+  }, [scope]);
 
   // Where each pane is, for a card's agent and, across tabs, its place.
   const { panes, placeOf } = useMemo(() => {
@@ -90,7 +128,7 @@ export const TaskBoard = memo(function TaskBoard({
     return { panes, placeOf };
   }, [snapshot]);
 
-  const scope = shown?.team ? "This team" : "This tab";
+  const scopeLabel = shown?.team ? "This team" : "This tab";
   const open = (card: TaskCard) => {
     if (!card.pane || !panes.has(card.pane)) return;
     void focusPane(card.pane);
@@ -106,7 +144,7 @@ export const TaskBoard = memo(function TaskBoard({
         </span>
         <div className="tb-switch" role="group">
           <button className={all ? "" : "on"} onClick={() => setAll(false)}>
-            {scope}
+            {scopeLabel}
           </button>
           <button className={all ? "on" : ""} onClick={() => setAll(true)}>
             All agents
