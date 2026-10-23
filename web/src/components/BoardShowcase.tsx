@@ -142,10 +142,10 @@ export default function BoardShowcase() {
           is split are two separate layouts. From 50% up the pointer reaches into the
           cards — click, select text, use the mouse in a program — and at 100% a browser
           page shows while its card is still, wholly in view and nothing (palette, panel,
-          menu) is open over it. Away from that, the card shows a picture of its page,
-          taken as it is hidden, when it navigates and every 5 seconds while the card is
-          on screen (on macOS and Windows; elsewhere, its URL). Below 50% is an overview,
-          where a click focuses a card,
+          menu) is open over it. Away from that, a card on screen shows a recent picture
+          of its page, refreshed when it navigates and every few seconds — on macOS;
+          Windows tries, keeping the last picture or the URL when it can’t, and elsewhere
+          the card shows the URL. Below 50% is an overview, where a click focuses a card,
           though typing still goes to the focused pane and the wheel still scrolls the
           card under it, unless that is a browser, which pans the board.
         </p>
