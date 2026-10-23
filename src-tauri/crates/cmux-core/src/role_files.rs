@@ -184,6 +184,7 @@ pub fn template(kind: Kind) -> &'static str {
              # harness: codex          # Claude Code unless set\n\
              # model: sonnet\n\
              # effort: high            # how hard the model thinks\n\
+             # profile: yolo           # Codex only: ~/.codex/yolo.config.toml\n\
              # way: our-way            # a way of working, appended to this prompt\n\
              # skills: [pdf]           # only these; [] for none\n\
              # mcp: [github]\n\

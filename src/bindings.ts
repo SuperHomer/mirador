@@ -332,6 +332,8 @@ export interface AgentRole {
   /** How hard its model thinks: Claude Code's `--effort`, Codex's
    * `model_reasoning_effort`. */
   effort: string | null;
+  /** Codex's `--profile`, from the person's own `<name>.config.toml`. */
+  profile: string | null;
   prompt: string | null;
   /** The way of working it follows. */
   way: string | null;
@@ -559,6 +561,7 @@ export const roleHint = (r: AgentRole): string =>
         r.harness === "claude" ? null : HARNESS_LABEL[r.harness],
         r.model ?? "default model",
         r.effort,
+        r.profile ? `profile: ${r.profile}` : null,
         r.way ? `way: ${r.way}` : null,
         r.mcp || r.plugins || r.skills || r.tools ? "limited" : null,
         r.source === "repo"

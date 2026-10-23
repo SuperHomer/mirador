@@ -498,6 +498,7 @@ pub fn launch_command(
         }
         match harness {
             Harness::Codex => {
+                arg("--profile", role.profile.as_deref().unwrap_or(""));
                 if let Some(prompt) = prompt {
                     arg("-c", &format!("developer_instructions={}", toml_string(prompt)));
                 }
@@ -538,13 +539,23 @@ pub fn launch_command(
 /// anyway). With no profile named, it is Codex's own default: the
 /// workspace one for a trusted project — `cwd`, or the repository it is
 /// in — and read-only for any other, or when `cwd` is not known.
-pub fn codex_base_profile(config: Option<&str>, cwd: Option<&std::path::Path>) -> Option<String> {
+///
+/// `profile` is the text of the role's `--profile`, `<name>.config.toml`
+/// beside config.toml: what it says wins over config.toml, as it does in
+/// Codex. One that does not parse is not guessed at either.
+pub fn codex_base_profile(config: Option<&str>, cwd: Option<&std::path::Path>, profile: Option<&str>) -> Option<String> {
     let config: toml::Table = toml::from_str(config.unwrap_or_default()).ok()?;
-    if config.contains_key("sandbox_mode") {
-        return None;
-    }
-    if let Some(profile) = config.get("default_permissions") {
-        return profile.as_str().filter(|p| *p != ":danger-full-access").map(String::from);
+    let profile: Option<toml::Table> = match profile {
+        Some(text) => Some(toml::from_str(text).ok()?),
+        None => None,
+    };
+    for table in profile.iter().chain([&config]) {
+        if table.contains_key("sandbox_mode") {
+            return None;
+        }
+        if let Some(profile) = table.get("default_permissions") {
+            return profile.as_str().filter(|p| *p != ":danger-full-access").map(String::from);
+        }
     }
     let Some(cwd) = cwd else { return Some(":read-only".into()) };
     let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
@@ -1089,6 +1100,9 @@ mod tests {
             launch_command(Some(&deep), Some("You build."), None, None, None, None, q),
             r#"codex --model 'gpt-5' -c 'model_reasoning_effort="xhigh"' -c 'developer_instructions="You build."'"#
         );
+        // Its profile is the person's own, named as it is.
+        let yolo = AgentRole { profile: Some("gpt-6".into()), ..role.clone() };
+        assert_eq!(launch_command(Some(&yolo), None, None, None, Some("go"), None, q), "codex --model 'gpt-5' --profile 'gpt-6' 'go'");
     }
 
     #[test]
@@ -1116,7 +1130,7 @@ mod tests {
         std::fs::create_dir_all(&project).unwrap();
         std::fs::create_dir_all(dir.join("repo/.git")).unwrap();
         let repo = dir.join("repo").canonicalize().unwrap();
-        let base = |config: Option<&str>| codex_base_profile(config, Some(&project));
+        let base = |config: Option<&str>| codex_base_profile(config, Some(&project), None);
 
         // Their own profile, built-in or theirs: Codex reads its definition.
         assert_eq!(base(Some("default_permissions = \":read-only\"")).as_deref(), Some(":read-only"));
@@ -1126,11 +1140,19 @@ mod tests {
         assert_eq!(base(Some(&trusted)).as_deref(), Some(":workspace"));
         assert_eq!(base(Some(&trusted.replace("trusted\"", "untrusted\""))).as_deref(), Some(":read-only"));
         assert_eq!(base(None).as_deref(), Some(":read-only"));
-        assert_eq!(codex_base_profile(Some(&trusted), None).as_deref(), Some(":read-only"), "nowhere known");
+        assert_eq!(codex_base_profile(Some(&trusted), None, None).as_deref(), Some(":read-only"), "nowhere known");
         // Nothing added where it cannot be done without guessing.
         assert_eq!(base(Some("default_permissions = ")), None, "a config that does not parse");
         assert_eq!(base(Some("sandbox_mode = \"read-only\"")), None, "profiles are ignored then");
         assert_eq!(base(Some("default_permissions = \":danger-full-access\"")), None);
+
+        // The role's Codex profile, its own file, wins over config.toml.
+        let in_profile = |config: &str, profile: &str| codex_base_profile(Some(config), Some(&project), Some(profile));
+        let top = "default_permissions = \":read-only\"";
+        assert_eq!(in_profile(top, "sandbox_mode = \"danger-full-access\""), None, "its sandbox_mode");
+        assert_eq!(in_profile(top, "default_permissions = \"locked\"").as_deref(), Some("locked"));
+        assert_eq!(in_profile(&trusted, "model = \"gpt-6\"").as_deref(), Some(":workspace"), "silent on it");
+        assert_eq!(in_profile(top, "model = "), None, "a profile that does not parse");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

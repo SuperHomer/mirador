@@ -1154,6 +1154,9 @@ fn agent_roles(json: bool) -> Result<(), String> {
             model.push_str(&format!(" · {effort}"));
         }
         let mut line = format!("{:<14}  {:<12}  {model:<21}  {:<12}", r.name, r.harness.label(), source(r.source));
+        if let Some(profile) = &r.profile {
+            line.push_str(&format!("  profile: {profile}"));
+        }
         if let Some(way) = &r.way {
             line.push_str(&format!("  way: {way}"));
         }

@@ -12,7 +12,8 @@
 //! ```
 //!
 //! A role's frontmatter says how it starts (`harness`, `model`, `effort`,
-//! `way`, `description`) and its body is its prompt; a way's body is its prompt.
+//! `profile`, `way`, `description`) and its body is its prompt; a way's body
+//! is its prompt.
 //! The same name in two places means the repository's: a team that commits
 //! a `reviewer` gets that reviewer, whatever its members have of their own.
 //! `agentRoles` entries in mirador.json are roles too, below the files.
@@ -232,6 +233,7 @@ struct RoleFront {
     harness: Option<String>,
     model: Option<String>,
     effort: Option<String>,
+    profile: Option<String>,
     way: Option<String>,
     description: Option<String>,
     mcp: Option<Vec<String>>,
@@ -261,11 +263,19 @@ pub(crate) fn parse_role(name: &str, text: &str) -> Result<(AgentRole, Vec<Strin
             return Err(format!("`{way}` cannot name a way of working"));
         }
     }
+    // It names a file, `<name>.config.toml` beside Codex's config.toml.
+    let profile = present(front.profile);
+    if let Some(profile) = &profile {
+        if !is_name(profile) {
+            return Err(format!("`{profile}` cannot name a Codex profile"));
+        }
+    }
     let role = AgentRole {
         name: name.to_string(),
         harness,
         model: present(front.model),
         effort: present(front.effort),
+        profile,
         prompt: present(Some(body.to_string())),
         way,
         description: present(front.description).map(|d| one_line(&d)),
@@ -338,6 +348,14 @@ fn problem_of(role: &AgentRole, ways: &[AgentWay]) -> Option<String> {
                 efforts.join(", ")
             ));
         }
+    }
+    if role.profile.is_some() && role.harness != Harness::Codex {
+        return Some(format!("`profile` is Codex's: a {} role has none", role.harness.label()));
+    }
+    // A profile can turn the sandbox and the approvals off, and it is the
+    // person's to choose, like `tools.allow`: a repository never picks one.
+    if role.source == RoleSource::Repo && role.profile.is_some() {
+        return Some("a repository's role cannot pick a Codex profile — put `profile` in a role of your own".into());
     }
     if let Some(way) = role.way.as_ref().filter(|way| !ways.iter().any(|w| &&w.name == way)) {
         return Some(format!("way of working `{way}` is not in any ways/ directory"));
@@ -483,13 +501,14 @@ mod tests {
     fn parses_a_role_file() {
         let (role, ignored) = parse_role(
             "reviewer",
-            "---\nharness: codex\nmodel: gpt-5\neffort: ' high '\nway: our-way\ndescription: |\n  Reviews\n  diffs\nsandbox: read-only\n---\n\nYou review. Never edit.\n",
+            "---\nharness: codex\nmodel: gpt-5\neffort: ' high '\nprofile: gpt-6\nway: our-way\ndescription: |\n  Reviews\n  diffs\nsandbox: read-only\n---\n\nYou review. Never edit.\n",
         )
         .unwrap();
         assert_eq!(role.name, "reviewer");
         assert_eq!(role.harness, Harness::Codex);
         assert_eq!(role.model.as_deref(), Some("gpt-5"));
         assert_eq!(role.effort.as_deref(), Some("high"));
+        assert_eq!(role.profile.as_deref(), Some("gpt-6"));
         assert_eq!(role.way.as_deref(), Some("our-way"));
         assert_eq!(role.description.as_deref(), Some("Reviews diffs"));
         assert_eq!(role.prompt.as_deref(), Some("You review. Never edit."));
@@ -517,6 +536,7 @@ mod tests {
 
         assert!(parse_role("x", "---\nharness: vim\n---\n").unwrap_err().contains("unknown harness"));
         assert!(parse_role("x", "---\nway: ../etc\n---\n").is_err());
+        assert!(parse_role("x", "---\nharness: codex\nprofile: ../config\n---\n").is_err());
         assert!(parse_role("x", "---\nmodel: [opus\n---\n").unwrap_err().starts_with("frontmatter"));
     }
 
@@ -610,12 +630,30 @@ mod tests {
         write(&global.join("roles/loud.md"), "---\neffort: HIGH\n---\n");
         write(&global.join("roles/codex-deep.md"), "---\nharness: codex\neffort: ultra\n---\n");
         write(&global.join("roles/codex-odd.md"), "---\nharness: codex\neffort: extreme\n---\n");
+        // A Codex profile is Codex's, and yours to pick, never a repository's.
+        write(&global.join("roles/yolo.md"), "---\nharness: codex\nprofile: yolo\n---\n");
+        write(&global.join("roles/claude-yolo.md"), "---\nprofile: yolo\n---\n");
+        write(&repo.join("roles/their-yolo.md"), "---\nharness: codex\nprofile: yolo\n---\n");
 
         let cat = catalog_in(Some(&repo), &global, &[]);
         let names: Vec<_> = cat.roles.iter().filter(|r| r.source != RoleSource::Builtin).map(|r| r.name.as_str()).collect();
         assert_eq!(
             names,
-            ["careful", "codex-deep", "codex-mcp", "codex-odd", "deep", "gem", "lost", "loud", "mine", "theirs"]
+            [
+                "careful",
+                "claude-yolo",
+                "codex-deep",
+                "codex-mcp",
+                "codex-odd",
+                "deep",
+                "gem",
+                "lost",
+                "loud",
+                "mine",
+                "their-yolo",
+                "theirs",
+                "yolo"
+            ]
         );
         let problem = |name: &str| cat.roles.iter().find(|r| r.name == name).unwrap().problem.clone();
         assert!(problem("codex-mcp").is_some_and(|p| p.contains("only Claude Code's can")));
@@ -631,6 +669,9 @@ mod tests {
             problem("codex-odd").as_deref(),
             Some("effort `extreme` is not one Codex takes: low, medium, high, xhigh, max, ultra")
         );
+        assert_eq!(problem("yolo"), None);
+        assert_eq!(problem("claude-yolo").as_deref(), Some("`profile` is Codex's: a Claude Code role has none"));
+        assert!(problem("their-yolo").is_some_and(|p| p.contains("cannot pick a Codex profile")));
         let has = |needle: &str| cat.problems.iter().any(|p| p.contains(needle));
         assert!(has("never closed"), "{:?}", cat.problems);
         assert!(has("a name is letters"));

@@ -1543,13 +1543,21 @@ pub(crate) fn prepare_launch(
                 .map(std::path::PathBuf::from)
                 .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
             // No file is no config; one that cannot be read is not guessed at.
-            let config = match home.map(|h| std::fs::read_to_string(h.join("config.toml"))) {
+            let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
                 Some(Ok(text)) => Some(Some(text)),
                 Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
                 _ => Some(None),
             };
             config
-                .and_then(|c| cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new)))
+                .and_then(|c| {
+                    // Codex 0.164 keeps a profile in its own file beside
+                    // config.toml; a missing one is Codex's to report.
+                    let profile = r.profile.as_ref().and_then(|p| {
+                        let file = home.as_ref()?.join(format!("{p}.config.toml"));
+                        std::fs::read_to_string(file).ok()
+                    });
+                    cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
+                })
                 .map(|base| (base, cmux_core::ipc::default_socket_path()))
         }
         _ => None,

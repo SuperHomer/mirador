@@ -352,6 +352,7 @@ fn agent_roles_in(cfg: &Config) -> Vec<AgentRole> {
             name: name.to_string(),
             model: present(&role.model),
             effort: present(&role.effort),
+            profile: present(&role.profile),
             prompt: present(&role.prompt),
             way: present(&role.way),
             description: present(&role.description),
