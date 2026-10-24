@@ -1716,6 +1716,12 @@ mod tests {
             panic!()
         };
         assert_eq!((title.join(" ").as_str(), to), ("drop --to", None));
+        let Command::Agent { action: AgentAction::Send { message, card, .. } } =
+            parse(&["agent", "send", "worker", "--card", "ab12", "--", "use", "-v"])
+        else {
+            panic!()
+        };
+        assert_eq!((message.join(" ").as_str(), card.as_deref()), ("use -v", Some("ab12")));
     }
 
     /// How a hook knows which pane its agent runs in. The tty fallback is
