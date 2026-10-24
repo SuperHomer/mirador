@@ -218,6 +218,7 @@ export function SplitLayer({
         return (
           <div
             key={p.paneId}
+            data-pane={p.paneId}
             className={`pane-slot${card ? " card" : ""}${inHand ? " dragging" : ""}`}
             style={
               card
