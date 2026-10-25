@@ -157,7 +157,14 @@ export const AgentWall = memo(function AgentWall({
           )}
         </span>
         {shown && (
+          // Splits leaves the wall, so it is never the side shown here.
           <div className="tb-switch" role="group">
+            <button
+              title="Show this tab's splits (⌘⇧A / Ctrl+Shift+A)"
+              onClick={() => void toggleAgentWall(shown.focusedPane)}
+            >
+              Splits
+            </button>
             <button
               className={side === "agents" ? "on" : ""}
               title="This tab's agents' terminals"
@@ -209,15 +216,6 @@ export const AgentWall = memo(function AgentWall({
             </div>
           )}
         </div>
-        {shown && (
-          <button
-            className="wall-new-button"
-            title="Show this tab's splits (⌘⇧A / Ctrl+Shift+A)"
-            onClick={() => void toggleAgentWall(shown.focusedPane)}
-          >
-            Splits
-          </button>
-        )}
       </div>
 
       {side === "tasks" ? (

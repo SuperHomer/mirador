@@ -476,8 +476,8 @@ turn ended and how long it took (since the task, or since it resumed).
 Without a name it is this tab's; with one, the tasks given to that agent
 or sent by it, the moves of its cards, and its turns.
 
-The task board is the agent wall's other side: the wall's **Agents |
-Tasks** switch shows the tab's task board in place of its agents' tiles.
+The task board is the agent wall's other side: the wall's **Splits |
+Agents | Tasks** switch shows the tab's task board in place of its agents' tiles.
 `agent board` turns the tab it runs in to its wall on the Tasks side and
 prints `wall on: tasks` (`agent_board` answers `{"wall": true,
 "wallView": "tasks"}`) — also the palette's *Agents: Task Board*. Its

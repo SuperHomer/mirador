@@ -30,13 +30,13 @@ downloads, the feature tour and the keybinding reference.
   each with its role, model and (Claude Code) whether it is working, idle,
   or waiting on you; type into any of them from there. The same key
   switches back, and each tab remembers its view across restarts. Its
-  **Agents | Tasks** switch turns it over to the tab's task board.
+  **Splits | Agents | Tasks** switch turns it over to the tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
   start Claude Code or Codex with their own model, prompt and shared way of
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
-- **Task board**, the agent wall's Tasks side (its **Agents | Tasks**
+- **Task board**, the agent wall's Tasks side (its **Splits | Agents | Tasks**
   switch, the palette's *Agents: Task Board*, or `mira agent board`): what
   each agent was given and where it stands, in To do, Doing, Needs you and Done, for this team or every
   tab. Mirador adds a card whenever it gives an agent a task (`team start`,
@@ -547,8 +547,8 @@ pane's process table (macOS and Linux; on Windows only Claude Code's hooks
 make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*, the
 **▦ Wall** button beside the sidebar's Agents heading (lit while the tab
 is a wall) and `mira agent wall` (which prints `wall on` or `wall off`)
-each switch the current tab between the two; the wall's own **Splits**
-button switches back. Each tab keeps its view across restarts, and the
+each switch the current tab between the two, and so does **Splits** in
+the wall's header. Each tab keeps its view across restarts, and the
 board draws a walled tab's wall in its frame, in place of its cards. The tiles are the
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
@@ -557,8 +557,8 @@ new agent from the wall's **+ New agent** splits the tab under the wall and
 gets a tile. Each tile shows the role, the model, and what the agent is
 doing: **working**, **needs you** (with what for), or **idle**. Click a
 tile's header to see that agent alone in its tab, which leaves the wall.
-The header's **Agents | Tasks** switch turns the wall over to the tab's
-task board in place of the tiles, and back; the wall comes up again on
+The header's **Splits | Agents | Tasks** switch leaves the wall, or turns
+it over to the tab's task board in place of the tiles, and back; the wall comes up again on
 the side it was left on, across restarts too.
 
 **Right-click an agent** (its sidebar row, or a wall tile's header; the
