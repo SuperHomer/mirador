@@ -836,6 +836,65 @@ pub struct AgentActivity {
     pub subagents: Vec<SubagentInfo>,
 }
 
+/// One turn of an agent's trail: a prompt and what the agent did for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailTurn {
+    /// Its first line, shortened. Absent for actions with no prompt before
+    /// them (a transcript that starts mid-conversation).
+    pub prompt: Option<String>,
+    /// Unix millis of its first and latest entries.
+    pub started_ms: Option<u64>,
+    pub last_ms: Option<u64>,
+    /// In the order they were called.
+    pub actions: Vec<TrailAction>,
+}
+
+/// One tool call, summed up: the full input and output stay in the agent's
+/// transcript, read on demand as an [`ActionDetail`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailAction {
+    /// The tool call's id, which asks for its detail.
+    pub id: String,
+    pub tool: String,
+    /// One line: a command, a path, a pattern, a URL, a description.
+    pub summary: String,
+    pub started_ms: Option<u64>,
+    /// From the call to its result; absent until there is one.
+    pub duration_ms: Option<u64>,
+    pub status: ActionStatus,
+    /// A failed command's, when its result says it.
+    pub exit_code: Option<i32>,
+    /// The first lines of its result, shortened.
+    pub output: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionStatus {
+    Ok,
+    Error,
+    /// No result yet.
+    Running,
+    /// No result, and the agent moved on: interrupted, or the session
+    /// was stopped under it.
+    Interrupted,
+}
+
+/// One tool call in full, as its transcript has it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionDetail {
+    pub id: String,
+    pub tool: String,
+    /// Its input, as pretty-printed JSON.
+    pub input: String,
+    /// Its result's text; absent while there is none.
+    pub output: Option<String>,
+    pub is_error: bool,
+}
+
 /// A pane drawing the task board.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
