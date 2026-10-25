@@ -181,3 +181,47 @@ fn the_agent_editor_opens_and_comes_back() {
     sb.launch();
     assert!(listed(&sb).is_some(), "the editor comes back as an editor, not a shell");
 }
+
+/// `mira agent wall` shows the tab's agents in place of its splits, in the
+/// same tab, and again shows the splits. While the wall is up the agent's
+/// pane is still in its tab and its terminal, lent to its tile, still
+/// takes input and answers `read-screen`; and the wall is still up after a
+/// relaunch.
+#[test]
+fn the_wall_is_a_view_of_its_tab_and_comes_back() {
+    e2e!();
+    let mut sb = Sandbox::new("wall");
+    sb.launch();
+    let first = sb.first_pane();
+    sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
+    let agent = sb.call(Request::AgentNew { role: None, task: None, target: None, pane_id: Some(first.clone()) })
+        ["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for_screen(&agent, "the fake claude", LONG, |s| s.contains("fake claude ready"));
+    sb.wait_for("the agent to be listed", LONG, || {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.iter().any(|a| a["paneId"] == agent.as_str()).then_some(())
+    });
+    let wall = |sb: &Sandbox| -> Vec<bool> {
+        let tabs = sb.snapshot()["tabs"].as_array().cloned().unwrap_or_default();
+        tabs.iter().map(|t| t["wall"].as_bool().unwrap_or(false)).collect()
+    };
+
+    let (code, out, err) = sb.mira(Some(&agent), &["agent", "wall"]);
+    assert_eq!((code, out.trim()), (0, "wall on"), "{err}");
+    assert_eq!(wall(&sb), [true], "the same tab, now a wall; no tab of its own");
+    assert_eq!(sb.panes(), [first.clone(), agent.clone()], "its panes stay");
+    sb.type_into(&agent, "through-the-wall\r");
+    sb.wait_for_screen(&agent, "the agent's terminal in the wall", LONG, |s| s.contains("through-the-wall"));
+
+    sb.quit();
+    sb.launch();
+    assert_eq!(wall(&sb), [true], "the wall comes back with its tab");
+    assert_eq!(sb.panes(), [first.clone(), agent.clone()]);
+
+    let (code, out, err) = sb.mira(Some(&agent), &["agent", "wall"]);
+    assert_eq!((code, out.trim()), (0, "wall off"), "{err}");
+    assert_eq!(wall(&sb), [false]);
+}
