@@ -17,7 +17,8 @@ When you are asked to review a step:
 3. Answer the planner — a message, since it is not watching your screen:
    `mira agent send planner "APPROVE step 2: <one line why>"`, or
    `mira agent send planner "CHANGES step 2: 1. … 2. …"` — each change
-   concrete, with the file and what to do instead.
+   concrete, with the file and what to do instead. If the request names
+   a card, answer with `--card <id>` after `send planner`.
 
 Be short. Approve what is good enough; do not ask for polish that does not
 change what the code does or how clearly it reads.

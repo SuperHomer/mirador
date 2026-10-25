@@ -97,10 +97,22 @@ pub fn spawn(handle: tauri::AppHandle) {
                 let procs = cmux_core::agents::process_table();
                 let running = cmux_core::agents::panes_running_agents(&procs, &pids);
                 let mut meta = state.meta.lock().unwrap();
+                // What the task log learns on the way: agents gone, turns
+                // ended. Logged once the lock is let go.
+                let mut turns = Vec::new();
                 for (pane, _) in &pids {
                     let Some(entry) = meta.get_mut(pane) else { continue };
+                    let was_agent = entry.is_agent();
+                    let live = entry.agent_harness.filter(|_| entry.agent_live);
                     if entry.observe_agent(running.get(pane), cmux_core::agents::AUTO_RESUME) {
                         changed = true;
+                    }
+                    // Forgotten, or another agent in its place.
+                    if was_agent && (!entry.is_agent() || live.is_some_and(|h| entry.agent_harness != Some(h))) {
+                        turns.push(cmux_protocol::TaskEventKind::TurnEnded {
+                            pane: pane.clone(),
+                            end: cmux_protocol::TurnEnd::Exited,
+                        });
                     }
                 }
                 // Claude Code's own record of each session — its name, and
@@ -135,9 +147,19 @@ pub fn spawn(handle: tauri::AppHandle) {
                         session.as_deref(),
                         running.get(pane).map(|r| r.args.as_str()),
                     );
-                    if meta.get_mut(pane).is_some_and(|m| m.apply_claude_session(found)) {
+                    let Some(m) = meta.get_mut(pane) else { continue };
+                    let before = m.status();
+                    if m.apply_claude_session(found) {
                         changed = true;
                     }
+                    // Its hooks' status, when it has one, wins: this only
+                    // tells a turn of an agent without them.
+                    turns.extend(cmux_core::tasks::status_event(pane, before, m.status()));
+                }
+                drop(meta);
+                turns.extend(codex_turn_ends(&state));
+                for turn in turns {
+                    crate::tasks::record(&handle, turn);
                 }
             }
 
@@ -264,4 +286,41 @@ fn fetch_pr(repo_root: &str, branch: &str) -> Option<PrStatus> {
         url: json["url"].as_str().unwrap_or("").to_string(),
         checks: checks.to_string(),
     })
+}
+
+/// The turns live Codex agents ended since the last tick. Codex has no
+/// hooks; it writes a turn's end only to its rollout, so each live Codex
+/// pane's is followed: the first from where it was when first seen — what
+/// it held before is history, not logged again — and a newer session
+/// after it (`/new`) from its start (`follow_from_start`). The rollout is
+/// the one the trail reads, found under the same rule (`lsof` only when it
+/// may have changed).
+fn codex_turn_ends(state: &AppState) -> Vec<cmux_protocol::TaskEventKind> {
+    let codex: Vec<String> = state
+        .meta
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, m)| m.agent_live && m.harness() == Some(cmux_protocol::Harness::Codex))
+        .map(|(pane, _)| pane.clone())
+        .collect();
+    let mut ends = Vec::new();
+    for pane in &codex {
+        let Ok(crate::commands::TrailFile::Codex(known)) = crate::commands::trail_file(state, pane) else { continue };
+        use cmux_core::codex_trail::{follow_from_start, RolloutTail};
+        let mut tails = state.codex_tails.lock().unwrap();
+        let before = tails.get(pane).map(|t| t.path.clone());
+        if before.as_ref() != Some(&known.path) {
+            let tail = if follow_from_start(before.as_deref(), &known.path) {
+                RolloutTail::from_start(known.path)
+            } else {
+                RolloutTail::at_end(known.path)
+            };
+            tails.insert(pane.clone(), tail);
+        }
+        let tail = tails.get_mut(pane).expect("followed above");
+        ends.extend(tail.read().into_iter().map(|end| cmux_protocol::TaskEventKind::TurnEnded { pane: pane.clone(), end }));
+    }
+    state.codex_tails.lock().unwrap().retain(|pane, _| codex.contains(pane));
+    ends
 }

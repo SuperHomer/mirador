@@ -315,6 +315,107 @@ export interface AgentActivity {
   subagents: SubagentInfo[];
 }
 
+export type ActionStatus = "ok" | "error" | "running" | "interrupted";
+
+/** One tool call of an agent's trail (`cmux_protocol::TrailAction`). */
+export interface TrailAction {
+  id: string;
+  tool: string;
+  /** One line: a command, a path, a pattern, a URL, a description. */
+  summary: string;
+  startedMs: number | null;
+  durationMs: number | null;
+  status: ActionStatus;
+  exitCode: number | null;
+  /** The first lines of its result. */
+  output: string;
+}
+
+/** One turn: a prompt and what the agent did for it. */
+export interface TrailTurn {
+  /** Its first line; null for actions with no prompt before them. */
+  prompt: string | null;
+  /** The whole prompt, up to a few thousand characters. */
+  text: string | null;
+  startedMs: number | null;
+  lastMs: number | null;
+  actions: TrailAction[];
+}
+
+/** What a pane's agent did, oldest turn first, or why there is nothing. */
+export interface AgentTrail {
+  paneId: string;
+  turns: TrailTurn[];
+  /** Turns before the first one sent. */
+  older: number;
+  /** Turns left out between the first — a card's, older than the latest —
+   *  and the latest; 0 when they follow on. */
+  gap: number;
+  /** What it is a reading of: the same as the last answer's, the same answer. */
+  version: string | null;
+  reason: string | null;
+}
+
+/** One action in full, read from the agent's own file on demand. */
+export interface ActionDetail {
+  id: string;
+  tool: string;
+  /** Its input, as pretty-printed JSON. */
+  input: string;
+  /** Its result; null while there is none. */
+  output: string | null;
+  isError: boolean;
+}
+
+/** A task-board pane, and the tab whose cards it shows. */
+export interface TaskBoardPaneInfo {
+  paneId: string;
+  /** The tab it was opened from. */
+  tabId: string | null;
+}
+
+export type TaskColumn = "todo" | "doing" | "needsYou" | "done";
+export type TaskSource = "teamStart" | "agentNew" | "agentSend" | "manual";
+
+/** A card of the task board (`cmux_protocol::TaskCard`). */
+export interface TaskCard {
+  id: string;
+  title: string;
+  source: TaskSource;
+  from: string;
+  assignee: string | null;
+  pane: string | null;
+  team: string | null;
+  tab: string | null;
+  column: TaskColumn;
+  createdMs: number;
+  updatedMs: number;
+}
+
+/** One line of the task log (`cmux_protocol::TaskHistoryEntry`): the
+ *  event's fields, flattened, and the line `mira agent history` prints. */
+export interface TaskHistoryEntry {
+  atMs: number;
+  kind: "given" | "moved" | "turnEnded" | "resumed";
+  card?: string;
+  /** A task given: its whole text. */
+  text?: string;
+  agent: string | null;
+  turnMs: number | null;
+  summary: string;
+}
+
+/** The history of a card, else of a tab, else of every tab; oldest first. */
+export const taskHistory = (tabId: string | null, card: string | null) =>
+  invoke<TaskHistoryEntry[]>("task_history", { tabId, card });
+
+/** The cards of a tab, or of every tab when `tabId` is null; of the done
+ *  ones, only the latest. */
+export const taskCards = (tabId: string | null) =>
+  invoke<TaskCard[]>("task_cards", { tabId });
+export const openTaskBoard = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_task_board", { paneId, tab });
+
 export interface AgentWallPaneInfo {
   paneId: string;
   /** The tab whose agents it shows: the one it was opened from. */
@@ -382,6 +483,7 @@ export interface WorkspaceSnapshot {
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   agentWallPanes: AgentWallPaneInfo[];
+  taskBoardPanes: TaskBoardPaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;
@@ -649,6 +751,11 @@ export const openAgentWall = (paneId: string | null) =>
   invoke<string>("open_agent_wall", { paneId });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
+/** Its last `turns` turns, and any begun at or after `sinceMs`. */
+export const getAgentTrail = (paneId: string, turns: number | null, sinceMs: number | null) =>
+  invoke<AgentTrail>("get_agent_trail", { paneId, turns, sinceMs });
+export const getTrailDetail = (paneId: string, actionId: string) =>
+  invoke<ActionDetail>("get_trail_detail", { paneId, actionId });
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

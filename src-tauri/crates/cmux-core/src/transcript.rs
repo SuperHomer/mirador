@@ -10,7 +10,8 @@
 //!
 //! A session transcript grows to tens of megabytes, and the panel showing
 //! this polls every two seconds, so [`Cache`] reads each file once and then
-//! only what was appended since.
+//! only what was appended since. It adds up [`Stats`] here, and the trail of
+//! what an agent did in `trail`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek, SeekFrom};
@@ -48,6 +49,17 @@ pub struct Stats {
     todos: Option<Vec<Task>>,
     started_ms: Option<u64>,
     last_ms: Option<u64>,
+}
+
+/// What a [`Cache`] adds a transcript up into, one line at a time.
+pub trait Feed: Default {
+    fn feed(&mut self, line: &str);
+}
+
+impl Feed for Stats {
+    fn feed(&mut self, line: &str) {
+        Stats::feed(self, line)
+    }
 }
 
 impl Stats {
@@ -231,7 +243,7 @@ impl Stats {
     }
 }
 
-fn text(value: &Value) -> Option<String> {
+pub(crate) fn text(value: &Value) -> Option<String> {
     match value {
         Value::String(s) if !s.is_empty() => Some(s.clone()),
         Value::Number(n) => Some(n.to_string()),
@@ -241,7 +253,7 @@ fn text(value: &Value) -> Option<String> {
 
 /// Unix millis of an RFC 3339 UTC timestamp as Claude Code writes them
 /// (`2026-10-04T08:49:29.163Z`).
-fn parse_timestamp(s: &str) -> Option<u64> {
+pub(crate) fn parse_timestamp(s: &str) -> Option<u64> {
     let s = s.strip_suffix('Z')?;
     let (date, time) = s.split_once('T')?;
     let mut d = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
@@ -278,16 +290,21 @@ pub fn is_transcript_of(path: &Path, session_id: &str) -> bool {
 }
 
 /// Every transcript read so far, and how far.
-#[derive(Default)]
-pub struct Cache {
-    files: HashMap<PathBuf, (u64, Stats)>,
+pub struct Cache<T = Stats> {
+    files: HashMap<PathBuf, (u64, T)>,
 }
 
-impl Cache {
+impl<T> Default for Cache<T> {
+    fn default() -> Self {
+        Self { files: HashMap::new() }
+    }
+}
+
+impl<T: Feed> Cache<T> {
     /// The transcript at `path`, brought up to date with what was appended
     /// since the last read. A file that shrank was rewritten, and is read
     /// again from the start.
-    pub fn read(&mut self, path: &Path) -> Option<&Stats> {
+    pub fn read(&mut self, path: &Path) -> Option<&T> {
         // Bounded: a session with hundreds of subagents is read again on
         // the next poll rather than kept forever.
         if self.files.len() > 512 && !self.files.contains_key(path) {
@@ -298,7 +315,7 @@ impl Cache {
         let (offset, stats) = self.files.entry(path.to_path_buf()).or_default();
         if len < *offset {
             *offset = 0;
-            *stats = Stats::default();
+            *stats = T::default();
         }
         if len > *offset {
             file.seek(SeekFrom::Start(*offset)).ok()?;
@@ -316,6 +333,13 @@ impl Cache {
         Some(stats)
     }
 
+    /// How far into `path` it has read: changes with every line it reads.
+    pub fn consumed(&self, path: &Path) -> Option<u64> {
+        self.files.get(path).map(|(offset, _)| *offset)
+    }
+}
+
+impl Cache {
     /// A session and its subagents. `live`: the session's Claude Code is
     /// running, without which a subagent it hosted cannot be.
     pub fn activity(&mut self, transcript: &Path, live: bool) -> (TranscriptSummary, Vec<SubagentInfo>) {
@@ -505,7 +529,7 @@ mod tests {
         std::fs::write(subs.join("agent-a1.jsonl"), format!("{PROMPT}\n{tool}\n{{\"type\":\"assi")).unwrap();
         std::fs::write(subs.join("agent-a2.jsonl"), format!("{PROMPT}\n{}\n", r#"{"type":"assistant","message":{"content":[{"type":"text","text":"x"}],"stop_reason":"end_turn"}}"#)).unwrap();
 
-        let mut cache = Cache::default();
+        let mut cache: Cache = Cache::default();
         let (_, agents) = cache.activity(&session, true);
         let states: Vec<(&str, SubagentState)> = agents.iter().map(|a| (a.id.as_str(), a.state)).collect();
         assert_eq!(states, [("a1", SubagentState::Running), ("a2", SubagentState::Done)]);

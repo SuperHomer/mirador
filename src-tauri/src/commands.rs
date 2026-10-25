@@ -111,6 +111,16 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .map(|(pane, m)| cmux_protocol::AgentEditorPane { pane_id: pane.clone(), cwd: m.cwd.clone() })
             .collect()
     };
+    snapshot.task_board_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter(|(_, m)| m.task_board)
+            .map(|(pane, m)| cmux_protocol::TaskBoardPane {
+                pane_id: pane.clone(),
+                tab_id: m.task_board_tab.clone(),
+            })
+            .collect()
+    };
     snapshot.agent_wall_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -223,6 +233,172 @@ pub async fn get_agent_activity(
     pane_id: String,
 ) -> Result<cmux_protocol::AgentActivity, String> {
     tauri::async_runtime::spawn_blocking(move || agent_activity(&app.state::<AppState>(), &pane_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Where an agent's trail is read from.
+#[derive(Clone)]
+pub enum TrailFile {
+    Claude(std::path::PathBuf),
+    Codex(cmux_core::codex_trail::KnownRollout),
+}
+
+/// How many panes' trail files are kept: a pane's goes when it closes,
+/// and this bounds what nothing else would.
+const TRAIL_FILES: usize = 256;
+
+/// The file a pane's agent writes what it does to, or why there is none
+/// to read: Claude Code's transcript, which its hooks name, or the rollout
+/// its Codex holds open. Once the agent is gone, the one it last wrote.
+pub fn trail_file(state: &AppState, pane_id: &str) -> Result<TrailFile, String> {
+    let agent = {
+        let meta = state.meta.lock().unwrap();
+        meta.get(pane_id).filter(|m| m.is_agent()).map(|m| (m.harness(), m.agent_transcript.clone(), m.agent_pid))
+    };
+    let found = match agent {
+        None => {
+            return state.trail_files.lock().unwrap().get(pane_id).cloned().ok_or_else(|| "not an agent pane".into())
+        }
+        Some((Some(cmux_protocol::Harness::Claude), transcript, _)) => transcript
+            .filter(|p| p.is_file())
+            .map(TrailFile::Claude)
+            .ok_or_else(|| "no transcript found".to_string()),
+        Some((Some(cmux_protocol::Harness::Codex), _, pid)) => codex_rollout(state, pane_id, pid).map(TrailFile::Codex),
+        Some(_) => Err("only Claude Code and Codex agents have a trail".into()),
+    };
+    // The pane's agent now has this file, or none: what an agent before
+    // it wrote is not this one's.
+    let mut files = state.trail_files.lock().unwrap();
+    match &found {
+        Ok(file) => {
+            if files.len() >= TRAIL_FILES && !files.contains_key(pane_id) {
+                let open = state.meta.lock().unwrap();
+                files.retain(|pane, _| open.contains_key(pane));
+            }
+            files.insert(pane_id.to_string(), file.clone());
+        }
+        Err(_) => {
+            files.remove(pane_id);
+        }
+    }
+    found
+}
+
+/// The rollout the Codex running in `pane_id` holds open. Finding it runs
+/// `lsof`, so what was found is kept while it can still be right: the same
+/// process, and no rollout started since (see `needs_lookup`).
+fn codex_rollout(
+    state: &AppState,
+    pane_id: &str,
+    pid: Option<u32>,
+) -> Result<cmux_core::codex_trail::KnownRollout, String> {
+    use cmux_core::codex_trail::{needs_lookup, newest_rollout, open_rollout, sessions_of, KnownRollout};
+    if cfg!(not(unix)) {
+        return Err("Codex on Windows has no trail yet".into());
+    }
+    let pid = pid.ok_or("no Codex session found: Codex is not running here")?;
+    let known = match state.trail_files.lock().unwrap().get(pane_id) {
+        Some(TrailFile::Codex(known)) => Some(known.clone()),
+        _ => None,
+    };
+    let newest = known.as_ref().and_then(|k| sessions_of(&k.path)).and_then(newest_rollout);
+    let lookup = needs_lookup(known.as_ref(), pid, newest.as_deref());
+    match known {
+        Some(known) if !lookup => Ok(known),
+        known => match open_rollout(pid) {
+            Ok(path) => {
+                // The first time, where its sessions are is known only now.
+                let newest = newest.or_else(|| sessions_of(&path).and_then(newest_rollout));
+                Ok(KnownRollout { pid, path, newest })
+            }
+            // The same process holding none any more has exited: what it
+            // wrote is still its trail.
+            Err(_) if known.as_ref().is_some_and(|k| k.pid == pid) => Ok(known.unwrap()),
+            Err(0) => Err("no Codex session found".into()),
+            Err(_) => Err("more than one Codex session in this pane".into()),
+        },
+    }
+}
+
+/// What a pane's agent did, turn by turn: its last `turns` turns, and any
+/// begun since `since_ms` (`trail::window`). No file to read from is no
+/// error: the trail is empty, and says why.
+pub fn agent_trail(
+    state: &AppState,
+    pane_id: &str,
+    turns: Option<u32>,
+    since_ms: Option<u64>,
+) -> cmux_protocol::AgentTrail {
+    use cmux_core::trail::{version, window, Window};
+    // The window of what the file says now, and how far into it that is.
+    fn read<T: cmux_core::transcript::Feed>(
+        cache: &Mutex<cmux_core::transcript::Cache<T>>,
+        path: &std::path::Path,
+        turns_of: fn(&T) -> &[cmux_protocol::TrailTurn],
+        turns: Option<u32>,
+        since_ms: Option<u64>,
+    ) -> Option<(Window, String)> {
+        let mut cache = cache.lock().unwrap();
+        let window = window(turns_of(cache.read(path)?), turns, since_ms);
+        let consumed = cache.consumed(path).unwrap_or(0);
+        Some((window, version(path, consumed, turns, since_ms)))
+    }
+    let empty = |reason: String| cmux_protocol::AgentTrail {
+        pane_id: pane_id.to_string(),
+        turns: Vec::new(),
+        older: 0,
+        gap: 0,
+        version: None,
+        reason: Some(reason),
+    };
+    let read = match trail_file(state, pane_id) {
+        Ok(TrailFile::Claude(path)) => read(&state.trails, &path, cmux_core::trail::Trail::turns, turns, since_ms),
+        Ok(TrailFile::Codex(known)) => {
+            read(&state.codex_trails, &known.path, cmux_core::codex_trail::CodexTrail::turns, turns, since_ms)
+        }
+        Err(reason) => return empty(reason),
+    };
+    let Some((window, version)) = read else { return empty("no transcript found".into()) };
+    cmux_protocol::AgentTrail {
+        pane_id: pane_id.to_string(),
+        turns: window.turns,
+        older: window.older as u32,
+        gap: window.gap as u32,
+        version: Some(version),
+        reason: None,
+    }
+}
+
+/// One action of a pane's trail in full, read from its agent's file.
+pub fn trail_detail(state: &AppState, pane_id: &str, action_id: &str) -> Result<cmux_protocol::ActionDetail, String> {
+    match trail_file(state, pane_id)? {
+        TrailFile::Claude(path) => cmux_core::trail::action_detail(&path, action_id),
+        TrailFile::Codex(known) => cmux_core::codex_trail::action_detail(&known.path, action_id),
+    }
+    .ok_or_else(|| format!("no action {action_id} in this agent's trail"))
+}
+
+/// [`agent_trail`] for the board, off the main thread like the activity.
+#[tauri::command]
+pub async fn get_agent_trail(
+    app: AppHandle,
+    pane_id: String,
+    turns: Option<u32>,
+    since_ms: Option<u64>,
+) -> Result<cmux_protocol::AgentTrail, String> {
+    tauri::async_runtime::spawn_blocking(move || agent_trail(&app.state::<AppState>(), &pane_id, turns, since_ms))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_trail_detail(
+    app: AppHandle,
+    pane_id: String,
+    action_id: String,
+) -> Result<cmux_protocol::ActionDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || trail_detail(&app.state::<AppState>(), &pane_id, &action_id))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1412,6 +1588,22 @@ pub fn open_agent(
     tab: bool,
     background: bool,
 ) -> Result<String, String> {
+    open_agent_from(app, state, role, task, pane_id, tab, background, "you".into())
+}
+
+/// [`open_agent`], its task logged as given by `from`: a person, from the
+/// app; whoever ran `mira agent new`, from the socket.
+#[allow(clippy::too_many_arguments)]
+pub fn open_agent_from(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    role: Option<String>,
+    task: Option<String>,
+    pane_id: Option<String>,
+    tab: bool,
+    background: bool,
+    from: String,
+) -> Result<String, String> {
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
@@ -1447,6 +1639,9 @@ pub fn open_agent(
         mark_launched(meta.entry(new_pane.clone()).or_default(), launch, cwd);
     }
     emit_workspace(&app);
+    if let Some(task) = &task {
+        crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None);
+    }
     Ok(new_pane)
 }
 
@@ -1806,12 +2001,20 @@ pub async fn ack_pty(app: AppHandle, pane_id: String, bytes: u64) {
 
 fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
     let mut meta = state.meta.lock().unwrap();
+    let mut agents = Vec::new();
     for pane in panes {
         let _ = state.pty.close(pane);
-        meta.remove(pane);
+        if meta.remove(pane).is_some_and(|m| m.is_agent()) {
+            agents.push(pane.clone());
+        }
     }
     drop(meta);
+    for pane in agents {
+        let end = cmux_protocol::TurnEnd::Exited;
+        crate::tasks::record(app, cmux_protocol::TaskEventKind::TurnEnded { pane, end });
+    }
     notify::forget_panes(state, panes);
+    state.trail_files.lock().unwrap().retain(|pane, _| !panes.contains(pane));
     for pane in panes {
         crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);

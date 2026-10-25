@@ -10,6 +10,7 @@ mod intel;
 mod notify;
 mod runs;
 mod server;
+mod tasks;
 mod teams;
 mod update;
 mod whatsnew;
@@ -60,6 +61,19 @@ pub struct AppState {
     pub emit_coalescer: commands::EmitCoalescer,
     /// Claude Code transcripts read so far, for agent activity.
     pub transcripts: Mutex<cmux_core::transcript::Cache>,
+    /// Claude Code transcripts and Codex rollouts read so far, for agent
+    /// trails.
+    pub trails: Mutex<cmux_core::transcript::Cache<cmux_core::trail::Trail>>,
+    pub codex_trails: Mutex<cmux_core::transcript::Cache<cmux_core::codex_trail::CodexTrail>>,
+    /// The file each pane's agent last wrote its trail to, by pane: kept
+    /// after the agent exits, until another starts there or the pane
+    /// closes.
+    pub trail_files: Mutex<std::collections::HashMap<String, commands::TrailFile>>,
+    /// Each live Codex pane's rollout, followed for the ends of its turns.
+    pub codex_tails: Mutex<std::collections::HashMap<String, cmux_core::codex_trail::RolloutTail>>,
+    /// The task log's path, locked while it is appended to or read: the
+    /// app is its one writer.
+    pub task_log: Mutex<std::path::PathBuf>,
 }
 
 pub fn save_session(state: &AppState) {
@@ -209,6 +223,10 @@ pub fn run() {
         .map(|(id, _)| id.clone())
         .collect();
     cmux_core::session::gc_scrollback(&workspace.all_pane_ids());
+    let task_log = cmux_core::tasks::log_path();
+    if let Err(e) = cmux_core::tasks::compact(&task_log, runs::now_ms()) {
+        eprintln!("mirador: could not compact the task log: {e}");
+    }
 
     let builder = tauri::Builder::default();
     // A second launch on Windows or Linux would run without the automation
@@ -249,6 +267,11 @@ pub fn run() {
             browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
             transcripts: Mutex::new(Default::default()),
+            trails: Mutex::new(Default::default()),
+            codex_trails: Mutex::new(Default::default()),
+            trail_files: Mutex::new(Default::default()),
+            codex_tails: Mutex::new(Default::default()),
+            task_log: Mutex::new(task_log),
             update: update::UpdateState::default(),
             emit_coalescer: commands::EmitCoalescer::default(),
         })
@@ -339,7 +362,12 @@ pub fn run() {
             teams::team_add,
             teams::team_restart,
             commands::open_agent_wall,
+            tasks::open_task_board,
+            tasks::task_cards,
+            tasks::task_history,
             commands::get_agent_activity,
+            commands::get_agent_trail,
+            commands::get_trail_detail,
             commands::mark_pane_read,
             commands::zoom_pane,
             commands::load_graph,

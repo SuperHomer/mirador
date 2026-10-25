@@ -171,6 +171,9 @@ pub struct WorkspaceSnapshot {
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
+    /// Task-board panes: each shows the cards of a tab's agents.
+    #[serde(default)]
+    pub task_board_panes: Vec<TaskBoardPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -371,6 +374,14 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// Opens the task board of `pane_id`'s tab (the focused pane's when
+    /// absent) beside it, or in a tab of its own with `target` "tab".
+    AgentBoard {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+    },
     /// Opens the editor for the role, way and team files `pane_id`'s
     /// directory sees: a split of that pane, or a tab with `target` "tab".
     AgentEditor {
@@ -391,6 +402,10 @@ pub enum Request {
         pane_id: Option<String>,
         #[serde(default)]
         force: bool,
+        /// A card written by hand the message is for, by id or a prefix of
+        /// one: it is logged on that card rather than on one of its own.
+        #[serde(default)]
+        card: Option<String>,
     },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {
@@ -410,6 +425,62 @@ pub enum Request {
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,
+    /// The task board of `pane_id`'s tab, or of every tab with `all`.
+    TaskList {
+        #[serde(default)]
+        all: bool,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Writes a card in `pane_id`'s tab, for the agent `to` (as
+    /// `AgentSend` finds it) or nobody yet. Answers its id.
+    TaskAdd {
+        title: String,
+        #[serde(default)]
+        to: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Puts a card written by hand in `column`; `card` is its id, or a
+    /// prefix of one card's only.
+    TaskMove {
+        card: String,
+        column: TaskColumn,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// The task log, oldest first: of the agent `name` (as `AgentSend`
+    /// finds it), else of `pane_id`'s tab, or all of it with `all`.
+    AgentHistory {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        all: bool,
+        #[serde(default)]
+        pane_id: Option<String>,
+        /// The history of one card instead, by id or a prefix of one.
+        #[serde(default)]
+        card: Option<String>,
+    },
+    /// What an agent did, turn by turn: of the agent `name` (as
+    /// `AgentSend` finds it), else of `pane_id`. Only its last `turns`
+    /// turns when given.
+    AgentTrail {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        turns: Option<u32>,
+    },
+    /// One action of that trail in full, by its id.
+    AgentTrailDetail {
+        action_id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Adds a member to the team of `pane_id`'s tab, beside the others.
     TeamAdd {
         role: String,
@@ -784,6 +855,97 @@ pub struct AgentActivity {
     pub subagents: Vec<SubagentInfo>,
 }
 
+/// What an agent pane's agent did, from its own transcript (Claude Code)
+/// or rollout (Codex), oldest turn first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTrail {
+    pub pane_id: String,
+    pub turns: Vec<TrailTurn>,
+    /// Turns before the first one in `turns`.
+    pub older: u32,
+    /// Turns left out between the first one — a card's, older than the
+    /// latest — and the latest; 0 when they follow on.
+    pub gap: u32,
+    /// What it is a reading of: an answer with the version of the last
+    /// is the same answer.
+    pub version: Option<String>,
+    /// Why there is nothing to show, when there is not: no transcript
+    /// found, an agent without one, more than one Codex session.
+    pub reason: Option<String>,
+}
+
+/// One turn of an agent's trail: a prompt and what the agent did for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailTurn {
+    /// Its first line, shortened. Absent for actions with no prompt before
+    /// them (a transcript that starts mid-conversation).
+    pub prompt: Option<String>,
+    /// The whole prompt, up to a few thousand characters.
+    pub text: Option<String>,
+    /// Unix millis of its first and latest entries.
+    pub started_ms: Option<u64>,
+    pub last_ms: Option<u64>,
+    /// In the order they were called.
+    pub actions: Vec<TrailAction>,
+}
+
+/// One tool call, summed up: the full input and output stay in the agent's
+/// transcript, read on demand as an [`ActionDetail`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailAction {
+    /// The tool call's id, which asks for its detail.
+    pub id: String,
+    pub tool: String,
+    /// One line: a command, a path, a pattern, a URL, a description.
+    pub summary: String,
+    pub started_ms: Option<u64>,
+    /// From the call to its result; absent until there is one.
+    pub duration_ms: Option<u64>,
+    pub status: ActionStatus,
+    /// A failed command's, when its result says it.
+    pub exit_code: Option<i32>,
+    /// The first lines of its result, shortened.
+    pub output: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionStatus {
+    Ok,
+    Error,
+    /// No result yet.
+    Running,
+    /// No result, and the agent moved on: interrupted, or the session
+    /// was stopped under it.
+    Interrupted,
+}
+
+/// One tool call in full, as its transcript has it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionDetail {
+    pub id: String,
+    pub tool: String,
+    /// Its input, as pretty-printed JSON.
+    pub input: String,
+    /// Its result's text; absent while there is none.
+    pub output: Option<String>,
+    pub is_error: bool,
+}
+
+/// A pane drawing the task board.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBoardPane {
+    pub pane_id: String,
+    /// The tab whose cards it shows: the one it was opened from.
+    #[serde(default)]
+    pub tab_id: Option<String>,
+}
+
 /// A pane drawing the agent wall.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -951,6 +1113,118 @@ pub enum SeatState {
     Running,
     Exited,
     Closed,
+}
+
+/// A column of the task board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskColumn {
+    Todo,
+    Doing,
+    NeedsYou,
+    Done,
+}
+
+/// How a task was given: by Mirador starting a team or an agent, by
+/// `mira agent send`, or written as a card with `mira task add`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskSource {
+    TeamStart,
+    AgentNew,
+    AgentSend,
+    Manual,
+}
+
+/// How an agent's turn ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TurnEnd {
+    /// It stopped and waits for its next prompt.
+    Done,
+    /// It stopped to ask a person something.
+    NeedsYou,
+    /// Its agent is gone: the pane is a shell again, or closed.
+    Exited,
+}
+
+/// One line of the task log: something that happened to a task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskEvent {
+    /// Unix millis.
+    pub at_ms: u64,
+    #[serde(flatten)]
+    pub what: TaskEventKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum TaskEventKind {
+    /// A task given to an agent, or a card written.
+    Given {
+        card: String,
+        source: TaskSource,
+        /// The sender's name, or `you` for a person.
+        from: String,
+        /// The agent it was given to, by name and pane; a card written
+        /// for nobody yet has neither.
+        to: Option<String>,
+        pane: Option<String>,
+        team: Option<String>,
+        tab: Option<String>,
+        text: String,
+    },
+    /// A card put in a column by hand.
+    Moved {
+        card: String,
+        column: TaskColumn,
+        /// Who moved it, as in `from`.
+        by: String,
+    },
+    /// The agent in `pane` stopped.
+    TurnEnded { pane: String, end: TurnEnd },
+    /// The agent in `pane` went back to work after needing a person.
+    Resumed { pane: String },
+}
+
+/// One line of `mira agent history`: an event of the log, with what the
+/// rest of the log says about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskHistoryEntry {
+    #[serde(flatten)]
+    pub event: TaskEvent,
+    /// The agent a turn end or a resume is about, by the name it was last
+    /// given a task under.
+    pub agent: Option<String>,
+    /// For a turn end: how long since the task or the resume it ends.
+    pub turn_ms: Option<u64>,
+    /// The event in one line, as `mira agent history` prints it after its
+    /// age: `planner → worker  agent-send  Step 2: …`, `worker done after
+    /// 3m`.
+    #[serde(default)]
+    pub summary: String,
+}
+
+/// A card of the task board: the log folded up, one card per task given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskCard {
+    pub id: String,
+    /// The first line of the task's text.
+    pub title: String,
+    pub source: TaskSource,
+    pub from: String,
+    pub assignee: Option<String>,
+    pub pane: Option<String>,
+    pub team: Option<String>,
+    pub tab: Option<String>,
+    pub column: TaskColumn,
+    pub created_ms: u64,
+    pub updated_ms: u64,
+    /// The events that touched it, oldest first.
+    pub history: Vec<TaskEvent>,
 }
 
 /// Where a role or a way of working was defined. A repository's wins over

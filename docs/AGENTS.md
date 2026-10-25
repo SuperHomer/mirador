@@ -236,6 +236,7 @@ mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its ow
 mira agent list                               # pane, status, harness, name, model
 mira agent wall                               # this tab's agents, in a grid
 mira agent activity [--pane <id>]             # its tasks and subagents
+mira agent trail [NAME | --pane <id>]         # what it did, turn by turn
 ```
 
 A role is a Markdown file — its frontmatter says how it starts, its body is
@@ -401,6 +402,144 @@ right after a `send` does not end on the idle from before the message. It
 reads status from Claude Code's hooks; an agent without them only ends a
 wait by exiting.
 
+### Tasks, the board and history
+
+```bash
+mira task add <title…> [--to <name>]          # a card in this tab, in To do; prints its id
+mira task move <id> <todo|doing|needs-you|done>
+mira task done <id>                            # same as move <id> done
+mira task list [--all]                         # this tab's cards by column; every tab's
+mira agent send <name> --card <id> <message…>  # the message is that card's
+mira agent history [NAME | --pane <id> | --card <id> | --all]
+mira agent board [--tab]                       # the board, beside this pane
+```
+
+Mirador keeps a log of tasks: one line per event, kept across restarts.
+It logs a task given once the start or the send has worked — `team start`
+(the task, to the lead), `agent new` with a task, `agent send` — each with who sent it (the calling agent's
+name, or `you`), the agent it went to (its team member name, else its
+session's, else its role's, else its harness's: `claude`, `codex`), and
+its tab and team. It logs a Claude Code agent's turn ending when its
+status changes: working or needs-you to idle is done, anything to
+needs-you is needs-you, needs-you back to working is a resume — that
+status from its hooks or else its session file. A Codex agent has no
+status, but writes each turn's end to its rollout (see *The trail*
+below): on macOS and Linux Mirador follows a running Codex's rollout and
+logs a turn done for each `task_complete` in it, and for each
+`turn_aborted` (an interrupted turn, waiting for its next prompt). It
+starts at the rollout's end when it first sees it, so a session's
+history is never logged again, and reads a newer one after it (`/new`)
+from its start. Codex (0.163) writes no approval request to its rollout,
+so a Codex waiting on a person is never needs-you; and it still has no status
+for `agent list` or `agent wait`. **Every other harness has neither, so
+its turns are not logged.** An agent's exit is logged when its pane or
+tab is closed, and on macOS and Linux when its process is gone from the
+pane.
+
+The log folds into cards, in four columns — To do, Doing, Needs you,
+Done:
+
+- A task Mirador gives is a card in Doing that follows its agent: Needs
+  you when it asks a person, Doing again when it resumes, Done when its
+  turn ends or it exits. A newer task to the same agent puts the older
+  card in Done — which is how the card of an agent whose turns are not
+  logged closes.
+- A card written with `task add` starts in To do and moves only with
+  `task move` / `task done`. A card Mirador made is not moved by hand
+  (refused: its agent moves it).
+- `agent send --card <id>` logs the message on that written card, in its
+  history, and makes no card of its own; the card stays in its column. An
+  unknown id, an ambiguous prefix or a card Mirador made refuses the send
+  before anything is typed.
+
+Options go before or after a title or a message, in `task add` as in
+`agent send`; words after `--` are text, so a message or title with a
+word that starts with `-` goes there: `mira agent send worker -- "- fix A"`.
+
+A card's id is 8 hex characters; `move`, `done`, `--card` and
+`history --card` take any prefix that names one card only. `--to` and
+`agent history NAME` find the agent as `agent send` does. `task list` and
+the board belong to the calling pane's tab (its team's, in a team's tab),
+`--all` to every tab, and show of the Done cards only the 20 most recently
+moved. `agent history` prints one line per event, oldest first: how long
+ago, who to whom, how it was given and the text's first line, or how a
+turn ended and how long it took (since the task, or since it resumed).
+Without a name it is this tab's; with one, the tasks given to that agent
+or sent by it, the moves of its cards, and its turns.
+
+`agent board` opens a task-board pane showing the tab it was opened from
+(or, opened from the agent wall's *Task board* button, the tab the wall
+shows) — also the palette's *Agents: Task Board*. It switches between
+this team and all agents, and between Cards, History (newest first) and
+Trail (below); a card's title opens its history, its agent's name goes to
+its pane, and its ⋯ opens Trail on its agent at the turn the card started
+— the first to begin since it was given. It reads the log again whenever
+something is appended, and comes back after a relaunch.
+
+The log is `tasks.jsonl` in the data directory (on macOS
+`~/Library/Application Support/Mirador/`, on Linux `$XDG_DATA_HOME/mirador`
+or `~/.local/share/mirador`, on Windows `%APPDATA%\mirador`). The app is
+its only writer; at each start it keeps the last 30 days and at most the
+newest 10,000 events, and a line a crash left half-written is skipped.
+The built-in `omakase` planner puts each step up as a card for the worker
+and hands it over with `--card`.
+
+### The trail
+
+```bash
+mira agent trail [NAME | --pane <id>] [--turns N]   # its last N turns (3)
+mira agent trail [NAME | --pane <id>] --detail <action-id>
+```
+
+The task log says what an agent was given and how its turns ended; the
+trail says what it did. Each turn is its prompt's first line and how long
+ago it began, then one line per tool call, in order: how long ago, how
+long it took, `✓` done, `✗` failed, `…` still running or `-` left without
+a result (interrupted), the tool, what it was about, the exit code when
+it is not 0, and the call's id. What it was about: a command, the file
+an edit, write or read touched, a search's pattern, a fetch's URL, a
+subagent's description, and for any other tool its name and first string
+input. A failed command's exit code is the one its result reports.
+`--detail` prints one call in full — its input (as JSON, or the text a
+tool took as its input) and its output, marked when it is an error. NAME
+is found as `agent send` finds it; with neither, this pane's agent (the
+focused pane's, outside one).
+
+Nothing is copied: the trail is read from the agent's own file each time,
+and holds only the summaries (the first five lines of a result); the
+detail is read when asked for. So it lasts as long as that file does.
+
+- **Claude Code**: the session's transcript, which its hooks name
+  (`transcript_path`), as for `agent activity`. A subagent's own work is
+  in its own transcript and not in the trail: its `Agent` call is one
+  line of it.
+- **Codex**: its rollout, `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-….jsonl`
+  (`~/.codex` by default). Which one is not guessed from a directory and a
+  start time: it is the one the Codex process, or one beneath it, holds
+  open, found with `lsof` — two Codex agents started together in one
+  worktree never share it — and only when exactly one is open. It is
+  looked for again when the process changes or a newer rollout appears
+  (`/new` starts one in the same process). Codex 0.163 runs its tools
+  from a script; what the trail shows are the commands, file changes,
+  searches and image views that script did, each once it has finished —
+  a command still running is not written yet. **Windows has no Codex
+  trail**: there is no cheap way to list another process's open files.
+
+Once an agent exits, its pane keeps the last file it was read from, so
+its trail stays readable until another agent starts in that pane or the
+pane is closed. A pane with no trail answers with why, not an error:
+`not an agent pane`, `no transcript found`, `no Codex session found`,
+`more than one Codex session in this pane`, `Codex on Windows has no
+trail yet`, or `only Claude Code and Codex agents have a trail`. An
+action id the file does not hold is an error.
+
+On the board, Trail lists the scope's agents with their harness and
+status, and shows the picked one's turns newest first — its latest 20,
+with *Show older turns* for 20 more, and the whole prompt on opening a
+turn — each action opening to its input and output. It reads the trail
+again two seconds after each read while it is shown and the window is
+visible.
+
 ## 7. Workspace control
 
 ```bash
@@ -467,7 +606,8 @@ read_screen notify run list_runs agent_session agent_new agent_list
 agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
-ssh_forward diff_open`. Requests are
+ssh_forward diff_open task_list task_add task_move agent_history agent_board
+agent_trail agent_trail_detail`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

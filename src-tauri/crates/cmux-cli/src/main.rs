@@ -136,6 +136,11 @@ enum Command {
         #[command(subcommand)]
         action: TeamAction,
     },
+    /// Tasks: what agents were given and where each stands, as a board.
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -222,6 +227,34 @@ enum TeamAction {
 }
 
 #[derive(Subcommand)]
+enum TaskAction {
+    /// The board of this tab — its team's, in a team's tab — by column:
+    /// each card's agent, age and title. Every tab's with --all.
+    List {
+        #[arg(long)]
+        all: bool,
+    },
+    /// Write a card in this tab, in To do, and print its id. It moves only
+    /// when moved: `task move`, `task done`.
+    Add {
+        // Not trailing_var_arg: `--to` after the title is an option, not
+        // more title.
+        #[arg(required = true)]
+        title: Vec<String>,
+        /// The agent it is for: a teammate's name in this tab, as
+        /// `agent send` takes it.
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Put a card written with `task add` in a column: todo, doing,
+    /// needs-you or done. ID may be the start of one card's id. A card
+    /// Mirador made follows its agent and is not moved by hand.
+    Move { id: String, column: String },
+    /// Put a card written with `task add` in Done.
+    Done { id: String },
+}
+
+#[derive(Subcommand)]
 enum AgentAction {
     /// Start an agent in a pane beside this one: Claude Code, or a role's
     /// harness, model and prompt (its own, then its way of working's).
@@ -252,11 +285,17 @@ enum AgentAction {
     /// waiting on a person (a permission prompt) unless --force.
     Send {
         to: String,
-        #[arg(trailing_var_arg = true, required = true)]
+        // Not trailing_var_arg: `--card`, `--wait` after the message are
+        // options, not more message.
+        #[arg(required = true)]
         message: Vec<String>,
         /// Answer a prompt the agent is waiting on anyway.
         #[arg(long)]
         force: bool,
+        /// The card the message is for, written with `task add` (its id,
+        /// or the start of it): logged on that card, not on a new one.
+        #[arg(long)]
+        card: Option<String>,
         /// Then wait for it to finish, as `agent wait` does.
         #[arg(long)]
         wait: bool,
@@ -283,6 +322,45 @@ enum AgentAction {
     /// The roles `agent new --role` accepts here — this repository's
     /// `.mirador/roles`, then yours — and the ways of working they follow.
     Roles,
+    /// The tasks given in this tab and how each turn ended, oldest first:
+    /// of the agent NAME (a teammate's name, or a pane id) when given, of
+    /// every tab with --all.
+    History {
+        name: Option<String>,
+        /// The agent's pane, instead of a name.
+        #[arg(long, conflicts_with = "name")]
+        pane: Option<String>,
+        #[arg(long, conflicts_with_all = ["name", "pane"])]
+        all: bool,
+        /// One card's history instead: its id, or the start of it.
+        #[arg(long, conflicts_with_all = ["name", "pane", "all"])]
+        card: Option<String>,
+    },
+    /// What an agent did, turn by turn, read from its own transcript
+    /// (Claude Code) or session file (Codex): each turn's prompt, then a
+    /// line per action — when, how long, ✓ or ✗, the tool and what it was
+    /// about. Of the agent NAME (a teammate's name, or a pane id), else
+    /// of this pane.
+    Trail {
+        name: Option<String>,
+        /// The agent's pane, instead of a name.
+        #[arg(long, conflicts_with = "name")]
+        pane: Option<String>,
+        /// How many of its latest turns.
+        #[arg(long, default_value_t = 3)]
+        turns: u32,
+        /// One action's full input and output instead, by the id shown
+        /// at the end of its line.
+        #[arg(long)]
+        detail: Option<String>,
+    },
+    /// Open the task board for this tab beside this pane: its agents' cards
+    /// in To do, Doing, Needs you and Done, and every tab's at a switch.
+    Board {
+        /// Open a new tab instead of splitting this pane.
+        #[arg(long)]
+        tab: bool,
+    },
     /// Open the agent wall for this tab: its agents' terminals in one
     /// grid, in a tab of its own (the existing wall, if there is one).
     Wall,
@@ -583,13 +661,14 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
                 target: tab.then(|| "tab".to_string()),
             },
-            AgentAction::Send { to, message, force, wait, timeout } => {
+            AgentAction::Send { to, message, force, card, wait, timeout } => {
                 let started = now_ms();
                 let resp = send_request(Request::AgentSend {
                     to: to.clone(),
                     message: message.join(" "),
                     pane_id: own_pane(),
                     force,
+                    card,
                 })?;
                 if !wait || !resp.ok {
                     return render(resp, cli.json, false, None);
@@ -606,6 +685,20 @@ fn run(cli: Cli) -> Result<(), String> {
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&name, &pane, started, timeout);
             }
+            AgentAction::History { name, pane, all, card } => Request::AgentHistory {
+                name: name.or(pane),
+                all,
+                pane_id: own_pane(),
+                card,
+            },
+            AgentAction::Trail { name, pane, turns, detail } => match detail {
+                Some(action_id) => Request::AgentTrailDetail { action_id, name: name.or(pane), pane_id: own_pane() },
+                None => Request::AgentTrail { name: name.or(pane), pane_id: own_pane(), turns: Some(turns) },
+            },
+            AgentAction::Board { tab } => Request::AgentBoard {
+                pane_id: own_pane(),
+                target: tab.then(|| "tab".to_string()),
+            },
             AgentAction::Wall => Request::AgentWall {
                 pane_id: own_pane(),
             },
@@ -620,6 +713,20 @@ fn run(cli: Cli) -> Result<(), String> {
             TeamAction::List { defined: false } => Request::TeamList,
             TeamAction::Add { role, name } => Request::TeamAdd { role, name, pane_id: own_pane() },
             TeamAction::Restart { members } => Request::TeamRestart { members, pane_id: own_pane() },
+        },
+        Command::Task { action } => match action {
+            TaskAction::List { all } => Request::TaskList { all, pane_id: own_pane() },
+            TaskAction::Add { title, to } => Request::TaskAdd { title: title.join(" "), to, pane_id: own_pane() },
+            TaskAction::Move { id, column } => Request::TaskMove {
+                card: id,
+                column: cmux_core::tasks::parse_column(&column)?,
+                pane_id: own_pane(),
+            },
+            TaskAction::Done { id } => Request::TaskMove {
+                card: id,
+                column: cmux_protocol::TaskColumn::Done,
+                pane_id: own_pane(),
+            },
         },
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab } => Request::SshOpen {
@@ -915,6 +1022,14 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 render_activity(&data);
             } else if let Some(teams) = map.get("teams").and_then(|v| v.as_array()) {
                 render_teams(teams);
+            } else if let Some(cards) = map.get("cards") {
+                render_cards(serde_json::from_value(cards.clone()).map_err(|e| format!("bad response: {e}"))?);
+            } else if let Some(trail) = map.get("trail") {
+                render_trail(serde_json::from_value(trail.clone()).map_err(|e| format!("bad response: {e}"))?);
+            } else if let Some(action) = map.get("action") {
+                render_action(serde_json::from_value(action.clone()).map_err(|e| format!("bad response: {e}"))?);
+            } else if let Some(history) = map.get("history") {
+                render_history(serde_json::from_value(history.clone()).map_err(|e| format!("bad response: {e}"))?);
             } else if let Some(members) = map.get("members").and_then(|v| v.as_array()) {
                 for m in members {
                     println!(
@@ -934,6 +1049,7 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
+                .or_else(|| map.get("cardId"))
                 .and_then(|v| v.as_str())
             {
                 println!("{id}");
@@ -978,6 +1094,90 @@ fn render_teams(teams: &[serde_json::Value]) {
                 m["pane"].as_str().unwrap_or(""),
             );
         }
+    }
+}
+
+/// The board: a heading per column that has cards, then a line per card
+/// with its agent, how long ago it last moved, and its title.
+fn render_cards(cards: Vec<cmux_protocol::TaskCard>) {
+    use cmux_protocol::TaskColumn::*;
+    if cards.is_empty() {
+        println!("(no tasks — they appear as agents are given them: `mira agent send`, `team start`)");
+        return;
+    }
+    let now = now_ms();
+    for (column, heading) in [(Todo, "To do"), (Doing, "Doing"), (NeedsYou, "Needs you"), (Done, "Done")] {
+        let mut here = cards.iter().filter(|c| c.column == column).peekable();
+        if here.peek().is_none() {
+            continue;
+        }
+        println!("{heading}");
+        for c in here {
+            println!(
+                "  {}  {:<14}  {:>4}  {}",
+                c.id,
+                c.assignee.as_deref().unwrap_or("-"),
+                cmux_core::tasks::span(now.saturating_sub(c.updated_ms)),
+                c.title,
+            );
+        }
+    }
+}
+
+/// A trail: each turn's prompt and how long ago it began, then a line per
+/// action — how long ago, how long it took, its status, its tool, what it
+/// was about, and its id for `--detail`.
+fn render_trail(trail: cmux_protocol::AgentTrail) {
+    use cmux_protocol::ActionStatus::*;
+    if trail.turns.is_empty() {
+        println!("({})", trail.reason.as_deref().unwrap_or("no actions yet"));
+        return;
+    }
+    let now = now_ms();
+    let ago = |ms: Option<u64>| ms.map_or("-".to_string(), |ms| format!("{} ago", cmux_core::tasks::span(now.saturating_sub(ms))));
+    for turn in trail.turns {
+        println!("{:>8}  {}", ago(turn.started_ms), turn.prompt.as_deref().unwrap_or("(no prompt)"));
+        for a in turn.actions {
+            let mark = match a.status {
+                Ok => "✓",
+                Error => "✗",
+                Running => "…",
+                Interrupted => "-",
+            };
+            let took = a.duration_ms.map_or(String::new(), took);
+            let exit = a.exit_code.filter(|&c| c != 0).map_or(String::new(), |c| format!("  (exit {c})"));
+            println!("  {:>8}  {took:>6}  {mark} {:<10} {}{exit}  [{}]", ago(a.started_ms), a.tool, a.summary, a.id);
+        }
+    }
+}
+
+/// How long an action took: milliseconds, seconds, or minutes and up.
+fn took(ms: u64) -> String {
+    match ms {
+        0..=999 => format!("{ms}ms"),
+        1000..=59_999 => format!("{:.1}s", ms as f64 / 1000.0),
+        _ => cmux_core::tasks::span(ms),
+    }
+}
+
+/// One action in full: its input, then its output.
+fn render_action(action: cmux_protocol::ActionDetail) {
+    println!("{}  {}", action.tool, action.id);
+    println!("--- input");
+    println!("{}", action.input);
+    println!("--- output{}", if action.is_error { " (error)" } else { "" });
+    println!("{}", action.output.as_deref().unwrap_or("(no result yet)"));
+}
+
+/// The log: a line per event, oldest first, with how long ago it was.
+fn render_history(history: Vec<cmux_protocol::TaskHistoryEntry>) {
+    if history.is_empty() {
+        println!("(no tasks yet)");
+        return;
+    }
+    let now = now_ms();
+    for entry in history {
+        println!("{:>4} ago  {}", cmux_core::tasks::span(now.saturating_sub(entry.event.at_ms)), entry.summary);
     }
 }
 
@@ -1554,6 +1754,46 @@ fn install() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse(args: &[&str]) -> Command {
+        Cli::try_parse_from(["mira"].iter().chain(args)).unwrap_or_else(|e| panic!("{args:?}: {e}")).command
+    }
+
+    #[test]
+    fn options_go_before_or_after_a_title_or_a_message() {
+        for args in [
+            &["task", "add", "Step", "1:", "the", "model", "--to", "worker"][..],
+            &["task", "add", "--to", "worker", "Step", "1:", "the", "model"],
+            &["task", "add", "Step 1: the model", "--to", "worker"],
+        ] {
+            let Command::Task { action: TaskAction::Add { title, to } } = parse(args) else { panic!("{args:?}") };
+            assert_eq!((title.join(" ").as_str(), to.as_deref()), ("Step 1: the model", Some("worker")), "{args:?}");
+        }
+        for args in [
+            &["agent", "send", "worker", "Step 2", "go", "--card", "ab12", "--wait"][..],
+            &["agent", "send", "worker", "--card", "ab12", "--wait", "Step 2", "go"],
+        ] {
+            let Command::Agent { action: AgentAction::Send { to, message, card, wait, .. } } = parse(args) else {
+                panic!("{args:?}")
+            };
+            assert_eq!(
+                (to.as_str(), message.join(" ").as_str(), card.as_deref(), wait),
+                ("worker", "Step 2 go", Some("ab12"), true),
+                "{args:?}"
+            );
+        }
+        // A word that looks like an option is still text after `--`.
+        let Command::Task { action: TaskAction::Add { title, to } } = parse(&["task", "add", "--", "drop", "--to"]) else {
+            panic!()
+        };
+        assert_eq!((title.join(" ").as_str(), to), ("drop --to", None));
+        let Command::Agent { action: AgentAction::Send { message, card, .. } } =
+            parse(&["agent", "send", "worker", "--card", "ab12", "--", "use", "-v"])
+        else {
+            panic!()
+        };
+        assert_eq!((message.join(" ").as_str(), card.as_deref()), ("use -v", Some("ab12")));
+    }
 
     /// How a hook knows which pane its agent runs in. The tty fallback is
     /// unix-only, so on Windows this environment variable is the only

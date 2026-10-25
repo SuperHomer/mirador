@@ -14,6 +14,7 @@ import {
   openAgent,
   openAgentWall,
   openAgentEditor,
+  openTaskBoard,
   openWhatsNew,
   zoomPane,
   setView,
@@ -177,6 +178,13 @@ export const actions: ActionDef[] = [
     // Every agent's terminal in one grid; goes to the wall's
     // tab when there already is one.
     run: () => void openAgentWall(focusedPane() ?? null),
+  },
+  {
+    id: "task_board",
+    title: "Agents: Task Board",
+    // The cards of the tasks the focused tab's agents were given, beside
+    // the focused pane.
+    run: () => void openTaskBoard(focusedPane() ?? null, false),
   },
   {
     id: "agent_editor",

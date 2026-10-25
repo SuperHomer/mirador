@@ -102,8 +102,23 @@ fn serve_connection(app: AppHandle, stream: Box<dyn Stream>) {
     }
 }
 
+/// Who a request from `pane_id` comes from, for the task log: the agent
+/// there, or else a person.
+fn sender(state: &AppState, pane_id: Option<&str>) -> String {
+    pane_id.and_then(|p| crate::handoff::sender(state, p)).unwrap_or_else(|| "you".into())
+}
+
 fn focused_pane(state: &AppState) -> String {
     state.workspace.lock().unwrap().focused_pane()
+}
+
+/// The pane whose trail is asked for: the agent `name` as `agent send`
+/// finds it from `pane_id`'s tab, else `pane_id`, else the focused pane.
+fn trail_pane(state: &AppState, name: Option<String>, pane_id: Option<String>) -> Result<String, String> {
+    match name {
+        Some(name) => crate::handoff::find(state, &name, pane_id),
+        None => Ok(pane_id.unwrap_or_else(|| focused_pane(state))),
+    }
 }
 
 fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
@@ -235,9 +250,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             }
             let pane = resolve_pane(&state, pane_id, tty, job)
                 .ok_or("could not resolve the pane for this agent session")?;
-            {
+            let turn = {
                 let mut meta = state.meta.lock().unwrap();
                 let entry = meta.entry(pane.clone()).or_default();
+                let before = entry.status();
                 entry.agent_session = Some(record);
                 if let Some(path) = transcript_path
                     .map(std::path::PathBuf::from)
@@ -257,6 +273,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                         _ => None,
                     };
                 }
+                cmux_core::tasks::status_event(&pane, before, entry.status())
+            };
+            if let Some(turn) = turn {
+                crate::tasks::record(app, turn);
             }
             state
                 .session_dirty
@@ -270,7 +290,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             target,
             pane_id,
         } => {
-            let pane_id = crate::commands::open_agent(
+            let from = sender(&state, pane_id.as_deref());
+            let pane_id = crate::commands::open_agent_from(
                 app.clone(),
                 app.state(),
                 role,
@@ -280,6 +301,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 // a tab of its own only when asked for one.
                 target.as_deref() == Some("tab"),
                 false,
+                from,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }
@@ -301,8 +323,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::AgentSend { to, message, pane_id, force } => {
-            let pane = crate::handoff::send(&state, &to, &message, pane_id, force)?;
+        Request::AgentSend { to, message, pane_id, force, card } => {
+            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentFind { name, pane_id } => {
@@ -310,10 +332,32 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "paneId": pane }))
         }
         Request::TeamStart { team, task, pane_id } => {
-            let tab = crate::teams::start_team(app.clone(), app.state(), team, task, pane_id)?;
+            let from = sender(&state, pane_id.as_deref());
+            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, from)?;
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
+        Request::TaskList { all, pane_id } => Ok(json!({ "cards": crate::tasks::list(&state, all, pane_id)? })),
+        Request::TaskAdd { title, to, pane_id } => {
+            let from = sender(&state, pane_id.as_deref());
+            Ok(json!({ "cardId": crate::tasks::add(app, &title, to, pane_id, from)? }))
+        }
+        Request::TaskMove { card, column, pane_id } => {
+            let by = sender(&state, pane_id.as_deref());
+            crate::tasks::move_card(app, &card, column, by)?;
+            Ok(Value::Null)
+        }
+        Request::AgentTrail { name, pane_id, turns } => {
+            let pane = trail_pane(&state, name, pane_id)?;
+            Ok(json!({ "trail": crate::commands::agent_trail(&state, &pane, turns, None) }))
+        }
+        Request::AgentTrailDetail { action_id, name, pane_id } => {
+            let pane = trail_pane(&state, name, pane_id)?;
+            Ok(json!({ "action": crate::commands::trail_detail(&state, &pane, &action_id)? }))
+        }
+        Request::AgentHistory { name, all, pane_id, card } => {
+            Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id, card)? }))
+        }
         Request::TeamAdd { role, name, pane_id } => {
             let pane = crate::teams::team_add(app.clone(), app.state(), role, name, pane_id)?;
             Ok(json!({ "paneId": pane }))
@@ -321,6 +365,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::TeamRestart { members, pane_id } => {
             let done = crate::teams::team_restart(app.clone(), app.state(), members, pane_id)?;
             Ok(json!({ "members": done }))
+        }
+        Request::AgentBoard { pane_id, target } => {
+            let pane = crate::tasks::open_task_board(app.clone(), app.state(), pane_id, target.as_deref() == Some("tab"))?;
+            Ok(json!({ "paneId": pane }))
         }
         Request::AgentWall { pane_id } => {
             let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;
