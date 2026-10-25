@@ -1561,11 +1561,11 @@ pub fn graph_show_commit(
 }
 
 /// Starts a Claude Code agent: a shell pane (a split of `pane_id` — the
-/// usual way, so the agent works in the tab beside you — or a new tab,
-/// behind the current one when `background`) with `claude` typed into it, carrying the role's model and
-/// prompt and `task` as its first message. A shell rather than a command
-/// pane, as a restored agent is: `/exit` leaves a prompt, and the session
-/// it records resumes like any other.
+/// usual way, so the agent works in the tab beside you — or a new tab)
+/// with `claude` typed into it, carrying the role's model and prompt and
+/// `task` as its first message. A shell rather than a command pane, as a
+/// restored agent is: `/exit` leaves a prompt, and the session it records
+/// resumes like any other.
 // Off the main thread: a role that keeps a list of skills or plugins
 // asks Claude Code for its inventory first, which takes a second.
 #[tauri::command(async)]
@@ -1576,14 +1576,12 @@ pub fn open_agent(
     task: Option<String>,
     pane_id: Option<String>,
     tab: bool,
-    background: bool,
 ) -> Result<String, String> {
-    open_agent_from(app, state, role, task, pane_id, tab, background, "you".into())
+    open_agent_from(app, state, role, task, pane_id, tab, "you".into())
 }
 
 /// [`open_agent`], its task logged as given by `from`: a person, from the
 /// app; whoever ran `mira agent new`, from the socket.
-#[allow(clippy::too_many_arguments)]
 pub fn open_agent_from(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1591,7 +1589,6 @@ pub fn open_agent_from(
     task: Option<String>,
     pane_id: Option<String>,
     tab: bool,
-    background: bool,
     from: String,
 ) -> Result<String, String> {
     let source = pane_id
@@ -1609,13 +1606,7 @@ pub fn open_agent_from(
     let launch = prepare_launch(role.as_deref(), None, cwd.as_deref(), None, None, task.as_deref())?;
 
     let new_pane = if tab {
-        let mut ws = state.workspace.lock().unwrap();
-        let (_, pane) = if background {
-            ws.new_background_tab()
-        } else {
-            ws.new_tab()
-        };
-        pane
+        state.workspace.lock().unwrap().new_tab().1
     } else {
         state
             .workspace

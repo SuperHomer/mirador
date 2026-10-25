@@ -734,8 +734,7 @@ export const openAgent = (
   task: string | null,
   paneId: string | null,
   tab: boolean,
-  background = false,
-) => invoke<string>("open_agent", { role, task, paneId, tab, background });
+) => invoke<string>("open_agent", { role, task, paneId, tab });
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });

@@ -395,18 +395,6 @@ impl Workspace {
         (id, pane)
     }
 
-    /// Like [`Self::new_tab`], placed the same way, but leaves the active
-    /// tab on screen: an agent started from the wall opens behind it, so the
-    /// wall never hides and hands every agent's terminal back for a moment.
-    pub fn new_background_tab(&mut self) -> (String, String) {
-        let (tab, pane) = Tab::new();
-        let id = tab.id.clone();
-        let at = (self.active + 1).min(self.tabs.len());
-        self.tabs.insert(at, tab);
-        self.place_frame(&id);
-        (id, pane)
-    }
-
     /// Opens a team's tab after the active one, its panes laid out as
     /// `root`, the first focused. Returns the tab id.
     pub fn new_team_tab(&mut self, root: Node, team: cmux_protocol::TeamRun, title: &str) -> String {
@@ -991,19 +979,6 @@ mod tests {
     }
 
     #[test]
-    fn background_tab_opens_beside_the_active_one_and_leaves_it_active() {
-        let mut ws = Workspace::default();
-        let (_, _) = ws.new_tab();
-        let (_, _) = ws.new_tab();
-        ws.active = 1;
-        let before = ws.tabs[1].id.clone();
-        let (id, pane) = ws.new_background_tab();
-        assert_eq!(ws.tabs[ws.active].id, before, "the active tab stays on screen");
-        assert_eq!(ws.tabs[2].id, id, "placed where new_tab would put it");
-        assert!(layout::contains(&ws.tabs[2].root, &pane));
-    }
-
-    #[test]
     fn a_zoomed_pane_shows_alone_until_the_tab_is_asked_for() {
         let mut ws = Workspace::default();
         let claude = ws.focused_pane();
@@ -1131,7 +1106,7 @@ mod tests {
         ws.set_active_tab(&first);
         // Inserted in the tab order before the second tab, its frame still
         // goes right of every other.
-        ws.new_background_tab();
+        ws.new_tab();
         let panes = Workspace::fresh_pane_ids(2);
         let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![] };
         ws.new_team_tab(crate::teams::layout(&panes, None), team, "t");
