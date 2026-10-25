@@ -6,6 +6,7 @@ import {
   AgentInfo,
   agentLabel,
   AgentStatus,
+  focusPane,
   markPaneRead,
   openAgent,
   setWallView,
@@ -29,8 +30,11 @@ import {
 type Props = {
   /** The tab whose agents it shows, and in place of whose splits. */
   tabId: string;
-  /** It is on screen: only then does it borrow. */
+  /** It is on screen: only then does it borrow. On the board, every
+   *  tab's wall is. */
   visible: boolean;
+  /** Its tab is the active one, where the keyboard goes. */
+  current: boolean;
 };
 
 const STATUS_LABEL: Record<AgentStatus, string> = {
@@ -59,7 +63,11 @@ function columns(n: number): number {
  * tile is live and takes input — answering a permission prompt from here
  * is the same as in the agent's pane.
  */
-export const AgentWall = memo(function AgentWall({ tabId, visible }: Props) {
+export const AgentWall = memo(function AgentWall({
+  tabId,
+  visible,
+  current,
+}: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [roles, setRoles] = useState<AgentRole[]>([]);
@@ -78,18 +86,20 @@ export const AgentWall = memo(function AgentWall({ tabId, visible }: Props) {
   const tilesShown = visible && side === "agents";
 
   // The tab's focused pane is under the wall, so the keyboard would go
-  // nowhere: as the tiles come on screen, the wall gives it to that pane's
-  // tile, or the first. Only then — not on every snapshot, or a click in
-  // another tile would be undone. The tiles' own effects ran first, so
-  // their terminals are here by now — unless another wall holds one, and
-  // then it is not this wall's to focus.
+  // nowhere: as the tiles come on screen in the active tab — on the board,
+  // as their tab becomes it — the wall gives it to that pane's tile, or
+  // the first. Only then — not on every snapshot, or a click in another
+  // tile would be undone. The tiles' own effects ran first, so their
+  // terminals are here by now — unless another wall holds one, and then
+  // it is not this wall's to focus.
   const wallRef = useRef<HTMLDivElement>(null);
+  const keyboard = tilesShown && current;
   useEffect(() => {
-    if (!tilesShown) return;
+    if (!keyboard) return;
     const tile = tiles.find((a) => a.paneId === shown?.focusedPane) ?? tiles[0];
     const term = tile && getTerminal(tile.paneId);
     if (term?.element && wallRef.current?.contains(term.element)) term.focus();
-  }, [tilesShown]);
+  }, [keyboard]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
@@ -232,6 +242,7 @@ export const AgentWall = memo(function AgentWall({ tabId, visible }: Props) {
               agent={a}
               unread={unread.includes(a.paneId)}
               visible={visible}
+              current={current}
               now={now}
             />
           ))}
@@ -245,11 +256,13 @@ function WallTile({
   agent,
   unread,
   visible,
+  current,
   now,
 }: {
   agent: AgentInfo;
   unread: boolean;
   visible: boolean;
+  current: boolean;
   now: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -354,6 +367,10 @@ function WallTile({
           className="wall-term"
           onMouseDown={() => {
             if (unread) void markPaneRead(pane);
+            // On the board, a wall in another tab's frame: its tab becomes
+            // the active one, with this agent focused, so the keyboard
+            // stays in the tile pressed.
+            if (!current) void focusPane(pane);
           }}
         >
           {/* The terminal's element is appended here by `lendTerminal`, so

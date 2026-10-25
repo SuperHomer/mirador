@@ -73,11 +73,14 @@ function bodyUnder(e: WheelEvent): HTMLElement | null {
 }
 
 /** Whether `body` is the focused pane's: the active tab's, the one the
- *  keyboard types to. */
+ *  keyboard types to. A wall drawn in a frame stands for its tab's focused
+ *  pane, which is under it: the active tab's wall is the focused card. */
 function isFocused(body: HTMLElement): boolean {
   const snap = useWorkspaceStore.getState().snapshot;
   const focused = snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane;
-  return !!focused && body.closest<HTMLElement>(".pane-slot")?.dataset.pane === focused;
+  const slot = body.closest<HTMLElement>(".pane-slot");
+  if (slot?.dataset.wallOf) return slot.dataset.wallOf === snap?.activeTab;
+  return !!focused && slot?.dataset.pane === focused;
 }
 
 /**

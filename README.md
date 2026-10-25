@@ -548,7 +548,7 @@ make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*, the
 is a wall) and `mira agent wall` (which prints `wall on` or `wall off`)
 each switch the current tab between the two; the wall's own **Splits**
 button switches back. Each tab keeps its view across restarts, and the
-board shows every tab's panes as cards either way. The tiles are the
+board draws a walled tab's wall in its frame, in place of its cards. The tiles are the
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
 the keyboard goes to the focused agent's tile when the wall comes up. A

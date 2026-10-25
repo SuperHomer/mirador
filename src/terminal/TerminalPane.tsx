@@ -354,13 +354,15 @@ export const TerminalPane = memo(function TerminalPane({
 
   // On the board every terminal counts as visible, and a browser allows
   // ~16 WebGL contexts. So there a terminal renders with WebGL only while
-  // its card is in view and the board is at 100%; otherwise xterm
-  // falls back to its DOM renderer, which pauses while out of view and,
-  // being text, stays crisp when the board scales it. At 100% the screen
-  // holds far fewer than 16 cards.
+  // it is in view and the board is at 100%; otherwise xterm falls back to
+  // its DOM renderer, which pauses while out of view and, being text,
+  // stays crisp when the board scales it. At 100% the screen holds far
+  // fewer than 16 cards. In view is where the terminal is drawn — its
+  // card, or the tile of a wall on the board that holds it — so it is the
+  // terminal's own element that is watched, which moves with it.
   const [inView, setInView] = useState(true);
   useEffect(() => {
-    const el = containerRef.current;
+    const el = termRef.current?.element ?? containerRef.current;
     if (!onBoard || !el) {
       setInView(true);
       return;
@@ -372,7 +374,7 @@ export const TerminalPane = memo(function TerminalPane({
   }, [onBoard]);
   const fullSize = useBoardStore((s) => atFullSize(s.camera));
 
-  const onScreen = lent || (visible && (!onBoard || (inView && fullSize)));
+  const onScreen = (lent || visible) && (!onBoard || (inView && fullSize));
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
