@@ -4,6 +4,7 @@ import Features from "./components/Features";
 import AgentShowcase from "./components/AgentShowcase";
 import BoardShowcase from "./components/BoardShowcase";
 import TeamsShowcase from "./components/TeamsShowcase";
+import TasksShowcase from "./components/TasksShowcase";
 import DiffShowcase from "./components/DiffShowcase";
 import GraphShowcase from "./components/GraphShowcase";
 import PersistShowcase from "./components/PersistShowcase";
@@ -22,6 +23,7 @@ export default function App() {
       <Features />
       <AgentShowcase />
       <TeamsShowcase />
+      <TasksShowcase />
       <BoardShowcase />
       <DiffShowcase />
       <GraphShowcase />
