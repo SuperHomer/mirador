@@ -1,7 +1,8 @@
 //! An agent's trail, end to end: what it did, read from its own transcript
 //! through `mira agent trail`. The fake `claude` writes a transcript in
 //! Claude Code's shape and names it with its hooks, as Claude Code does;
-//! the fake `codex` writes no rollout. Skipped unless `MIRA_E2E=1`.
+//! the fake `codex` holds a rollout open, as Codex does. Skipped unless
+//! `MIRA_E2E=1`.
 
 use std::time::Duration;
 
@@ -57,10 +58,35 @@ fn an_agent_s_trail_shows_what_it_did() {
     assert_ne!(code, 0);
     assert!(err.contains("no action toolu_none"), "{err}");
 
-    // A Codex agent holding no session file has no trail, and says so.
-    let reason = sb.wait_for("the coder's reason", LONG, || {
-        let (_, out, _) = sb.mira(Some(&shell), &["agent", "trail", "--pane", &coder]);
-        out.contains("no Codex session found").then_some(out)
-    });
-    assert_eq!(reason.lines().count(), 1, "{reason}");
+    // A Codex agent's trail is the rollout it holds open.
+    let trail = |pane: &str| sb.mira(Some(&shell), &["agent", "trail", "--pane", pane]).1;
+    let shows = |pane: &str, what: &str| sb.wait_for(what, LONG, || Some(trail(pane)).filter(|t| t.contains(what)));
+    sb.mira(Some(&shell), &["agent", "send", &coder, "codex-check"]);
+    let first = shows(&coder, "echo codex-check");
+    assert!(first.contains("✓ CommandExecution"), "{first}");
+
+    // `/new` starts another rollout in the same process: the trail follows.
+    sb.mira(Some(&shell), &["agent", "send", &coder, "/new"]);
+    sb.wait_for("the new session", LONG, || sb.events("message", &coder).iter().any(|m| m["text"] == "/new").then_some(()));
+    sb.mira(Some(&shell), &["agent", "send", &coder, "after-new"]);
+    let second = shows(&coder, "echo after-new");
+    assert!(!second.contains("codex-check"), "the old session's turn:\n{second}");
+    let id = second.lines().find(|l| l.contains("after-new") && l.contains('[')).and_then(|l| l.rsplit_once('['))
+        .and_then(|(_, rest)| rest.strip_suffix(']')).expect("an id").to_string();
+
+    // Both agents exit; what they last wrote stays their pane's trail,
+    // and each action's detail with it, once the pane is no agent's.
+    for pane in [&coder, &dev] {
+        sb.mira(Some(&shell), &["agent", "send", pane, "/exit"]);
+        sb.wait_for("the agent to exit", LONG, || sb.events("exit", pane).into_iter().next());
+        sb.wait_for("the pane to be no agent's", LONG, || {
+            let agents = sb.call(Request::AgentList);
+            (!agents["agents"].as_array().unwrap().iter().any(|a| a["paneId"] == pane.as_str())).then_some(())
+        });
+    }
+    assert!(trail(&coder).contains("echo after-new"), "{}", trail(&coder));
+    assert!(trail(&dev).contains("echo trail-check please"), "{}", trail(&dev));
+    let (code, detail, err) = sb.mira(Some(&shell), &["agent", "trail", "--pane", &coder, "--detail", &id]);
+    assert_eq!(code, 0, "{err}");
+    assert!(detail.contains("--- output\nafter-new"), "{detail}");
 }

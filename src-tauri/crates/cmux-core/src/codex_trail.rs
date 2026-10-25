@@ -387,21 +387,58 @@ pub fn action_detail(path: &Path, id: &str) -> Option<ActionDetail> {
 /// multi-agent session — names none: no trail is better than another
 /// agent's.
 pub fn rollout_of(open: &[PathBuf]) -> Result<PathBuf, usize> {
-    let mut found: Vec<&PathBuf> = open
-        .iter()
-        .filter(|p| {
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-            name.starts_with("rollout-")
-                && name.ends_with(".jsonl")
-                && p.components().any(|c| c.as_os_str() == "sessions")
-        })
-        .collect();
+    let mut found: Vec<&PathBuf> = open.iter().filter(|p| is_rollout(p)).collect();
     found.sort();
     found.dedup();
     match found.as_slice() {
         [one] => Ok((*one).clone()),
         _ => Err(found.len()),
     }
+}
+
+fn is_rollout(p: &Path) -> bool {
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    name.starts_with("rollout-") && name.ends_with(".jsonl") && sessions_of(p).is_some()
+}
+
+/// The `sessions` directory a rollout is in.
+pub fn sessions_of(rollout: &Path) -> Option<&Path> {
+    rollout.ancestors().find(|a| a.file_name().is_some_and(|n| n == "sessions"))
+}
+
+/// The newest rollout under `sessions` (`YYYY/MM/DD/rollout-<time>-…`):
+/// the last file of the last day. Names sort by when they were started,
+/// so this is a few directory reads, not a walk.
+pub fn newest_rollout(sessions: &Path) -> Option<PathBuf> {
+    let last = |dir: &Path, dirs: bool| {
+        std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| if dirs { p.is_dir() } else { is_rollout(p) })
+            .max_by(|a, b| a.file_name().cmp(&b.file_name()))
+    };
+    let day = last(&last(&last(sessions, true)?, true)?, true)?;
+    last(&day, false)
+}
+
+/// A Codex's rollout as last found: for the process `pid`, when `newest`
+/// was the newest rollout there was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownRollout {
+    pub pid: u32,
+    pub path: PathBuf,
+    pub newest: Option<PathBuf>,
+}
+
+/// Whether the Codex at `pid` must be asked again which rollout it holds,
+/// `newest` being the newest rollout now. A different process, surely;
+/// the same one, only when a rollout has started since the last look —
+/// `/new` starts one in the same process. Any Codex starting one (a
+/// teammate) costs one look, then counts as seen.
+pub fn needs_lookup(known: Option<&KnownRollout>, pid: u32, newest: Option<&Path>) -> bool {
+    let Some(known) = known else { return true };
+    known.pid != pid || newest.and_then(Path::file_name) > known.newest.as_deref().and_then(Path::file_name)
 }
 
 /// The rollout the Codex at `pid` is writing. Codex keeps it open for as
@@ -615,6 +652,45 @@ mod tests {
         assert_eq!(turns[0].actions[0].status, ActionStatus::Error);
         assert!(action_detail(&path, "m1").unwrap().is_error);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn looks_again_only_when_a_rollout_may_have_changed() {
+        let day = std::env::temp_dir().join(".codex/sessions/2026/10/25");
+        let mine = day.join("rollout-2026-10-25T10-00-00-a.jsonl");
+        let later = day.join("rollout-2026-10-25T11-00-00-b.jsonl");
+        let known = KnownRollout { pid: 7, path: mine.clone(), newest: Some(mine.clone()) };
+        // Never looked, or another process: look.
+        assert!(needs_lookup(None, 7, Some(&mine)));
+        assert!(needs_lookup(Some(&known), 8, Some(&mine)));
+        // The same process, nothing newer: what was found holds.
+        assert!(!needs_lookup(Some(&known), 7, Some(&mine)));
+        assert!(!needs_lookup(Some(&known), 7, None));
+        // The same process, a rollout started since (its `/new`, or a
+        // teammate's): look, once.
+        assert!(needs_lookup(Some(&known), 7, Some(&later)));
+        let seen = KnownRollout { newest: Some(later.clone()), ..known };
+        assert!(!needs_lookup(Some(&seen), 7, Some(&later)));
+    }
+
+    #[test]
+    fn finds_the_newest_rollout_by_its_day_and_name() {
+        let sessions = std::env::temp_dir().join(format!("mira-newest-{}/sessions", std::process::id()));
+        let _ = std::fs::remove_dir_all(&sessions);
+        let touch = |rel: &str| {
+            let p = sessions.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "").unwrap();
+            p
+        };
+        assert_eq!(newest_rollout(&sessions), None);
+        touch("2026/09/30/rollout-2026-09-30T23-00-00-a.jsonl");
+        touch("2026/10/24/rollout-2026-10-24T09-00-00-b.jsonl");
+        let newest = touch("2026/10/24/rollout-2026-10-24T18-00-00-c.jsonl");
+        touch("2026/10/24/notes.txt");
+        assert_eq!(newest_rollout(&sessions), Some(newest.clone()));
+        assert_eq!(sessions_of(&newest), Some(sessions.as_path()));
+        let _ = std::fs::remove_dir_all(sessions.parent().unwrap());
     }
 
     #[test]

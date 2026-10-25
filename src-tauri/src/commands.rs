@@ -238,49 +238,86 @@ pub async fn get_agent_activity(
 }
 
 /// Where an agent's trail is read from.
-enum TrailFile {
+#[derive(Clone)]
+pub enum TrailFile {
     Claude(std::path::PathBuf),
-    Codex(std::path::PathBuf),
+    Codex(cmux_core::codex_trail::KnownRollout),
 }
+
+/// How many panes' trail files are kept: a pane's goes when it closes,
+/// and this bounds what nothing else would.
+const TRAIL_FILES: usize = 256;
 
 /// The file a pane's agent writes what it does to, or why there is none
 /// to read: Claude Code's transcript, which its hooks name, or the rollout
-/// its Codex holds open.
+/// its Codex holds open. Once the agent is gone, the one it last wrote.
 fn trail_file(state: &AppState, pane_id: &str) -> Result<TrailFile, String> {
-    let (harness, transcript, pid) = {
+    let agent = {
         let meta = state.meta.lock().unwrap();
-        let m = meta.get(pane_id).filter(|m| m.is_agent()).ok_or("not an agent pane")?;
-        (m.harness(), m.agent_transcript.clone(), m.agent_pid)
+        meta.get(pane_id).filter(|m| m.is_agent()).map(|m| (m.harness(), m.agent_transcript.clone(), m.agent_pid))
     };
-    match harness {
-        Some(cmux_protocol::Harness::Claude) => transcript
+    let found = match agent {
+        None => {
+            return state.trail_files.lock().unwrap().get(pane_id).cloned().ok_or_else(|| "not an agent pane".into())
+        }
+        Some((Some(cmux_protocol::Harness::Claude), transcript, _)) => transcript
             .filter(|p| p.is_file())
             .map(TrailFile::Claude)
-            .ok_or_else(|| "no transcript found".into()),
-        Some(cmux_protocol::Harness::Codex) => codex_rollout(state, pane_id, pid).map(TrailFile::Codex),
-        _ => Err("only Claude Code and Codex agents have a trail".into()),
+            .ok_or_else(|| "no transcript found".to_string()),
+        Some((Some(cmux_protocol::Harness::Codex), _, pid)) => codex_rollout(state, pane_id, pid).map(TrailFile::Codex),
+        Some(_) => Err("only Claude Code and Codex agents have a trail".into()),
+    };
+    // The pane's agent now has this file, or none: what an agent before
+    // it wrote is not this one's.
+    let mut files = state.trail_files.lock().unwrap();
+    match &found {
+        Ok(file) => {
+            if files.len() >= TRAIL_FILES && !files.contains_key(pane_id) {
+                let open = state.meta.lock().unwrap();
+                files.retain(|pane, _| open.contains_key(pane));
+            }
+            files.insert(pane_id.to_string(), file.clone());
+        }
+        Err(_) => {
+            files.remove(pane_id);
+        }
     }
+    found
 }
 
-/// The rollout the Codex running in `pane_id` holds open, remembered for
-/// as long as it is the same process: finding it runs `lsof`.
-fn codex_rollout(state: &AppState, pane_id: &str, pid: Option<u32>) -> Result<std::path::PathBuf, String> {
+/// The rollout the Codex running in `pane_id` holds open. Finding it runs
+/// `lsof`, so what was found is kept while it can still be right: the same
+/// process, and no rollout started since (see `needs_lookup`).
+fn codex_rollout(
+    state: &AppState,
+    pane_id: &str,
+    pid: Option<u32>,
+) -> Result<cmux_core::codex_trail::KnownRollout, String> {
+    use cmux_core::codex_trail::{needs_lookup, newest_rollout, open_rollout, sessions_of, KnownRollout};
     if cfg!(not(unix)) {
         return Err("Codex on Windows has no trail yet".into());
     }
     let pid = pid.ok_or("no Codex session found: Codex is not running here")?;
-    if let Some((known, path)) = state.rollouts.lock().unwrap().get(pane_id) {
-        if *known == pid {
-            return Ok(path.clone());
-        }
-    }
-    match cmux_core::codex_trail::open_rollout(pid) {
-        Ok(path) => {
-            state.rollouts.lock().unwrap().insert(pane_id.to_string(), (pid, path.clone()));
-            Ok(path)
-        }
-        Err(0) => Err("no Codex session found".into()),
-        Err(_) => Err("more than one Codex session in this pane".into()),
+    let known = match state.trail_files.lock().unwrap().get(pane_id) {
+        Some(TrailFile::Codex(known)) => Some(known.clone()),
+        _ => None,
+    };
+    let newest = known.as_ref().and_then(|k| sessions_of(&k.path)).and_then(newest_rollout);
+    let lookup = needs_lookup(known.as_ref(), pid, newest.as_deref());
+    match known {
+        Some(known) if !lookup => Ok(known),
+        known => match open_rollout(pid) {
+            Ok(path) => {
+                // The first time, where its sessions are is known only now.
+                let newest = newest.or_else(|| sessions_of(&path).and_then(newest_rollout));
+                Ok(KnownRollout { pid, path, newest })
+            }
+            // The same process holding none any more has exited: what it
+            // wrote is still its trail.
+            Err(_) if known.as_ref().is_some_and(|k| k.pid == pid) => Ok(known.unwrap()),
+            Err(0) => Err("no Codex session found".into()),
+            Err(_) => Err("more than one Codex session in this pane".into()),
+        },
     }
 }
 
@@ -289,7 +326,7 @@ fn codex_rollout(state: &AppState, pane_id: &str, pid: Option<u32>) -> Result<st
 pub fn agent_trail(state: &AppState, pane_id: &str) -> cmux_protocol::AgentTrail {
     let read = match trail_file(state, pane_id) {
         Ok(TrailFile::Claude(path)) => state.trails.lock().unwrap().read(&path).map(|t| t.turns().to_vec()),
-        Ok(TrailFile::Codex(path)) => state.codex_trails.lock().unwrap().read(&path).map(|t| t.turns().to_vec()),
+        Ok(TrailFile::Codex(known)) => state.codex_trails.lock().unwrap().read(&known.path).map(|t| t.turns().to_vec()),
         Err(reason) => {
             return cmux_protocol::AgentTrail { pane_id: pane_id.to_string(), turns: Vec::new(), reason: Some(reason) }
         }
@@ -305,7 +342,7 @@ pub fn agent_trail(state: &AppState, pane_id: &str) -> cmux_protocol::AgentTrail
 pub fn trail_detail(state: &AppState, pane_id: &str, action_id: &str) -> Result<cmux_protocol::ActionDetail, String> {
     match trail_file(state, pane_id)? {
         TrailFile::Claude(path) => cmux_core::trail::action_detail(&path, action_id),
-        TrailFile::Codex(path) => cmux_core::codex_trail::action_detail(&path, action_id),
+        TrailFile::Codex(known) => cmux_core::codex_trail::action_detail(&known.path, action_id),
     }
     .ok_or_else(|| format!("no action {action_id} in this agent's trail"))
 }
@@ -1940,6 +1977,7 @@ fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
         crate::tasks::record(app, cmux_protocol::TaskEventKind::TurnEnded { pane, end });
     }
     notify::forget_panes(state, panes);
+    state.trail_files.lock().unwrap().retain(|pane, _| !panes.contains(pane));
     for pane in panes {
         crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);

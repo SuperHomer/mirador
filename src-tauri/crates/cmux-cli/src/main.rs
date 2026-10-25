@@ -1145,7 +1145,7 @@ fn render_trail(trail: cmux_protocol::AgentTrail) {
                 Interrupted => "-",
             };
             let took = a.duration_ms.map_or(String::new(), took);
-            let exit = a.exit_code.map_or(String::new(), |c| format!("  (exit {c})"));
+            let exit = a.exit_code.filter(|&c| c != 0).map_or(String::new(), |c| format!("  (exit {c})"));
             println!("  {:>8}  {took:>6}  {mark} {:<10} {}{exit}  [{}]", ago(a.started_ms), a.tool, a.summary, a.id);
         }
     }

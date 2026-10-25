@@ -19,6 +19,11 @@
 //!   Mirador by its hooks as Claude Code's are, gets each turn's prompt
 //!   and one Bash call, `echo` of the message's first line, with its
 //!   result.
+//!
+//! As `codex` it echoes each message, and holds a rollout open as Codex
+//! does (`~/.codex/sessions/YYYY/MM/DD/rollout-….jsonl`), writing each
+//! message there as a turn with one `echo` command. `/new` starts a new
+//! rollout in the same process, as Codex's does.
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
@@ -52,6 +57,40 @@ fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(text.as_bytes());
     }
+}
+
+/// Opens the `seq`th rollout of this process, as Codex does: in today's
+/// directory, named for when it began, its session first.
+fn open_rollout(seq: u32) -> Option<std::fs::File> {
+    let home = std::path::PathBuf::from(std::env::var("HOME").ok()?);
+    let at = timestamp();
+    let dir = home.join(".codex/sessions").join(at[..10].replace('-', "/"));
+    std::fs::create_dir_all(&dir).ok()?;
+    let name = format!("rollout-{}-{}-{seq}.jsonl", at[..19].replace(':', "-"), std::process::id());
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(name)).ok()?;
+    let meta = serde_json::json!({ "timestamp": at, "type": "session_meta", "payload": { "id": format!("fake-{seq}"), "cli_version": "fake" } });
+    file.write_all(format!("{meta}\n").as_bytes()).ok()?;
+    Some(file)
+}
+
+/// Writes one turn to a rollout: its prompt, and an `echo` of its first
+/// line as the one command it ran.
+fn rollout_turn(file: &mut std::fs::File, n: u32, message: &str) {
+    let first = message.lines().next().unwrap_or_default();
+    let (at, turn) = (timestamp(), format!("turn-{n}"));
+    let event = |payload: serde_json::Value| serde_json::json!({ "timestamp": at, "type": "event_msg", "payload": payload });
+    let lines = [
+        event(serde_json::json!({ "type": "task_started", "turn_id": turn })),
+        event(serde_json::json!({ "type": "item_completed", "turn_id": turn, "item": {
+            "type": "UserMessage", "id": format!("u-{n}"), "content": [{ "type": "text", "text": message }] } })),
+        event(serde_json::json!({ "type": "item_completed", "turn_id": turn, "item": {
+            "type": "CommandExecution", "id": format!("cmd-{}-{n}", std::process::id()),
+            "command": ["/bin/zsh", "-lc", format!("echo {first}")], "status": "completed",
+            "exit_code": 0, "aggregated_output": first } })),
+        event(serde_json::json!({ "type": "task_complete", "turn_id": turn })),
+    ];
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let _ = file.write_all(text.as_bytes());
 }
 
 /// Now, as Claude Code writes it: `2026-10-25T09:00:00.000Z`.
@@ -166,6 +205,8 @@ fn main() {
     println!("fake {kind} ready");
     let mut paste: Option<Vec<String>> = None;
     let mut turns = 0;
+    let mut sessions = 1;
+    let mut rollout = if kind == "codex" { open_rollout(sessions) } else { None };
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
         // A bracketed paste spans lines: gather it into one message.
@@ -197,6 +238,13 @@ fn main() {
             break;
         }
         if !claude {
+            if message.trim() == "/new" && rollout.is_some() {
+                sessions += 1;
+                rollout = open_rollout(sessions);
+            } else if let Some(file) = rollout.as_mut() {
+                turns += 1;
+                rollout_turn(file, turns, &message);
+            }
             println!("got: {message}");
             continue;
         }
