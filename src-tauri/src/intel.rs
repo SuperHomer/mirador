@@ -290,9 +290,11 @@ fn fetch_pr(repo_root: &str, branch: &str) -> Option<PrStatus> {
 
 /// The turns live Codex agents ended since the last tick. Codex has no
 /// hooks; it writes a turn's end only to its rollout, so each live Codex
-/// pane's is followed from where it was when first seen — what it held
-/// before is history, not logged again. The rollout is the one the trail
-/// reads, found under the same rule (`lsof` only when it may have changed).
+/// pane's is followed: the first from where it was when first seen — what
+/// it held before is history, not logged again — and a newer session
+/// after it (`/new`) from its start (`follow_from_start`). The rollout is
+/// the one the trail reads, found under the same rule (`lsof` only when it
+/// may have changed).
 fn codex_turn_ends(state: &AppState) -> Vec<cmux_protocol::TaskEventKind> {
     let codex: Vec<String> = state
         .meta
@@ -305,13 +307,18 @@ fn codex_turn_ends(state: &AppState) -> Vec<cmux_protocol::TaskEventKind> {
     let mut ends = Vec::new();
     for pane in &codex {
         let Ok(crate::commands::TrailFile::Codex(known)) = crate::commands::trail_file(state, pane) else { continue };
+        use cmux_core::codex_trail::{follow_from_start, RolloutTail};
         let mut tails = state.codex_tails.lock().unwrap();
-        let tail = tails
-            .entry(pane.clone())
-            .or_insert_with(|| cmux_core::codex_trail::RolloutTail::at_end(known.path.clone()));
-        if tail.path != known.path {
-            *tail = cmux_core::codex_trail::RolloutTail::at_end(known.path);
+        let before = tails.get(pane).map(|t| t.path.clone());
+        if before.as_ref() != Some(&known.path) {
+            let tail = if follow_from_start(before.as_deref(), &known.path) {
+                RolloutTail::from_start(known.path)
+            } else {
+                RolloutTail::at_end(known.path)
+            };
+            tails.insert(pane.clone(), tail);
         }
+        let tail = tails.get_mut(pane).expect("followed above");
         ends.extend(tail.read().into_iter().map(|end| cmux_protocol::TaskEventKind::TurnEnded { pane: pane.clone(), end }));
     }
     state.codex_tails.lock().unwrap().retain(|pane, _| codex.contains(pane));

@@ -399,6 +399,12 @@ impl RolloutTail {
         Self { path, offset, ended: HashSet::new() }
     }
 
+    /// From the start of `path`: a session that began while its pane was
+    /// followed, whose every turn is new work.
+    pub fn from_start(path: PathBuf) -> Self {
+        Self { path, offset: 0, ended: HashSet::new() }
+    }
+
     /// The turns that ended in what was appended since the last read. A
     /// file that shrank was rewritten: it is followed from its new end.
     pub fn read(&mut self) -> Vec<TurnEnd> {
@@ -442,6 +448,16 @@ impl RolloutTail {
         }
         (ends, whole as u64)
     }
+}
+
+/// Whether a pane's rollout `path` is followed from its start rather than
+/// its end, `before` being the one the pane followed until now. A pane's
+/// first is history up to now; a newer one after it (`/new`) began while
+/// the pane was followed, so a turn it ended before Mirador noticed is
+/// still new. One no newer (`codex resume` reopening an old session) is
+/// history again.
+pub fn follow_from_start(before: Option<&Path>, path: &Path) -> bool {
+    before.is_some_and(|before| path.file_name() > before.file_name())
 }
 
 /// The rollout among a process's open files: the one `rollout-*.jsonl`
@@ -796,6 +812,20 @@ mod tests {
         append(&[complete("F", "09")]);
         assert_eq!(tail.read(), [TurnEnd::Done]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn follows_a_pane_s_new_session_from_its_start() {
+        let day = std::env::temp_dir().join(".codex/sessions/2026/10/25");
+        let old = day.join("rollout-2026-10-25T10-00-00-a.jsonl");
+        let new = day.join("rollout-2026-10-25T11-00-00-b.jsonl");
+        // First seen: its history is not logged.
+        assert!(!follow_from_start(None, &old));
+        // A newer one after it (`/new`): all of it is new work.
+        assert!(follow_from_start(Some(&old), &new));
+        // An older one reopened (`codex resume`), or the same: history.
+        assert!(!follow_from_start(Some(&new), &old));
+        assert!(!follow_from_start(Some(&old), &old));
     }
 
     #[test]

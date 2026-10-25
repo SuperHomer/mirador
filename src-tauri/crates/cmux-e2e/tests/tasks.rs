@@ -265,3 +265,43 @@ fn a_codex_agent_s_card_follows_its_turns() {
     let history = mira(&sb, &dev, &["agent", "history", "--pane", &coder]);
     assert_eq!(history.lines().filter(|l| l.contains("coder done")).count(), 1, "one end for its one turn:\n{history}\n{board}");
 }
+
+#[test]
+fn a_codex_turn_right_after_new_is_logged_once() {
+    e2e!();
+    let mut sb = Sandbox::new("codexnew");
+    // Turns shorter than the poller's tick.
+    sb.set_env("E2E_TURN_MS", "100");
+    sb.write(".mirador/roles/dev.md", "---\nmodel: opus\n---\nYou build.\n");
+    sb.write(".mirador/roles/coder.md", "---\nharness: codex\nmodel: gpt-5\n---\nYou code.\n");
+    sb.write(
+        ".mirador/teams/pair.md",
+        "---\nmembers:\n  - role: dev\n    lead: true\n  - role: coder\n---\nShip small.\n",
+    );
+    sb.launch();
+    let shell = sb.first_pane();
+    sb.call(Request::TeamStart { team: "pair".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.wait_for("the coder", LONG, || sb.member("coder"));
+    let dev = pane_of(&sb, "dev");
+    let coder = pane_of(&sb, "coder");
+    sb.wait_for("the dev's session", LONG, || sb.events("hooked", &dev).into_iter().next());
+    let done = |title: &str| {
+        sb.wait_for(&format!("{title} to be done"), LONG, || {
+            let board = mira(&sb, &dev, &["task", "list"]);
+            (column_of(&board, title).as_deref() == Some("Done")).then_some(())
+        })
+    };
+
+    // Its first session, followed.
+    mira(&sb, &dev, &["agent", "send", "coder", "First pass"]);
+    done("First pass");
+
+    // A new session, and a turn in it over before the poller next looks:
+    // the new rollout already holds its end when it is first read. `/new`
+    // typed by a person: from an agent it would come headed with who sent it.
+    mira(&sb, &shell, &["agent", "send", &coder, "/new"]);
+    mira(&sb, &dev, &["agent", "send", "coder", "Quick fix"]);
+    done("Quick fix");
+    let history = mira(&sb, &dev, &["agent", "history", "--pane", &coder]);
+    assert_eq!(history.lines().filter(|l| l.contains("coder done")).count(), 2, "one end per turn:\n{history}");
+}
