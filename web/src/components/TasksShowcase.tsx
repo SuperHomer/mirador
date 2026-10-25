@@ -459,7 +459,8 @@ export default function TasksShowcase() {
           Who was given what, and where it stands
         </h2>
         <p style={{ color: "var(--subtext)", fontSize: 15, lineHeight: 1.65, marginTop: 16 }}>
-          The task board shows what each agent was given, for one team or every tab.
+          The task board is the agent wall’s other side — one switch, Agents | Tasks —
+          and shows what each agent was given, for one team or every tab.
           Mirador adds a card each time it hands an agent a task, and moves it as the
           agent’s turns end — Doing, Needs you, Done — or to Done once the agent is
           given a newer one. Agents write cards of their own
@@ -490,7 +491,7 @@ export default function TasksShowcase() {
             · mira task add · mira agent history · mira agent trail
           </span>
           <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
-            or the palette’s Agents: Task Board, or the agent wall’s Task board button
+            or the agent wall’s Agents | Tasks switch, or the palette’s Agents: Task Board
           </span>
         </div>
       </div>

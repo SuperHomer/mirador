@@ -29,15 +29,16 @@ downloads, the feature tour and the keybinding reference.
   OpenCode, Pi, Gemini CLI, Amp, Aider and more, found by their process —
   each with its role, model and (Claude Code) whether it is working, idle,
   or waiting on you; type into any of them from there. The same key
-  switches back, and each tab remembers its view across restarts.
+  switches back, and each tab remembers its view across restarts. Its
+  **Agents | Tasks** switch turns it over to the tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
   start Claude Code or Codex with their own model, prompt and shared way of
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
-- **Task board** (`mira agent board`, the palette's *Agents: Task Board*,
-  or the wall's **Task board** button): what each agent was given and where
-  it stands, in To do, Doing, Needs you and Done, for this team or every
+- **Task board**, the agent wall's Tasks side (its **Agents | Tasks**
+  switch, the palette's *Agents: Task Board*, or `mira agent board`): what
+  each agent was given and where it stands, in To do, Doing, Needs you and Done, for this team or every
   tab. Mirador adds a card whenever it gives an agent a task (`team start`,
   `agent new`, `mira agent send`) and, for Claude Code and Codex, moves it
   as the agent's turns end; agents write their own with `mira task add` and
@@ -555,6 +556,9 @@ new agent from the wall's **+ New agent** splits the tab under the wall and
 gets a tile. Each tile shows the role, the model, and what the agent is
 doing: **working**, **needs you** (with what for), or **idle**. Click a
 tile's header to see that agent alone in its tab, which leaves the wall.
+The header's **Agents | Tasks** switch turns the wall over to the tab's
+task board in place of the tiles, and back; the wall comes up again on
+the side it was left on, across restarts too.
 
 **Right-click an agent** (its sidebar row, or a wall tile's header; the
 palette's *Agent Activity* for the focused one) to open its activity: the

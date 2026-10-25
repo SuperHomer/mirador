@@ -34,7 +34,8 @@ export default function AgentShowcase() {
           you) and takes your keystrokes, so you answer a permission prompt without
           leaving the wall. The wall is a view of the tab itself, in place of its
           splits: the same key switches back, and each tab remembers which it showed
-          when Mirador comes back. Each goes by its Claude Code session’s name, and beside its
+          when Mirador comes back. Its Agents | Tasks switch turns the wall over to the
+          tab’s task board. Each goes by its Claude Code session’s name, and beside its
           terminal sit the subagents it started, with how far each has got; right-click
           one for the full list. In the sidebar, each tab lists its agents below the
           tabs, and a click shows one alone.
