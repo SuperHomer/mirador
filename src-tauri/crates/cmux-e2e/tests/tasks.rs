@@ -292,7 +292,13 @@ fn a_codex_turn_right_after_new_is_logged_once() {
         })
     };
 
-    // Its first session, followed.
+    // Its first session, followed: the poller has found the coder's
+    // rollout — in the tick that starts following it — once its trail
+    // reads one, and a turn over before that is history, not logged.
+    sb.wait_for("the coder's rollout", LONG, || {
+        let (_, out, _) = sb.mira(Some(&shell), &["agent", "trail", "--pane", &coder]);
+        (out.trim() == "(no actions yet)").then_some(())
+    });
     mira(&sb, &dev, &["agent", "send", "coder", "First pass"]);
     done("First pass");
 
