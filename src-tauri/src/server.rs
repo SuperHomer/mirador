@@ -112,6 +112,15 @@ fn focused_pane(state: &AppState) -> String {
     state.workspace.lock().unwrap().focused_pane()
 }
 
+/// The pane whose trail is asked for: the agent `name` as `agent send`
+/// finds it from `pane_id`'s tab, else `pane_id`, else the focused pane.
+fn trail_pane(state: &AppState, name: Option<String>, pane_id: Option<String>) -> Result<String, String> {
+    match name {
+        Some(name) => crate::handoff::find(state, &name, pane_id),
+        None => Ok(pane_id.unwrap_or_else(|| focused_pane(state))),
+    }
+}
+
 fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
     let state = app.state::<AppState>();
     match req {
@@ -337,6 +346,19 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let by = sender(&state, pane_id.as_deref());
             crate::tasks::move_card(app, &card, column, by)?;
             Ok(Value::Null)
+        }
+        Request::AgentTrail { name, pane_id, turns } => {
+            let pane = trail_pane(&state, name, pane_id)?;
+            let mut trail = crate::commands::agent_trail(&state, &pane);
+            if let Some(n) = turns {
+                let keep = trail.turns.len().saturating_sub(n as usize);
+                trail.turns.drain(..keep);
+            }
+            Ok(json!({ "trail": trail }))
+        }
+        Request::AgentTrailDetail { action_id, name, pane_id } => {
+            let pane = trail_pane(&state, name, pane_id)?;
+            Ok(json!({ "action": crate::commands::trail_detail(&state, &pane, &action_id)? }))
         }
         Request::AgentHistory { name, all, pane_id, card } => {
             Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id, card)? }))

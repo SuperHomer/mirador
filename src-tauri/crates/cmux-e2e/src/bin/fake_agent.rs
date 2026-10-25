@@ -15,6 +15,10 @@
 //!   is a turn: `prompt-submit`, a moment's work (`E2E_TURN_MS`), `stop`.
 //!   A message containing `!ask` raises a permission prompt instead (a
 //!   `permission_prompt` notification) and leaves it up. `/exit` exits.
+//!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
+//!   Mirador by its hooks as Claude Code's are, gets each turn's prompt
+//!   and one Bash call, `echo` of the message's first line, with its
+//!   result.
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
@@ -27,6 +31,45 @@ fn log(event: serde_json::Value) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(format!("{event}\n").as_bytes());
     }
+}
+
+/// Appends one turn to the transcript at `path`, in the shape Claude Code
+/// writes: the prompt, a Bash call, and its result.
+fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
+    let first = message.lines().next().unwrap_or_default();
+    let id = format!("toolu_{}_{n}", std::process::id());
+    let at = timestamp();
+    let lines = [
+        serde_json::json!({ "type": "user", "timestamp": at, "message": { "role": "user", "content": message } }),
+        serde_json::json!({ "type": "assistant", "timestamp": at, "message": { "role": "assistant", "content": [
+            { "type": "tool_use", "id": id, "name": "Bash", "input": { "command": format!("echo {first}") } }
+        ] } }),
+        serde_json::json!({ "type": "user", "timestamp": at, "message": { "role": "user", "content": [
+            { "type": "tool_result", "tool_use_id": id, "content": first }
+        ] } }),
+    ];
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
+/// Now, as Claude Code writes it: `2026-10-25T09:00:00.000Z`.
+fn timestamp() -> String {
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    let (days, rem) = (ms.div_euclid(86_400_000), ms.rem_euclid(86_400_000));
+    // The civil date of a day count (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let (h, min, sec, milli) = (rem / 3_600_000, rem / 60_000 % 60, rem / 1000 % 60, rem % 1000);
+    format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{sec:02}.{milli:03}Z")
 }
 
 /// Runs `mira claude-hook <event>` with `payload`, as Claude Code's hooks
@@ -102,8 +145,18 @@ fn main() {
             let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
             format!("fake-{pid}-{}", t.as_millis())
         });
+    let transcript = std::env::var("HOME")
+        .map(|home| std::path::PathBuf::from(home).join(".claude/projects/fake").join(format!("{session}.jsonl")))
+        .ok()
+        .filter(|_| claude);
+    if let Some(dir) = transcript.as_deref().and_then(std::path::Path::parent) {
+        let _ = std::fs::create_dir_all(dir);
+    }
     if claude {
-        let ok = hook("session-start", serde_json::json!({ "session_id": session }));
+        let ok = hook(
+            "session-start",
+            serde_json::json!({ "session_id": session, "transcript_path": transcript }),
+        );
         log(serde_json::json!({ "event": "hooked", "pid": pid, "pane": pane, "session": session, "ok": ok }));
     }
     let turn = Duration::from_millis(
@@ -112,6 +165,7 @@ fn main() {
 
     println!("fake {kind} ready");
     let mut paste: Option<Vec<String>> = None;
+    let mut turns = 0;
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
         // A bracketed paste spans lines: gather it into one message.
@@ -159,6 +213,10 @@ fn main() {
             continue;
         }
         hook("prompt-submit", serde_json::json!({ "session_id": session }));
+        if let Some(path) = &transcript {
+            turns += 1;
+            transcript_turn(path, turns, &message);
+        }
         std::thread::sleep(turn);
         println!("done: {}", message.lines().next().unwrap_or_default());
         hook("stop", serde_json::json!({ "session_id": session }));

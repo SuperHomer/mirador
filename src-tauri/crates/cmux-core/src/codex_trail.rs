@@ -382,10 +382,11 @@ pub fn action_detail(path: &Path, id: &str) -> Option<ActionDetail> {
 }
 
 /// The rollout among a process's open files: the one `rollout-*.jsonl`
-/// under a `sessions` directory. None, or more than one — a Codex that
-/// started another, or one thread per agent of a multi-agent session —
-/// gives none: no trail is better than another agent's.
-pub fn rollout_of(open: &[PathBuf]) -> Option<PathBuf> {
+/// under a `sessions` directory, else how many there were. None, or more
+/// than one — a Codex that started another, or one thread per agent of a
+/// multi-agent session — names none: no trail is better than another
+/// agent's.
+pub fn rollout_of(open: &[PathBuf]) -> Result<PathBuf, usize> {
     let mut found: Vec<&PathBuf> = open
         .iter()
         .filter(|p| {
@@ -398,8 +399,8 @@ pub fn rollout_of(open: &[PathBuf]) -> Option<PathBuf> {
     found.sort();
     found.dedup();
     match found.as_slice() {
-        [one] => Some((*one).clone()),
-        _ => None,
+        [one] => Ok((*one).clone()),
+        _ => Err(found.len()),
     }
 }
 
@@ -408,10 +409,12 @@ pub fn rollout_of(open: &[PathBuf]) -> Option<PathBuf> {
 /// not guessed from a directory and a start time; the native binary that
 /// holds it runs beneath the npm wrapper, hence the whole tree.
 #[cfg(unix)]
-pub fn open_rollout(pid: u32) -> Option<PathBuf> {
+pub fn open_rollout(pid: u32) -> Result<PathBuf, usize> {
     use crate::ports::{process_children, process_tree};
     let pids: Vec<String> = process_tree(pid, &process_children()).iter().map(u32::to_string).collect();
-    let output = crate::proc::command("lsof").args(["-nP", "-Fn", "-p", &pids.join(",")]).output().ok()?;
+    let Ok(output) = crate::proc::command("lsof").args(["-nP", "-Fn", "-p", &pids.join(",")]).output() else {
+        return Err(0);
+    };
     let open: Vec<PathBuf> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|l| l.strip_prefix('n'))
@@ -422,8 +425,8 @@ pub fn open_rollout(pid: u32) -> Option<PathBuf> {
 
 /// Windows has no cheap way to list another process's open files.
 #[cfg(not(unix))]
-pub fn open_rollout(_pid: u32) -> Option<PathBuf> {
-    None
+pub fn open_rollout(_pid: u32) -> Result<PathBuf, usize> {
+    Err(0)
 }
 
 #[cfg(test)]
@@ -622,12 +625,12 @@ mod tests {
         let noise = [home.join("log/codex-tui.log"), home.join("rollout-stray.jsonl"), PathBuf::from("/dev/ttys002")];
         let open = |paths: &[&PathBuf]| -> Vec<PathBuf> { noise.iter().chain(paths.iter().copied()).cloned().collect() };
 
-        assert_eq!(rollout_of(&open(&[&rollout])), Some(rollout.clone()));
+        assert_eq!(rollout_of(&open(&[&rollout])), Ok(rollout.clone()));
         // The same file on two descriptors is still one.
-        assert_eq!(rollout_of(&open(&[&rollout, &rollout])), Some(rollout.clone()));
+        assert_eq!(rollout_of(&open(&[&rollout, &rollout])), Ok(rollout.clone()));
         // Two sessions held open (a Codex it started, or a thread per
         // agent): which is this pane's is not known, so none is shown.
-        assert_eq!(rollout_of(&open(&[&rollout, &other])), None);
-        assert_eq!(rollout_of(&open(&[])), None);
+        assert_eq!(rollout_of(&open(&[&rollout, &other])), Err(2));
+        assert_eq!(rollout_of(&open(&[])), Err(0));
     }
 }

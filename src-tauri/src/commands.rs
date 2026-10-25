@@ -237,6 +237,98 @@ pub async fn get_agent_activity(
         .map_err(|e| e.to_string())?
 }
 
+/// Where an agent's trail is read from.
+enum TrailFile {
+    Claude(std::path::PathBuf),
+    Codex(std::path::PathBuf),
+}
+
+/// The file a pane's agent writes what it does to, or why there is none
+/// to read: Claude Code's transcript, which its hooks name, or the rollout
+/// its Codex holds open.
+fn trail_file(state: &AppState, pane_id: &str) -> Result<TrailFile, String> {
+    let (harness, transcript, pid) = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(pane_id).filter(|m| m.is_agent()).ok_or("not an agent pane")?;
+        (m.harness(), m.agent_transcript.clone(), m.agent_pid)
+    };
+    match harness {
+        Some(cmux_protocol::Harness::Claude) => transcript
+            .filter(|p| p.is_file())
+            .map(TrailFile::Claude)
+            .ok_or_else(|| "no transcript found".into()),
+        Some(cmux_protocol::Harness::Codex) => codex_rollout(state, pane_id, pid).map(TrailFile::Codex),
+        _ => Err("only Claude Code and Codex agents have a trail".into()),
+    }
+}
+
+/// The rollout the Codex running in `pane_id` holds open, remembered for
+/// as long as it is the same process: finding it runs `lsof`.
+fn codex_rollout(state: &AppState, pane_id: &str, pid: Option<u32>) -> Result<std::path::PathBuf, String> {
+    if cfg!(not(unix)) {
+        return Err("Codex on Windows has no trail yet".into());
+    }
+    let pid = pid.ok_or("no Codex session found: Codex is not running here")?;
+    if let Some((known, path)) = state.rollouts.lock().unwrap().get(pane_id) {
+        if *known == pid {
+            return Ok(path.clone());
+        }
+    }
+    match cmux_core::codex_trail::open_rollout(pid) {
+        Ok(path) => {
+            state.rollouts.lock().unwrap().insert(pane_id.to_string(), (pid, path.clone()));
+            Ok(path)
+        }
+        Err(0) => Err("no Codex session found".into()),
+        Err(_) => Err("more than one Codex session in this pane".into()),
+    }
+}
+
+/// What a pane's agent did, turn by turn. No file to read from is no
+/// error: the trail is empty, and says why.
+pub fn agent_trail(state: &AppState, pane_id: &str) -> cmux_protocol::AgentTrail {
+    let read = match trail_file(state, pane_id) {
+        Ok(TrailFile::Claude(path)) => state.trails.lock().unwrap().read(&path).map(|t| t.turns().to_vec()),
+        Ok(TrailFile::Codex(path)) => state.codex_trails.lock().unwrap().read(&path).map(|t| t.turns().to_vec()),
+        Err(reason) => {
+            return cmux_protocol::AgentTrail { pane_id: pane_id.to_string(), turns: Vec::new(), reason: Some(reason) }
+        }
+    };
+    cmux_protocol::AgentTrail {
+        pane_id: pane_id.to_string(),
+        reason: read.is_none().then(|| "no transcript found".to_string()),
+        turns: read.unwrap_or_default(),
+    }
+}
+
+/// One action of a pane's trail in full, read from its agent's file.
+pub fn trail_detail(state: &AppState, pane_id: &str, action_id: &str) -> Result<cmux_protocol::ActionDetail, String> {
+    match trail_file(state, pane_id)? {
+        TrailFile::Claude(path) => cmux_core::trail::action_detail(&path, action_id),
+        TrailFile::Codex(path) => cmux_core::codex_trail::action_detail(&path, action_id),
+    }
+    .ok_or_else(|| format!("no action {action_id} in this agent's trail"))
+}
+
+/// [`agent_trail`] for the board, off the main thread like the activity.
+#[tauri::command]
+pub async fn get_agent_trail(app: AppHandle, pane_id: String) -> Result<cmux_protocol::AgentTrail, String> {
+    tauri::async_runtime::spawn_blocking(move || agent_trail(&app.state::<AppState>(), &pane_id))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_trail_detail(
+    app: AppHandle,
+    pane_id: String,
+    action_id: String,
+) -> Result<cmux_protocol::ActionDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || trail_detail(&app.state::<AppState>(), &pane_id, &action_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 pub fn emit_workspace(app: &AppHandle) {
     let state = app.state::<AppState>();
     state

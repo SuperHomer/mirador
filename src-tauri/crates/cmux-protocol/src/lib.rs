@@ -462,6 +462,25 @@ pub enum Request {
         #[serde(default)]
         card: Option<String>,
     },
+    /// What an agent did, turn by turn: of the agent `name` (as
+    /// `AgentSend` finds it), else of `pane_id`. Only its last `turns`
+    /// turns when given.
+    AgentTrail {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        turns: Option<u32>,
+    },
+    /// One action of that trail in full, by its id.
+    AgentTrailDetail {
+        action_id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Adds a member to the team of `pane_id`'s tab, beside the others.
     TeamAdd {
         role: String,
@@ -834,6 +853,18 @@ pub struct AgentActivity {
     pub session: TranscriptSummary,
     /// Running ones first, then the rest, latest activity first.
     pub subagents: Vec<SubagentInfo>,
+}
+
+/// What an agent pane's agent did, from its own transcript (Claude Code)
+/// or rollout (Codex), oldest turn first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTrail {
+    pub pane_id: String,
+    pub turns: Vec<TrailTurn>,
+    /// Why there is nothing to show, when there is not: no transcript
+    /// found, an agent without one, more than one Codex session.
+    pub reason: Option<String>,
 }
 
 /// One turn of an agent's trail: a prompt and what the agent did for it.

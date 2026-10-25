@@ -61,6 +61,13 @@ pub struct AppState {
     pub emit_coalescer: commands::EmitCoalescer,
     /// Claude Code transcripts read so far, for agent activity.
     pub transcripts: Mutex<cmux_core::transcript::Cache>,
+    /// Claude Code transcripts and Codex rollouts read so far, for agent
+    /// trails.
+    pub trails: Mutex<cmux_core::transcript::Cache<cmux_core::trail::Trail>>,
+    pub codex_trails: Mutex<cmux_core::transcript::Cache<cmux_core::codex_trail::CodexTrail>>,
+    /// The rollout each Codex pane's agent holds open, by pane, with the
+    /// pid it was found for: found again only when that changes.
+    pub rollouts: Mutex<std::collections::HashMap<String, (u32, std::path::PathBuf)>>,
     /// The task log's path, locked while it is appended to or read: the
     /// app is its one writer.
     pub task_log: Mutex<std::path::PathBuf>,
@@ -257,6 +264,9 @@ pub fn run() {
             browser_bridge: browser::BrowserBridge::default(),
             session_dirty: AtomicBool::new(false),
             transcripts: Mutex::new(Default::default()),
+            trails: Mutex::new(Default::default()),
+            codex_trails: Mutex::new(Default::default()),
+            rollouts: Mutex::new(Default::default()),
             task_log: Mutex::new(task_log),
             update: update::UpdateState::default(),
             emit_coalescer: commands::EmitCoalescer::default(),
@@ -352,6 +362,8 @@ pub fn run() {
             tasks::task_cards,
             tasks::task_history,
             commands::get_agent_activity,
+            commands::get_agent_trail,
+            commands::get_trail_detail,
             commands::mark_pane_read,
             commands::zoom_pane,
             commands::load_graph,

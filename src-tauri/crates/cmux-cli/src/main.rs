@@ -336,6 +336,24 @@ enum AgentAction {
         #[arg(long, conflicts_with_all = ["name", "pane", "all"])]
         card: Option<String>,
     },
+    /// What an agent did, turn by turn, read from its own transcript
+    /// (Claude Code) or session file (Codex): each turn's prompt, then a
+    /// line per action — when, how long, ✓ or ✗, the tool and what it was
+    /// about. Of the agent NAME (a teammate's name, or a pane id), else
+    /// of this pane.
+    Trail {
+        name: Option<String>,
+        /// The agent's pane, instead of a name.
+        #[arg(long, conflicts_with = "name")]
+        pane: Option<String>,
+        /// How many of its latest turns.
+        #[arg(long, default_value_t = 3)]
+        turns: u32,
+        /// One action's full input and output instead, by the id shown
+        /// at the end of its line.
+        #[arg(long)]
+        detail: Option<String>,
+    },
     /// Open the task board for this tab beside this pane: its agents' cards
     /// in To do, Doing, Needs you and Done, and every tab's at a switch.
     Board {
@@ -673,6 +691,10 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
                 card,
             },
+            AgentAction::Trail { name, pane, turns, detail } => match detail {
+                Some(action_id) => Request::AgentTrailDetail { action_id, name: name.or(pane), pane_id: own_pane() },
+                None => Request::AgentTrail { name: name.or(pane), pane_id: own_pane(), turns: Some(turns) },
+            },
             AgentAction::Board { tab } => Request::AgentBoard {
                 pane_id: own_pane(),
                 target: tab.then(|| "tab".to_string()),
@@ -1002,6 +1024,10 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 render_teams(teams);
             } else if let Some(cards) = map.get("cards") {
                 render_cards(serde_json::from_value(cards.clone()).map_err(|e| format!("bad response: {e}"))?);
+            } else if let Some(trail) = map.get("trail") {
+                render_trail(serde_json::from_value(trail.clone()).map_err(|e| format!("bad response: {e}"))?);
+            } else if let Some(action) = map.get("action") {
+                render_action(serde_json::from_value(action.clone()).map_err(|e| format!("bad response: {e}"))?);
             } else if let Some(history) = map.get("history") {
                 render_history(serde_json::from_value(history.clone()).map_err(|e| format!("bad response: {e}"))?);
             } else if let Some(members) = map.get("members").and_then(|v| v.as_array()) {
@@ -1096,6 +1122,51 @@ fn render_cards(cards: Vec<cmux_protocol::TaskCard>) {
             );
         }
     }
+}
+
+/// A trail: each turn's prompt and how long ago it began, then a line per
+/// action — how long ago, how long it took, its status, its tool, what it
+/// was about, and its id for `--detail`.
+fn render_trail(trail: cmux_protocol::AgentTrail) {
+    use cmux_protocol::ActionStatus::*;
+    if trail.turns.is_empty() {
+        println!("({})", trail.reason.as_deref().unwrap_or("no actions yet"));
+        return;
+    }
+    let now = now_ms();
+    let ago = |ms: Option<u64>| ms.map_or("-".to_string(), |ms| format!("{} ago", cmux_core::tasks::span(now.saturating_sub(ms))));
+    for turn in trail.turns {
+        println!("{:>8}  {}", ago(turn.started_ms), turn.prompt.as_deref().unwrap_or("(no prompt)"));
+        for a in turn.actions {
+            let mark = match a.status {
+                Ok => "✓",
+                Error => "✗",
+                Running => "…",
+                Interrupted => "-",
+            };
+            let took = a.duration_ms.map_or(String::new(), took);
+            let exit = a.exit_code.map_or(String::new(), |c| format!("  (exit {c})"));
+            println!("  {:>8}  {took:>6}  {mark} {:<10} {}{exit}  [{}]", ago(a.started_ms), a.tool, a.summary, a.id);
+        }
+    }
+}
+
+/// How long an action took: milliseconds, seconds, or minutes and up.
+fn took(ms: u64) -> String {
+    match ms {
+        0..=999 => format!("{ms}ms"),
+        1000..=59_999 => format!("{:.1}s", ms as f64 / 1000.0),
+        _ => cmux_core::tasks::span(ms),
+    }
+}
+
+/// One action in full: its input, then its output.
+fn render_action(action: cmux_protocol::ActionDetail) {
+    println!("{}  {}", action.tool, action.id);
+    println!("--- input");
+    println!("{}", action.input);
+    println!("--- output{}", if action.is_error { " (error)" } else { "" });
+    println!("{}", action.output.as_deref().unwrap_or("(no result yet)"));
 }
 
 /// The log: a line per event, oldest first, with how long ago it was.

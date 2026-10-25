@@ -58,6 +58,8 @@ permissions = [
   "allow-task-cards",
   "allow-task-history",
   "allow-get-agent-activity",
+  "allow-get-agent-trail",
+  "allow-get-trail-detail",
   "allow-mark-pane-read",
   "allow-zoom-pane",
   "allow-load-graph",
