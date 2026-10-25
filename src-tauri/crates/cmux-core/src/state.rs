@@ -589,6 +589,12 @@ impl Workspace {
         Some(tab.wall)
     }
 
+    /// The tab holding `pane` is showing its wall, under which a split of
+    /// `pane` would open unseen.
+    pub fn walled(&self, pane: &str) -> bool {
+        self.tab_of_pane(pane).is_some_and(|t| t.wall)
+    }
+
     /// Shows the whole of the tab holding `pane` again.
     pub fn unzoom(&mut self, pane: &str) -> bool {
         match self.tab_of_pane_mut(pane) {
@@ -1030,6 +1036,8 @@ mod tests {
         assert_eq!(ws.toggle_wall(&server), Some(true));
         assert!(wall(&ws, 0));
         assert!(!wall(&ws, 1));
+        assert!(ws.walled(&claude) && ws.walled(&server));
+        assert!(!ws.walled(&other) && !ws.walled("nope"));
         assert_eq!(ws.toggle_wall(&claude), Some(false));
         assert!(!wall(&ws, 0));
         assert_eq!(ws.toggle_wall(&other), Some(true));

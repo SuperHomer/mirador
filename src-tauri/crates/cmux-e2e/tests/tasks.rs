@@ -236,6 +236,30 @@ fn the_task_board_opens_and_comes_back() {
 }
 
 #[test]
+fn a_board_asked_for_under_the_wall_gets_a_tab_of_its_own() {
+    e2e!();
+    let mut sb = Sandbox::new("wall-board");
+    sb.launch();
+    let first = sb.first_pane();
+    let tab = sb.snapshot()["activeTab"].as_str().unwrap().to_string();
+    assert_eq!(mira(&sb, &first, &["agent", "wall"]).trim(), "wall on");
+
+    // A split, as asked, would open under the wall and never show.
+    let board = mira(&sb, &first, &["agent", "board"]).trim().to_string();
+    let pane = sb.wait_for("the board pane", LONG, || {
+        sb.snapshot()["taskBoardPanes"].as_array()?.iter().find(|b| b["paneId"] == board.as_str()).cloned()
+    });
+    assert_eq!(pane["tabId"], tab.as_str(), "{pane}");
+    let snap = sb.snapshot();
+    let tabs = snap["tabs"].as_array().unwrap();
+    assert_eq!(tabs.len(), 2, "{snap}");
+    assert_eq!(tabs[0]["id"], tab.as_str());
+    assert_eq!(tabs[0]["root"]["paneId"], first.as_str(), "the walled tab is not split: {snap}");
+    assert!(tabs[0]["wall"].as_bool().unwrap());
+    assert_eq!(tabs[1]["root"]["paneId"], board.as_str(), "{snap}");
+}
+
+#[test]
 fn a_codex_agent_s_card_follows_its_turns() {
     e2e!();
     let mut sb = Sandbox::new("codextasks");
