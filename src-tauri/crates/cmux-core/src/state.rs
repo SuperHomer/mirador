@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use cmux_protocol::{
     BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, View,
-    WorkspaceSnapshot,
+    WallView, WorkspaceSnapshot,
 };
 
 use crate::{board, layout};
@@ -283,6 +283,9 @@ pub struct Tab {
     /// The tab shows its agents as the wall instead of its splits.
     /// Persisted.
     pub wall: bool,
+    /// The side of the wall it shows. Kept while the wall is off, so the
+    /// wall comes back on the side last shown. Persisted.
+    pub wall_view: WallView,
     /// Where the tab's frame sits on the board.
     pub frame: BoardPoint,
     /// Each pane's card on the board, relative to `frame`. Kept for every
@@ -313,6 +316,7 @@ impl Tab {
             zoomed: None,
             team: None,
             wall: false,
+            wall_view: WallView::default(),
             frame: BoardPoint::default(),
         }
     }
@@ -589,6 +593,18 @@ impl Workspace {
         Some(tab.wall)
     }
 
+    /// Shows the tab holding `pane` as its wall, on the `view` side; false
+    /// when no tab holds `pane`. Like `toggle_wall`, it lets a zoom go.
+    pub fn show_wall(&mut self, pane: &str, view: WallView) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        tab.wall = true;
+        tab.wall_view = view;
+        tab.zoomed = None;
+        true
+    }
+
     /// The tab holding `pane` is showing its wall, under which a split of
     /// `pane` would open unseen.
     pub fn walled(&self, pane: &str) -> bool {
@@ -754,6 +770,7 @@ impl Workspace {
                         },
                         zoomed_pane: t.zoomed.clone(),
                         wall: t.wall,
+                        wall_view: t.wall_view,
                         frame: t.frame_rect(),
                         cards: layout::pane_ids(&t.root)
                             .into_iter()
@@ -1050,6 +1067,32 @@ mod tests {
         // ...and zooming one agent leaves the wall.
         assert!(ws.zoom_pane(&claude));
         assert!(!wall(&ws, 0));
+    }
+
+    #[test]
+    fn the_wall_comes_back_on_the_side_last_shown() {
+        let mut ws = Workspace::default();
+        let claude = ws.focused_pane();
+        let server = ws.split_pane(&claude, SplitDir::Row).unwrap();
+        let side = |ws: &Workspace| ws.snapshot(&HashMap::new()).tabs[0].wall_view;
+        assert_eq!(side(&ws), WallView::Agents);
+
+        // Asked for one side, the wall comes on there, and lets a zoom go.
+        ws.zoom_pane(&claude);
+        assert!(ws.show_wall(&server, WallView::Tasks));
+        let tab = &ws.snapshot(&HashMap::new()).tabs[0];
+        assert!(tab.wall);
+        assert_eq!(tab.wall_view, WallView::Tasks);
+        assert_eq!(tab.zoomed_pane, None);
+        assert!(!ws.show_wall("nope", WallView::Tasks));
+
+        // Turned off and on again, it is still on that side.
+        assert_eq!(ws.toggle_wall(&claude), Some(false));
+        assert_eq!(side(&ws), WallView::Tasks);
+        assert_eq!(ws.toggle_wall(&claude), Some(true));
+        assert_eq!(side(&ws), WallView::Tasks);
+        assert!(ws.show_wall(&claude, WallView::Agents));
+        assert_eq!(side(&ws), WallView::Agents);
     }
 
     #[test]

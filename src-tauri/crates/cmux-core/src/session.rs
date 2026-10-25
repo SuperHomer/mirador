@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{BoardPoint, BoardRect, Camera, Node, View};
+use cmux_protocol::{BoardPoint, BoardRect, Camera, Node, View, WallView};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{PaneMeta, Tab, Workspace};
@@ -23,6 +23,8 @@ pub struct SessionTab {
     pub team: Option<cmux_protocol::TeamRun>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub wall: bool,
+    #[serde(default, skip_serializing_if = "WallView::is_agents")]
+    pub wall_view: WallView,
     /// Absent from sessions saved before the board: the tab gets a frame
     /// and cards from its splits when it is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -136,6 +138,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
             focused: t.focused.clone(),
             team: t.team.clone(),
             wall: t.wall,
+            wall_view: t.wall_view,
             frame: Some(t.frame),
             cards: t.cards.clone(),
         })
@@ -225,6 +228,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             zoomed: None,
             team: t.team,
             wall: t.wall,
+            wall_view: t.wall_view,
             frame: t.frame.unwrap_or_default(),
             cards,
         });
@@ -359,6 +363,24 @@ mod tests {
     }
 
     #[test]
+    fn a_wall_comes_back_on_its_side() {
+        let mut ws = Workspace::default();
+        let tasks = ws.focused_pane();
+        let (_, plain) = ws.new_tab();
+        // On the Tasks side, then off: the side is still the tab's.
+        ws.show_wall(&tasks, WallView::Tasks);
+        ws.toggle_wall(&tasks);
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        let tab = back.tab_of_pane(&tasks).unwrap();
+        assert!(!tab.wall);
+        assert_eq!(tab.wall_view, WallView::Tasks);
+        assert_eq!(back.tab_of_pane(&plain).unwrap().wall_view, WallView::Agents);
+        // The Agents side, the default, is not written.
+        assert_eq!(json.matches(r#""wall_view":"#).count(), 1);
+    }
+
+    #[test]
     fn capture_restore_roundtrip() {
         let mut ws = Workspace::default();
         let a = ws.focused_pane();
@@ -486,8 +508,8 @@ mod tests {
         let first = ws.tabs[0].frame_rect();
         assert_eq!(ws.tabs[1].frame.x, first.x + first.w + crate::board::FRAME_GAP);
         assert!(ws.tabs[1].cards.contains_key("c"));
-        // And no tab is a wall.
-        assert!(ws.tabs.iter().all(|t| !t.wall));
+        // And no tab is a wall, each on the Agents side when it becomes one.
+        assert!(ws.tabs.iter().all(|t| !t.wall && t.wall_view == WallView::Agents));
     }
 
     #[test]

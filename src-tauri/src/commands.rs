@@ -1810,6 +1810,25 @@ pub fn toggle_agent_wall(
     Ok(on)
 }
 
+/// Shows the tab of `pane_id` (the focused pane when absent) as its wall,
+/// on the `view` side: its agents, or its task board.
+#[tauri::command]
+pub fn set_wall_view(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    view: cmux_protocol::WallView,
+) -> Result<(), String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if !state.workspace.lock().unwrap().show_wall(&pane, view) {
+        return Err(format!("no pane {pane}"));
+    }
+    emit_workspace(&app);
+    Ok(())
+}
+
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY
 /// runs `ssh -tt <host>`, so auth/agent/2FA behave exactly as in any
 /// terminal; disconnect leaves the pane idle and a keypress reconnects.

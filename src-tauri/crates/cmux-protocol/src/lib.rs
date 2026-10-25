@@ -71,6 +71,9 @@ pub struct TabSnapshot {
     /// The tab shows its agents as the wall instead of its splits.
     #[serde(default)]
     pub wall: bool,
+    /// The side of the wall it shows, or will when the wall is next on.
+    #[serde(default)]
+    pub wall_view: WallView,
     /// Where the tab's frame sits on the board, and its size (derived from
     /// its cards). Card positions are relative to the frame's `x`, `y`.
     #[serde(default)]
@@ -88,6 +91,22 @@ pub enum View {
     #[default]
     Tabs,
     Board,
+}
+
+/// The side of a tab's wall on show: its agents' terminals, or the task
+/// board of what they were given.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WallView {
+    #[default]
+    Agents,
+    Tasks,
+}
+
+impl WallView {
+    pub fn is_agents(&self) -> bool {
+        *self == WallView::Agents
+    }
 }
 
 /// The part of the board on screen: `x`, `y` is the board point at the
