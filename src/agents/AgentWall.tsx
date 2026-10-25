@@ -20,6 +20,7 @@ import { useWorkspaceStore } from "../state/workspaceStore";
 import { flyToCard } from "../state/boardStore";
 import {
   fitTerminal,
+  getTerminal,
   isLent,
   isLentTo,
   lendTerminal,
@@ -88,6 +89,20 @@ export const AgentWall = memo(function AgentWall({
     [snapshot, tabId],
   );
 
+  // The tab's focused pane is under the wall, so the keyboard would go
+  // nowhere: coming on screen, the wall gives it to that pane's tile, or
+  // the first. Only then — not on every snapshot, or a click in another
+  // tile would be undone. The tiles' own effects ran first, so their
+  // terminals are here by now — unless another wall holds one, and then
+  // it is not this wall's to focus.
+  const wallRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!visible) return;
+    const tile = tiles.find((a) => a.paneId === shown?.focusedPane) ?? tiles[0];
+    const term = tile && getTerminal(tile.paneId);
+    if (term?.element && wallRef.current?.contains(term.element)) term.focus();
+  }, [visible]);
+
   const unread = snapshot?.unreadPanes ?? [];
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
   const cols = columns(tiles.length);
@@ -121,7 +136,7 @@ export const AgentWall = memo(function AgentWall({
   };
 
   return (
-    <div className="pane agent-wall">
+    <div className="pane agent-wall" ref={wallRef}>
       <div className="wall-chrome">
         <span className="wall-badge">Agents</span>
         {shown && (
