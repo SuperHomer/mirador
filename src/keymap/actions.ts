@@ -13,8 +13,8 @@ import {
   openGraph,
   openAgent,
   toggleAgentWall,
+  setWallView,
   openAgentEditor,
-  openTaskBoard,
   openWhatsNew,
   zoomPane,
   setView,
@@ -182,9 +182,9 @@ export const actions: ActionDef[] = [
   {
     id: "task_board",
     title: "Agents: Task Board",
-    // The cards of the tasks the focused tab's agents were given, beside
-    // the focused pane.
-    run: () => void openTaskBoard(focusedPane() ?? null, false),
+    // The cards of the tasks the focused tab's agents were given: its
+    // wall, on the Tasks side.
+    run: () => void setWallView(focusedPane() ?? null, "tasks"),
   },
   {
     id: "agent_editor",

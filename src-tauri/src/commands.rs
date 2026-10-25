@@ -111,16 +111,6 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .map(|(pane, m)| cmux_protocol::AgentEditorPane { pane_id: pane.clone(), cwd: m.cwd.clone() })
             .collect()
     };
-    snapshot.task_board_panes = {
-        let meta = state.meta.lock().unwrap();
-        meta.iter()
-            .filter(|(_, m)| m.task_board)
-            .map(|(pane, m)| cmux_protocol::TaskBoardPane {
-                pane_id: pane.clone(),
-                tab_id: m.task_board_tab.clone(),
-            })
-            .collect()
-    };
     snapshot.agents = agent_infos(state);
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();

@@ -354,11 +354,14 @@ enum AgentAction {
         #[arg(long)]
         detail: Option<String>,
     },
-    /// Open the task board for this tab beside this pane: its agents' cards
-    /// in To do, Doing, Needs you and Done, and every tab's at a switch.
+    /// Show this tab as the agent wall on its Tasks side, the task board:
+    /// its agents' cards in To do, Doing, Needs you and Done, and every
+    /// tab's at a switch.
     Board {
-        /// Open a new tab instead of splitting this pane.
-        #[arg(long)]
+        /// Ignored. The board was a pane of its own, which this opened in
+        /// a new tab, until it became the wall's Tasks side; scripts
+        /// written for v0.1.33 still pass it.
+        #[arg(long, hide = true)]
         tab: bool,
     },
     /// Show this tab as the agent wall, its agents' terminals in one
@@ -695,10 +698,14 @@ fn run(cli: Cli) -> Result<(), String> {
                 Some(action_id) => Request::AgentTrailDetail { action_id, name: name.or(pane), pane_id: own_pane() },
                 None => Request::AgentTrail { name: name.or(pane), pane_id: own_pane(), turns: Some(turns) },
             },
-            AgentAction::Board { tab } => Request::AgentBoard {
-                pane_id: own_pane(),
-                target: tab.then(|| "tab".to_string()),
-            },
+            AgentAction::Board { tab: _ } => {
+                let resp = send_request(Request::AgentBoard { pane_id: own_pane() })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                println!("wall on: tasks");
+                return Ok(());
+            }
             AgentAction::Wall => {
                 let resp = send_request(Request::AgentWall { pane_id: own_pane() })?;
                 if cli.json || !resp.ok {

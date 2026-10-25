@@ -374,13 +374,6 @@ export interface ActionDetail {
   isError: boolean;
 }
 
-/** A task-board pane, and the tab whose cards it shows. */
-export interface TaskBoardPaneInfo {
-  paneId: string;
-  /** The tab it was opened from. */
-  tabId: string | null;
-}
-
 export type TaskColumn = "todo" | "doing" | "needsYou" | "done";
 export type TaskSource = "teamStart" | "agentNew" | "agentSend" | "manual";
 
@@ -420,8 +413,6 @@ export const taskHistory = (tabId: string | null, card: string | null) =>
  *  ones, only the latest. */
 export const taskCards = (tabId: string | null) =>
   invoke<TaskCard[]>("task_cards", { tabId });
-export const openTaskBoard = (paneId: string | null, tab: boolean) =>
-  invoke<string>("open_task_board", { paneId, tab });
 
 /** Where a role or a way of working was defined (`cmux_protocol::RoleSource`). */
 export type RoleSource = "repo" | "global" | "config" | "builtin";
@@ -483,7 +474,6 @@ export interface WorkspaceSnapshot {
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
-  taskBoardPanes: TaskBoardPaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;

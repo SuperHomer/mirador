@@ -211,7 +211,7 @@ export const AgentWall = memo(function AgentWall({ tabId, visible }: Props) {
       </div>
 
       {side === "tasks" ? (
-        <TaskBoard tabId={tabId} visible={visible} board={false} />
+        <TaskBoard tabId={tabId} visible={visible} />
       ) : tiles.length === 0 ? (
         <div className="wall-empty">
           <p>No agents in {shown?.title ?? "this tab"}.</p>

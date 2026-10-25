@@ -2,7 +2,7 @@
 //! answers with. The log's format and the fold into cards are
 //! `cmux_core::tasks`'s; this is where they meet panes, tabs and teams.
 
-use cmux_protocol::{SplitDir, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource};
+use cmux_protocol::{TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::AppState;
@@ -198,36 +198,3 @@ pub fn task_cards(state: State<'_, AppState>, tab_id: Option<String>) -> Vec<Tas
     board(&state, tab_id)
 }
 
-/// Opens a task board for the tab of `pane_id` (the focused pane when
-/// absent): a split of it, or a tab of its own. A tab of its own too when
-/// that tab shows its wall, where a split would open under the wall and
-/// never be seen — whoever asked, the wall's button, the palette or
-/// `mira agent board`.
-#[tauri::command]
-pub fn open_task_board(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    pane_id: Option<String>,
-    tab: bool,
-) -> Result<String, String> {
-    let source = pane_id
-        .filter(|id| state.meta.lock().unwrap().contains_key(id))
-        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    let target = tab_of(&state, Some(source.clone())).ok();
-    let pane = {
-        let mut ws = state.workspace.lock().unwrap();
-        if tab || ws.walled(&source) {
-            ws.new_tab().1
-        } else {
-            ws.split_pane(&source, SplitDir::Row).ok_or_else(|| format!("no pane {source}"))?
-        }
-    };
-    {
-        let mut meta = state.meta.lock().unwrap();
-        let entry = meta.entry(pane.clone()).or_default();
-        entry.task_board = true;
-        entry.task_board_tab = target;
-    }
-    crate::commands::emit_workspace(&app);
-    Ok(pane)
-}

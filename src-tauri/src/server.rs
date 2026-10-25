@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use cmux_core::transport::{self, Stream};
-use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope};
+use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope, WallView};
 
 use crate::{notify, AppState};
 
@@ -365,9 +365,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let done = crate::teams::team_restart(app.clone(), app.state(), members, pane_id)?;
             Ok(json!({ "members": done }))
         }
-        Request::AgentBoard { pane_id, target } => {
-            let pane = crate::tasks::open_task_board(app.clone(), app.state(), pane_id, target.as_deref() == Some("tab"))?;
-            Ok(json!({ "paneId": pane }))
+        Request::AgentBoard { pane_id } => {
+            crate::commands::set_wall_view(app.clone(), app.state(), pane_id, WallView::Tasks)?;
+            Ok(json!({ "wall": true, "wallView": WallView::Tasks }))
         }
         Request::AgentWall { pane_id } => {
             let on = crate::commands::toggle_agent_wall(app.clone(), app.state(), pane_id)?;

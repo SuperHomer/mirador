@@ -58,7 +58,6 @@ pub const APP_COMMANDS: &[&str] = &[
     "list_teams",
     "team_add",
     "team_restart",
-    "open_task_board",
     "task_cards",
     "task_history",
     "toggle_agent_wall",

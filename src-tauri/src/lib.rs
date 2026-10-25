@@ -361,7 +361,6 @@ pub fn run() {
             teams::list_teams,
             teams::team_add,
             teams::team_restart,
-            tasks::open_task_board,
             tasks::task_cards,
             tasks::task_history,
             commands::toggle_agent_wall,
