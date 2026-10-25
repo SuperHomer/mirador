@@ -14,6 +14,16 @@
  * while a task sent without a card gets one that does. One card is open
  * on its history, in `mira agent history`'s words. At phone width the
  * columns go two by two, as the app's do in a narrow split.
+ *
+ * Under it, the Trail view on the worker, as TaskBoard.tsx's TrailView
+ * draws it: the scope's agents with their status dot and harness, and
+ * the picked one's turns newest first, each a prompt's first line (the
+ * line `mira agent send` prefixes, so it opens to the rest) over its
+ * actions — mark, tool, cmux-core's trail.rs one-line summary (a path
+ * as the agent gave it, absolute), exit code and time — one opened on
+ * its input and output, as the app reads them from the transcript.
+ * At phone width the agents become a row over the turns, as in a
+ * narrow split.
  */
 
 type Card = {
@@ -148,6 +158,43 @@ function TaskCard({ card, color }: { card: Card; color: string }) {
   );
 }
 
+/** The pane's header, as the app draws it, on one of its three views. */
+function Chrome({ view }: { view: number }) {
+  return (
+    <div
+      className="tasks-chrome"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "4px 6px",
+        borderBottom: "1px solid var(--surface)",
+        minHeight: 30,
+      }}
+    >
+      <span
+        style={{
+          flexShrink: 0,
+          background: "var(--accent)",
+          color: "var(--bg)",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: ".04em",
+          textTransform: "uppercase",
+          padding: "2px 6px",
+          borderRadius: 4,
+        }}
+      >
+        Tasks
+      </span>
+      <span style={{ fontSize: 12, fontWeight: 600, marginRight: "auto" }}>omakase</span>
+      <Switch labels={["Cards", "History", "Trail"]} on={view} />
+      <Switch labels={["This team", "All agents"]} on={0} />
+      <span style={{ fontSize: 14, color: "var(--subtext)" }}>✕</span>
+    </div>
+  );
+}
+
 function TaskBoardMockup() {
   return (
     <div
@@ -162,37 +209,7 @@ function TaskBoardMockup() {
         textAlign: "left",
       }}
     >
-      <div
-        className="tasks-chrome"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "4px 6px",
-          borderBottom: "1px solid var(--surface)",
-          minHeight: 30,
-        }}
-      >
-        <span
-          style={{
-            flexShrink: 0,
-            background: "var(--accent)",
-            color: "var(--bg)",
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: ".04em",
-            textTransform: "uppercase",
-            padding: "2px 6px",
-            borderRadius: 4,
-          }}
-        >
-          Tasks
-        </span>
-        <span style={{ fontSize: 12, fontWeight: 600, marginRight: "auto" }}>omakase</span>
-        <Switch labels={["Cards", "History", "Trail"]} on={0} />
-        <Switch labels={["This team", "All agents"]} on={0} />
-        <span style={{ fontSize: 14, color: "var(--subtext)" }}>✕</span>
-      </div>
+      <Chrome view={0} />
       <div
         className="tasks-columns"
         style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6, padding: 6, minHeight: 330 }}
@@ -236,6 +253,191 @@ function TaskBoardMockup() {
   );
 }
 
+/** The Trail view's marks, and the app's colors for them. */
+const MARKS = {
+  ok: { text: "✓", color: "var(--green)" },
+  error: { text: "✗", color: "var(--red)" },
+  running: { text: "…", color: "var(--accent)" },
+} as const;
+
+type Action = {
+  status: keyof typeof MARKS;
+  tool: string;
+  summary: string;
+  exit?: number;
+  took?: string;
+  /** Its input and output, when it is open. */
+  detail?: { input: string; output: string };
+};
+
+const REFRESH = "/Users/me/api/src/auth/refresh.rs";
+const FROM_PLANNER = "[message from planner, via mira agent send]";
+
+const FAILED_TEST = `Exit code 101
+   Compiling api v0.4.0 (/Users/me/api)
+    Finished \`test\` profile [unoptimized + debuginfo] target(s) in 4.12s
+     Running unittests src/main.rs (target/debug/deps/api-3f9c2a1e)
+test auth::refresh::expires_after_30_days ... FAILED
+
+---- auth::refresh::expires_after_30_days stdout ----
+thread 'auth::refresh::expires_after_30_days' panicked at src/auth/refresh.rs:212:9:
+assertion \`left == right\` failed
+  left: Ok(Refreshed)
+ right: Err(Expired)
+
+test result: FAILED. 43 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
+error: test failed, to rerun pass \`-p api --bin api\``;
+
+/** The worker's turns, newest first. */
+const TURNS: { when: string; actions: Action[] }[] = [
+  {
+    when: "1m",
+    actions: [
+      { status: "ok", tool: "Read", summary: REFRESH, took: "9ms" },
+      { status: "ok", tool: "Grep", summary: "issued_at", took: "41ms" },
+      { status: "ok", tool: "Edit", summary: REFRESH, took: "22ms" },
+      {
+        status: "error",
+        tool: "Bash",
+        summary: "cargo test -p api",
+        exit: 101,
+        took: "9.8s",
+        detail: {
+          input: `{\n  "command": "cargo test -p api",\n  "description": "Run the api tests"\n}`,
+          output: FAILED_TEST,
+        },
+      },
+      { status: "ok", tool: "Edit", summary: REFRESH, took: "18ms" },
+      { status: "ok", tool: "Bash", summary: "cargo test -p api", took: "7.2s" },
+      { status: "running", tool: "Bash", summary: "cargo clippy -p api -- -D warnings" },
+    ],
+  },
+  {
+    when: "6m",
+    actions: [
+      { status: "ok", tool: "Edit", summary: REFRESH, took: "25ms" },
+      { status: "ok", tool: "Bash", summary: "cargo test -p api", took: "6.9s" },
+    ],
+  },
+];
+
+/** The team's agents, as the Trail view lists them, the worker picked. */
+const AGENTS = [
+  { name: "planner", harness: "Claude Code", dot: "#fab387" },
+  { name: "worker", harness: "Claude Code", dot: "var(--accent)", on: true },
+  { name: "reviewer", harness: "Codex", dot: "var(--green)" },
+];
+
+const DETAIL_HEAD = {
+  fontSize: 10,
+  color: "var(--muted)",
+  textTransform: "uppercase" as const,
+  letterSpacing: ".04em",
+  marginTop: 4,
+};
+
+const DETAIL_TEXT = {
+  marginTop: 2,
+  maxHeight: 240,
+  overflow: "auto",
+  padding: "5px 7px",
+  background: "var(--bg)",
+  borderRadius: 4,
+  color: "var(--text)",
+  fontSize: 11,
+  whiteSpace: "pre-wrap" as const,
+  overflowWrap: "anywhere" as const,
+};
+
+function ActionLine({ action }: { action: Action }) {
+  return (
+    <li>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "1px 0", fontSize: 11, lineHeight: 1.5, color: "var(--subtext)" }}>
+        <span style={{ flexShrink: 0, width: "1em", color: MARKS[action.status].color }}>{MARKS[action.status].text}</span>
+        <span style={{ flexShrink: 0, color: "var(--text)" }}>{action.tool}</span>
+        <span className="mono" style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {action.summary}
+        </span>
+        {action.exit !== undefined && <span style={{ flexShrink: 0, color: "var(--red)" }}>exit {action.exit}</span>}
+        <span style={{ flexShrink: 0, color: "var(--muted)" }}>{action.took ?? ""}</span>
+      </div>
+      {action.detail && (
+        <div style={{ margin: "2px 0 6px 1.6em" }}>
+          <div style={DETAIL_HEAD}>input</div>
+          <pre className="mono" style={DETAIL_TEXT}>{action.detail.input}</pre>
+          <div style={DETAIL_HEAD}>output (error)</div>
+          <pre className="mono" style={DETAIL_TEXT}>{action.detail.output}</pre>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function TrailMockup() {
+  return (
+    <div
+      style={{
+        maxWidth: 940,
+        margin: "18px auto 0",
+        border: "1px solid var(--surface)",
+        borderRadius: 12,
+        overflow: "hidden",
+        background: "var(--bg-alt)",
+        boxShadow: "0 24px 60px rgba(0,0,0,.5)",
+        textAlign: "left",
+      }}
+    >
+      <Chrome view={2} />
+      <div className="tasks-trail" style={{ display: "grid", gridTemplateColumns: "minmax(110px, 180px) minmax(0, 1fr)" }}>
+        <ul className="tasks-agents" style={{ listStyle: "none", padding: 4, borderRight: "1px solid var(--surface)" }}>
+          {AGENTS.map((a) => (
+            <li
+              key={a.name}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 6px",
+                borderRadius: 4,
+                background: a.on ? "var(--surface)" : "none",
+                color: a.on ? "var(--text)" : "var(--subtext)",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{ flexShrink: 0, width: 7, height: 7, borderRadius: "50%", background: a.dot }} />
+              <span>{a.name}</span>
+              <span className="tasks-agent-meta" style={{ flexShrink: 0, marginLeft: "auto", fontSize: 10, color: "var(--muted)" }}>
+                {a.harness}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <ol style={{ listStyle: "none", padding: "6px 10px" }}>
+          {TURNS.map((turn) => (
+            <li key={turn.when} style={{ marginBottom: 10 }}>
+              {/* Its prompt is more than its first line, so it opens. */}
+              <details style={{ fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+                <summary>
+                  <span style={{ display: "inline-block", minWidth: "3.2em", marginRight: 6, color: "var(--muted)" }}>
+                    {turn.when}
+                  </span>
+                  <span style={{ color: "var(--text)" }}>{FROM_PLANNER}</span>
+                </summary>
+              </details>
+              <ol style={{ listStyle: "none", marginLeft: "3.8em" }}>
+                {turn.actions.map((a, i) => (
+                  <ActionLine key={i} action={a} />
+                ))}
+              </ol>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 export default function TasksShowcase() {
   return (
     <section
@@ -263,7 +465,10 @@ export default function TasksShowcase() {
           with <span className="mono" style={{ color: "var(--text)" }}>mira task add</span> —
           the omakase planner puts up its steps that way and moves them as they go.
           Open a card for its history: who sent what, how each turn ended, and how long
-          it took.
+          it took. The Trail shows what each agent actually did, turn by turn: its
+          prompt, then every command, edit, read and search with how it ended, each
+          opening to its full input and output — read from Claude Code’s and Codex’s
+          own session files, never copied.
         </p>
         <div
           style={{
@@ -281,7 +486,7 @@ export default function TasksShowcase() {
             mira agent board
           </span>
           <span className="mono" style={{ color: "var(--muted)", fontSize: 12.5 }}>
-            · mira task add · mira agent history
+            · mira task add · mira agent history · mira agent trail
           </span>
           <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
             or the palette’s Agents: Task Board, or the agent wall’s Task board button
@@ -289,6 +494,7 @@ export default function TasksShowcase() {
         </div>
       </div>
       <TaskBoardMockup />
+      <TrailMockup />
     </section>
   );
 }

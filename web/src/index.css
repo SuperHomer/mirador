@@ -51,6 +51,15 @@ button { font-family: inherit; cursor: pointer; }
      split; its switches, which do not shrink there, wrap under the name. */
   .tasks-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .tasks-chrome { flex-wrap: wrap; }
+  .tasks-trail { grid-template-columns: minmax(0, 1fr) !important; }
+  .tasks-agents {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    border-right: none !important;
+    border-bottom: 1px solid var(--surface);
+  }
+  .tasks-agent-meta { display: none; }
   #board .board-mock-controls {
     position: static !important;
     width: fit-content;
