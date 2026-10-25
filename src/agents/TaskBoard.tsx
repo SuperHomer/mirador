@@ -404,7 +404,7 @@ function TrailView({
           <>
             {/* Scrolled to a card's turn only once read back to it. */}
             <Timeline key={pane} trail={trail} at={readSince === since ? at : null} now={now} />
-            {trail.turns.length >= limit && (
+            {trail.older + trail.gap > 0 && (
               <button className="tb-older" onClick={() => setOlder({ pane, turns: limit + TRAIL_TURNS })}>
                 Show older turns
               </button>
@@ -450,6 +450,11 @@ function Timeline({
         .reverse()
         .map(({ turn, i }) => (
           <li key={`${turn.startedMs}-${i}`} ref={i === goal ? target : undefined} className="tb-turn">
+            {i === 0 && trail.gap > 0 && (
+              <p className="tb-gap">
+                {trail.gap} {trail.gap === 1 ? "turn" : "turns"} not shown
+              </p>
+            )}
             <TurnHead turn={turn} now={now} />
             <ol className="tb-actions">
               {turn.actions.map((a) => (
@@ -555,19 +560,13 @@ function took(ms: number): string {
   return age(0, ms);
 }
 
-/** What a trail read says, in short: a read saying the same as the last
- *  changes nothing on screen, and is not drawn again. A turn's `lastMs`
- *  moves with every entry that lands in it, a result included. */
-function fingerprint(trail: AgentTrail): string {
-  return `${trail.reason}|${trail.turns.map((t) => `${t.startedMs}:${t.lastMs}:${t.actions.length}`).join(",")}`;
-}
-
 /**
  * `pane`'s trail — its last `turns` turns, and any begun since `sinceMs` —
  * read again [`POLL_MS`] after each read returns, while `enabled`: one
  * read at a time, as `useAgentActivity` reads, and a failed read keeps the
- * last good one. A read that says what the last did is not set, so the
- * view is not drawn again every two seconds for nothing. Null until the
+ * last good one. A read of the same version as the last (Rust's: the file,
+ * how far into it was read, the window) is not set, so the view is not
+ * drawn again every two seconds for nothing. Null until the
  * first read for this pane: the last pane's trail is never shown, not even
  * for a render, under another's name or scrolled to another's card. With
  * it, the `sinceMs` it was read with.
@@ -590,7 +589,7 @@ function useTrail(
         .then(
           (t) => {
             if (cancelled) return;
-            const f = fingerprint(t);
+            const f = t.version ?? `reason:${t.reason}`;
             if (f !== seen.current) {
               seen.current = f;
               setRead({ trail: t, since: sinceMs });

@@ -346,6 +346,13 @@ export interface TrailTurn {
 export interface AgentTrail {
   paneId: string;
   turns: TrailTurn[];
+  /** Turns before the first one sent. */
+  older: number;
+  /** Turns left out between the first — a card's, older than the latest —
+   *  and the latest; 0 when they follow on. */
+  gap: number;
+  /** What it is a reading of: the same as the last answer's, the same answer. */
+  version: string | null;
   reason: string | null;
 }
 

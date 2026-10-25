@@ -330,22 +330,43 @@ pub fn agent_trail(
     turns: Option<u32>,
     since_ms: Option<u64>,
 ) -> cmux_protocol::AgentTrail {
-    use cmux_core::trail::window;
-    let read = match trail_file(state, pane_id) {
-        Ok(TrailFile::Claude(path)) => {
-            state.trails.lock().unwrap().read(&path).map(|t| window(t.turns(), turns, since_ms).to_vec())
-        }
-        Ok(TrailFile::Codex(known)) => {
-            state.codex_trails.lock().unwrap().read(&known.path).map(|t| window(t.turns(), turns, since_ms).to_vec())
-        }
-        Err(reason) => {
-            return cmux_protocol::AgentTrail { pane_id: pane_id.to_string(), turns: Vec::new(), reason: Some(reason) }
-        }
+    use cmux_core::trail::{version, window, Window};
+    // The window of what the file says now, and how far into it that is.
+    fn read<T: cmux_core::transcript::Feed>(
+        cache: &Mutex<cmux_core::transcript::Cache<T>>,
+        path: &std::path::Path,
+        turns_of: fn(&T) -> &[cmux_protocol::TrailTurn],
+        turns: Option<u32>,
+        since_ms: Option<u64>,
+    ) -> Option<(Window, String)> {
+        let mut cache = cache.lock().unwrap();
+        let window = window(turns_of(cache.read(path)?), turns, since_ms);
+        let consumed = cache.consumed(path).unwrap_or(0);
+        Some((window, version(path, consumed, turns, since_ms)))
+    }
+    let empty = |reason: String| cmux_protocol::AgentTrail {
+        pane_id: pane_id.to_string(),
+        turns: Vec::new(),
+        older: 0,
+        gap: 0,
+        version: None,
+        reason: Some(reason),
     };
+    let read = match trail_file(state, pane_id) {
+        Ok(TrailFile::Claude(path)) => read(&state.trails, &path, cmux_core::trail::Trail::turns, turns, since_ms),
+        Ok(TrailFile::Codex(known)) => {
+            read(&state.codex_trails, &known.path, cmux_core::codex_trail::CodexTrail::turns, turns, since_ms)
+        }
+        Err(reason) => return empty(reason),
+    };
+    let Some((window, version)) = read else { return empty("no transcript found".into()) };
     cmux_protocol::AgentTrail {
         pane_id: pane_id.to_string(),
-        reason: read.is_none().then(|| "no transcript found".to_string()),
-        turns: read.unwrap_or_default(),
+        turns: window.turns,
+        older: window.older as u32,
+        gap: window.gap as u32,
+        version: Some(version),
+        reason: None,
     }
 }
 

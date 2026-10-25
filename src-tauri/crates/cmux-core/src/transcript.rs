@@ -332,6 +332,11 @@ impl<T: Feed> Cache<T> {
         }
         Some(stats)
     }
+
+    /// How far into `path` it has read: changes with every line it reads.
+    pub fn consumed(&self, path: &Path) -> Option<u64> {
+        self.files.get(path).map(|(offset, _)| *offset)
+    }
 }
 
 impl Cache {

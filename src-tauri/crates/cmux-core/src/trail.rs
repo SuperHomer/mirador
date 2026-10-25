@@ -236,17 +236,44 @@ fn shorten(s: &str, chars: usize) -> String {
     }
 }
 
+/// What a view is sent of a trail: some of its turns, oldest first, and
+/// how many it was not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Window {
+    pub turns: Vec<TrailTurn>,
+    /// Turns before the first one sent.
+    pub older: usize,
+    /// Turns between the first one sent — a card's, older than the latest
+    /// — and the latest; 0 when they follow on.
+    pub gap: usize,
+}
+
 /// The turns a view asks for: the last `limit` (all, without one), and
-/// any earlier begun at or after `since_ms` — the turn a card links to may
-/// be older than the latest few.
-pub fn window(turns: &[TrailTurn], limit: Option<u32>, since_ms: Option<u64>) -> &[TrailTurn] {
-    let mut from = limit.map_or(0, |n| turns.len().saturating_sub(n as usize));
-    if let Some(since) = since_ms {
-        if let Some(i) = turns.iter().position(|t| t.started_ms.is_some_and(|s| s >= since)) {
-            from = from.min(i);
-        }
+/// the turn a card links to — the first begun at or after `since_ms` —
+/// when it is older than those, alone before them: never more than
+/// `limit + 1` turns, however old the card. Asking for a larger `limit`
+/// pages back from the latest, closing the gap.
+pub fn window(turns: &[TrailTurn], limit: Option<u32>, since_ms: Option<u64>) -> Window {
+    let latest = limit.map_or(0, |n| turns.len().saturating_sub(n as usize));
+    let target = since_ms
+        .and_then(|since| turns.iter().position(|t| t.started_ms.is_some_and(|s| s >= since)))
+        .filter(|&i| i < latest);
+    match target {
+        Some(t) => Window {
+            turns: std::iter::once(&turns[t]).chain(&turns[latest..]).cloned().collect(),
+            older: t,
+            gap: latest - t - 1,
+        },
+        None => Window { turns: turns[latest..].to_vec(), older: latest, gap: 0 },
     }
-    &turns[from..]
+}
+
+/// What a trail answer is a reading of: the file, how far into it was
+/// read, and the window asked for. Any line read since — a result landing
+/// at the same instant as its call — changes it, so a view can skip an
+/// answer whose version it has drawn already.
+pub fn version(path: &Path, consumed: u64, limit: Option<u32>, since_ms: Option<u64>) -> String {
+    format!("{}:{consumed}:{limit:?}:{since_ms:?}", path.display())
 }
 
 /// One call's full input and output, read from the transcript at `path`:
@@ -427,19 +454,33 @@ mod tests {
     }
 
     #[test]
-    fn a_window_is_the_latest_turns_and_any_since_a_time() {
+    fn a_window_is_the_latest_turns_and_a_card_s_turn() {
         let turns: Vec<TrailTurn> = (0..10).map(|i| turn(Some("go"), Some(i * 1000))).collect();
-        let starts = |w: &[TrailTurn]| w.iter().map(|t| t.started_ms.unwrap() / 1000).collect::<Vec<_>>();
-        assert_eq!(window(&turns, None, None).len(), 10);
-        assert_eq!(starts(window(&turns, Some(3), None)), [7, 8, 9]);
-        assert_eq!(window(&turns, Some(30), None).len(), 10);
-        // A card given before the latest three reaches its turn.
-        assert_eq!(starts(window(&turns, Some(3), Some(4500))), [5, 6, 7, 8, 9]);
-        // Since a time within the latest: no fewer than the latest three.
-        assert_eq!(starts(window(&turns, Some(3), Some(8000))), [7, 8, 9]);
-        // Nothing begun since: the latest, where its turn will come.
-        assert_eq!(starts(window(&turns, Some(2), Some(99_000))), [8, 9]);
-        assert!(window(&[], Some(3), Some(0)).is_empty());
+        let seen = |w: Window| (w.turns.iter().map(|t| t.started_ms.unwrap() / 1000).collect::<Vec<_>>(), w.older, w.gap);
+        assert_eq!(seen(window(&turns, None, None)), ((0..10).collect(), 0, 0));
+        assert_eq!(seen(window(&turns, Some(3), None)), (vec![7, 8, 9], 7, 0));
+        assert_eq!(seen(window(&turns, Some(30), None)), ((0..10).collect(), 0, 0));
+        // A card given before the latest three: its turn, then a gap.
+        assert_eq!(seen(window(&turns, Some(3), Some(4500))), (vec![5, 7, 8, 9], 5, 1));
+        // Right before them: no gap.
+        assert_eq!(seen(window(&turns, Some(3), Some(6000))), (vec![6, 7, 8, 9], 6, 0));
+        // Within the latest, or nothing begun since: the latest alone.
+        assert_eq!(seen(window(&turns, Some(3), Some(8000))), (vec![7, 8, 9], 7, 0));
+        assert_eq!(seen(window(&turns, Some(2), Some(99_000))), (vec![8, 9], 8, 0));
+        assert_eq!(seen(window(&[], Some(3), Some(0))), (vec![], 0, 0));
+    }
+
+    #[test]
+    fn an_old_card_s_window_stays_bounded() {
+        let turns: Vec<TrailTurn> = (0..200).map(|i| turn(Some("go"), Some(i * 1000))).collect();
+        let w = window(&turns, Some(20), Some(1000));
+        assert!(w.turns.len() <= 21, "{}", w.turns.len());
+        assert_eq!(w.turns[0].started_ms, Some(1000), "the card's turn");
+        assert_eq!(w.turns[1].started_ms, Some(180_000), "then the latest twenty");
+        assert_eq!((w.older, w.gap), (1, 178));
+        // Paging back from the latest closes the gap, still holding it.
+        let w = window(&turns, Some(40), Some(1000));
+        assert_eq!((w.turns.len(), w.older, w.gap), (41, 1, 158));
     }
 
     #[test]
@@ -493,9 +534,17 @@ mod tests {
         std::fs::write(&path, format!("{}\n{}\n", prompt("go", "00"), call("a", "Bash", "{}", "01"))).unwrap();
         let mut cache: crate::transcript::Cache<Trail> = Default::default();
         assert_eq!(cache.read(&path).unwrap().turns()[0].actions[0].status, ActionStatus::Running);
+        let before = version(&path, cache.consumed(&path).unwrap(), Some(20), None);
+        assert_eq!(cache.consumed(&path), Some(std::fs::metadata(&path).unwrap().len()));
+        // Its result, at the very instant of the call: the same turn times.
         let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
-        std::io::Write::write_all(&mut f, format!("{}\n", result("a", r#""done""#, false, "02")).as_bytes()).unwrap();
-        assert_eq!(cache.read(&path).unwrap().turns()[0].actions[0].status, ActionStatus::Ok);
+        std::io::Write::write_all(&mut f, format!("{}\n", result("a", r#""done""#, false, "01")).as_bytes()).unwrap();
+        let turns = cache.read(&path).unwrap().turns().to_vec();
+        assert_eq!(turns[0].actions[0].status, ActionStatus::Ok);
+        assert_eq!(turns[0].last_ms, Some(1_792_918_801_000), "nothing for a fingerprint of times to see");
+        assert_ne!(version(&path, cache.consumed(&path).unwrap(), Some(20), None), before);
+        // The same reading asked for another window is another answer.
+        assert_ne!(version(&path, cache.consumed(&path).unwrap(), Some(40), None), version(&path, cache.consumed(&path).unwrap(), Some(20), None));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

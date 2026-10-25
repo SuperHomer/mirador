@@ -3052,6 +3052,14 @@ button.tb-assignee:hover {
   color: var(--muted);
 }
 
+/* Between a card's turn and the latest ones: what is left out. */
+.tb-gap {
+  margin: 0 0 8px 3.8em;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* Under the oldest turn shown: more of them, on asking. */
 .tb-older {
   margin: 0 0 6px 3.8em;

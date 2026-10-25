@@ -862,6 +862,14 @@ pub struct AgentActivity {
 pub struct AgentTrail {
     pub pane_id: String,
     pub turns: Vec<TrailTurn>,
+    /// Turns before the first one in `turns`.
+    pub older: u32,
+    /// Turns left out between the first one — a card's, older than the
+    /// latest — and the latest; 0 when they follow on.
+    pub gap: u32,
+    /// What it is a reading of: an answer with the version of the last
+    /// is the same answer.
+    pub version: Option<String>,
     /// Why there is nothing to show, when there is not: no transcript
     /// found, an agent without one, more than one Codex session.
     pub reason: Option<String>,
