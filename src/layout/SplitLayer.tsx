@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
-  AgentWallPaneInfo,
   TaskBoardPaneInfo,
   BoardRect,
   CardRect,
@@ -89,7 +88,6 @@ export function SplitLayer({
   diffPanes,
   whatsNewPanes,
   graphPanes,
-  agentWallPanes,
   agentEditorPanes,
   taskBoardPanes,
 }: {
@@ -108,7 +106,6 @@ export function SplitLayer({
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
-  agentWallPanes: AgentWallPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   taskBoardPanes: TaskBoardPaneInfo[];
 }) {
@@ -224,7 +221,6 @@ export function SplitLayer({
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
-        const wall = agentWallPanes.find((w) => w.paneId === p.paneId);
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
         const tasks = taskBoardPanes.find((t) => t.paneId === p.paneId);
         return (
@@ -256,18 +252,7 @@ export function SplitLayer({
               />
             )}
             <div className={`pane-body${browser ? " browser" : ""}`}>
-              {wall ? (
-                // A wall pane restored from before the wall was a view of
-                // its tab. On the board it borrows no terminal: each agent's
-                // own card is on screen already, and a terminal is drawn in
-                // one place.
-                <AgentWall
-                  paneId={p.paneId}
-                  tabId={wall.tabId}
-                  visible={shown && !board}
-                  board={board}
-                />
-              ) : tasks ? (
+              {tasks ? (
                 <TaskBoard
                   paneId={p.paneId}
                   tabId={tasks.tabId}
@@ -338,7 +323,7 @@ export function SplitLayer({
       {walled && (
         <div className="pane-slot" style={frac(FULL)}>
           <div className="pane-body">
-            <AgentWall tabId={tab.id} visible={active} board={false} />
+            <AgentWall tabId={tab.id} visible={active} />
           </div>
         </div>
       )}

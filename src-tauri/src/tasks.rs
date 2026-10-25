@@ -199,8 +199,7 @@ pub fn task_cards(state: State<'_, AppState>, tab_id: Option<String>) -> Vec<Tas
 }
 
 /// Opens a task board for the tab of `pane_id` (the focused pane when
-/// absent): a split of it, or a tab of its own. Opened from the agent
-/// wall, it shows the tab the wall does.
+/// absent): a split of it, or a tab of its own.
 #[tauri::command]
 pub fn open_task_board(
     app: AppHandle,
@@ -211,11 +210,7 @@ pub fn open_task_board(
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    let wall_shows = state.meta.lock().unwrap().get(&source).filter(|m| m.agent_wall).map(|m| m.agent_wall_tab.clone());
-    let target = match wall_shows {
-        Some(shown) => shown,
-        None => tab_of(&state, Some(source.clone())).ok(),
-    };
+    let target = tab_of(&state, Some(source.clone())).ok();
     let pane = if tab {
         state.workspace.lock().unwrap().new_tab().1
     } else {

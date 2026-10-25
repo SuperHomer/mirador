@@ -99,7 +99,7 @@ export const TerminalPane = memo(function TerminalPane({
   const config = useConfigStore((s) => s.config);
   const fitRef = useRef<FitAddon | null>(null);
   const webglRef = useRef<WebglAddon | null>(null);
-  // Lent to the agent wall: drawn there while this tab is hidden, so it
+  // Lent to the agent wall: drawn there while this pane is under it, so it
   // keeps its renderer as if it were on screen.
   const [lent, setLent] = useState(false);
 
@@ -108,7 +108,7 @@ export const TerminalPane = memo(function TerminalPane({
     return watchTerminal(paneId, () => setLent(isLent(paneId)));
   }, [paneId]);
 
-  // The wall keeps a terminal it borrowed until the pane's own tab shows.
+  // The wall keeps a terminal it borrowed until the pane itself shows.
   useEffect(() => {
     if (visible && lent) reclaimTerminal(paneId);
   }, [visible, lent, paneId]);
@@ -392,8 +392,8 @@ export const TerminalPane = memo(function TerminalPane({
     return () => clearTimeout(timer);
   }, [onScreen, onBoard, paneId]);
 
-  // Also on becoming visible, and on coming back from the wall: going to
-  // an agent's tab from its tile means typing to it next.
+  // Also on becoming visible, and on coming back from the wall: showing an
+  // agent alone from its tile means typing to it next.
   useEffect(() => {
     if (focused && visible && !lent) termRef.current?.focus();
   }, [focused, visible, lent]);

@@ -1,13 +1,9 @@
 import { create } from "zustand";
-import { AgentInfo, WorkspaceSnapshot, TabSnapshot, Node } from "../bindings";
+import { AgentInfo, WorkspaceSnapshot, TabSnapshot } from "../bindings";
 
 interface WorkspaceStore {
   snapshot: WorkspaceSnapshot | null;
-  /**
-   * The tab whose agents the sidebar lists: the active tab, or — while the
-   * active tab is the agent wall, which is a way of looking at agents
-   * rather than a place they work — the tab the wall shows.
-   */
+  /** The tab whose agents the sidebar lists: the active tab. */
   currentTab: string | null;
   sidebarVisible: boolean;
   setSnapshot: (s: WorkspaceSnapshot) => void;
@@ -29,16 +25,8 @@ export function activeTab(
   return snapshot.tabs.find((t) => t.id === snapshot.activeTab) ?? null;
 }
 
-function paneIds(node: Node): string[] {
-  return node.type === "leaf" ? [node.paneId] : node.children.flatMap(paneIds);
-}
-
 function currentTab(snapshot: WorkspaceSnapshot): string | null {
-  const tab = activeTab(snapshot);
-  if (!tab) return null;
-  const panes = paneIds(tab.root);
-  const wall = snapshot.agentWallPanes.find((w) => panes.includes(w.paneId));
-  return wall ? wall.tabId : tab.id;
+  return activeTab(snapshot)?.id ?? null;
 }
 
 /** The agents the sidebar lists: the current tab's, and no other tab's. */

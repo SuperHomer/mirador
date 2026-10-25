@@ -121,16 +121,6 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
-    snapshot.agent_wall_panes = {
-        let meta = state.meta.lock().unwrap();
-        meta.iter()
-            .filter(|(_, m)| m.agent_wall)
-            .map(|(pane, m)| cmux_protocol::AgentWallPane {
-                pane_id: pane.clone(),
-                tab_id: m.agent_wall_tab.clone(),
-            })
-            .collect()
-    };
     snapshot.agents = agent_infos(state);
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();
@@ -612,8 +602,8 @@ pub fn focus_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
 }
 
 /// Clears a pane's unread notifications without focusing it — the agent
-/// wall, where clicking into an agent's terminal reads what it said but
-/// must not switch to the agent's own tab.
+/// wall, where clicking into an agent's terminal reads what it said and
+/// leaves the tab's focused pane where it was.
 #[tauri::command]
 pub fn mark_pane_read(app: AppHandle, state: State<'_, AppState>, pane_id: String) {
     if notify::mark_pane_read(&state, &pane_id) {
@@ -1806,57 +1796,6 @@ pub fn agent_roles(state: State<'_, AppState>, pane_id: Option<String>) -> cmux_
         .and_then(|m| m.cwd.clone())
         .or_else(cmux_core::config::default_cwd);
     cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new))
-}
-
-/// Opens the agent wall for the tab of `pane_id` (the focused pane when
-/// absent): a tab of its own showing that tab's agents. There is one wall:
-/// opened again from another tab it is reused and shows that tab instead —
-/// to look at a tab's agents, go to the tab and open the wall. Never a
-/// split: a wall beside the agents it shows would have nothing to draw, a
-/// terminal being drawn in one place only.
-///
-/// The wall keeps the directory of the pane it was opened from.
-#[tauri::command]
-pub fn open_agent_wall(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    pane_id: Option<String>,
-) -> Result<String, String> {
-    let source = pane_id
-        .filter(|id| state.meta.lock().unwrap().contains_key(id))
-        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    let wall = {
-        let mut ws = state.workspace.lock().unwrap();
-        let mut meta = state.meta.lock().unwrap();
-        let existing = ws
-            .all_pane_ids()
-            .into_iter()
-            .find(|p| meta.get(p).is_some_and(|m| m.agent_wall));
-        let current = existing
-            .as_ref()
-            .and_then(|w| meta.get(w))
-            .and_then(|m| m.agent_wall_tab.clone());
-        let target = ws.wall_target(&source, &meta, current.as_deref());
-        let cwd = meta.get(&source).and_then(|m| m.cwd.clone());
-        let wall = match existing {
-            Some(wall) => {
-                ws.focus_pane(&wall);
-                wall
-            }
-            None => ws.new_tab().1,
-        };
-        let entry = meta.entry(wall.clone()).or_default();
-        entry.agent_wall = true;
-        entry.agent_wall_tab = target;
-        if cwd.is_some() {
-            entry.cwd = cwd;
-        } else if entry.cwd.is_none() {
-            entry.cwd = cmux_core::config::default_cwd();
-        }
-        wall
-    };
-    emit_workspace(&app);
-    Ok(wall)
 }
 
 /// Shows the tab of `pane_id` (the focused pane when absent) as the wall

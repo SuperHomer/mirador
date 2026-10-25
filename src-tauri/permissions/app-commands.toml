@@ -53,7 +53,6 @@ permissions = [
   "allow-list-teams",
   "allow-team-add",
   "allow-team-restart",
-  "allow-open-agent-wall",
   "allow-open-task-board",
   "allow-task-cards",
   "allow-task-history",

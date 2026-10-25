@@ -138,7 +138,7 @@ export const actions: ActionDef[] = [
     title: "Copy Selection",
     run: () => {
       // The terminal with keyboard focus first: in the agent wall that is
-      // an agent's, while the workspace's focused pane is the wall.
+      // a tile's, which need not be the workspace's focused pane.
       const pane = focusedPane();
       const term =
         terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);

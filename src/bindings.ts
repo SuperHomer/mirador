@@ -418,12 +418,6 @@ export const taskCards = (tabId: string | null) =>
 export const openTaskBoard = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_task_board", { paneId, tab });
 
-export interface AgentWallPaneInfo {
-  paneId: string;
-  /** The tab whose agents it shows: the one it was opened from. */
-  tabId: string | null;
-}
-
 /** Where a role or a way of working was defined (`cmux_protocol::RoleSource`). */
 export type RoleSource = "repo" | "global" | "config" | "builtin";
 
@@ -484,7 +478,6 @@ export interface WorkspaceSnapshot {
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
-  agentWallPanes: AgentWallPaneInfo[];
   taskBoardPanes: TaskBoardPaneInfo[];
   agents: AgentInfo[];
   view: View;
@@ -749,8 +742,6 @@ export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
 /** The wall for the tab of `paneId` (the focused pane when null). */
-export const openAgentWall = (paneId: string | null) =>
-  invoke<string>("open_agent_wall", { paneId });
 export const toggleAgentWall = (paneId: string | null) =>
   invoke<boolean>("toggle_agent_wall", { paneId });
 export const getAgentActivity = (paneId: string) =>

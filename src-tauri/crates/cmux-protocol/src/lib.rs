@@ -168,9 +168,6 @@ pub struct WorkspaceSnapshot {
     /// Commit-graph panes and the repository each one reads.
     #[serde(default)]
     pub graph_panes: Vec<GraphPane>,
-    /// Agent-wall panes: each draws every agent's terminal in a grid.
-    #[serde(default)]
-    pub agent_wall_panes: Vec<AgentWallPane>,
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
@@ -945,16 +942,6 @@ pub struct ActionDetail {
 pub struct TaskBoardPane {
     pub pane_id: String,
     /// The tab whose cards it shows: the one it was opened from.
-    #[serde(default)]
-    pub tab_id: Option<String>,
-}
-
-/// A pane drawing the agent wall.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentWallPane {
-    pub pane_id: String,
-    /// The tab whose agents it shows: the one it was opened from.
     #[serde(default)]
     pub tab_id: Option<String>,
 }

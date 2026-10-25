@@ -87,11 +87,6 @@ pub struct PaneMeta {
     pub agent_message: Option<String>,
     /// Unix millis of the last `agent_status` change.
     pub agent_since_ms: Option<u64>,
-    /// Agent-wall pane: draws the agents of one tab in a grid.
-    pub agent_wall: bool,
-    /// The tab an agent-wall pane shows the agents of: the tab it was
-    /// opened from (see `Workspace::wall_target`).
-    pub agent_wall_tab: Option<String>,
     /// Agent-editor pane: the role, way and team files its directory sees,
     /// for editing.
     pub agent_editor: bool,
@@ -580,26 +575,6 @@ impl Workspace {
         true
     }
 
-    /// The tab a wall opened from `source` shows: `source`'s own tab —
-    /// unless that tab holds a wall itself (opening the wall from the
-    /// wall), which keeps showing `current`.
-    pub fn wall_target(
-        &self,
-        source: &str,
-        meta: &HashMap<String, PaneMeta>,
-        current: Option<&str>,
-    ) -> Option<String> {
-        let tab = self.tabs.iter().find(|t| layout::contains(&t.root, source))?;
-        let is_wall_tab = layout::pane_ids(&tab.root)
-            .iter()
-            .any(|p| meta.get(p).is_some_and(|m| m.agent_wall));
-        if is_wall_tab {
-            current.map(str::to_string)
-        } else {
-            Some(tab.id.clone())
-        }
-    }
-
     /// Shows `pane` alone, filling its tab, and focuses it (activating the
     /// tab). The other panes keep running and keep their size; they are
     /// only hidden.
@@ -748,17 +723,14 @@ impl Workspace {
                     let pane_meta = meta.get(&t.focused);
                     let cwd = pane_meta.and_then(|m| m.cwd.clone());
                     let osc_title = pane_meta.and_then(|m| m.title.clone());
-                    // The wall and the board run no shell: nothing would
-                    // ever title them.
-                    let wall_title = pane_meta.and_then(|m| {
-                        m.agent_wall
-                            .then(|| "Agents".to_string())
-                            .or_else(|| m.task_board.then(|| "Tasks".to_string()))
-                    });
+                    // The board runs no shell: nothing would ever title it.
+                    let board_title = pane_meta
+                        .filter(|m| m.task_board)
+                        .map(|_| "Tasks".to_string());
                     let title = t
                         .title
                         .clone()
-                        .or(wall_title)
+                        .or(board_title)
                         .or(osc_title)
                         .unwrap_or_else(|| {
                             cwd.as_deref()
@@ -808,7 +780,6 @@ impl Workspace {
             diff_panes: Vec::new(),
             whats_new_panes: Vec::new(),
             graph_panes: Vec::new(),
-            agent_wall_panes: Vec::new(),
             agent_editor_panes: Vec::new(),
             task_board_panes: Vec::new(),
             agents: Vec::new(),
@@ -835,9 +806,7 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
         return "shell".to_string();
     };
     let name = |path: &str| display_dir(path);
-    if m.agent_wall {
-        "Agents".to_string()
-    } else if m.agent_editor {
+    if m.agent_editor {
         "Roles, ways & teams".to_string()
     } else if m.task_board {
         "Tasks".to_string()
@@ -1098,25 +1067,6 @@ mod tests {
         // ...and zooming one agent leaves the wall.
         assert!(ws.zoom_pane(&claude));
         assert!(!wall(&ws, 0));
-    }
-
-    #[test]
-    fn a_wall_shows_the_tab_it_was_opened_from() {
-        let mut ws = Workspace::default();
-        let work = ws.focused_pane();
-        let first = ws.tabs[0].id.clone();
-        let (second, other) = ws.new_tab();
-        let (_, wall) = ws.new_tab();
-        let mut meta = HashMap::new();
-        meta.insert(wall.clone(), PaneMeta { agent_wall: true, ..Default::default() });
-
-        assert_eq!(ws.wall_target(&work, &meta, None), Some(first.clone()));
-        // Opened again from another tab, it shows that one.
-        assert_eq!(ws.wall_target(&other, &meta, Some(&first)), Some(second));
-        // Opened from the wall itself, it keeps what it shows.
-        assert_eq!(ws.wall_target(&wall, &meta, Some(&first)), Some(first));
-        assert_eq!(ws.wall_target(&wall, &meta, None), None);
-        assert_eq!(ws.wall_target("gone", &meta, None), None);
     }
 
     #[test]
@@ -1410,7 +1360,6 @@ mod tests {
         assert_eq!(meta(PaneMeta { title: Some(r"C:\pwsh.exe".into()), ..Default::default() }), "shell");
         assert_eq!(meta(PaneMeta { diff_repo: Some("/src/mirador".into()), ..Default::default() }), "Diff · mirador");
         assert_eq!(meta(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
-        assert_eq!(meta(PaneMeta { agent_wall: true, title: Some("x".into()), ..Default::default() }), "Agents");
         assert_eq!(meta(PaneMeta { task_board: true, ..Default::default() }), "Tasks");
     }
 
