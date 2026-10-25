@@ -130,12 +130,12 @@ impl Trail {
     }
 }
 
-fn turn(prompt: Option<String>, ms: Option<u64>) -> TrailTurn {
+pub(crate) fn turn(prompt: Option<String>, ms: Option<u64>) -> TrailTurn {
     TrailTurn { prompt, started_ms: ms, last_ms: ms, actions: Vec::new() }
 }
 
 /// Moves a turn's latest entry to `ms`, when the entry has one.
-fn stamp(turn: &mut TrailTurn, ms: Option<u64>) {
+pub(crate) fn stamp(turn: &mut TrailTurn, ms: Option<u64>) {
     if ms.is_some() {
         turn.last_ms = ms;
     }
@@ -144,7 +144,7 @@ fn stamp(turn: &mut TrailTurn, ms: Option<u64>) {
 /// What a call is about, in a line: the field that says it for the tools
 /// that have one, and otherwise the tool and its first string input
 /// (by key order, the same in every build).
-fn summarize(tool: &str, input: &Value) -> String {
+pub(crate) fn summarize(tool: &str, input: &Value) -> String {
     let field = match tool {
         "Bash" => "command",
         "Edit" | "Write" | "MultiEdit" | "Read" => "file_path",
@@ -194,7 +194,7 @@ fn exit_code(output: &str) -> Option<i32> {
 }
 
 /// The first line of `s`, shortened; `…` says something was left out.
-fn one_line(s: &str) -> String {
+pub(crate) fn one_line(s: &str) -> String {
     let s = s.trim();
     let first = s.lines().next().unwrap_or("");
     let cut = shorten(first, SUMMARY_CHARS);
@@ -206,7 +206,7 @@ fn one_line(s: &str) -> String {
 }
 
 /// The first lines of a result, each shortened.
-fn head(s: &str) -> String {
+pub(crate) fn head(s: &str) -> String {
     let lines: Vec<String> = s
         .trim_end()
         .lines()
