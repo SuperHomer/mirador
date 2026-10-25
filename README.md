@@ -52,7 +52,8 @@ downloads, the feature tour and the keybinding reference.
   (`mira agent trail`; docs/AGENTS.md)
 - **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
   in the sidebar): every tab as a frame and every pane as a card on one
-  canvas. Scroll over the focused card to scroll its content, at any zoom
+  canvas — a tab showing its agent wall shows the wall in its frame instead,
+  its agents' live tiles or its task board. Scroll over the focused card to scroll its content, at any zoom
   (a browser card pans away from 100%, where its page is not drawn);
   scroll anywhere else, other cards included, or drag empty board, a gap
   or a card's header, to pan, or hold ⌥ (Alt) to pan over the focused

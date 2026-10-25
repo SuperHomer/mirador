@@ -571,7 +571,10 @@ mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
 ```
 
-The board shows every tab as a frame and every pane as a card; where a
+The board shows every tab as a frame and every pane as a card — but a
+tab showing its agent wall shows the wall in its frame, its agents or its
+task board, with its cards kept under it; `wall` in `list-tabs --json`
+says which tabs those are. Where a
 card sits on the board and how its tab is split are separate layouts, and
 neither changes the other. A pane created with `mira` lands in a free spot
 of its tab's frame, and a new tab's frame lands at the centre of the view
