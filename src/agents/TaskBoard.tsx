@@ -16,6 +16,7 @@ import {
   focusPane,
   getAgentTrail,
   getTrailDetail,
+  setWallView,
   taskCards,
   taskHistory,
 } from "../bindings";
@@ -23,7 +24,9 @@ import { useWorkspaceStore } from "../state/workspaceStore";
 import { flyToCard } from "../state/boardStore";
 
 type Props = {
-  paneId: string;
+  /** Its own pane; absent when it is the Tasks side of its tab's wall,
+   *  whose chrome names the tab and which it does not close. */
+  paneId?: string;
   /** The tab whose cards it shows: the one it was opened from. */
   tabId: string | null;
   /** On screen: only then does it read the log. */
@@ -128,6 +131,10 @@ export const TaskBoard = memo(function TaskBoard({
   const goTo = (pane: string) => {
     void focusPane(pane);
     if (board) flyToCard(pane);
+    // On the wall, an agent of this tab is under it: its tile shows it.
+    if (!paneId && shown && paneIds(shown.root).includes(pane)) {
+      void setWallView(pane, "agents");
+    }
   };
 
   const agents = useMemo(
@@ -140,12 +147,19 @@ export const TaskBoard = memo(function TaskBoard({
   };
 
   return (
-    <div className="pane task-board">
+    <div className={paneId ? "pane task-board" : "task-board embedded"}>
       <div className="wall-chrome">
-        <span className="wall-badge">Tasks</span>
-        <span className="wall-tab" title="The tab this board shows the cards of">
-          {shown ? (shown.team?.name ?? shown.title) : "closed tab"}
-        </span>
+        {paneId && (
+          <>
+            <span className="wall-badge">Tasks</span>
+            <span
+              className="wall-tab"
+              title="The tab this board shows the cards of"
+            >
+              {shown ? (shown.team?.name ?? shown.title) : "closed tab"}
+            </span>
+          </>
+        )}
         <div className="tb-switch" role="group">
           <button
             className={view === "cards" ? "on" : ""}
@@ -176,13 +190,15 @@ export const TaskBoard = memo(function TaskBoard({
             All agents
           </button>
         </div>
-        <button
-          className="wall-close"
-          title="Close task board"
-          onClick={() => void closePane(paneId)}
-        >
-          ✕
-        </button>
+        {paneId && (
+          <button
+            className="wall-close"
+            title="Close task board"
+            onClick={() => void closePane(paneId)}
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {view === "trail" ? (

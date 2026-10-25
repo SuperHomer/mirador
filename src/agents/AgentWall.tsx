@@ -8,11 +8,13 @@ import {
   AgentStatus,
   markPaneRead,
   openAgent,
-  openTaskBoard,
+  setWallView,
   toggleAgentWall,
+  WallView,
   zoomPane,
 } from "../bindings";
 import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
+import { TaskBoard } from "./TaskBoard";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import {
@@ -69,19 +71,25 @@ export const AgentWall = memo(function AgentWall({ tabId, visible }: Props) {
     [snapshot, tabId],
   );
 
+  // Its tiles, or the tab's task board in their place. On the Tasks side
+  // no tile is mounted, so each lent terminal has gone back to its own
+  // pane under the wall, and the Agents side borrows them again.
+  const side: WallView = shown?.wallView ?? "agents";
+  const tilesShown = visible && side === "agents";
+
   // The tab's focused pane is under the wall, so the keyboard would go
-  // nowhere: coming on screen, the wall gives it to that pane's tile, or
-  // the first. Only then — not on every snapshot, or a click in another
-  // tile would be undone. The tiles' own effects ran first, so their
-  // terminals are here by now — unless another wall holds one, and then
-  // it is not this wall's to focus.
+  // nowhere: as the tiles come on screen, the wall gives it to that pane's
+  // tile, or the first. Only then — not on every snapshot, or a click in
+  // another tile would be undone. The tiles' own effects ran first, so
+  // their terminals are here by now — unless another wall holds one, and
+  // then it is not this wall's to focus.
   const wallRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!visible) return;
+    if (!tilesShown) return;
     const tile = tiles.find((a) => a.paneId === shown?.focusedPane) ?? tiles[0];
     const term = tile && getTerminal(tile.paneId);
     if (term?.element && wallRef.current?.contains(term.element)) term.focus();
-  }, [visible]);
+  }, [tilesShown]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
@@ -138,15 +146,24 @@ export const AgentWall = memo(function AgentWall({ tabId, visible }: Props) {
             </>
           )}
         </span>
-        <button
-          className="wall-new-button"
-          title="The cards of the tasks this tab's agents were given"
-          // Over its tab, a split would open under the wall: the board for
-          // the tab gets a tab of its own instead.
-          onClick={() => void openTaskBoard(shown?.focusedPane ?? null, true)}
-        >
-          Task board
-        </button>
+        {shown && (
+          <div className="tb-switch" role="group">
+            <button
+              className={side === "agents" ? "on" : ""}
+              title="This tab's agents' terminals"
+              onClick={() => void setWallView(shown.focusedPane, "agents")}
+            >
+              Agents
+            </button>
+            <button
+              className={side === "tasks" ? "on" : ""}
+              title="The cards of the tasks this tab's agents were given"
+              onClick={() => void setWallView(shown.focusedPane, "tasks")}
+            >
+              Tasks
+            </button>
+          </div>
+        )}
         <div className="wall-new">
           <button
             className="wall-new-button"
@@ -193,7 +210,9 @@ export const AgentWall = memo(function AgentWall({ tabId, visible }: Props) {
         )}
       </div>
 
-      {tiles.length === 0 ? (
+      {side === "tasks" ? (
+        <TaskBoard tabId={tabId} visible={visible} board={false} />
+      ) : tiles.length === 0 ? (
         <div className="wall-empty">
           <p>No agents in {shown?.title ?? "this tab"}.</p>
           <p className="wall-empty-hint">

@@ -2696,6 +2696,17 @@ body,
   margin-left: 0;
 }
 
+/* The wall's Agents | Tasks keeps + New agent and Splits beside it. */
+.tb-switch + .wall-new {
+  margin-left: 0;
+}
+
+/* The Tasks side of a wall: under the wall's chrome, filling the rest. */
+.task-board.embedded {
+  flex: 1;
+  min-height: 0;
+}
+
 .tb-switch button {
   border: none;
   background: transparent;
