@@ -285,6 +285,9 @@ pub struct Tab {
     /// The team running in this tab, if one was started here: who is in
     /// which pane. Persisted, so a team is still a team after a restart.
     pub team: Option<cmux_protocol::TeamRun>,
+    /// The tab shows its agents as the wall instead of its splits.
+    /// Persisted.
+    pub wall: bool,
     /// Where the tab's frame sits on the board.
     pub frame: BoardPoint,
     /// Each pane's card on the board, relative to `frame`. Kept for every
@@ -314,6 +317,7 @@ impl Tab {
             focused,
             zoomed: None,
             team: None,
+            wall: false,
             frame: BoardPoint::default(),
         }
     }
@@ -603,8 +607,23 @@ impl Workspace {
         if !self.focus_pane(pane) {
             return false;
         }
-        self.tabs[self.active].zoomed = Some(pane.to_string());
+        // One agent alone is a way out of the wall, not a pane on it.
+        let tab = &mut self.tabs[self.active];
+        tab.zoomed = Some(pane.to_string());
+        tab.wall = false;
         true
+    }
+
+    /// Shows the tab holding `pane` as the wall of its agents, or its
+    /// splits again if it already is; the new state, or `None` when no tab
+    /// holds `pane`. The wall shows every agent, so a zoomed one is let go.
+    pub fn toggle_wall(&mut self, pane: &str) -> Option<bool> {
+        let tab = self.tab_of_pane_mut(pane)?;
+        tab.wall = !tab.wall;
+        if tab.wall {
+            tab.zoomed = None;
+        }
+        Some(tab.wall)
     }
 
     /// Shows the whole of the tab holding `pane` again.
@@ -768,6 +787,7 @@ impl Workspace {
                             ports
                         },
                         zoomed_pane: t.zoomed.clone(),
+                        wall: t.wall,
                         frame: t.frame_rect(),
                         cards: layout::pane_ids(&t.root)
                             .into_iter()
@@ -1052,6 +1072,32 @@ mod tests {
         assert!(ws.unzoom(&claude));
         assert_eq!(zoomed(&ws), None);
         assert!(!ws.unzoom(&claude), "nothing to let go of");
+    }
+
+    #[test]
+    fn a_tab_toggles_between_its_splits_and_its_wall() {
+        let mut ws = Workspace::default();
+        let claude = ws.focused_pane();
+        let server = ws.split_pane(&claude, SplitDir::Row).unwrap();
+        let (_, other) = ws.new_tab();
+        let wall = |ws: &Workspace, i: usize| ws.snapshot(&HashMap::new()).tabs[i].wall;
+
+        // Any pane of the tab toggles the whole tab, and no other.
+        assert_eq!(ws.toggle_wall(&server), Some(true));
+        assert!(wall(&ws, 0));
+        assert!(!wall(&ws, 1));
+        assert_eq!(ws.toggle_wall(&claude), Some(false));
+        assert!(!wall(&ws, 0));
+        assert_eq!(ws.toggle_wall(&other), Some(true));
+        assert_eq!(ws.toggle_wall("nope"), None);
+
+        // The wall shows every agent, so turning it on lets a zoom go...
+        ws.zoom_pane(&claude);
+        assert_eq!(ws.toggle_wall(&claude), Some(true));
+        assert_eq!(ws.snapshot(&HashMap::new()).tabs[0].zoomed_pane, None);
+        // ...and zooming one agent leaves the wall.
+        assert!(ws.zoom_pane(&claude));
+        assert!(!wall(&ws, 0));
     }
 
     #[test]

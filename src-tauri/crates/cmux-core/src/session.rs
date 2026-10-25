@@ -21,6 +21,8 @@ pub struct SessionTab {
     pub focused: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<cmux_protocol::TeamRun>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wall: bool,
     /// Absent from sessions saved before the board: the tab gets a frame
     /// and cards from its splits when it is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,6 +134,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
             root: t.root.clone(),
             focused: t.focused.clone(),
             team: t.team.clone(),
+            wall: t.wall,
             frame: Some(t.frame),
             cards: t.cards.clone(),
         })
@@ -212,6 +215,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             focused,
             zoomed: None,
             team: t.team,
+            wall: t.wall,
             frame: t.frame.unwrap_or_default(),
             cards,
         });
@@ -330,6 +334,20 @@ mod tests {
         assert_eq!(t.title.as_deref(), Some("squad"));
         // A tab with no team writes nothing for it.
         assert!(!json.contains(r#""team":null"#));
+    }
+
+    #[test]
+    fn a_wall_comes_back_with_its_tab() {
+        let mut ws = Workspace::default();
+        let walled = ws.focused_pane();
+        let (_, plain) = ws.new_tab();
+        ws.toggle_wall(&walled);
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert!(back.tab_of_pane(&walled).unwrap().wall);
+        assert!(!back.tab_of_pane(&plain).unwrap().wall);
+        // Only the wall's tab writes the key.
+        assert_eq!(json.matches(r#""wall":"#).count(), 1);
     }
 
     #[test]
@@ -465,6 +483,8 @@ mod tests {
         let first = ws.tabs[0].frame_rect();
         assert_eq!(ws.tabs[1].frame.x, first.x + first.w + crate::board::FRAME_GAP);
         assert!(ws.tabs[1].cards.contains_key("c"));
+        // And no tab is a wall.
+        assert!(ws.tabs.iter().all(|t| !t.wall));
     }
 
     #[test]

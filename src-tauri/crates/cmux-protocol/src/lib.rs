@@ -68,6 +68,9 @@ pub struct TabSnapshot {
     /// The pane shown alone, filling the tab, when one is.
     #[serde(default)]
     pub zoomed_pane: Option<String>,
+    /// The tab shows its agents as the wall instead of its splits.
+    #[serde(default)]
+    pub wall: bool,
     /// Where the tab's frame sits on the board, and its size (derived from
     /// its cards). Card positions are relative to the frame's `x`, `y`.
     #[serde(default)]
