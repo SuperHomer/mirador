@@ -461,7 +461,8 @@ export default function TasksShowcase() {
         <p style={{ color: "var(--subtext)", fontSize: 15, lineHeight: 1.65, marginTop: 16 }}>
           The task board shows what each agent was given, for one team or every tab.
           Mirador adds a card each time it hands an agent a task, and moves it as the
-          agent’s turns end: Doing, Needs you, Done. Agents write cards of their own
+          agent’s turns end — Doing, Needs you, Done — or to Done once the agent is
+          given a newer one. Agents write cards of their own
           with <span className="mono" style={{ color: "var(--text)" }}>mira task add</span> —
           the omakase planner puts up its steps that way and moves them as they go.
           Open a card for its history: who sent what, how each turn ended, and how long
