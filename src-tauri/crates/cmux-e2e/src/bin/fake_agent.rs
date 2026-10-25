@@ -73,24 +73,29 @@ fn open_rollout(seq: u32) -> Option<std::fs::File> {
     Some(file)
 }
 
-/// Writes one turn to a rollout: its prompt, and an `echo` of its first
-/// line as the one command it ran.
-fn rollout_turn(file: &mut std::fs::File, n: u32, message: &str) {
+/// Writes one turn to a rollout: its start and prompt, `took` of work,
+/// then an `echo` of its first line as the one command it ran, and its end.
+fn rollout_turn(file: &mut std::fs::File, n: u32, message: &str, took: Duration) {
     let first = message.lines().next().unwrap_or_default();
     let (at, turn) = (timestamp(), format!("turn-{n}"));
     let event = |payload: serde_json::Value| serde_json::json!({ "timestamp": at, "type": "event_msg", "payload": payload });
-    let lines = [
+    let mut write = |lines: &[serde_json::Value]| {
+        let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        let _ = file.write_all(text.as_bytes());
+    };
+    write(&[
         event(serde_json::json!({ "type": "task_started", "turn_id": turn })),
         event(serde_json::json!({ "type": "item_completed", "turn_id": turn, "item": {
             "type": "UserMessage", "id": format!("u-{n}"), "content": [{ "type": "text", "text": message }] } })),
+    ]);
+    std::thread::sleep(took);
+    write(&[
         event(serde_json::json!({ "type": "item_completed", "turn_id": turn, "item": {
             "type": "CommandExecution", "id": format!("cmd-{}-{n}", std::process::id()),
             "command": ["/bin/zsh", "-lc", format!("echo {first}")], "status": "completed",
             "exit_code": 0, "aggregated_output": first } })),
         event(serde_json::json!({ "type": "task_complete", "turn_id": turn })),
-    ];
-    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
-    let _ = file.write_all(text.as_bytes());
+    ]);
 }
 
 /// Now, as Claude Code writes it: `2026-10-25T09:00:00.000Z`.
@@ -243,7 +248,7 @@ fn main() {
                 rollout = open_rollout(sessions);
             } else if let Some(file) = rollout.as_mut() {
                 turns += 1;
-                rollout_turn(file, turns, &message);
+                rollout_turn(file, turns, &message, turn);
             }
             println!("got: {message}");
             continue;

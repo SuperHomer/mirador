@@ -251,7 +251,7 @@ const TRAIL_FILES: usize = 256;
 /// The file a pane's agent writes what it does to, or why there is none
 /// to read: Claude Code's transcript, which its hooks name, or the rollout
 /// its Codex holds open. Once the agent is gone, the one it last wrote.
-fn trail_file(state: &AppState, pane_id: &str) -> Result<TrailFile, String> {
+pub fn trail_file(state: &AppState, pane_id: &str) -> Result<TrailFile, String> {
     let agent = {
         let meta = state.meta.lock().unwrap();
         meta.get(pane_id).filter(|m| m.is_agent()).map(|m| (m.harness(), m.agent_transcript.clone(), m.agent_pid))

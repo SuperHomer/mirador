@@ -157,6 +157,7 @@ pub fn spawn(handle: tauri::AppHandle) {
                     turns.extend(cmux_core::tasks::status_event(pane, before, m.status()));
                 }
                 drop(meta);
+                turns.extend(codex_turn_ends(&state));
                 for turn in turns {
                     crate::tasks::record(&handle, turn);
                 }
@@ -285,4 +286,34 @@ fn fetch_pr(repo_root: &str, branch: &str) -> Option<PrStatus> {
         url: json["url"].as_str().unwrap_or("").to_string(),
         checks: checks.to_string(),
     })
+}
+
+/// The turns live Codex agents ended since the last tick. Codex has no
+/// hooks; it writes a turn's end only to its rollout, so each live Codex
+/// pane's is followed from where it was when first seen — what it held
+/// before is history, not logged again. The rollout is the one the trail
+/// reads, found under the same rule (`lsof` only when it may have changed).
+fn codex_turn_ends(state: &AppState) -> Vec<cmux_protocol::TaskEventKind> {
+    let codex: Vec<String> = state
+        .meta
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, m)| m.agent_live && m.harness() == Some(cmux_protocol::Harness::Codex))
+        .map(|(pane, _)| pane.clone())
+        .collect();
+    let mut ends = Vec::new();
+    for pane in &codex {
+        let Ok(crate::commands::TrailFile::Codex(known)) = crate::commands::trail_file(state, pane) else { continue };
+        let mut tails = state.codex_tails.lock().unwrap();
+        let tail = tails
+            .entry(pane.clone())
+            .or_insert_with(|| cmux_core::codex_trail::RolloutTail::at_end(known.path.clone()));
+        if tail.path != known.path {
+            *tail = cmux_core::codex_trail::RolloutTail::at_end(known.path);
+        }
+        ends.extend(tail.read().into_iter().map(|end| cmux_protocol::TaskEventKind::TurnEnded { pane: pane.clone(), end }));
+    }
+    state.codex_tails.lock().unwrap().retain(|pane, _| codex.contains(pane));
+    ends
 }

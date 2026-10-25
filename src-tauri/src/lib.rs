@@ -69,6 +69,8 @@ pub struct AppState {
     /// after the agent exits, until another starts there or the pane
     /// closes.
     pub trail_files: Mutex<std::collections::HashMap<String, commands::TrailFile>>,
+    /// Each live Codex pane's rollout, followed for the ends of its turns.
+    pub codex_tails: Mutex<std::collections::HashMap<String, cmux_core::codex_trail::RolloutTail>>,
     /// The task log's path, locked while it is appended to or read: the
     /// app is its one writer.
     pub task_log: Mutex<std::path::PathBuf>,
@@ -268,6 +270,7 @@ pub fn run() {
             trails: Mutex::new(Default::default()),
             codex_trails: Mutex::new(Default::default()),
             trail_files: Mutex::new(Default::default()),
+            codex_tails: Mutex::new(Default::default()),
             task_log: Mutex::new(task_log),
             update: update::UpdateState::default(),
             emit_coalescer: commands::EmitCoalescer::default(),

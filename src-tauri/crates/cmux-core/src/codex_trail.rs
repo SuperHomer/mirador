@@ -15,11 +15,11 @@
 //! `call_id`. Nothing here is a documented format either: every field is
 //! optional, and a line that does not parse is skipped.
 
-use std::collections::HashMap;
-use std::io::BufRead;
+use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{ActionDetail, ActionStatus, TrailAction, TrailTurn};
+use cmux_protocol::{ActionDetail, ActionStatus, TrailAction, TrailTurn, TurnEnd};
 use serde_json::Value;
 
 use crate::trail::{head, one_line, stamp, summarize, turn};
@@ -381,6 +381,69 @@ pub fn action_detail(path: &Path, id: &str) -> Option<ActionDetail> {
     detail
 }
 
+/// Follows a rollout as it grows, for the ends of its turns: what Claude
+/// Code's `Stop` hook tells of its turns, Codex writes only here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RolloutTail {
+    pub path: PathBuf,
+    offset: u64,
+    /// Turns already ended, so a turn ends once whatever its lines say.
+    ended: HashSet<String>,
+}
+
+impl RolloutTail {
+    /// From the end of `path` as it is now: the turns it holds already
+    /// ended before Mirador looked, and are not logged (again).
+    pub fn at_end(path: PathBuf) -> Self {
+        let offset = std::fs::metadata(&path).map_or(0, |m| m.len());
+        Self { path, offset, ended: HashSet::new() }
+    }
+
+    /// The turns that ended in what was appended since the last read. A
+    /// file that shrank was rewritten: it is followed from its new end.
+    pub fn read(&mut self) -> Vec<TurnEnd> {
+        let Ok(mut file) = std::fs::File::open(&self.path) else { return Vec::new() };
+        let len = file.metadata().map_or(0, |m| m.len());
+        if len <= self.offset {
+            self.offset = len;
+            return Vec::new();
+        }
+        let mut bytes = Vec::new();
+        if file.seek(SeekFrom::Start(self.offset)).is_err() || file.take(len - self.offset).read_to_end(&mut bytes).is_err() {
+            return Vec::new();
+        }
+        let (ends, used) = self.turn_ends(&bytes);
+        self.offset += used;
+        ends
+    }
+
+    /// The turn ends in `bytes`, appended at the offset, and how many of
+    /// them were whole lines: a line still being written waits for the
+    /// next read. A `task_complete` is a turn done; a `turn_aborted` (an
+    /// interrupted turn) is one too, its agent waiting for its next prompt.
+    fn turn_ends(&mut self, bytes: &[u8]) -> (Vec<TurnEnd>, u64) {
+        let whole = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+        let mut ends = Vec::new();
+        for line in bytes[..whole].split(|&b| b == b'\n') {
+            let Ok(entry) = serde_json::from_slice::<Value>(line) else { continue };
+            let p = &entry["payload"];
+            if entry["type"] != "event_msg" || !matches!(p["type"].as_str(), Some("task_complete" | "turn_aborted")) {
+                continue;
+            }
+            // Bounded: turn ids are not reused, so forgetting old ones
+            // only matters for a turn ending twice across that.
+            if self.ended.len() > 1024 {
+                self.ended.clear();
+            }
+            let turn = text(&p["turn_id"]).unwrap_or_default();
+            if turn.is_empty() || self.ended.insert(turn) {
+                ends.push(TurnEnd::Done);
+            }
+        }
+        (ends, whole as u64)
+    }
+}
+
 /// The rollout among a process's open files: the one `rollout-*.jsonl`
 /// under a `sessions` directory, else how many there were. None, or more
 /// than one — a Codex that started another, or one thread per agent of a
@@ -691,6 +754,48 @@ mod tests {
         assert_eq!(newest_rollout(&sessions), Some(newest.clone()));
         assert_eq!(sessions_of(&newest), Some(sessions.as_path()));
         let _ = std::fs::remove_dir_all(sessions.parent().unwrap());
+    }
+
+    #[test]
+    fn tells_each_turn_end_once_from_where_it_began_following() {
+        let dir = std::env::temp_dir().join(format!("mira-tail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout-1.jsonl");
+        let append = |lines: &[String]| {
+            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+            std::io::Write::write_all(&mut f, (lines.join("\n") + "\n").as_bytes()).unwrap();
+        };
+        // A session's history, there before Mirador looked: not replayed.
+        append(&[started("A", "00"), complete("A", "01")]);
+        let mut tail = RolloutTail::at_end(path.clone());
+        assert_eq!(tail.read(), []);
+
+        // A turn ending now is told once, however often it is read.
+        append(&[started("B", "02"), item("B", &command("c", "ls", 0, "x"), 0, 1), complete("B", "03")]);
+        assert_eq!(tail.read(), [TurnEnd::Done]);
+        assert_eq!(tail.read(), []);
+
+        // Interrupted is an end too; one turn's second end is not.
+        append(&[started("C", "04"), line("05", "event_msg", r#"{"type":"turn_aborted","turn_id":"C"}"#)]);
+        append(&[complete("C", "06")]);
+        assert_eq!(tail.read(), [TurnEnd::Done]);
+
+        // A line still being written waits for the rest of it.
+        let done = complete("D", "07");
+        let (head, rest) = done.split_at(20);
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        std::io::Write::write_all(&mut f, head.as_bytes()).unwrap();
+        assert_eq!(tail.read(), []);
+        std::io::Write::write_all(&mut f, format!("{rest}\n").as_bytes()).unwrap();
+        assert_eq!(tail.read(), [TurnEnd::Done]);
+
+        // Rewritten shorter: followed from its new end, nothing replayed.
+        std::fs::write(&path, format!("{}\n", complete("E", "08"))).unwrap();
+        assert_eq!(tail.read(), []);
+        append(&[complete("F", "09")]);
+        assert_eq!(tail.read(), [TurnEnd::Done]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

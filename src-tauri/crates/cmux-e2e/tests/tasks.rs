@@ -234,3 +234,34 @@ fn the_task_board_opens_and_comes_back() {
     let pane = listed(&sb).expect("the board comes back as a board, not a shell");
     assert_eq!(pane["tabId"], tab.as_str());
 }
+
+#[test]
+fn a_codex_agent_s_card_follows_its_turns() {
+    e2e!();
+    let mut sb = Sandbox::new("codextasks");
+    sb.set_env("E2E_TURN_MS", "3000");
+    sb.write(".mirador/roles/dev.md", "---\nmodel: opus\n---\nYou build.\n");
+    sb.write(".mirador/roles/coder.md", "---\nharness: codex\nmodel: gpt-5\n---\nYou code.\n");
+    sb.write(
+        ".mirador/teams/pair.md",
+        "---\nmembers:\n  - role: dev\n    lead: true\n  - role: coder\n---\nShip small.\n",
+    );
+    sb.launch();
+    let shell = sb.first_pane();
+    sb.call(Request::TeamStart { team: "pair".into(), task: None, pane_id: Some(shell) });
+    sb.wait_for("the coder", LONG, || sb.member("coder"));
+    let dev = pane_of(&sb, "dev");
+    let coder = pane_of(&sb, "coder");
+    sb.wait_for("the dev's session", LONG, || sb.events("hooked", &dev).into_iter().next());
+
+    // Codex has no hooks: its turn ends come from its rollout.
+    mira(&sb, &dev, &["agent", "send", "coder", "Refactor the parser"]);
+    let board = mira(&sb, &dev, &["task", "list"]);
+    assert_eq!(column_of(&board, "Refactor the parser").as_deref(), Some("Doing"), "{board}");
+    let board = sb.wait_for("the card to be done", LONG, || {
+        let board = mira(&sb, &dev, &["task", "list"]);
+        (column_of(&board, "Refactor the parser").as_deref() == Some("Done")).then_some(board)
+    });
+    let history = mira(&sb, &dev, &["agent", "history", "--pane", &coder]);
+    assert_eq!(history.lines().filter(|l| l.contains("coder done")).count(), 1, "one end for its one turn:\n{history}\n{board}");
+}
