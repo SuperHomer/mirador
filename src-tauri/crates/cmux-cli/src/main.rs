@@ -361,8 +361,8 @@ enum AgentAction {
         #[arg(long)]
         tab: bool,
     },
-    /// Open the agent wall for this tab: its agents' terminals in one
-    /// grid, in a tab of its own (the existing wall, if there is one).
+    /// Show this tab as the agent wall, its agents' terminals in one
+    /// grid in place of its splits; again to show the splits.
     Wall,
 }
 
@@ -699,9 +699,15 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
                 target: tab.then(|| "tab".to_string()),
             },
-            AgentAction::Wall => Request::AgentWall {
-                pane_id: own_pane(),
-            },
+            AgentAction::Wall => {
+                let resp = send_request(Request::AgentWall { pane_id: own_pane() })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                let on = resp.data.as_ref().and_then(|d| d["wall"].as_bool()).unwrap_or(false);
+                println!("wall {}", if on { "on" } else { "off" });
+                return Ok(());
+            }
         },
         Command::Team { action } => match action {
             TeamAction::Start { team, task } => Request::TeamStart {

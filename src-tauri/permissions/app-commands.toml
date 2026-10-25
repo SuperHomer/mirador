@@ -57,6 +57,7 @@ permissions = [
   "allow-open-task-board",
   "allow-task-cards",
   "allow-task-history",
+  "allow-toggle-agent-wall",
   "allow-get-agent-activity",
   "allow-get-agent-trail",
   "allow-get-trail-detail",

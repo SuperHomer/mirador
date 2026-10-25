@@ -1859,6 +1859,27 @@ pub fn open_agent_wall(
     Ok(wall)
 }
 
+/// Shows the tab of `pane_id` (the focused pane when absent) as the wall
+/// of its agents, or its splits again when it already is. The new state.
+#[tauri::command]
+pub fn toggle_agent_wall(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+) -> Result<bool, String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let on = state
+        .workspace
+        .lock()
+        .unwrap()
+        .toggle_wall(&pane)
+        .ok_or_else(|| format!("no pane {pane}"))?;
+    emit_workspace(&app);
+    Ok(on)
+}
+
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY
 /// runs `ssh -tt <host>`, so auth/agent/2FA behave exactly as in any
 /// terminal; disconnect leaves the pane idle and a keypress reconnects.

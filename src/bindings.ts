@@ -29,6 +29,8 @@ export interface TabSnapshot {
   ports: number[];
   /** The pane shown alone, filling the tab, when one is. */
   zoomedPane: string | null;
+  /** The tab shows its agents as the wall instead of its splits. */
+  wall: boolean;
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
   /** Its frame on the board; its cards are placed relative to `x`, `y`. */
@@ -749,6 +751,8 @@ export const markPaneRead = (paneId: string) =>
 /** The wall for the tab of `paneId` (the focused pane when null). */
 export const openAgentWall = (paneId: string | null) =>
   invoke<string>("open_agent_wall", { paneId });
+export const toggleAgentWall = (paneId: string | null) =>
+  invoke<boolean>("toggle_agent_wall", { paneId });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
 /** Its last `turns` turns, and any begun at or after `sinceMs`. */

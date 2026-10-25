@@ -370,9 +370,9 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
-    /// Opens the agent wall for the tab of `pane_id` (the focused pane
-    /// when absent): its own tab, reused if there is one, showing that
-    /// tab's agents.
+    /// Shows the tab of `pane_id` (the focused pane when absent) as the
+    /// wall of its agents, or its splits again when it already is.
+    /// Answers `{"wall": bool}`, the new state.
     AgentWall {
         #[serde(default)]
         pane_id: Option<String>,

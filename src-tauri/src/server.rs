@@ -371,8 +371,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentWall { pane_id } => {
-            let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;
-            Ok(json!({ "paneId": pane_id }))
+            let on = crate::commands::toggle_agent_wall(app.clone(), app.state(), pane_id)?;
+            Ok(json!({ "wall": on }))
         }
         Request::Run {
             command,
