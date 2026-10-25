@@ -125,10 +125,7 @@ impl CodexTrail {
             _ => item["duration"]["secs"].as_u64().map(|s| s * 1000 + item["duration"]["nanos"].as_u64().unwrap_or(0) / 1_000_000),
         };
         let exit_code = item["exit_code"].as_i64().and_then(|c| i32::try_from(c).ok());
-        let failed = matches!(item["status"].as_str(), Some("failed" | "declined" | "error"))
-            || exit_code.is_some_and(|c| c != 0)
-            || item["error"].is_string()
-            || item["error"].is_object();
+        let failed = item_failed(item);
         let t = self.turn_for_action(p, ms);
         let turn = &mut self.turns[t];
         turn.actions.push(TrailAction {
@@ -248,6 +245,15 @@ fn item_summary(kind: &str, item: &Value) -> String {
     })
 }
 
+/// Whether an item says it failed: by its status, a non-zero exit code,
+/// or an error it carries (an MCP call's, which keeps its status).
+fn item_failed(item: &Value) -> bool {
+    matches!(item["status"].as_str(), Some("failed" | "declined" | "error"))
+        || item["exit_code"].as_i64().is_some_and(|c| c != 0)
+        || item["error"].is_string()
+        || item["error"].is_object()
+}
+
 /// What an item says came of it.
 fn item_output(item: &Value) -> String {
     OUTPUT_KEYS
@@ -340,8 +346,7 @@ pub fn action_detail(path: &Path, id: &str) -> Option<ActionDetail> {
                 id: id.to_string(),
                 tool: text(&item["type"]).unwrap_or_default(),
                 input: serde_json::to_string_pretty(&input).unwrap_or_default(),
-                is_error: matches!(item["status"].as_str(), Some("failed" | "declined" | "error"))
-                    || item["exit_code"].as_i64().is_some_and(|c| c != 0),
+                is_error: item_failed(item),
                 output: Some(output),
             });
         }
@@ -589,6 +594,23 @@ mod tests {
         assert_eq!((s1.input.as_str(), s1.is_error), ("{\n  \"command\": \"false\"\n}", true));
         assert_eq!(action_detail(&path, "s2").unwrap().output, None);
         assert_eq!(action_detail(&path, "zzz"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_item_with_an_error_failed_in_the_trail_and_its_detail() {
+        let dir = std::env::temp_dir().join(format!("mira-codex-error-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout-1.jsonl");
+        // Completed, no exit code, but an error.
+        let mcp = r#"{"type":"McpToolCall","id":"m1","server":"docs","tool":"read","status":"completed","error":{"message":"not found"}}"#;
+        let lines = [started("A", "00"), item("A", mcp, 0, 10)];
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+
+        let turns = trail(&lines);
+        assert_eq!(turns[0].actions[0].status, ActionStatus::Error);
+        assert!(action_detail(&path, "m1").unwrap().is_error);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
