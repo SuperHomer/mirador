@@ -46,12 +46,14 @@ impl Feed for Trail {
         }
         let ms = entry["timestamp"].as_str().and_then(parse_timestamp);
         match entry["type"].as_str() {
-            Some("assistant") => self.assistant(&entry["message"], ms),
+            Some("assistant") => {
+                self.assistant(&entry["message"], ms);
+                if let Some(turn) = self.turns.last_mut() {
+                    stamp(turn, ms);
+                }
+            }
             Some("user") => self.user(&entry, ms),
-            _ => return,
-        }
-        if let (Some(turn), Some(ms)) = (self.turns.last_mut(), ms) {
-            turn.last_ms = Some(ms);
+            _ => {}
         }
     }
 }
@@ -94,6 +96,8 @@ impl Trail {
             let Some((t, a)) = block["tool_use_id"].as_str().and_then(|id| self.pending.remove(id)) else {
                 continue;
             };
+            // Its own turn's, which a late result is not the latest of.
+            stamp(&mut self.turns[t], ms);
             let action = &mut self.turns[t].actions[a];
             let error = block["is_error"].as_bool() == Some(true);
             let output = result_text(&block["content"]);
@@ -120,12 +124,21 @@ impl Trail {
         }
         if !prompt.starts_with("[Request interrupted") {
             self.turns.push(turn(Some(one_line(prompt)), ms));
+        } else if let Some(turn) = self.turns.last_mut() {
+            stamp(turn, ms);
         }
     }
 }
 
 fn turn(prompt: Option<String>, ms: Option<u64>) -> TrailTurn {
     TrailTurn { prompt, started_ms: ms, last_ms: ms, actions: Vec::new() }
+}
+
+/// Moves a turn's latest entry to `ms`, when the entry has one.
+fn stamp(turn: &mut TrailTurn, ms: Option<u64>) {
+    if ms.is_some() {
+        turn.last_ms = ms;
+    }
 }
 
 /// What a call is about, in a line: the field that says it for the tools
@@ -385,6 +398,9 @@ mod tests {
             t.feed(line);
         }
         assert_eq!(t.turns()[0].actions[0].status, ActionStatus::Ok);
+        // And moves on its own turn's time, not the newer one's.
+        assert_eq!(t.turns()[0].last_ms, Some(1_792_918_803_000));
+        assert_eq!(t.turns()[1].last_ms, Some(1_792_918_802_000));
     }
 
     #[test]
