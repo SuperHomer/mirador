@@ -226,6 +226,94 @@ fn a_card_sizes_its_terminal() {
     assert!(rows_big > rows_small * 18 / 10, "{rows_big} rows at 600px, {rows_small} at 300px");
 }
 
+/// The size of the agent's terminal, as its `!size` prints it: the last
+/// rows-and-columns line on its screen.
+fn agent_pty(sb: &Sandbox, agent: &str) -> Option<(u32, u32)> {
+    sb.type_into(agent, "!size\r");
+    let screen = sb.screen(agent)?;
+    let line = screen
+        .lines()
+        .rev()
+        .find(|l| l.split_whitespace().count() == 2 && l.chars().all(|c| c.is_ascii_digit() || c == ' '))?;
+    let mut it = line.split_whitespace().map(|n| n.parse::<u32>().unwrap());
+    Some((it.next()?, it.next()?))
+}
+
+/// An agent answers a message: the fake one says it is done with it.
+fn assert_agent_answers(sb: &Sandbox, agent: &str, message: &str) {
+    sb.type_into(agent, &format!("{message}\r"));
+    let done = format!("done: {message}");
+    sb.wait_for_screen(agent, "the agent to answer", LONG, |s| s.contains(&done));
+}
+
+/// A walled tab on the board draws its wall in its frame, in place of its
+/// cards: its agents' terminals are in the wall's tiles, sized by them —
+/// not by their cards — and answer there, and go on answering as the board
+/// is left and the wall turned off. What the frame looks like needs a
+/// person; the size its PTY is given is what a caller can see of where a
+/// terminal is drawn.
+#[test]
+fn a_walled_tab_on_the_board_draws_its_wall() {
+    e2e!();
+    let mut sb = Sandbox::new("boardwall");
+    sb.launch();
+    let first = sb.first_pane();
+    sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
+    let agents: Vec<String> = (0..2)
+        .map(|_| {
+            let agent = sb.call(Request::AgentNew { role: None, task: None, target: None, pane_id: Some(first.clone()) })
+                ["paneId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            sb.wait_for_screen(&agent, "the fake claude", LONG, |s| s.contains("fake claude ready"));
+            agent
+        })
+        .collect();
+    sb.wait_for("the agents to be listed", LONG, || {
+        let listed = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.iter().all(|a| listed.iter().any(|l| l["paneId"] == a.as_str())).then_some(())
+    });
+    let sized = &agents[0];
+
+    // On the board, the agent's card made small, in place: the frame stays
+    // as big as the other cards make it.
+    sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
+    let c = card(&sb.snapshot(), sized);
+    let at = |k: &str| c[k].as_f64().unwrap();
+    sb.call(Request::SetCardRect { pane_id: sized.clone(), x: at("x"), y: at("y"), w: 200.0, h: 150.0 });
+    let (card_rows, card_cols) = sb.wait_for("the terminal to take its card's size", LONG, || {
+        agent_pty(&sb, sized).filter(|&(rows, cols)| rows <= 12 && cols <= 40)
+    });
+
+    // The wall on: the frame shows it, and the terminal is the tile's, half
+    // the frame across and most of it down.
+    let (code, out, err) = sb.mira(Some(sized), &["agent", "wall"]);
+    assert_eq!((code, out.trim()), (0, "wall on"), "{err}");
+    let snap = sb.snapshot();
+    assert_eq!(snap["view"], "board");
+    assert!(snap["tabs"][0]["wall"].as_bool().unwrap(), "{snap}");
+    let (rows, cols) = sb.wait_for("the terminal to take its tile's size", LONG, || {
+        agent_pty(&sb, sized).filter(|&(rows, cols)| rows >= 2 * card_rows && cols >= 2 * card_cols)
+    });
+    assert_eq!(card(&sb.snapshot(), sized)["w"], 200.0, "the card itself is left as it was: {rows}x{cols}");
+    for (i, agent) in agents.iter().enumerate() {
+        assert_agent_answers(&sb, agent, &format!("on-the-board-{i}"));
+    }
+
+    // Off the board, still the wall; then the splits again.
+    sb.call(Request::View { view: Some(cmux_protocol::View::Tabs) });
+    for (i, agent) in agents.iter().enumerate() {
+        assert_agent_answers(&sb, agent, &format!("in-the-tab-{i}"));
+    }
+    let (code, out, err) = sb.mira(Some(sized), &["agent", "wall"]);
+    assert_eq!((code, out.trim()), (0, "wall off"), "{err}");
+    for (i, agent) in agents.iter().enumerate() {
+        assert_agent_answers(&sb, agent, &format!("in-its-pane-{i}"));
+    }
+    assert_panes_answer(&sb, std::slice::from_ref(&first));
+}
+
 /// A page for a browser card, served on an ephemeral port for the life of
 /// the test.
 fn serve_page() -> String {
