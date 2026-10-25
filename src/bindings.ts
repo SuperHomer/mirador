@@ -744,8 +744,9 @@ export const openAgentWall = (paneId: string | null) =>
   invoke<string>("open_agent_wall", { paneId });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
-export const getAgentTrail = (paneId: string) =>
-  invoke<AgentTrail>("get_agent_trail", { paneId });
+/** Its last `turns` turns, and any begun at or after `sinceMs`. */
+export const getAgentTrail = (paneId: string, turns: number | null, sinceMs: number | null) =>
+  invoke<AgentTrail>("get_agent_trail", { paneId, turns, sinceMs });
 export const getTrailDetail = (paneId: string, actionId: string) =>
   invoke<ActionDetail>("get_trail_detail", { paneId, actionId });
 export const loadGraph = (paneId: string, limit: number | null = null) =>

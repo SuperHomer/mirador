@@ -236,6 +236,19 @@ fn shorten(s: &str, chars: usize) -> String {
     }
 }
 
+/// The turns a view asks for: the last `limit` (all, without one), and
+/// any earlier begun at or after `since_ms` — the turn a card links to may
+/// be older than the latest few.
+pub fn window(turns: &[TrailTurn], limit: Option<u32>, since_ms: Option<u64>) -> &[TrailTurn] {
+    let mut from = limit.map_or(0, |n| turns.len().saturating_sub(n as usize));
+    if let Some(since) = since_ms {
+        if let Some(i) = turns.iter().position(|t| t.started_ms.is_some_and(|s| s >= since)) {
+            from = from.min(i);
+        }
+    }
+    &turns[from..]
+}
+
 /// One call's full input and output, read from the transcript at `path`:
 /// absent when the transcript is gone or holds no call `id`.
 pub fn action_detail(path: &Path, id: &str) -> Option<ActionDetail> {
@@ -411,6 +424,22 @@ mod tests {
         // And moves on its own turn's time, not the newer one's.
         assert_eq!(t.turns()[0].last_ms, Some(1_792_918_803_000));
         assert_eq!(t.turns()[1].last_ms, Some(1_792_918_802_000));
+    }
+
+    #[test]
+    fn a_window_is_the_latest_turns_and_any_since_a_time() {
+        let turns: Vec<TrailTurn> = (0..10).map(|i| turn(Some("go"), Some(i * 1000))).collect();
+        let starts = |w: &[TrailTurn]| w.iter().map(|t| t.started_ms.unwrap() / 1000).collect::<Vec<_>>();
+        assert_eq!(window(&turns, None, None).len(), 10);
+        assert_eq!(starts(window(&turns, Some(3), None)), [7, 8, 9]);
+        assert_eq!(window(&turns, Some(30), None).len(), 10);
+        // A card given before the latest three reaches its turn.
+        assert_eq!(starts(window(&turns, Some(3), Some(4500))), [5, 6, 7, 8, 9]);
+        // Since a time within the latest: no fewer than the latest three.
+        assert_eq!(starts(window(&turns, Some(3), Some(8000))), [7, 8, 9]);
+        // Nothing begun since: the latest, where its turn will come.
+        assert_eq!(starts(window(&turns, Some(2), Some(99_000))), [8, 9]);
+        assert!(window(&[], Some(3), Some(0)).is_empty());
     }
 
     #[test]

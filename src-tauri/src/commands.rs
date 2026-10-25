@@ -321,12 +321,23 @@ fn codex_rollout(
     }
 }
 
-/// What a pane's agent did, turn by turn. No file to read from is no
+/// What a pane's agent did, turn by turn: its last `turns` turns, and any
+/// begun since `since_ms` (`trail::window`). No file to read from is no
 /// error: the trail is empty, and says why.
-pub fn agent_trail(state: &AppState, pane_id: &str) -> cmux_protocol::AgentTrail {
+pub fn agent_trail(
+    state: &AppState,
+    pane_id: &str,
+    turns: Option<u32>,
+    since_ms: Option<u64>,
+) -> cmux_protocol::AgentTrail {
+    use cmux_core::trail::window;
     let read = match trail_file(state, pane_id) {
-        Ok(TrailFile::Claude(path)) => state.trails.lock().unwrap().read(&path).map(|t| t.turns().to_vec()),
-        Ok(TrailFile::Codex(known)) => state.codex_trails.lock().unwrap().read(&known.path).map(|t| t.turns().to_vec()),
+        Ok(TrailFile::Claude(path)) => {
+            state.trails.lock().unwrap().read(&path).map(|t| window(t.turns(), turns, since_ms).to_vec())
+        }
+        Ok(TrailFile::Codex(known)) => {
+            state.codex_trails.lock().unwrap().read(&known.path).map(|t| window(t.turns(), turns, since_ms).to_vec())
+        }
         Err(reason) => {
             return cmux_protocol::AgentTrail { pane_id: pane_id.to_string(), turns: Vec::new(), reason: Some(reason) }
         }
@@ -349,8 +360,13 @@ pub fn trail_detail(state: &AppState, pane_id: &str, action_id: &str) -> Result<
 
 /// [`agent_trail`] for the board, off the main thread like the activity.
 #[tauri::command]
-pub async fn get_agent_trail(app: AppHandle, pane_id: String) -> Result<cmux_protocol::AgentTrail, String> {
-    tauri::async_runtime::spawn_blocking(move || agent_trail(&app.state::<AppState>(), &pane_id))
+pub async fn get_agent_trail(
+    app: AppHandle,
+    pane_id: String,
+    turns: Option<u32>,
+    since_ms: Option<u64>,
+) -> Result<cmux_protocol::AgentTrail, String> {
+    tauri::async_runtime::spawn_blocking(move || agent_trail(&app.state::<AppState>(), &pane_id, turns, since_ms))
         .await
         .map_err(|e| e.to_string())
 }

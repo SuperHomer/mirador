@@ -3052,6 +3052,23 @@ button.tb-assignee:hover {
   color: var(--muted);
 }
 
+/* Under the oldest turn shown: more of them, on asking. */
+.tb-older {
+  margin: 0 0 6px 3.8em;
+  padding: 2px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 4px;
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tb-older:hover {
+  color: var(--text);
+}
+
 .tb-turns,
 .tb-actions {
   list-style: none;

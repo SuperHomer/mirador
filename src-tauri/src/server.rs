@@ -349,12 +349,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::AgentTrail { name, pane_id, turns } => {
             let pane = trail_pane(&state, name, pane_id)?;
-            let mut trail = crate::commands::agent_trail(&state, &pane);
-            if let Some(n) = turns {
-                let keep = trail.turns.len().saturating_sub(n as usize);
-                trail.turns.drain(..keep);
-            }
-            Ok(json!({ "trail": trail }))
+            Ok(json!({ "trail": crate::commands::agent_trail(&state, &pane, turns, None) }))
         }
         Request::AgentTrailDetail { action_id, name, pane_id } => {
             let pane = trail_pane(&state, name, pane_id)?;

@@ -43,6 +43,10 @@ const COLUMNS: [TaskColumn, string][] = [
  *  event, so it is read on a timer, as the activity panel is. */
 const POLL_MS = 2000;
 
+/** How many of an agent's latest turns the Trail view reads, and how
+ *  many more each "Show older" adds. */
+const TRAIL_TURNS = 20;
+
 /** A turn begins this long after its card was given, at the most before:
  *  the card is logged as the message is typed, the prompt entry after. */
 const GIVEN_SLACK_MS = 1000;
@@ -55,6 +59,7 @@ const MARKS: Record<TrailAction["status"], string> = {
 };
 
 const NO_CARDS: TaskCard[] = [];
+const NO_AGENTS: AgentInfo[] = [];
 const NO_HISTORY: TaskHistoryEntry[] = [];
 
 function paneIds(node: Node): string[] {
@@ -183,9 +188,9 @@ export const TaskBoard = memo(function TaskBoard({
       {view === "trail" ? (
         <TrailView
           agents={agents}
+          running={snapshot?.agents ?? NO_AGENTS}
           picked={trailOf}
           onPick={(a) => setTrailOf({ pane: a.paneId, label: agentLabel(a), at: null })}
-          onScrolled={() => setTrailOf((t) => t && { ...t, at: null })}
           live={live}
           now={now}
         />
@@ -332,36 +337,48 @@ function Card({
 /**
  * The Trail view: the scope's agents, and what the picked one did, turn
  * by turn, newest first, read from its own transcript or rollout while on
- * screen. An agent that has exited stays pickable from its cards: the
- * app keeps its last file.
+ * screen — its latest [`TRAIL_TURNS`] turns, more on asking, and from a
+ * card, back to that card's turn. An agent that has exited stays pickable
+ * from its cards: the app keeps its last file.
  */
 function TrailView({
   agents,
+  running,
   picked,
   onPick,
-  onScrolled,
   live,
   now,
 }: {
+  /** The scope's agents. */
   agents: AgentInfo[];
+  /** Every agent running, in any tab. */
+  running: AgentInfo[];
   picked: { pane: string; label: string; at: number | null } | null;
   onPick: (agent: AgentInfo) => void;
-  onScrolled: () => void;
   live: boolean;
   now: number;
 }) {
   const windowVisible = useWindowVisible();
   const pane = picked?.pane ?? agents[0]?.paneId ?? null;
-  const trail = useTrail(pane, live && windowVisible);
+  const [older, setOlder] = useState<{ pane: string | null; turns: number }>({ pane, turns: TRAIL_TURNS });
+  const limit = older.pane === pane ? older.turns : TRAIL_TURNS;
+  const at = picked?.pane === pane ? picked.at : null;
+  const since = at === null ? null : at - GIVEN_SLACK_MS;
+  const { trail, readSince } = useTrail(pane, live && windowVisible, limit, since);
   const listed = agents.some((a) => a.paneId === pane);
+  // Picked from a card: out of this scope but running, or gone.
+  const alive = running.some((a) => a.paneId === pane);
   return (
     <div className="tb-trail">
       <ul className="tb-agents">
         {!listed && picked && (
           <li>
-            <button className="tb-agent on" title="Its agent is no longer running">
+            <button
+              className="tb-agent on"
+              title={alive ? "Its agent runs in another tab" : "Its agent is no longer running"}
+            >
               <span className="tb-agent-name">{picked.label}</span>
-              <span className="tb-agent-meta">exited</span>
+              <span className="tb-agent-meta">{alive ? "other tab" : "exited"}</span>
             </button>
           </li>
         )}
@@ -384,13 +401,15 @@ function TrailView({
         ) : trail === null ? null : trail.turns.length === 0 ? (
           <p className="tb-reason">{trail.reason ?? "Nothing done yet."}</p>
         ) : (
-          <Timeline
-            key={pane}
-            trail={trail}
-            at={picked?.pane === pane ? picked.at : null}
-            onScrolled={onScrolled}
-            now={now}
-          />
+          <>
+            {/* Scrolled to a card's turn only once read back to it. */}
+            <Timeline key={pane} trail={trail} at={readSince === since ? at : null} now={now} />
+            {trail.turns.length >= limit && (
+              <button className="tb-older" onClick={() => setOlder({ pane, turns: limit + TRAIL_TURNS })}>
+                Show older turns
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -405,25 +424,25 @@ function TrailView({
 function Timeline({
   trail,
   at,
-  onScrolled,
   now,
 }: {
   trail: AgentTrail;
   at: number | null;
-  onScrolled: () => void;
   now: number;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const target = useRef<HTMLLIElement>(null);
+  // The card it last scrolled to: once per link, not on every read.
+  const scrolledTo = useRef<number | null>(null);
   const turns = trail.turns;
   const after = at === null ? -1 : turns.findIndex((t) => t.startedMs !== null && t.startedMs >= at - GIVEN_SLACK_MS);
   // No turn begun since yet: the latest, where its turn will come.
   const goal = at !== null && after === -1 ? turns.length - 1 : after;
   useEffect(() => {
-    if (at === null) return;
+    if (at === null || scrolledTo.current === at) return;
     target.current?.scrollIntoView({ block: "start" });
-    onScrolled();
-  }, [at, onScrolled]);
+    scrolledTo.current = at;
+  }, [at, trail]);
   return (
     <ol className="tb-turns">
       {turns
@@ -536,24 +555,46 @@ function took(ms: number): string {
   return age(0, ms);
 }
 
+/** What a trail read says, in short: a read saying the same as the last
+ *  changes nothing on screen, and is not drawn again. A turn's `lastMs`
+ *  moves with every entry that lands in it, a result included. */
+function fingerprint(trail: AgentTrail): string {
+  return `${trail.reason}|${trail.turns.map((t) => `${t.startedMs}:${t.lastMs}:${t.actions.length}`).join(",")}`;
+}
+
 /**
- * `pane`'s trail, read again [`POLL_MS`] after each read returns, while
- * `enabled`: one read at a time, as `useAgentActivity` reads, and a failed
- * read keeps the last good one. Null until the first read for this pane:
- * the last pane's trail is never shown, not even for a render, under
- * another's name or scrolled to another's card.
+ * `pane`'s trail — its last `turns` turns, and any begun since `sinceMs` —
+ * read again [`POLL_MS`] after each read returns, while `enabled`: one
+ * read at a time, as `useAgentActivity` reads, and a failed read keeps the
+ * last good one. A read that says what the last did is not set, so the
+ * view is not drawn again every two seconds for nothing. Null until the
+ * first read for this pane: the last pane's trail is never shown, not even
+ * for a render, under another's name or scrolled to another's card. With
+ * it, the `sinceMs` it was read with.
  */
-function useTrail(pane: string | null, enabled: boolean): AgentTrail | null {
-  const [trail, setTrail] = useState<AgentTrail | null>(null);
+function useTrail(
+  pane: string | null,
+  enabled: boolean,
+  turns: number,
+  sinceMs: number | null,
+) {
+  const [read, setRead] = useState<{ trail: AgentTrail; since: number | null } | null>(null);
+  const seen = useRef("");
   useEffect(() => {
     if (!pane || !enabled) return;
     let cancelled = false;
     let timer: number | undefined;
+    seen.current = "";
     const load = () => {
-      void getAgentTrail(pane)
+      void getAgentTrail(pane, turns, sinceMs)
         .then(
           (t) => {
-            if (!cancelled) setTrail(t);
+            if (cancelled) return;
+            const f = fingerprint(t);
+            if (f !== seen.current) {
+              seen.current = f;
+              setRead({ trail: t, since: sinceMs });
+            }
           },
           (e) => console.error(`mirador: task board: ${e}`),
         )
@@ -566,8 +607,9 @@ function useTrail(pane: string | null, enabled: boolean): AgentTrail | null {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [pane, enabled]);
-  return trail?.paneId === pane ? trail : null;
+  }, [pane, enabled, turns, sinceMs]);
+  const mine = read?.trail.paneId === pane ? read : null;
+  return { trail: mine?.trail ?? null, readSince: mine?.since ?? null };
 }
 
 /** Whether the window is visible: not minimized, nor behind another space. */
