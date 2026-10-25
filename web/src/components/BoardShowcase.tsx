@@ -147,8 +147,11 @@ export default function BoardShowcase() {
           window are visible — on macOS;
           Windows tries, keeping the last picture or the URL when it can’t, and elsewhere
           the card shows the URL. Below 50% is an overview, where a click focuses a card,
-          though typing still goes to the focused pane and the wheel still scrolls the
-          card under it, unless that is a browser, which pans the board.
+          though typing still goes to the focused pane. At any zoom the wheel scrolls the
+          focused card’s content, unless that is a browser away from 100%, and pans the
+          board anywhere else, other cards included; hold <BothKeys mac="⌥" other="Alt" /> to
+          pan over the focused card too — all but a browser page at 100%, which keeps its
+          own scroll.
         </p>
         <div
           style={{

@@ -36,11 +36,12 @@ downloads, the feature tour and the keybinding reference.
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
   in the sidebar): every tab as a frame and every pane as a card on one
-  canvas. Scroll over a card to scroll its content, at any zoom (a
-  browser card pans away from 100%, where its page is not drawn); drag or
-  scroll over empty board, a gap or a card's header to pan, or hold ⌥
-  (Alt) to pan from anywhere but a browser page at 100%, which keeps its
-  own scroll; pinch or Ctrl+scroll to zoom; double-click a card's header
+  canvas. Scroll over the focused card to scroll its content, at any zoom
+  (a browser card pans away from 100%, where its page is not drawn);
+  scroll anywhere else, other cards included, or drag empty board, a gap
+  or a card's header, to pan, or hold ⌥ (Alt) to pan over the focused
+  card too — anywhere but a browser page at 100%, which keeps its own
+  scroll; pinch or Ctrl+scroll to zoom; double-click a card's header
   to fly to it at 100%. A frame's **+** adds a pane to it (its Agent wall
   item opens the wall in a frame of its own), **New frame** a tab. In the
   corner, **−** and **+** step the zoom (10% to 400%), double-clicking the
@@ -49,9 +50,9 @@ downloads, the feature tour and the keybinding reference.
   goes to the focused pane at any zoom, and from 50% up the pointer
   reaches inside cards too: click, select text, use the mouse in a
   program. Below 50% the board is an overview, where a click focuses a
-  card (the wheel still scrolls it). A browser page shows only at 100%,
-  while its card is still, wholly in view and nothing (palette, panel,
-  menu) is open over it. Away from that, a card shows a recent picture
+  card (the wheel scrolls it once it is focused). A browser page shows
+  only at 100%, while its card is still, wholly in view and nothing
+  (palette, panel, menu) is open over it. Away from that, a card shows a recent picture
   of its page rather than its URL, refreshed after it navigates and every
   few seconds while the card and the window are visible. That is on
   macOS; Windows tries, and keeps the last picture (or the URL) when it

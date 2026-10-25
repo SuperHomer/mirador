@@ -704,9 +704,11 @@ body,
 
 /* Below 50%, a card is something to look at: its content takes no
    pointer, and a click lands on the card, focusing it. The keyboard still
-   types into it, and the wheel still scrolls it: BoardHost hands it over
-   (`handWheel`). From 50% up the content takes the pointer, xterm's with
-   its coordinates unscaled (`unscale`). A browser card's page is drawn
+   types into the focused card, and the wheel still scrolls it: BoardHost
+   hands it over (`handWheel`); over any other card the wheel pans. From
+   50% up the content takes the pointer, xterm's with its coordinates
+   unscaled (`unscale`), and BoardHost stops the wheel over an unfocused
+   card before xterm sees it, to pan instead. A browser card's page is drawn
    only at 100%, so away from it there is nothing in it to point at. */
 .tabs-host.board.distant .pane-body,
 .tabs-host.board.overview .pane-body.browser {

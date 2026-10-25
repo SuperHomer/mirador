@@ -72,6 +72,14 @@ function bodyUnder(e: WheelEvent): HTMLElement | null {
   return inside ? body : null;
 }
 
+/** Whether `body` is the focused pane's: the active tab's, the one the
+ *  keyboard types to. */
+function isFocused(body: HTMLElement): boolean {
+  const snap = useWorkspaceStore.getState().snapshot;
+  const focused = snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane;
+  return !!focused && body.closest<HTMLElement>(".pane-slot")?.dataset.pane === focused;
+}
+
 /**
  * Hands a wheel to what is under the pointer in a card's `body`, which
  * below 50% takes no pointer of its own: a copy of it, dispatched there,
@@ -225,11 +233,13 @@ export function BoardHost({ board, children }: { board: boolean; children: React
         store().moveTo(zoomAround(cam, clampZoom(cam.zoom * Math.exp(-step * 0.01)), px, py));
         return;
       }
-      // Over a card's content the wheel is the content's, at any zoom;
-      // Alt pans from anywhere — but a browser page shown at 100% is a
-      // native webview over its card, and its wheel never comes here.
+      // Over the focused card's content the wheel is the content's, at
+      // any zoom; anywhere else, other cards included, it pans, so a busy
+      // board pans without Alt. Alt pans from anywhere — but a browser
+      // page shown at 100% is a native webview over its card, and its
+      // wheel never comes here.
       const body = bodyUnder(e);
-      if (body && !e.altKey) {
+      if (body && !e.altKey && isFocused(body)) {
         // From 50% up the content takes the pointer, and scrolls itself.
         if (body.contains(e.target as Node)) return;
         // A browser page is not drawn away from 100%: nothing to scroll.
@@ -241,7 +251,8 @@ export function BoardHost({ board, children }: { board: boolean; children: React
         }
       }
       e.preventDefault();
-      // Alt over a card's content: the board's, not the content's too.
+      // Over a card's content, unfocused or with Alt: the board's, not
+      // the content's too — from 50% up it would reach xterm by itself.
       if (body) e.stopPropagation();
       const scale = e.deltaMode === 1 ? LINE_PX : 1;
       store().moveTo({
