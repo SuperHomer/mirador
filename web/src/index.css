@@ -47,6 +47,19 @@ button { font-family: inherit; cursor: pointer; }
   /* The hero's mock needs the width more than the page needs a margin. */
   .hero { padding-left: 16px !important; padding-right: 16px !important; }
   .teams-sidebar { display: none; }
+  /* The task board's columns go two by two, as the app's do in a narrow
+     split; its switches, which do not shrink there, wrap under the name. */
+  .tasks-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .tasks-chrome { flex-wrap: wrap; }
+  .tasks-trail { grid-template-columns: minmax(0, 1fr) !important; }
+  .tasks-agents {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    border-right: none !important;
+    border-bottom: 1px solid var(--surface);
+  }
+  .tasks-agent-meta { display: none; }
   #board .board-mock-controls {
     position: static !important;
     width: fit-content;
