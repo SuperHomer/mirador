@@ -874,6 +874,8 @@ pub struct TrailTurn {
     /// Its first line, shortened. Absent for actions with no prompt before
     /// them (a transcript that starts mid-conversation).
     pub prompt: Option<String>,
+    /// The whole prompt, up to a few thousand characters.
+    pub text: Option<String>,
     /// Unix millis of its first and latest entries.
     pub started_ms: Option<u64>,
     pub last_ms: Option<u64>,

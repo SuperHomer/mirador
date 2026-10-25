@@ -19,8 +19,11 @@ use serde_json::Value;
 
 use crate::transcript::{parse_timestamp, text, Feed};
 
-/// The longest a summary or a prompt gets, in characters.
+/// The longest a summary or a prompt's line gets, in characters.
 const SUMMARY_CHARS: usize = 160;
+/// The longest a turn's whole prompt is kept: a pasted document can be
+/// far longer, and the trail is read every few seconds.
+const PROMPT_CHARS: usize = 8000;
 /// How much of a result a trail keeps: its first lines, each shortened.
 const OUTPUT_LINES: usize = 5;
 const OUTPUT_LINE_CHARS: usize = 200;
@@ -123,15 +126,21 @@ impl Trail {
             self.turns[t].actions[a].status = ActionStatus::Interrupted;
         }
         if !prompt.starts_with("[Request interrupted") {
-            self.turns.push(turn(Some(one_line(prompt)), ms));
+            self.turns.push(turn(Some(prompt), ms));
         } else if let Some(turn) = self.turns.last_mut() {
             stamp(turn, ms);
         }
     }
 }
 
-pub(crate) fn turn(prompt: Option<String>, ms: Option<u64>) -> TrailTurn {
-    TrailTurn { prompt, started_ms: ms, last_ms: ms, actions: Vec::new() }
+pub(crate) fn turn(prompt: Option<&str>, ms: Option<u64>) -> TrailTurn {
+    TrailTurn {
+        prompt: prompt.map(one_line),
+        text: prompt.map(|p| shorten(p.trim(), PROMPT_CHARS)),
+        started_ms: ms,
+        last_ms: ms,
+        actions: Vec::new(),
+    }
 }
 
 /// Moves a turn's latest entry to `ms`, when the entry has one.
@@ -306,6 +315,7 @@ mod tests {
         assert_eq!(turns.len(), 2);
         let first = &turns[0];
         assert_eq!(first.prompt.as_deref(), Some("Fix the build…"));
+        assert_eq!(first.text.as_deref(), Some("Fix the build\nIt fails on main"));
         assert_eq!(first.started_ms, Some(1_792_918_800_000));
         assert_eq!(first.last_ms, Some(1_792_918_806_000));
         let summed: Vec<(&str, &str, ActionStatus, Option<u64>)> = first

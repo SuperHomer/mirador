@@ -104,7 +104,10 @@ impl CodexTrail {
         let Some(prompt) = prompt else { return };
         let t = self.turn_for_action(p, ms);
         let turn = &mut self.turns[t];
-        turn.prompt.get_or_insert_with(|| one_line(&prompt));
+        if turn.prompt.is_none() {
+            let full = crate::trail::turn(Some(&prompt), None);
+            (turn.prompt, turn.text) = (full.prompt, full.text);
+        }
         stamp(turn, ms);
     }
 
@@ -605,6 +608,7 @@ mod tests {
         assert_eq!(turns.len(), 2);
         let a = &turns[0];
         assert_eq!(a.prompt.as_deref(), Some("Fix the build…"));
+        assert_eq!(a.text.as_deref(), Some("Fix the build\nthen test"));
         assert_eq!((a.started_ms, a.last_ms), (Some(t0), Some(t0 + 9000)));
         let summed: Vec<(&str, &str, ActionStatus, Option<i32>)> = a
             .actions

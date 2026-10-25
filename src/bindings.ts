@@ -315,6 +315,51 @@ export interface AgentActivity {
   subagents: SubagentInfo[];
 }
 
+export type ActionStatus = "ok" | "error" | "running" | "interrupted";
+
+/** One tool call of an agent's trail (`cmux_protocol::TrailAction`). */
+export interface TrailAction {
+  id: string;
+  tool: string;
+  /** One line: a command, a path, a pattern, a URL, a description. */
+  summary: string;
+  startedMs: number | null;
+  durationMs: number | null;
+  status: ActionStatus;
+  exitCode: number | null;
+  /** The first lines of its result. */
+  output: string;
+}
+
+/** One turn: a prompt and what the agent did for it. */
+export interface TrailTurn {
+  /** Its first line; null for actions with no prompt before them. */
+  prompt: string | null;
+  /** The whole prompt, up to a few thousand characters. */
+  text: string | null;
+  startedMs: number | null;
+  lastMs: number | null;
+  actions: TrailAction[];
+}
+
+/** What a pane's agent did, oldest turn first, or why there is nothing. */
+export interface AgentTrail {
+  paneId: string;
+  turns: TrailTurn[];
+  reason: string | null;
+}
+
+/** One action in full, read from the agent's own file on demand. */
+export interface ActionDetail {
+  id: string;
+  tool: string;
+  /** Its input, as pretty-printed JSON. */
+  input: string;
+  /** Its result; null while there is none. */
+  output: string | null;
+  isError: boolean;
+}
+
 /** A task-board pane, and the tab whose cards it shows. */
 export interface TaskBoardPaneInfo {
   paneId: string;
@@ -699,6 +744,10 @@ export const openAgentWall = (paneId: string | null) =>
   invoke<string>("open_agent_wall", { paneId });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
+export const getAgentTrail = (paneId: string) =>
+  invoke<AgentTrail>("get_agent_trail", { paneId });
+export const getTrailDetail = (paneId: string, actionId: string) =>
+  invoke<ActionDetail>("get_trail_detail", { paneId, actionId });
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

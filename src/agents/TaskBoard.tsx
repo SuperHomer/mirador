@@ -1,12 +1,21 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  ActionDetail,
+  AgentInfo,
+  AgentTrail,
+  HARNESS_LABEL,
   Node,
   TaskCard,
   TaskColumn,
   TaskHistoryEntry,
+  TrailAction,
+  TrailTurn,
+  agentLabel,
   closePane,
   focusPane,
+  getAgentTrail,
+  getTrailDetail,
   taskCards,
   taskHistory,
 } from "../bindings";
@@ -29,6 +38,21 @@ const COLUMNS: [TaskColumn, string][] = [
   ["needsYou", "Needs you"],
   ["done", "Done"],
 ];
+
+/** How often the Trail view reads its agent's trail again: it has no
+ *  event, so it is read on a timer, as the activity panel is. */
+const POLL_MS = 2000;
+
+/** A turn begins this long after its card was given, at the most before:
+ *  the card is logged as the message is typed, the prompt entry after. */
+const GIVEN_SLACK_MS = 1000;
+
+const MARKS: Record<TrailAction["status"], string> = {
+  ok: "✓",
+  error: "✗",
+  running: "…",
+  interrupted: "-",
+};
 
 const NO_CARDS: TaskCard[] = [];
 const NO_HISTORY: TaskHistoryEntry[] = [];
@@ -63,7 +87,10 @@ export const TaskBoard = memo(function TaskBoard({
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [all, setAll] = useState(false);
-  const [view, setView] = useState<"cards" | "history">("cards");
+  const [view, setView] = useState<"cards" | "history" | "trail">("cards");
+  // The agent the Trail view shows, and the time of the card it was
+  // opened from, to scroll to that card's turn.
+  const [trailOf, setTrailOf] = useState<{ pane: string; label: string; at: number | null } | null>(null);
   const live = visible || board;
   const now = useNow(live);
 
@@ -98,6 +125,15 @@ export const TaskBoard = memo(function TaskBoard({
     if (board) flyToCard(pane);
   };
 
+  const agents = useMemo(
+    () => (snapshot?.agents ?? []).filter((a) => all || a.tabId === tabId),
+    [snapshot, all, tabId],
+  );
+  const showTrail = (card: TaskCard) => {
+    setTrailOf({ pane: card.pane!, label: card.assignee ?? "its agent", at: card.createdMs });
+    setView("trail");
+  };
+
   return (
     <div className="pane task-board">
       <div className="wall-chrome">
@@ -119,6 +155,13 @@ export const TaskBoard = memo(function TaskBoard({
           >
             History
           </button>
+          <button
+            className={view === "trail" ? "on" : ""}
+            title="What each agent did, turn by turn, from its own transcript"
+            onClick={() => setView("trail")}
+          >
+            Trail
+          </button>
         </div>
         <div className="tb-switch" role="group">
           <button className={all ? "" : "on"} onClick={() => setAll(false)}>
@@ -137,7 +180,16 @@ export const TaskBoard = memo(function TaskBoard({
         </button>
       </div>
 
-      {view === "history" ? (
+      {view === "trail" ? (
+        <TrailView
+          agents={agents}
+          picked={trailOf}
+          onPick={(a) => setTrailOf({ pane: a.paneId, label: agentLabel(a), at: null })}
+          onScrolled={() => setTrailOf((t) => t && { ...t, at: null })}
+          live={live}
+          now={now}
+        />
+      ) : view === "history" ? (
         history.length === 0 ? (
           <Empty />
         ) : (
@@ -171,6 +223,7 @@ export const TaskBoard = memo(function TaskBoard({
                       live={live}
                       now={now}
                       onGoTo={goTo}
+                      onTrail={showTrail}
                     />
                   ))}
                 </div>
@@ -206,6 +259,7 @@ function Card({
   live,
   now,
   onGoTo,
+  onTrail,
 }: {
   card: TaskCard;
   place: string | null;
@@ -213,6 +267,7 @@ function Card({
   live: boolean;
   now: number;
   onGoTo: (pane: string) => void;
+  onTrail: (card: TaskCard) => void;
 }) {
   const [open, setOpen] = useState(false);
   const history = useLogRead(
@@ -255,6 +310,15 @@ function Card({
         )}
         {place && <span className="tb-place">{place}</span>}
         <span className="tb-age">{age(card.updatedMs, now)}</span>
+        {card.pane && (
+          <button
+            className="tb-trail-open"
+            title="What its agent did for it: the Trail view, at this task's turn"
+            onClick={() => onTrail(card)}
+          >
+            ⋯
+          </button>
+        )}
       </div>
       {open && (
         <div className="tb-card-history">
@@ -263,6 +327,258 @@ function Card({
       )}
     </div>
   );
+}
+
+/**
+ * The Trail view: the scope's agents, and what the picked one did, turn
+ * by turn, newest first, read from its own transcript or rollout while on
+ * screen. An agent that has exited stays pickable from its cards: the
+ * app keeps its last file.
+ */
+function TrailView({
+  agents,
+  picked,
+  onPick,
+  onScrolled,
+  live,
+  now,
+}: {
+  agents: AgentInfo[];
+  picked: { pane: string; label: string; at: number | null } | null;
+  onPick: (agent: AgentInfo) => void;
+  onScrolled: () => void;
+  live: boolean;
+  now: number;
+}) {
+  const windowVisible = useWindowVisible();
+  const pane = picked?.pane ?? agents[0]?.paneId ?? null;
+  const trail = useTrail(pane, live && windowVisible);
+  const listed = agents.some((a) => a.paneId === pane);
+  return (
+    <div className="tb-trail">
+      <ul className="tb-agents">
+        {!listed && picked && (
+          <li>
+            <button className="tb-agent on" title="Its agent is no longer running">
+              <span className="tb-agent-name">{picked.label}</span>
+              <span className="tb-agent-meta">exited</span>
+            </button>
+          </li>
+        )}
+        {agents.map((a) => (
+          <li key={a.paneId}>
+            <button
+              className={`tb-agent${a.paneId === pane ? " on" : ""}`}
+              onClick={() => onPick(a)}
+            >
+              <span className={`tb-agent-dot ${a.status ?? "unknown"}`} />
+              <span className="tb-agent-name">{agentLabel(a)}</span>
+              <span className="tb-agent-meta">{HARNESS_LABEL[a.harness]}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="tb-timeline">
+        {pane === null ? (
+          <p className="tb-reason">No agents here.</p>
+        ) : trail === null ? null : trail.turns.length === 0 ? (
+          <p className="tb-reason">{trail.reason ?? "Nothing done yet."}</p>
+        ) : (
+          <Timeline
+            key={pane}
+            trail={trail}
+            at={picked?.pane === pane ? picked.at : null}
+            onScrolled={onScrolled}
+            now={now}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Turns, newest first, each with its actions in order; one action open at
+ * a time, its detail read when opened. Opened from a card, it scrolls once
+ * to that card's turn: the first to begin after the card was given.
+ */
+function Timeline({
+  trail,
+  at,
+  onScrolled,
+  now,
+}: {
+  trail: AgentTrail;
+  at: number | null;
+  onScrolled: () => void;
+  now: number;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const target = useRef<HTMLLIElement>(null);
+  const turns = trail.turns;
+  const after = at === null ? -1 : turns.findIndex((t) => t.startedMs !== null && t.startedMs >= at - GIVEN_SLACK_MS);
+  // No turn begun since yet: the latest, where its turn will come.
+  const goal = at !== null && after === -1 ? turns.length - 1 : after;
+  useEffect(() => {
+    if (at === null) return;
+    target.current?.scrollIntoView({ block: "start" });
+    onScrolled();
+  }, [at, onScrolled]);
+  return (
+    <ol className="tb-turns">
+      {turns
+        .map((turn, i) => ({ turn, i }))
+        .reverse()
+        .map(({ turn, i }) => (
+          <li key={`${turn.startedMs}-${i}`} ref={i === goal ? target : undefined} className="tb-turn">
+            <TurnHead turn={turn} now={now} />
+            <ol className="tb-actions">
+              {turn.actions.map((a) => (
+                <ActionLine
+                  key={a.id}
+                  pane={trail.paneId}
+                  action={a}
+                  open={open === a.id}
+                  onToggle={() => setOpen((o) => (o === a.id ? null : a.id))}
+                />
+              ))}
+            </ol>
+          </li>
+        ))}
+    </ol>
+  );
+}
+
+function TurnHead({ turn, now }: { turn: TrailTurn; now: number }) {
+  const when = (
+    <span className="tb-when" title={turn.startedMs ? new Date(turn.startedMs).toLocaleString() : undefined}>
+      {turn.startedMs ? age(turn.startedMs, now) : "–"}
+    </span>
+  );
+  const prompt = <span className="tb-prompt">{turn.prompt ?? "(no prompt)"}</span>;
+  // Only a prompt with more than its first line opens.
+  if (!turn.text || turn.text === turn.prompt) {
+    return (
+      <div className="tb-turn-head">
+        {when}
+        {prompt}
+      </div>
+    );
+  }
+  return (
+    <details className="tb-turn-head">
+      <summary>
+        {when}
+        {prompt}
+      </summary>
+      <pre className="tb-text">{turn.text}</pre>
+    </details>
+  );
+}
+
+function ActionLine({
+  pane,
+  action,
+  open,
+  onToggle,
+}: {
+  pane: string;
+  action: TrailAction;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const exit = action.exitCode !== null && action.exitCode !== 0 ? `exit ${action.exitCode}` : null;
+  return (
+    <li className={`tb-action ${action.status}`}>
+      <button className="tb-action-line" title={action.output || undefined} onClick={onToggle}>
+        <span className="tb-action-mark">{MARKS[action.status]}</span>
+        <span className="tb-action-tool">{action.tool}</span>
+        <span className="tb-action-summary">{action.summary}</span>
+        {exit && <span className="tb-action-exit">{exit}</span>}
+        <span className="tb-action-took">{action.durationMs === null ? "" : took(action.durationMs)}</span>
+      </button>
+      {open && <ActionDetailView pane={pane} id={action.id} />}
+    </li>
+  );
+}
+
+/** One action's input and output, read once when it is opened. As text:
+ *  what an agent read or ran is never drawn as HTML. */
+function ActionDetailView({ pane, id }: { pane: string; id: string }) {
+  const [detail, setDetail] = useState<ActionDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void getTrailDetail(pane, id).then(
+      (d) => !cancelled && setDetail(d),
+      (e) => !cancelled && setError(String(e)),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pane, id]);
+  if (error) return <p className="tb-reason">{error}</p>;
+  if (!detail) return <p className="tb-reason">Reading…</p>;
+  return (
+    <div className="tb-detail">
+      <div className="tb-detail-head">input</div>
+      <pre className="tb-detail-text">{detail.input}</pre>
+      <div className="tb-detail-head">{detail.isError ? "output (error)" : "output"}</div>
+      <pre className="tb-detail-text">{detail.output ?? "(no result yet)"}</pre>
+    </div>
+  );
+}
+
+/** How long an action took, as `mira agent trail` says it. */
+function took(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return age(0, ms);
+}
+
+/**
+ * `pane`'s trail, read again [`POLL_MS`] after each read returns, while
+ * `enabled`: one read at a time, as `useAgentActivity` reads, and a failed
+ * read keeps the last good one. Null until the first read for this pane:
+ * the last pane's trail is never shown, not even for a render, under
+ * another's name or scrolled to another's card.
+ */
+function useTrail(pane: string | null, enabled: boolean): AgentTrail | null {
+  const [trail, setTrail] = useState<AgentTrail | null>(null);
+  useEffect(() => {
+    if (!pane || !enabled) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = () => {
+      void getAgentTrail(pane)
+        .then(
+          (t) => {
+            if (!cancelled) setTrail(t);
+          },
+          (e) => console.error(`mirador: task board: ${e}`),
+        )
+        .finally(() => {
+          if (!cancelled) timer = window.setTimeout(load, POLL_MS);
+        });
+    };
+    load();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [pane, enabled]);
+  return trail?.paneId === pane ? trail : null;
+}
+
+/** Whether the window is visible: not minimized, nor behind another space. */
+function useWindowVisible(): boolean {
+  const [visible, setVisible] = useState(() => document.visibilityState === "visible");
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  return visible;
 }
 
 /**

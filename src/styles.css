@@ -2924,6 +2924,259 @@ button.tb-assignee:hover {
   margin-left: auto;
 }
 
+/* A card's way to its agent's trail, beside its age. */
+.tb-trail-open {
+  flex-shrink: 0;
+  border: none;
+  padding: 0 2px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tb-trail-open:hover {
+  color: var(--text);
+}
+
+/* The Trail view: the agents on the left, the picked one's turns beside. */
+.tb-trail {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
+}
+
+.tb-agents {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border-right: 1px solid var(--surface);
+}
+
+.tb-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-agent:hover {
+  color: var(--text);
+}
+
+.tb-agent.on {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tb-agent-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.tb-agent-dot.working {
+  background: var(--wall-working);
+}
+
+.tb-agent-dot.needsYou {
+  background: var(--wall-needs-you);
+}
+
+.tb-agent-dot.idle {
+  background: var(--wall-idle);
+}
+
+.tb-agent-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-agent-meta {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+/* A narrow split: the agents a row of chips over the turns. */
+@container (max-width: 520px) {
+  .tb-trail {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .tb-agents {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--surface);
+  }
+
+  .tb-agent {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .tb-agent-meta {
+    display: none;
+  }
+}
+
+.tb-timeline {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 10px;
+}
+
+.tb-reason {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tb-turns,
+.tb-actions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tb-turn {
+  margin-bottom: 10px;
+}
+
+.tb-turn-head {
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.tb-turn-head summary {
+  cursor: pointer;
+}
+
+.tb-prompt {
+  color: var(--text);
+}
+
+/* Actions under their prompt, past its time. */
+.tb-actions {
+  margin-left: 3.8em;
+}
+
+.tb-action {
+  --tb-action: var(--muted);
+}
+
+.tb-action.ok {
+  --tb-action: var(--wall-idle);
+}
+
+.tb-action.error {
+  --tb-action: #f38ba8;
+}
+
+.tb-action.running {
+  --tb-action: var(--wall-working);
+}
+
+.tb-action-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 1px 0;
+  border: none;
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-action-line:hover .tb-action-summary {
+  color: var(--text);
+}
+
+.tb-action-mark {
+  flex-shrink: 0;
+  width: 1em;
+  color: var(--tb-action);
+}
+
+.tb-action-tool {
+  flex-shrink: 0;
+  color: var(--text);
+}
+
+.tb-action-summary {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.tb-action-exit {
+  flex-shrink: 0;
+  color: #f38ba8;
+}
+
+.tb-action-took {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An action opened: its input and output as text, a long one scrolling
+   inside a capped height. */
+.tb-detail {
+  margin: 2px 0 6px 1.6em;
+}
+
+.tb-detail-head {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+
+.tb-detail-text {
+  margin: 2px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 5px 7px;
+  background: var(--bg);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Agent editor: the role, way and team files, a list beside a text. */
 .agent-editor {
   display: flex;
