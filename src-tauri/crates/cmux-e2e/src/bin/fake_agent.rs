@@ -18,7 +18,7 @@
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
 //!   Mirador by its hooks as Claude Code's are, gets each turn's prompt
 //!   and one Bash call, `echo` of the message's first line, with its
-//!   result.
+//!   result — a failure (exit 1) when the message says `!fail`.
 //!
 //! As `codex` it echoes each message, and holds a rollout open as Codex
 //! does (`~/.codex/sessions/YYYY/MM/DD/rollout-….jsonl`), writing each
@@ -47,10 +47,10 @@ fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
     let lines = [
         serde_json::json!({ "type": "user", "timestamp": at, "message": { "role": "user", "content": message } }),
         serde_json::json!({ "type": "assistant", "timestamp": at, "message": { "role": "assistant", "content": [
-            { "type": "tool_use", "id": id, "name": "Bash", "input": { "command": format!("echo {first}") } }
+            { "type": "tool_use", "id": id, "name": "Bash", "input": { "command": command(first) } }
         ] } }),
         serde_json::json!({ "type": "user", "timestamp": at, "message": { "role": "user", "content": [
-            { "type": "tool_result", "tool_use_id": id, "content": first }
+            { "type": "tool_result", "tool_use_id": id, "content": result(first), "is_error": failing(first) }
         ] } }),
     ];
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
@@ -92,10 +92,27 @@ fn rollout_turn(file: &mut std::fs::File, n: u32, message: &str, took: Duration)
     write(&[
         event(serde_json::json!({ "type": "item_completed", "turn_id": turn, "item": {
             "type": "CommandExecution", "id": format!("cmd-{}-{n}", std::process::id()),
-            "command": ["/bin/zsh", "-lc", format!("echo {first}")], "status": "completed",
-            "exit_code": 0, "aggregated_output": first } })),
+            "command": ["/bin/zsh", "-lc", command(first)],
+            "status": if failing(first) { "failed" } else { "completed" },
+            "exit_code": i32::from(failing(first)), "aggregated_output": first } })),
         event(serde_json::json!({ "type": "task_complete", "turn_id": turn })),
     ]);
+}
+
+/// A turn's one command: an `echo` of its message's first line, which
+/// fails (exit 1) when the message says `!fail`.
+fn failing(first: &str) -> bool {
+    first.contains("!fail")
+}
+
+fn command(first: &str) -> String {
+    if failing(first) { format!("echo {first} && false") } else { format!("echo {first}") }
+}
+
+/// Its result as Claude Code writes it: a failed command's output headed
+/// with its exit code.
+fn result(first: &str) -> String {
+    if failing(first) { format!("Exit code 1\n{first}") } else { first.to_string() }
 }
 
 /// Now, as Claude Code writes it: `2026-10-25T09:00:00.000Z`.

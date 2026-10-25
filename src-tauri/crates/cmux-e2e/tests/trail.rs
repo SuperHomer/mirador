@@ -58,6 +58,16 @@ fn an_agent_s_trail_shows_what_it_did() {
     assert_ne!(code, 0);
     assert!(err.contains("no action toolu_none"), "{err}");
 
+    // A command that fails: ✗ with its exit code, its detail an error.
+    let (code, _, err) = sb.mira(Some(&shell), &["agent", "send", &dev, "--wait", "--timeout", "40", "build it !fail"]);
+    assert_eq!(code, 0, "{err}");
+    let out = sb.mira(Some(&shell), &["agent", "trail", "--pane", &dev]).1;
+    let failed = out.lines().find(|l| l.contains("build it") && l.contains('[')).unwrap_or_else(|| panic!("no failed action in:\n{out}"));
+    assert!(failed.contains("✗") && failed.contains("(exit 1)"), "{failed}");
+    let id = failed.rsplit_once('[').and_then(|(_, rest)| rest.strip_suffix(']')).expect("an id");
+    let detail = sb.mira(Some(&shell), &["agent", "trail", "--pane", &dev, "--detail", id]).1;
+    assert!(detail.contains("--- output (error)\nExit code 1"), "{detail}");
+
     // A Codex agent's trail is the rollout it holds open.
     let trail = |pane: &str| sb.mira(Some(&shell), &["agent", "trail", "--pane", pane]).1;
     let shows = |pane: &str, what: &str| sb.wait_for(what, LONG, || Some(trail(pane)).filter(|t| t.contains(what)));
