@@ -268,10 +268,11 @@ inconsistency reviewers will notice.
   exception — see `agents::restore_pane`.)
 - **A terminal is drawn in one place.** The agent wall shows agents by
   *moving* each pane's xterm element into its tile (`lendTerminal` in
-  `terminal/registry.ts`) and back when the wall's tab is hidden — not a
-  second xterm on the same output. That is only sound because one tab is on
-  screen at a time, and the PTY has one size: whoever shows the terminal
-  sizes it. So the wall leaves out agents in its own tab, and anything new
+  `terminal/registry.ts`) and back when its own pane shows again — not a
+  second xterm on the same output. That is only sound because the wall is
+  a view of its own tab, drawn over its panes (on the board, over its
+  frame in place of its cards), so each terminal has one place to be; and
+  the PTY has one size: whoever shows the terminal sizes it. Anything new
   that wants to draw a pane's terminal must borrow it the same way.
 - **React StrictMode double-mounts in dev** and has twice broken the terminal
   by swapping the output sink out from under a pending attach.

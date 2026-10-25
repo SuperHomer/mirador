@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use cmux_core::transport::{self, Stream};
-use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope};
+use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope, WallView};
 
 use crate::{notify, AppState};
 
@@ -300,7 +300,6 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 // Beside the pane it was asked from, in the tab you work in;
                 // a tab of its own only when asked for one.
                 target.as_deref() == Some("tab"),
-                false,
                 from,
             )?;
             Ok(json!({ "paneId": pane_id }))
@@ -366,13 +365,13 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let done = crate::teams::team_restart(app.clone(), app.state(), members, pane_id)?;
             Ok(json!({ "members": done }))
         }
-        Request::AgentBoard { pane_id, target } => {
-            let pane = crate::tasks::open_task_board(app.clone(), app.state(), pane_id, target.as_deref() == Some("tab"))?;
-            Ok(json!({ "paneId": pane }))
+        Request::AgentBoard { pane_id } => {
+            crate::commands::set_wall_view(app.clone(), app.state(), pane_id, WallView::Tasks)?;
+            Ok(json!({ "wall": true, "wallView": WallView::Tasks }))
         }
         Request::AgentWall { pane_id } => {
-            let pane_id = crate::commands::open_agent_wall(app.clone(), app.state(), pane_id)?;
-            Ok(json!({ "paneId": pane_id }))
+            let on = crate::commands::toggle_agent_wall(app.clone(), app.state(), pane_id)?;
+            Ok(json!({ "wall": on }))
         }
         Request::Run {
             command,

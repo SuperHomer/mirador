@@ -181,12 +181,12 @@ fn tasks_are_logged_as_agents_work() {
     assert!(mira(&sb, &planner, &["agent", "history", "--all"]).contains("you → planner  team-start  plan the chart"));
 }
 
-/// The board pane opens beside the pane it is asked from, showing that
-/// tab's cards, and is still a board after a relaunch. What it draws is
-/// the webview's, out of reach here; the cards it reads are the ones
-/// `task list` prints, from the same function.
+/// The board is the tab's own wall, turned to its Tasks side, and still is
+/// after a relaunch. What it draws is the webview's, out of reach here;
+/// the cards it reads are the ones `task list` prints, from the same
+/// function.
 #[test]
-fn the_task_board_opens_and_comes_back() {
+fn the_task_board_is_the_tabs_wall_on_its_tasks_side() {
     e2e!();
     let mut sb = Sandbox::new("task-board");
     sb.launch();
@@ -194,13 +194,15 @@ fn the_task_board_opens_and_comes_back() {
     let tab = sb.snapshot()["activeTab"].as_str().unwrap().to_string();
     mira(&sb, &first, &["task", "add", "Step 1: the pane"]);
 
-    let board = mira(&sb, &first, &["agent", "board"]).trim().to_string();
-    let listed = |sb: &Sandbox| -> Option<serde_json::Value> {
-        sb.snapshot()["taskBoardPanes"].as_array()?.iter().find(|b| b["paneId"] == board.as_str()).cloned()
+    // The tab itself, shown as its wall on the Tasks side: no pane, no tab.
+    assert_eq!(mira(&sb, &first, &["agent", "board"]).trim(), "wall on: tasks");
+    let side = |sb: &Sandbox| {
+        let snap = sb.snapshot();
+        let t = snap["tabs"].as_array().unwrap().iter().find(|t| t["id"] == tab.as_str()).cloned().unwrap();
+        (t["wall"].as_bool().unwrap(), t["wallView"].as_str().unwrap().to_string())
     };
-    let pane = sb.wait_for("the board pane", LONG, || listed(&sb));
-    assert_eq!(pane["tabId"], tab.as_str(), "{pane}");
-    assert_eq!(sb.panes(), [first.clone(), board.clone()]);
+    assert_eq!(side(&sb), (true, "tasks".to_string()));
+    assert_eq!(sb.panes(), std::slice::from_ref(&first));
     // A plain agent, with no team, session or role name, is called by its
     // harness, as `agent list` calls it.
     mira(&sb, &first, &["agent", "new", "Upgrade the logging library"]);
@@ -211,28 +213,48 @@ fn the_task_board_opens_and_comes_back() {
     let line = list.lines().find(|l| l.ends_with("Upgrade the logging library")).unwrap();
     assert_eq!(line.split_whitespace().nth(1), Some("claude"), "{list}");
     // A render throw in the board takes the whole tree down with it: the
-    // terminal beside it still answering says the page survived it.
+    // terminal under the wall still answering says the page survived it.
     sb.type_into(&first, "echo still-$((40+2))\r");
-    sb.wait_for("the terminal beside the board", LONG, || {
+    sb.wait_for("the terminal under the board", LONG, || {
         sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
     });
-    // Asked from the board itself, its tab is still the one it shows.
-    let cards = sb.call(Request::TaskList { all: false, pane_id: Some(board.clone()) });
+    let cards = sb.call(Request::TaskList { all: false, pane_id: Some(first.clone()) });
     let titles: Vec<&str> = cards["cards"].as_array().unwrap().iter().filter_map(|c| c["title"].as_str()).collect();
     assert_eq!(titles, ["Step 1: the pane", "Upgrade the logging library"]);
 
-    // One of its own, in a tab of its own, still showing this tab.
-    let other = mira(&sb, &first, &["agent", "board", "--tab"]).trim().to_string();
-    let other_pane = sb.wait_for("the board in a tab", LONG, || {
-        sb.snapshot()["taskBoardPanes"].as_array()?.iter().find(|b| b["paneId"] == other.as_str()).cloned()
-    });
-    assert_eq!(other_pane["tabId"], tab.as_str());
-    assert_eq!(sb.snapshot()["tabs"].as_array().unwrap().len(), 2);
+    // `--tab`, from when the board was a pane, is still taken, and ignored.
+    assert_eq!(mira(&sb, &first, &["agent", "board", "--tab"]).trim(), "wall on: tasks");
+    assert_eq!(sb.snapshot()["tabs"].as_array().unwrap().len(), 1);
 
     sb.quit();
     sb.launch();
-    let pane = listed(&sb).expect("the board comes back as a board, not a shell");
-    assert_eq!(pane["tabId"], tab.as_str());
+    assert_eq!(side(&sb), (true, "tasks".to_string()), "the wall comes back on its Tasks side");
+}
+
+#[test]
+fn the_wall_keeps_the_side_it_was_left_on() {
+    e2e!();
+    let mut sb = Sandbox::new("wall-board");
+    sb.launch();
+    let first = sb.first_pane();
+    let side = |sb: &Sandbox| {
+        let snap = sb.snapshot();
+        let t = &snap["tabs"][0];
+        (t["wall"].as_bool().unwrap(), t["wallView"].as_str().unwrap().to_string())
+    };
+    assert_eq!(mira(&sb, &first, &["agent", "wall"]).trim(), "wall on");
+    assert_eq!(side(&sb), (true, "agents".to_string()));
+
+    // From the Agents side, the board turns the wall over.
+    assert_eq!(mira(&sb, &first, &["agent", "board"]).trim(), "wall on: tasks");
+    assert_eq!(side(&sb), (true, "tasks".to_string()));
+    assert_eq!(sb.panes(), std::slice::from_ref(&first));
+
+    // Off and on again, it is still on its Tasks side.
+    assert_eq!(mira(&sb, &first, &["agent", "wall"]).trim(), "wall off");
+    assert_eq!(side(&sb), (false, "tasks".to_string()));
+    assert_eq!(mira(&sb, &first, &["agent", "wall"]).trim(), "wall on");
+    assert_eq!(side(&sb), (true, "tasks".to_string()));
 }
 
 #[test]

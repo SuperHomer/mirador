@@ -117,7 +117,8 @@ body,
   cursor: pointer;
 }
 
-.sidebar-wall:hover {
+.sidebar-wall:hover,
+.sidebar-wall.selected {
   background: var(--surface);
   color: var(--text);
 }
@@ -2419,19 +2420,6 @@ body,
   line-height: 1.4;
 }
 
-.wall-close {
-  border: none;
-  background: transparent;
-  color: var(--subtext);
-  font-size: 14px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.wall-close:hover {
-  color: var(--text);
-}
-
 .wall-empty {
   flex: 1;
   display: flex;
@@ -2668,30 +2656,16 @@ body,
   font-size: 12px;
 }
 
-button.wall-term-go {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-
-button.wall-term-go:hover {
-  color: var(--text);
-}
-
-/* Task board: the task log's cards in four columns, under the wall's
-   chrome and in its colours. */
+/* Task board: the task log's cards in four columns, the Tasks side of a
+   wall, filling it under its chrome and in its colours. */
 .task-board {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0;
   background: var(--bg-alt);
   /* Its width decides how many columns fit side by side. */
   container-type: inline-size;
-  --wall-working: var(--accent);
-  --wall-needs-you: #fab387;
-  --wall-idle: #a6e3a1;
 }
 
 .tb-switch {
@@ -2704,6 +2678,11 @@ button.wall-term-go:hover {
 }
 
 .tb-switch + .tb-switch {
+  margin-left: 0;
+}
+
+/* The wall's Agents | Tasks keeps + New agent and Splits beside it. */
+.tb-switch + .wall-new {
   margin-left: 0;
 }
 

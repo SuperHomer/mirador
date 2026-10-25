@@ -4,7 +4,6 @@ import {
   AgentRole,
   agentRoles,
   openAgent,
-  openAgentWall,
   openBrowser,
   openDiff,
   openGraph,
@@ -136,7 +135,6 @@ export function FrameMenu({
           <button onClick={run(() => openGraph(pane, false))}>
             Commit graph
           </button>
-          <button onClick={run(() => openAgentWall(pane))}>Agent wall</button>
         </>
       )}
     </div>,

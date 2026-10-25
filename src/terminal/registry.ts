@@ -86,16 +86,16 @@ export function isLentTo(paneId: string, host: HTMLElement): boolean {
  * the function that gives it back, or null when there is no terminal to
  * lend or it is already lent elsewhere.
  *
- * Lending works because only one tab is on screen at a time: a terminal
- * drawn in the wall is never also wanted in its own tab, and the PTY has
- * one size, which belongs to whichever place is showing it.
+ * Lending works because the wall is drawn over its tab's splits: a
+ * terminal drawn in the wall is never also wanted in its own pane, and the
+ * PTY has one size, which belongs to whichever place is showing it.
  *
- * A lent terminal stays lent while the wall is hidden, until its own tab
- * is shown and takes it back (`reclaimTerminal`). Every move resizes the
- * PTY, and Claude Code redraws on each resize; a narrowing one leaves
- * rewrapped fragments and reprinted banners behind. Returning every
- * agent whenever the wall hid resized all of them twice per visit to any
- * one, which is what made tiles fill with debris.
+ * A lent terminal stays lent while the wall's tab is hidden, until the
+ * wall goes and its pane shows and takes it back (`reclaimTerminal`).
+ * Every move resizes the PTY, and Claude Code redraws on each resize; a
+ * narrowing one leaves rewrapped fragments and reprinted banners behind.
+ * Returning every agent whenever the wall hid resized all of them twice
+ * per visit, which is what made tiles fill with debris.
  */
 export function lendTerminal(
   paneId: string,
@@ -120,7 +120,7 @@ export function lendTerminal(
 }
 
 /**
- * Brings a lent terminal back to its own pane: its tab is on screen now.
+ * Brings a lent terminal back to its own pane: the pane is on screen now.
  * The borrower's release then does nothing; the wall lends it again the
  * next time it is shown.
  */
@@ -141,8 +141,8 @@ export function fitTerminal(paneId: string) {
 
 /**
  * The terminal holding keyboard focus, wherever it is drawn. In the wall,
- * that is not the workspace's focused pane (the wall is), so copy and
- * paste look here first.
+ * that need not be the workspace's focused pane, so copy and paste look
+ * here first.
  */
 export function terminalWithFocus(): Terminal | undefined {
   const active = document.activeElement;

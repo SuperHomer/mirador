@@ -24,19 +24,21 @@ downloads, the feature tour and the keybinding reference.
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,
   a commit, or a branch — file tree, hunks, and your terminal's own theme.
   A header picker switches between the repository's git worktrees
-- **Agent wall** (`mira agent wall`, `mod+shift+A`): every agent's live
-  terminal in one grid — Claude Code, Codex, OpenCode, Pi, Gemini CLI, Amp,
-  Aider and more, found by their process — each with its role, model and
-  (Claude Code) whether it is working, idle, or waiting on you; type into
-  any of them from there.
+- **Agent wall** (`mira agent wall`, `mod+shift+A`): a tab's splits swapped
+  for its agents' live terminals in one grid — Claude Code, Codex,
+  OpenCode, Pi, Gemini CLI, Amp, Aider and more, found by their process —
+  each with its role, model and (Claude Code) whether it is working, idle,
+  or waiting on you; type into any of them from there. The same key
+  switches back, and each tab remembers its view across restarts. Its
+  **Splits | Agents | Tasks** switch turns it over to the tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
   start Claude Code or Codex with their own model, prompt and shared way of
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
-- **Task board** (`mira agent board`, the palette's *Agents: Task Board*,
-  or the wall's **Task board** button): what each agent was given and where
-  it stands, in To do, Doing, Needs you and Done, for this team or every
+- **Task board**, the agent wall's Tasks side (its **Splits | Agents | Tasks**
+  switch, the palette's *Agents: Task Board*, or `mira agent board`): what
+  each agent was given and where it stands, in To do, Doing, Needs you and Done, for this team or every
   tab. Mirador adds a card whenever it gives an agent a task (`team start`,
   `agent new`, `mira agent send`) and, for Claude Code and Codex, moves it
   as the agent's turns end; agents write their own with `mira task add` and
@@ -50,14 +52,15 @@ downloads, the feature tour and the keybinding reference.
   (`mira agent trail`; docs/AGENTS.md)
 - **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
   in the sidebar): every tab as a frame and every pane as a card on one
-  canvas. Scroll over the focused card to scroll its content, at any zoom
+  canvas — a tab showing its agent wall shows the wall in its frame instead,
+  its agents' live tiles or its task board. Scroll over the focused card to scroll its content, at any zoom
   (a browser card pans away from 100%, where its page is not drawn);
   scroll anywhere else, other cards included, or drag empty board, a gap
   or a card's header, to pan, or hold ⌥ (Alt) to pan over the focused
   card too — anywhere but a browser page at 100%, which keeps its own
   scroll; pinch or Ctrl+scroll to zoom; double-click a card's header
-  to fly to it at 100%. A frame's **+** adds a pane to it (its Agent wall
-  item opens the wall in a frame of its own), **New frame** a tab. In the
+  to fly to it at 100%. A frame's **+** adds a pane to it, **New frame** a
+  tab. In the
   corner, **−** and **+** step the zoom (10% to 400%), double-clicking the
   percentage types one in, **Fit** shows everything, and **Arrange** packs
   the frames into rows, in tab order, to the window's shape. Typing
@@ -268,7 +271,7 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘⇧W | Ctrl+Shift+Q | close tab |
 | ⌘D / ⌘⇧D | Ctrl+Shift+D / Ctrl+Shift+E | split right / down |
 | ⌘G | Ctrl+Shift+G | diff pane for this repo |
-| ⌘⇧A | Ctrl+Shift+A | agent wall |
+| ⌘⇧A | Ctrl+Shift+A | agent wall on / off |
 | ⌘⇧O | Ctrl+Shift+O | board / tabs view |
 | ⌘0 | Ctrl+Shift+0 | board: show everything |
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
@@ -536,18 +539,27 @@ is idle — never into a shell running something else, which it reports as
 `busy` — and opens a new pane beside a teammate for one whose pane was
 closed. Run `team add` and `team restart` from a pane of the team's tab.
 
-The **agent wall** (`mod+shift+A`, the palette's *Agent Wall*, the **▦ Wall**
-button beside the sidebar's Agents heading, or `mira agent wall`) draws the
-agents of the tab you open it from in a grid, in a tab of its own — roles,
-and any agent you started by hand: `claude`, `codex`, `opencode`, `pi`,
-`gemini`, `amp`, `cursor-agent`, `copilot`, `aider`, `goose`, `qwen`,
-`crush` or `droid`, found in the pane's process table (macOS and Linux;
-on Windows only Claude Code's hooks make an agent). For another tab's agents, go to that
-tab and open the wall again: the same wall switches to it. The tiles are the agents' real terminals, moved there
-while the wall is on screen, so you can type into one to answer a
-permission prompt without leaving the wall. Each tile shows the role, the
-model, and what the agent is doing: **working**, **needs you** (with what
-for), or **idle**. Click a tile's header to see that agent alone in its tab.
+The **agent wall** is a way of showing a tab: in place of its splits, the
+tab's agents in a grid — roles, and any agent you started by hand:
+`claude`, `codex`, `opencode`, `pi`, `gemini`, `amp`, `cursor-agent`,
+`copilot`, `aider`, `goose`, `qwen`, `crush` or `droid`, found in the
+pane's process table (macOS and Linux; on Windows only Claude Code's hooks
+make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*, the
+**▦ Wall** button beside the sidebar's Agents heading (lit while the tab
+is a wall) and `mira agent wall` (which prints `wall on` or `wall off`)
+each switch the current tab between the two, and so does **Splits** in
+the wall's header. Each tab keeps its view across restarts, and the
+board draws a walled tab's wall in its frame, in place of its cards. The tiles are the
+agents' real terminals, moved there while the wall is on screen, so you
+can type into one to answer a permission prompt without leaving the wall;
+the keyboard goes to the focused agent's tile when the wall comes up. A
+new agent from the wall's **+ New agent** splits the tab under the wall and
+gets a tile. Each tile shows the role, the model, and what the agent is
+doing: **working**, **needs you** (with what for), or **idle**. Click a
+tile's header to see that agent alone in its tab, which leaves the wall.
+The header's **Splits | Agents | Tasks** switch leaves the wall, or turns
+it over to the tab's task board in place of the tiles, and back; the wall comes up again on
+the side it was left on, across restarts too.
 
 **Right-click an agent** (its sidebar row, or a wall tile's header; the
 palette's *Agent Activity* for the focused one) to open its activity: the

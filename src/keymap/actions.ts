@@ -12,9 +12,9 @@ import {
   checkUpdate,
   openGraph,
   openAgent,
-  openAgentWall,
+  toggleAgentWall,
+  setWallView,
   openAgentEditor,
-  openTaskBoard,
   openWhatsNew,
   zoomPane,
   setView,
@@ -138,7 +138,7 @@ export const actions: ActionDef[] = [
     title: "Copy Selection",
     run: () => {
       // The terminal with keyboard focus first: in the agent wall that is
-      // an agent's, while the workspace's focused pane is the wall.
+      // a tile's, which need not be the workspace's focused pane.
       const pane = focusedPane();
       const term =
         terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
@@ -174,17 +174,17 @@ export const actions: ActionDef[] = [
   },
   {
     id: "agent_wall",
-    title: "Agent Wall",
-    // Every agent's terminal in one grid; goes to the wall's
-    // tab when there already is one.
-    run: () => void openAgentWall(focusedPane() ?? null),
+    title: "Toggle Agent Wall",
+    // The tab's agents' terminals in one grid in place of its splits,
+    // or its splits again.
+    run: () => void toggleAgentWall(focusedPane() ?? null),
   },
   {
     id: "task_board",
     title: "Agents: Task Board",
-    // The cards of the tasks the focused tab's agents were given, beside
-    // the focused pane.
-    run: () => void openTaskBoard(focusedPane() ?? null, false),
+    // The cards of the tasks the focused tab's agents were given: its
+    // wall, on the Tasks side.
+    run: () => void setWallView(focusedPane() ?? null, "tasks"),
   },
   {
     id: "agent_editor",

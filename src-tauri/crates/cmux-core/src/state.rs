@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use cmux_protocol::{
     BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, View,
-    WorkspaceSnapshot,
+    WallView, WorkspaceSnapshot,
 };
 
 use crate::{board, layout};
@@ -87,19 +87,9 @@ pub struct PaneMeta {
     pub agent_message: Option<String>,
     /// Unix millis of the last `agent_status` change.
     pub agent_since_ms: Option<u64>,
-    /// Agent-wall pane: draws the agents of one tab in a grid.
-    pub agent_wall: bool,
-    /// The tab an agent-wall pane shows the agents of: the tab it was
-    /// opened from (see `Workspace::wall_target`).
-    pub agent_wall_tab: Option<String>,
     /// Agent-editor pane: the role, way and team files its directory sees,
     /// for editing.
     pub agent_editor: bool,
-    /// Task-board pane: the cards of one tab's agents, or of every tab's.
-    pub task_board: bool,
-    /// The tab a task-board pane shows the cards of: the tab it was opened
-    /// from.
-    pub task_board_tab: Option<String>,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
@@ -285,6 +275,12 @@ pub struct Tab {
     /// The team running in this tab, if one was started here: who is in
     /// which pane. Persisted, so a team is still a team after a restart.
     pub team: Option<cmux_protocol::TeamRun>,
+    /// The tab shows its agents as the wall instead of its splits.
+    /// Persisted.
+    pub wall: bool,
+    /// The side of the wall it shows. Kept while the wall is off, so the
+    /// wall comes back on the side last shown. Persisted.
+    pub wall_view: WallView,
     /// Where the tab's frame sits on the board.
     pub frame: BoardPoint,
     /// Each pane's card on the board, relative to `frame`. Kept for every
@@ -314,6 +310,8 @@ impl Tab {
             focused,
             zoomed: None,
             team: None,
+            wall: false,
+            wall_view: WallView::default(),
             frame: BoardPoint::default(),
         }
     }
@@ -392,18 +390,6 @@ impl Workspace {
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
-        self.place_frame(&id);
-        (id, pane)
-    }
-
-    /// Like [`Self::new_tab`], placed the same way, but leaves the active
-    /// tab on screen: an agent started from the wall opens behind it, so the
-    /// wall never hides and hands every agent's terminal back for a moment.
-    pub fn new_background_tab(&mut self) -> (String, String) {
-        let (tab, pane) = Tab::new();
-        let id = tab.id.clone();
-        let at = (self.active + 1).min(self.tabs.len());
-        self.tabs.insert(at, tab);
         self.place_frame(&id);
         (id, pane)
     }
@@ -576,26 +562,6 @@ impl Workspace {
         true
     }
 
-    /// The tab a wall opened from `source` shows: `source`'s own tab —
-    /// unless that tab holds a wall itself (opening the wall from the
-    /// wall), which keeps showing `current`.
-    pub fn wall_target(
-        &self,
-        source: &str,
-        meta: &HashMap<String, PaneMeta>,
-        current: Option<&str>,
-    ) -> Option<String> {
-        let tab = self.tabs.iter().find(|t| layout::contains(&t.root, source))?;
-        let is_wall_tab = layout::pane_ids(&tab.root)
-            .iter()
-            .any(|p| meta.get(p).is_some_and(|m| m.agent_wall));
-        if is_wall_tab {
-            current.map(str::to_string)
-        } else {
-            Some(tab.id.clone())
-        }
-    }
-
     /// Shows `pane` alone, filling its tab, and focuses it (activating the
     /// tab). The other panes keep running and keep their size; they are
     /// only hidden.
@@ -603,7 +569,34 @@ impl Workspace {
         if !self.focus_pane(pane) {
             return false;
         }
-        self.tabs[self.active].zoomed = Some(pane.to_string());
+        // One agent alone is a way out of the wall, not a pane on it.
+        let tab = &mut self.tabs[self.active];
+        tab.zoomed = Some(pane.to_string());
+        tab.wall = false;
+        true
+    }
+
+    /// Shows the tab holding `pane` as the wall of its agents, or its
+    /// splits again if it already is; the new state, or `None` when no tab
+    /// holds `pane`. The wall shows every agent, so a zoomed one is let go.
+    pub fn toggle_wall(&mut self, pane: &str) -> Option<bool> {
+        let tab = self.tab_of_pane_mut(pane)?;
+        tab.wall = !tab.wall;
+        if tab.wall {
+            tab.zoomed = None;
+        }
+        Some(tab.wall)
+    }
+
+    /// Shows the tab holding `pane` as its wall, on the `view` side; false
+    /// when no tab holds `pane`. Like `toggle_wall`, it lets a zoom go.
+    pub fn show_wall(&mut self, pane: &str, view: WallView) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        tab.wall = true;
+        tab.wall_view = view;
+        tab.zoomed = None;
         true
     }
 
@@ -729,17 +722,9 @@ impl Workspace {
                     let pane_meta = meta.get(&t.focused);
                     let cwd = pane_meta.and_then(|m| m.cwd.clone());
                     let osc_title = pane_meta.and_then(|m| m.title.clone());
-                    // The wall and the board run no shell: nothing would
-                    // ever title them.
-                    let wall_title = pane_meta.and_then(|m| {
-                        m.agent_wall
-                            .then(|| "Agents".to_string())
-                            .or_else(|| m.task_board.then(|| "Tasks".to_string()))
-                    });
                     let title = t
                         .title
                         .clone()
-                        .or(wall_title)
                         .or(osc_title)
                         .unwrap_or_else(|| {
                             cwd.as_deref()
@@ -768,6 +753,8 @@ impl Workspace {
                             ports
                         },
                         zoomed_pane: t.zoomed.clone(),
+                        wall: t.wall,
+                        wall_view: t.wall_view,
                         frame: t.frame_rect(),
                         cards: layout::pane_ids(&t.root)
                             .into_iter()
@@ -788,9 +775,7 @@ impl Workspace {
             diff_panes: Vec::new(),
             whats_new_panes: Vec::new(),
             graph_panes: Vec::new(),
-            agent_wall_panes: Vec::new(),
             agent_editor_panes: Vec::new(),
-            task_board_panes: Vec::new(),
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
@@ -815,12 +800,8 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
         return "shell".to_string();
     };
     let name = |path: &str| display_dir(path);
-    if m.agent_wall {
-        "Agents".to_string()
-    } else if m.agent_editor {
+    if m.agent_editor {
         "Roles, ways & teams".to_string()
-    } else if m.task_board {
-        "Tasks".to_string()
     } else if let Some(version) = &m.whats_new {
         format!("What's new in {version}")
     } else if let Some(url) = &m.browser_url {
@@ -1002,19 +983,6 @@ mod tests {
     }
 
     #[test]
-    fn background_tab_opens_beside_the_active_one_and_leaves_it_active() {
-        let mut ws = Workspace::default();
-        let (_, _) = ws.new_tab();
-        let (_, _) = ws.new_tab();
-        ws.active = 1;
-        let before = ws.tabs[1].id.clone();
-        let (id, pane) = ws.new_background_tab();
-        assert_eq!(ws.tabs[ws.active].id, before, "the active tab stays on screen");
-        assert_eq!(ws.tabs[2].id, id, "placed where new_tab would put it");
-        assert!(layout::contains(&ws.tabs[2].root, &pane));
-    }
-
-    #[test]
     fn a_zoomed_pane_shows_alone_until_the_tab_is_asked_for() {
         let mut ws = Workspace::default();
         let claude = ws.focused_pane();
@@ -1055,22 +1023,55 @@ mod tests {
     }
 
     #[test]
-    fn a_wall_shows_the_tab_it_was_opened_from() {
+    fn a_tab_toggles_between_its_splits_and_its_wall() {
         let mut ws = Workspace::default();
-        let work = ws.focused_pane();
-        let first = ws.tabs[0].id.clone();
-        let (second, other) = ws.new_tab();
-        let (_, wall) = ws.new_tab();
-        let mut meta = HashMap::new();
-        meta.insert(wall.clone(), PaneMeta { agent_wall: true, ..Default::default() });
+        let claude = ws.focused_pane();
+        let server = ws.split_pane(&claude, SplitDir::Row).unwrap();
+        let (_, other) = ws.new_tab();
+        let wall = |ws: &Workspace, i: usize| ws.snapshot(&HashMap::new()).tabs[i].wall;
 
-        assert_eq!(ws.wall_target(&work, &meta, None), Some(first.clone()));
-        // Opened again from another tab, it shows that one.
-        assert_eq!(ws.wall_target(&other, &meta, Some(&first)), Some(second));
-        // Opened from the wall itself, it keeps what it shows.
-        assert_eq!(ws.wall_target(&wall, &meta, Some(&first)), Some(first));
-        assert_eq!(ws.wall_target(&wall, &meta, None), None);
-        assert_eq!(ws.wall_target("gone", &meta, None), None);
+        // Any pane of the tab toggles the whole tab, and no other.
+        assert_eq!(ws.toggle_wall(&server), Some(true));
+        assert!(wall(&ws, 0));
+        assert!(!wall(&ws, 1));
+        assert_eq!(ws.toggle_wall(&claude), Some(false));
+        assert!(!wall(&ws, 0));
+        assert_eq!(ws.toggle_wall(&other), Some(true));
+        assert_eq!(ws.toggle_wall("nope"), None);
+
+        // The wall shows every agent, so turning it on lets a zoom go...
+        ws.zoom_pane(&claude);
+        assert_eq!(ws.toggle_wall(&claude), Some(true));
+        assert_eq!(ws.snapshot(&HashMap::new()).tabs[0].zoomed_pane, None);
+        // ...and zooming one agent leaves the wall.
+        assert!(ws.zoom_pane(&claude));
+        assert!(!wall(&ws, 0));
+    }
+
+    #[test]
+    fn the_wall_comes_back_on_the_side_last_shown() {
+        let mut ws = Workspace::default();
+        let claude = ws.focused_pane();
+        let server = ws.split_pane(&claude, SplitDir::Row).unwrap();
+        let side = |ws: &Workspace| ws.snapshot(&HashMap::new()).tabs[0].wall_view;
+        assert_eq!(side(&ws), WallView::Agents);
+
+        // Asked for one side, the wall comes on there, and lets a zoom go.
+        ws.zoom_pane(&claude);
+        assert!(ws.show_wall(&server, WallView::Tasks));
+        let tab = &ws.snapshot(&HashMap::new()).tabs[0];
+        assert!(tab.wall);
+        assert_eq!(tab.wall_view, WallView::Tasks);
+        assert_eq!(tab.zoomed_pane, None);
+        assert!(!ws.show_wall("nope", WallView::Tasks));
+
+        // Turned off and on again, it is still on that side.
+        assert_eq!(ws.toggle_wall(&claude), Some(false));
+        assert_eq!(side(&ws), WallView::Tasks);
+        assert_eq!(ws.toggle_wall(&claude), Some(true));
+        assert_eq!(side(&ws), WallView::Tasks);
+        assert!(ws.show_wall(&claude, WallView::Agents));
+        assert_eq!(side(&ws), WallView::Agents);
     }
 
     #[test]
@@ -1135,7 +1136,7 @@ mod tests {
         ws.set_active_tab(&first);
         // Inserted in the tab order before the second tab, its frame still
         // goes right of every other.
-        ws.new_background_tab();
+        ws.new_tab();
         let panes = Workspace::fresh_pane_ids(2);
         let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![] };
         ws.new_team_tab(crate::teams::layout(&panes, None), team, "t");
@@ -1364,8 +1365,6 @@ mod tests {
         assert_eq!(meta(PaneMeta { title: Some(r"C:\pwsh.exe".into()), ..Default::default() }), "shell");
         assert_eq!(meta(PaneMeta { diff_repo: Some("/src/mirador".into()), ..Default::default() }), "Diff · mirador");
         assert_eq!(meta(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
-        assert_eq!(meta(PaneMeta { agent_wall: true, title: Some("x".into()), ..Default::default() }), "Agents");
-        assert_eq!(meta(PaneMeta { task_board: true, ..Default::default() }), "Tasks");
     }
 
     #[test]

@@ -234,10 +234,19 @@ mira agent edit [--tab]                       # a pane to edit them, and teams
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, harness, name, model
-mira agent wall                               # this tab's agents, in a grid
+mira agent wall                               # this tab as its agents' grid, or its splits again
 mira agent activity [--pane <id>]             # its tasks and subagents
 mira agent trail [NAME | --pane <id>]         # what it did, turn by turn
 ```
+
+`agent wall` switches the tab it runs in between its splits and the wall,
+its agents' terminals in one grid, and prints the new state, `wall on` or
+`wall off` (`agent_wall` answers `{"wall": true}`). The same tab, not a
+tab of its own: its panes keep running under the wall, `read-screen` and
+`send-input` reach them as before, and the tab remembers the wall, and
+which side of it (agents or tasks, `wallView` in `list-tabs --json`), across
+restarts: turned on again, the wall is on the side it was left on.
+Zooming one agent (`zoom_pane`) leaves the wall.
 
 A role is a Markdown file — its frontmatter says how it starts, its body is
 its prompt — and may follow a *way of working*, a playbook in `ways/` that
@@ -411,7 +420,7 @@ mira task done <id>                            # same as move <id> done
 mira task list [--all]                         # this tab's cards by column; every tab's
 mira agent send <name> --card <id> <message…>  # the message is that card's
 mira agent history [NAME | --pane <id> | --card <id> | --all]
-mira agent board [--tab]                       # the board, beside this pane
+mira agent board                               # this tab's wall, on its Tasks side
 ```
 
 Mirador keeps a log of tasks: one line per event, kept across restarts.
@@ -467,14 +476,18 @@ turn ended and how long it took (since the task, or since it resumed).
 Without a name it is this tab's; with one, the tasks given to that agent
 or sent by it, the moves of its cards, and its turns.
 
-`agent board` opens a task-board pane showing the tab it was opened from
-(or, opened from the agent wall's *Task board* button, the tab the wall
-shows) — also the palette's *Agents: Task Board*. It switches between
-this team and all agents, and between Cards, History (newest first) and
+The task board is the agent wall's other side: the wall's **Splits |
+Agents | Tasks** switch shows the tab's task board in place of its agents' tiles.
+`agent board` turns the tab it runs in to its wall on the Tasks side and
+prints `wall on: tasks` (`agent_board` answers `{"wall": true,
+"wallView": "tasks"}`) — also the palette's *Agents: Task Board*. Its
+old `--tab`, from when the board was a pane of its own, is still taken
+and does nothing. The board switches between this team and all agents, and between Cards, History (newest first) and
 Trail (below); a card's title opens its history, its agent's name goes to
 its pane, and its ⋯ opens Trail on its agent at the turn the card started
-— the first to begin since it was given. It reads the log again whenever
-something is appended, and comes back after a relaunch.
+— the first to begin since it was given; going to an agent of this tab
+turns the wall back to its tiles. It reads the log again whenever
+something is appended.
 
 The log is `tasks.jsonl` in the data directory (on macOS
 `~/Library/Application Support/Mirador/`, on Linux `$XDG_DATA_HOME/mirador`
@@ -558,7 +571,10 @@ mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
 ```
 
-The board shows every tab as a frame and every pane as a card; where a
+The board shows every tab as a frame and every pane as a card — but a
+tab showing its agent wall shows the wall in its frame, its agents or its
+task board, with its cards kept under it; `wall` in `list-tabs --json`
+says which tabs those are. Where a
 card sits on the board and how its tab is split are separate layouts, and
 neither changes the other. A pane created with `mira` lands in a free spot
 of its tab's frame, and a new tab's frame lands at the centre of the view

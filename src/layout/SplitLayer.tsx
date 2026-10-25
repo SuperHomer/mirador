@@ -1,8 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
-  AgentWallPaneInfo,
-  TaskBoardPaneInfo,
   BoardRect,
   CardRect,
   BrowserPaneInfo,
@@ -28,7 +26,6 @@ import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
 import { AgentEditor } from "../agents/AgentEditor";
 import { AgentWall } from "../agents/AgentWall";
-import { TaskBoard } from "../agents/TaskBoard";
 
 // Mirrors `cmux_core::board`, which has the last word when a card is
 // dropped: a card stays inside its frame, below its label, and big enough
@@ -89,9 +86,7 @@ export function SplitLayer({
   diffPanes,
   whatsNewPanes,
   graphPanes,
-  agentWallPanes,
   agentEditorPanes,
-  taskBoardPanes,
 }: {
   tab: TabSnapshot;
   /** Drawn as cards on the board. */
@@ -108,9 +103,7 @@ export function SplitLayer({
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
-  agentWallPanes: AgentWallPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
-  taskBoardPanes: TaskBoardPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -160,12 +153,21 @@ export function SplitLayer({
     window.addEventListener("pointerup", onUp);
   };
 
+  // The tab's agents as the wall, drawn over the whole layer — on the
+  // board, over its frame where the cards would be. Its panes stay mounted
+  // under it, hidden as a zoom hides them; the wall borrows the agents'
+  // terminals while it is on screen. Each agent is in one tab, so on the
+  // board, where every tab is on screen, no terminal is wanted twice.
+  const walled = tab.wall;
   // One pane shown alone: it fills the layer, and the rest stay mounted at
   // their own size but out of sight — hidden, not unmounted, so terminals
   // keep their buffers, and not resized, so their PTYs are left alone.
   // The board shows every pane.
   const zoomed =
-    !board && tab.zoomedPane && panes.some((p) => p.paneId === tab.zoomedPane)
+    !board &&
+    !walled &&
+    tab.zoomedPane &&
+    panes.some((p) => p.paneId === tab.zoomedPane)
       ? tab.zoomedPane
       : null;
   const FULL: Frac = { x: 0, y: 0, w: 1, h: 1 };
@@ -204,7 +206,7 @@ export function SplitLayer({
   return (
     <div className="split-layer" ref={layerRef}>
       {panes.map((p) => {
-        const hidden = zoomed !== null && p.paneId !== zoomed;
+        const hidden = walled || (zoomed !== null && p.paneId !== zoomed);
         const shown = active && !hidden;
         // On the board every tab is shown, and each has a focused pane:
         // only the active tab's takes the keyboard there.
@@ -217,24 +219,21 @@ export function SplitLayer({
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
-        const wall = agentWallPanes.find((w) => w.paneId === p.paneId);
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
-        const tasks = taskBoardPanes.find((t) => t.paneId === p.paneId);
+        const hide: React.CSSProperties = hidden
+          ? { visibility: "hidden", pointerEvents: "none" }
+          : {};
         return (
           <div
             key={p.paneId}
             data-pane={p.paneId}
             className={`pane-slot${card ? " card" : ""}${inHand ? " dragging" : ""}`}
-            style={
-              card
+            style={{
+              ...(card
                 ? px(inHand && !held.resize ? held.rect : card)
-                : {
-                    ...frac(p.paneId === zoomed ? FULL : p.rect),
-                    ...(hidden
-                      ? { visibility: "hidden", pointerEvents: "none" }
-                      : {}),
-                  }
-            }
+                : frac(p.paneId === zoomed ? FULL : p.rect)),
+              ...hide,
+            }}
             // Below 50% a card's content takes no pointer; a click on it
             // still lands here, and makes it the pane the keyboard types to.
             onMouseDown={card ? (e) => pressCard(e, p.paneId) : undefined}
@@ -249,24 +248,7 @@ export function SplitLayer({
               />
             )}
             <div className={`pane-body${browser ? " browser" : ""}`}>
-              {wall ? (
-                // On the board the wall borrows no terminal: each agent's own
-                // card is on screen already, and a terminal is drawn in one
-                // place.
-                <AgentWall
-                  paneId={p.paneId}
-                  tabId={wall.tabId}
-                  visible={shown && !board}
-                  board={board}
-                />
-              ) : tasks ? (
-                <TaskBoard
-                  paneId={p.paneId}
-                  tabId={tasks.tabId}
-                  visible={shown}
-                  board={board}
-                />
-              ) : editor ? (
+              {editor ? (
                 <AgentEditor
                   paneId={p.paneId}
                   cwd={editor.cwd}
@@ -327,7 +309,22 @@ export function SplitLayer({
         );
       })}
       {held?.resize && <div className="card-ghost" style={px(held.rect)} />}
+      {walled && (
+        // The same element in either view, so going to or from the board
+        // moves the wall rather than remounting it: its tiles keep the
+        // terminals they hold, and nothing is lent twice.
+        <div
+          className="pane-slot"
+          data-wall-of={tab.id}
+          style={board ? px(frameContent(tab.frame)) : frac(FULL)}
+        >
+          <div className="pane-body">
+            <AgentWall tabId={tab.id} visible={active} current={current} />
+          </div>
+        </div>
+      )}
       {!zoomed &&
+        !walled &&
         !board &&
         dividers.map((d) => (
           <div
@@ -383,6 +380,17 @@ function frac(r: Frac): React.CSSProperties {
     top: `${r.y * 100}%`,
     width: `${r.w * 100}%`,
     height: `${r.h * 100}%`,
+  };
+}
+
+/** Where a frame's cards can be, relative to the frame: inside its padding
+ *  and below its label, as `cmux_core::board::frame_rect` sizes it. */
+function frameContent(frame: BoardRect): BoardRect {
+  return {
+    x: FRAME_PADDING,
+    y: FRAME_HEADER,
+    w: frame.w - 2 * FRAME_PADDING,
+    h: frame.h - FRAME_HEADER - FRAME_PADDING,
   };
 }
 

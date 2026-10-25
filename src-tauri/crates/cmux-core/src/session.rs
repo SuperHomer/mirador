@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{BoardPoint, BoardRect, Camera, Node, View};
+use cmux_protocol::{BoardPoint, BoardRect, Camera, Node, View, WallView};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{PaneMeta, Tab, Workspace};
@@ -21,6 +21,10 @@ pub struct SessionTab {
     pub focused: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<cmux_protocol::TeamRun>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wall: bool,
+    #[serde(default, skip_serializing_if = "WallView::is_agents")]
+    pub wall_view: WallView,
     /// Absent from sessions saved before the board: the tab gets a frame
     /// and cards from its splits when it is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,16 +53,23 @@ pub struct SessionPane {
     /// passes it again, or the agent would come back without its limits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_settings: Option<String>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// The wall and the task board were panes of their own before they
+    /// were the two sides of a way of showing a tab. Read so that such a
+    /// pane is dropped on restore rather than coming back as a shell;
+    /// never written.
+    #[serde(default, skip_serializing)]
     pub agent_wall: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_wall_tab: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub agent_editor: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing)]
     pub task_board: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_board_tab: Option<String>,
+}
+
+impl SessionPane {
+    /// A pane of a type that is no more (see `agent_wall`).
+    fn retired(&self) -> bool {
+        self.agent_wall || self.task_board
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +143,8 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
             root: t.root.clone(),
             focused: t.focused.clone(),
             team: t.team.clone(),
+            wall: t.wall,
+            wall_view: t.wall_view,
             frame: Some(t.frame),
             cards: t.cards.clone(),
         })
@@ -158,11 +171,9 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
                         agent_settings: m.and_then(|m| m.agent_settings.clone()),
-                        agent_wall: m.is_some_and(|m| m.agent_wall),
-                        agent_wall_tab: m.and_then(|m| m.agent_wall_tab.clone()),
+                        agent_wall: false,
                         agent_editor: m.is_some_and(|m| m.agent_editor),
-                        task_board: m.is_some_and(|m| m.task_board),
-                        task_board_tab: m.and_then(|m| m.task_board_tab.clone()),
+                        task_board: false,
                     },
                 )
             })
@@ -188,11 +199,20 @@ pub fn load() -> Option<SessionFile> {
 /// Rebuilds workspace + meta from a session. Invalid entries are dropped;
 /// an unusable session yields None (caller starts fresh).
 pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta>)> {
+    let retired: Vec<&String> = file
+        .panes
+        .iter()
+        .filter(|(_, p)| p.retired())
+        .map(|(id, _)| id)
+        .collect();
     let mut tabs = Vec::new();
     let mut unplaced = Vec::new();
-    for t in file.tabs {
+    for mut t in file.tabs {
+        let emptied = retired.iter().any(|p| {
+            matches!(crate::layout::remove(&mut t.root, p), crate::layout::RemoveOutcome::BecameEmpty)
+        });
         let panes = crate::layout::pane_ids(&t.root);
-        if panes.is_empty() {
+        if emptied || panes.is_empty() {
             continue;
         }
         let focused = if panes.contains(&t.focused) {
@@ -212,6 +232,8 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             focused,
             zoomed: None,
             team: t.team,
+            wall: t.wall,
+            wall_view: t.wall_view,
             frame: t.frame.unwrap_or_default(),
             cards,
         });
@@ -251,6 +273,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
     let meta = file
         .panes
         .into_iter()
+        .filter(|(_, p)| !p.retired())
         .map(|(id, p)| {
             (
                 id,
@@ -264,11 +287,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     diff_spec: p.diff_spec,
                     agent_role: p.agent_role,
                     agent_settings: p.agent_settings,
-                    agent_wall: p.agent_wall,
-                    agent_wall_tab: p.agent_wall_tab,
                     agent_editor: p.agent_editor,
-                    task_board: p.task_board,
-                    task_board_tab: p.task_board_tab,
                     ..Default::default()
                 },
             )
@@ -333,6 +352,38 @@ mod tests {
     }
 
     #[test]
+    fn a_wall_comes_back_with_its_tab() {
+        let mut ws = Workspace::default();
+        let walled = ws.focused_pane();
+        let (_, plain) = ws.new_tab();
+        ws.toggle_wall(&walled);
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert!(back.tab_of_pane(&walled).unwrap().wall);
+        assert!(!back.tab_of_pane(&plain).unwrap().wall);
+        // Only the wall's tab writes the key.
+        assert_eq!(json.matches(r#""wall":"#).count(), 1);
+    }
+
+    #[test]
+    fn a_wall_comes_back_on_its_side() {
+        let mut ws = Workspace::default();
+        let tasks = ws.focused_pane();
+        let (_, plain) = ws.new_tab();
+        // On the Tasks side, then off: the side is still the tab's.
+        ws.show_wall(&tasks, WallView::Tasks);
+        ws.toggle_wall(&tasks);
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        let tab = back.tab_of_pane(&tasks).unwrap();
+        assert!(!tab.wall);
+        assert_eq!(tab.wall_view, WallView::Tasks);
+        assert_eq!(back.tab_of_pane(&plain).unwrap().wall_view, WallView::Agents);
+        // The Agents side, the default, is not written.
+        assert_eq!(json.matches(r#""wall_view":"#).count(), 1);
+    }
+
+    #[test]
     fn capture_restore_roundtrip() {
         let mut ws = Workspace::default();
         let a = ws.focused_pane();
@@ -352,8 +403,6 @@ mod tests {
             c.clone(),
             PaneMeta {
                 command: Some("npm test".into()),
-                task_board: true,
-                task_board_tab: Some("tab-1".into()),
                 ..Default::default()
             },
         );
@@ -364,8 +413,6 @@ mod tests {
                 agent_role: Some("reviewer".into()),
                 agent_settings: Some("/data/prompts/reviewer-1.settings.json".into()),
                 agent_status: Some(cmux_protocol::AgentStatus::Working),
-                agent_wall: true,
-                agent_wall_tab: Some("tab-1".into()),
                 ..Default::default()
             },
         );
@@ -385,13 +432,8 @@ mod tests {
         // ever what this run heard.
         assert_eq!(rmeta[&b].agent_role.as_deref(), Some("reviewer"));
         assert_eq!(rmeta[&b].agent_settings.as_deref(), Some("/data/prompts/reviewer-1.settings.json"));
-        assert!(rmeta[&b].agent_wall);
-        assert_eq!(rmeta[&b].agent_wall_tab.as_deref(), Some("tab-1"));
         assert_eq!(rmeta[&b].agent_status, None);
-        assert!(!rmeta[&a].agent_wall);
         assert_eq!(rmeta[&c].command.as_deref(), Some("npm test"));
-        assert!(rmeta[&c].task_board && !rmeta[&a].task_board);
-        assert_eq!(rmeta[&c].task_board_tab.as_deref(), Some("tab-1"));
     }
 
     #[test]
@@ -465,6 +507,68 @@ mod tests {
         let first = ws.tabs[0].frame_rect();
         assert_eq!(ws.tabs[1].frame.x, first.x + first.w + crate::board::FRAME_GAP);
         assert!(ws.tabs[1].cards.contains_key("c"));
+        // And no tab is a wall, each on the Agents side when it becomes one.
+        assert!(ws.tabs.iter().all(|t| !t.wall && t.wall_view == WallView::Agents));
+    }
+
+    #[test]
+    fn an_old_wall_or_board_pane_is_dropped_on_restore() {
+        // The wall was a pane: here alone in a tab of its own, and split
+        // beside a shell in another.
+        let json = r#"{
+            "version": 1,
+            "tabs": [
+                {"id": "work", "title": null, "focused": "a",
+                 "root": {"type": "split", "dir": "row", "ratios": [0.5, 0.5],
+                          "children": [{"type": "leaf", "paneId": "a"}, {"type": "leaf", "paneId": "b"}]}},
+                {"id": "walltab", "title": null, "focused": "w",
+                 "root": {"type": "leaf", "paneId": "w"}},
+                {"id": "mixed", "title": null, "focused": "v",
+                 "root": {"type": "split", "dir": "row", "ratios": [0.5, 0.5],
+                          "children": [{"type": "leaf", "paneId": "c"}, {"type": "leaf", "paneId": "v"}]}},
+                {"id": "boardtab", "title": null, "focused": "t",
+                 "root": {"type": "leaf", "paneId": "t"}},
+                {"id": "beside", "title": null, "focused": "d",
+                 "root": {"type": "split", "dir": "row", "ratios": [0.5, 0.5],
+                          "children": [{"type": "leaf", "paneId": "d"}, {"type": "leaf", "paneId": "u"}]}}
+            ],
+            "active_tab": "walltab",
+            "panes": {"a": {"cwd": "/tmp"}, "b": {}, "c": {}, "d": {},
+                      "w": {"agent_wall": true, "agent_wall_tab": "work"},
+                      "v": {"agent_wall": true, "agent_wall_tab": "work"},
+                      "t": {"task_board": true, "task_board_tab": "work"},
+                      "u": {"task_board": true, "task_board_tab": "beside"}}
+        }"#;
+        let (ws, meta) = restore(serde_json::from_str(json).unwrap()).unwrap();
+        let ids: Vec<&str> = ws.tabs.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["work", "mixed", "beside"], "a wall's or a board's own tab goes with it");
+        // It was the active tab: the first takes its place.
+        assert_eq!(ws.tabs[ws.active].id, "work");
+        assert_eq!(crate::layout::pane_ids(&ws.tabs[0].root), ["a", "b"]);
+        assert_eq!(crate::layout::pane_ids(&ws.tabs[1].root), ["c"]);
+        assert_eq!(ws.tabs[1].focused, "c");
+        assert!(!ws.tabs[1].cards.contains_key("v"));
+        assert_eq!(crate::layout::pane_ids(&ws.tabs[2].root), ["d"]);
+        assert!(!ws.tabs[2].cards.contains_key("u"));
+        for gone in ["w", "v", "t", "u"] {
+            assert!(!meta.contains_key(gone), "{gone}");
+        }
+        assert_eq!(meta["a"].cwd.as_deref(), Some("/tmp"));
+        // And they are never written again.
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        assert!(!json.contains("agent_wall") && !json.contains("task_board"));
+    }
+
+    #[test]
+    fn a_session_of_only_an_old_wall_restores_nothing() {
+        let json = r#"{
+            "version": 1,
+            "tabs": [{"id": "walltab", "title": null, "focused": "w",
+                      "root": {"type": "leaf", "paneId": "w"}}],
+            "active_tab": "walltab",
+            "panes": {"w": {"agent_wall": true}}
+        }"#;
+        assert!(restore(serde_json::from_str(json).unwrap()).is_none());
     }
 
     #[test]

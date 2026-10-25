@@ -12,24 +12,20 @@ import {
   TrailAction,
   TrailTurn,
   agentLabel,
-  closePane,
   focusPane,
   getAgentTrail,
   getTrailDetail,
+  setWallView,
   taskCards,
   taskHistory,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { flyToCard } from "../state/boardStore";
 
 type Props = {
-  paneId: string;
-  /** The tab whose cards it shows: the one it was opened from. */
-  tabId: string | null;
+  /** The tab whose wall it is the Tasks side of, and whose cards it shows. */
+  tabId: string;
   /** On screen: only then does it read the log. */
   visible: boolean;
-  /** Drawn as a card on the board. */
-  board: boolean;
 };
 
 const COLUMNS: [TaskColumn, string][] = [
@@ -83,12 +79,7 @@ const scopeOf = (key: string) => (key === "*" ? null : key);
  * given to a tab's agents, its team's in a team's tab, or every tab's —
  * or the log itself, newest first. Read again whenever it is appended to.
  */
-export const TaskBoard = memo(function TaskBoard({
-  paneId,
-  tabId,
-  visible,
-  board,
-}: Props) {
+export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [all, setAll] = useState(false);
@@ -96,11 +87,10 @@ export const TaskBoard = memo(function TaskBoard({
   // The agent the Trail view shows, and the time of the card it was
   // opened from, to scroll to that card's turn.
   const [trailOf, setTrailOf] = useState<{ pane: string; label: string; at: number | null } | null>(null);
-  const live = visible || board;
+  const live = visible;
   const now = useNow(live);
 
-  // With its tab closed, only every tab's is left to show.
-  const scope = all ? "*" : (tabId ?? "");
+  const scope = all ? "*" : tabId;
   const cards = useLogRead(
     live,
     view === "cards" ? scope : "",
@@ -127,7 +117,10 @@ export const TaskBoard = memo(function TaskBoard({
 
   const goTo = (pane: string) => {
     void focusPane(pane);
-    if (board) flyToCard(pane);
+    // An agent of this tab is under the wall: its tile shows it.
+    if (shown && paneIds(shown.root).includes(pane)) {
+      void setWallView(pane, "agents");
+    }
   };
 
   const agents = useMemo(
@@ -140,12 +133,8 @@ export const TaskBoard = memo(function TaskBoard({
   };
 
   return (
-    <div className="pane task-board">
+    <div className="task-board">
       <div className="wall-chrome">
-        <span className="wall-badge">Tasks</span>
-        <span className="wall-tab" title="The tab this board shows the cards of">
-          {shown ? (shown.team?.name ?? shown.title) : "closed tab"}
-        </span>
         <div className="tb-switch" role="group">
           <button
             className={view === "cards" ? "on" : ""}
@@ -176,13 +165,6 @@ export const TaskBoard = memo(function TaskBoard({
             All agents
           </button>
         </div>
-        <button
-          className="wall-close"
-          title="Close task board"
-          onClick={() => void closePane(paneId)}
-        >
-          ✕
-        </button>
       </div>
 
       {view === "trail" ? (

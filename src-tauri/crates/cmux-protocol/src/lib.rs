@@ -68,6 +68,12 @@ pub struct TabSnapshot {
     /// The pane shown alone, filling the tab, when one is.
     #[serde(default)]
     pub zoomed_pane: Option<String>,
+    /// The tab shows its agents as the wall instead of its splits.
+    #[serde(default)]
+    pub wall: bool,
+    /// The side of the wall it shows, or will when the wall is next on.
+    #[serde(default)]
+    pub wall_view: WallView,
     /// Where the tab's frame sits on the board, and its size (derived from
     /// its cards). Card positions are relative to the frame's `x`, `y`.
     #[serde(default)]
@@ -85,6 +91,22 @@ pub enum View {
     #[default]
     Tabs,
     Board,
+}
+
+/// The side of a tab's wall on show: its agents' terminals, or the task
+/// board of what they were given.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WallView {
+    #[default]
+    Agents,
+    Tasks,
+}
+
+impl WallView {
+    pub fn is_agents(&self) -> bool {
+        *self == WallView::Agents
+    }
 }
 
 /// The part of the board on screen: `x`, `y` is the board point at the
@@ -165,15 +187,9 @@ pub struct WorkspaceSnapshot {
     /// Commit-graph panes and the repository each one reads.
     #[serde(default)]
     pub graph_panes: Vec<GraphPane>,
-    /// Agent-wall panes: each draws every agent's terminal in a grid.
-    #[serde(default)]
-    pub agent_wall_panes: Vec<AgentWallPane>,
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
-    /// Task-board panes: each shows the cards of a tab's agents.
-    #[serde(default)]
-    pub task_board_panes: Vec<TaskBoardPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -367,20 +383,19 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
-    /// Opens the agent wall for the tab of `pane_id` (the focused pane
-    /// when absent): its own tab, reused if there is one, showing that
-    /// tab's agents.
+    /// Shows the tab of `pane_id` (the focused pane when absent) as the
+    /// wall of its agents, or its splits again when it already is.
+    /// Answers `{"wall": bool}`, the new state.
     AgentWall {
         #[serde(default)]
         pane_id: Option<String>,
     },
-    /// Opens the task board of `pane_id`'s tab (the focused pane's when
-    /// absent) beside it, or in a tab of its own with `target` "tab".
+    /// Shows the tab of `pane_id` (the focused pane's when absent) as its
+    /// wall, on the Tasks side: its task board. Answers `{"wall": true,
+    /// "wallView": "tasks"}`.
     AgentBoard {
         #[serde(default)]
         pane_id: Option<String>,
-        #[serde(default)]
-        target: Option<String>,
     },
     /// Opens the editor for the role, way and team files `pane_id`'s
     /// directory sees: a split of that pane, or a tab with `target` "tab".
@@ -934,26 +949,6 @@ pub struct ActionDetail {
     /// Its result's text; absent while there is none.
     pub output: Option<String>,
     pub is_error: bool,
-}
-
-/// A pane drawing the task board.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskBoardPane {
-    pub pane_id: String,
-    /// The tab whose cards it shows: the one it was opened from.
-    #[serde(default)]
-    pub tab_id: Option<String>,
-}
-
-/// A pane drawing the agent wall.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentWallPane {
-    pub pane_id: String,
-    /// The tab whose agents it shows: the one it was opened from.
-    #[serde(default)]
-    pub tab_id: Option<String>,
 }
 
 /// A named way to start an agent: a Markdown file in a repository's

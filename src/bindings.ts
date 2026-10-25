@@ -29,6 +29,10 @@ export interface TabSnapshot {
   ports: number[];
   /** The pane shown alone, filling the tab, when one is. */
   zoomedPane: string | null;
+  /** The tab shows its agents as the wall instead of its splits. */
+  wall: boolean;
+  /** The side of the wall it shows, or will when the wall is next on. */
+  wallView: WallView;
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
   /** Its frame on the board; its cards are placed relative to `x`, `y`. */
@@ -39,6 +43,9 @@ export interface TabSnapshot {
 
 /** Tabs one at a time with their splits, or every pane on one board. */
 export type View = "tabs" | "board";
+
+/** The side of a tab's wall: its agents' terminals, or its task board. */
+export type WallView = "agents" | "tasks";
 
 /** The board point at the viewport's top-left, and screen px per unit. */
 export interface Camera {
@@ -367,13 +374,6 @@ export interface ActionDetail {
   isError: boolean;
 }
 
-/** A task-board pane, and the tab whose cards it shows. */
-export interface TaskBoardPaneInfo {
-  paneId: string;
-  /** The tab it was opened from. */
-  tabId: string | null;
-}
-
 export type TaskColumn = "todo" | "doing" | "needsYou" | "done";
 export type TaskSource = "teamStart" | "agentNew" | "agentSend" | "manual";
 
@@ -413,14 +413,6 @@ export const taskHistory = (tabId: string | null, card: string | null) =>
  *  ones, only the latest. */
 export const taskCards = (tabId: string | null) =>
   invoke<TaskCard[]>("task_cards", { tabId });
-export const openTaskBoard = (paneId: string | null, tab: boolean) =>
-  invoke<string>("open_task_board", { paneId, tab });
-
-export interface AgentWallPaneInfo {
-  paneId: string;
-  /** The tab whose agents it shows: the one it was opened from. */
-  tabId: string | null;
-}
 
 /** Where a role or a way of working was defined (`cmux_protocol::RoleSource`). */
 export type RoleSource = "repo" | "global" | "config" | "builtin";
@@ -482,8 +474,6 @@ export interface WorkspaceSnapshot {
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
-  agentWallPanes: AgentWallPaneInfo[];
-  taskBoardPanes: TaskBoardPaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;
@@ -739,16 +729,17 @@ export const openAgent = (
   task: string | null,
   paneId: string | null,
   tab: boolean,
-  background = false,
-) => invoke<string>("open_agent", { role, task, paneId, tab, background });
+) => invoke<string>("open_agent", { role, task, paneId, tab });
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
 /** The wall for the tab of `paneId` (the focused pane when null). */
-export const openAgentWall = (paneId: string | null) =>
-  invoke<string>("open_agent_wall", { paneId });
+export const toggleAgentWall = (paneId: string | null) =>
+  invoke<boolean>("toggle_agent_wall", { paneId });
+export const setWallView = (paneId: string | null, view: WallView) =>
+  invoke<void>("set_wall_view", { paneId, view });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
 /** Its last `turns` turns, and any begun at or after `sinceMs`. */

@@ -99,7 +99,7 @@ export const TerminalPane = memo(function TerminalPane({
   const config = useConfigStore((s) => s.config);
   const fitRef = useRef<FitAddon | null>(null);
   const webglRef = useRef<WebglAddon | null>(null);
-  // Lent to the agent wall: drawn there while this tab is hidden, so it
+  // Lent to the agent wall: drawn there while this pane is under it, so it
   // keeps its renderer as if it were on screen.
   const [lent, setLent] = useState(false);
 
@@ -108,7 +108,7 @@ export const TerminalPane = memo(function TerminalPane({
     return watchTerminal(paneId, () => setLent(isLent(paneId)));
   }, [paneId]);
 
-  // The wall keeps a terminal it borrowed until the pane's own tab shows.
+  // The wall keeps a terminal it borrowed until the pane itself shows.
   useEffect(() => {
     if (visible && lent) reclaimTerminal(paneId);
   }, [visible, lent, paneId]);
@@ -354,13 +354,15 @@ export const TerminalPane = memo(function TerminalPane({
 
   // On the board every terminal counts as visible, and a browser allows
   // ~16 WebGL contexts. So there a terminal renders with WebGL only while
-  // its card is in view and the board is at 100%; otherwise xterm
-  // falls back to its DOM renderer, which pauses while out of view and,
-  // being text, stays crisp when the board scales it. At 100% the screen
-  // holds far fewer than 16 cards.
+  // it is in view and the board is at 100%; otherwise xterm falls back to
+  // its DOM renderer, which pauses while out of view and, being text,
+  // stays crisp when the board scales it. At 100% the screen holds far
+  // fewer than 16 cards. In view is where the terminal is drawn — its
+  // card, or the tile of a wall on the board that holds it — so it is the
+  // terminal's own element that is watched, which moves with it.
   const [inView, setInView] = useState(true);
   useEffect(() => {
-    const el = containerRef.current;
+    const el = termRef.current?.element ?? containerRef.current;
     if (!onBoard || !el) {
       setInView(true);
       return;
@@ -372,7 +374,7 @@ export const TerminalPane = memo(function TerminalPane({
   }, [onBoard]);
   const fullSize = useBoardStore((s) => atFullSize(s.camera));
 
-  const onScreen = lent || (visible && (!onBoard || (inView && fullSize)));
+  const onScreen = (lent || visible) && (!onBoard || (inView && fullSize));
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
@@ -392,8 +394,8 @@ export const TerminalPane = memo(function TerminalPane({
     return () => clearTimeout(timer);
   }, [onScreen, onBoard, paneId]);
 
-  // Also on becoming visible, and on coming back from the wall: going to
-  // an agent's tab from its tile means typing to it next.
+  // Also on becoming visible, and on coming back from the wall: showing an
+  // agent alone from its tile means typing to it next.
   useEffect(() => {
     if (focused && visible && !lent) termRef.current?.focus();
   }, [focused, visible, lent]);

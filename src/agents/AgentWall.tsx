@@ -6,20 +6,21 @@ import {
   AgentInfo,
   agentLabel,
   AgentStatus,
-  Node,
-  closePane,
   focusPane,
   markPaneRead,
   openAgent,
-  openTaskBoard,
+  setWallView,
+  toggleAgentWall,
+  WallView,
   zoomPane,
 } from "../bindings";
 import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
+import { TaskBoard } from "./TaskBoard";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { flyToCard } from "../state/boardStore";
 import {
   fitTerminal,
+  getTerminal,
   isLent,
   isLentTo,
   lendTerminal,
@@ -27,22 +28,14 @@ import {
 } from "../terminal/registry";
 
 type Props = {
-  paneId: string;
-  /** The tab whose agents it shows: the one it was opened from. */
-  tabId: string | null;
-  /** The wall's tab is the one on screen: only then does it borrow. */
+  /** The tab whose agents it shows, and in place of whose splits. */
+  tabId: string;
+  /** It is on screen: only then does it borrow. On the board, every
+   *  tab's wall is. */
   visible: boolean;
-  /**
-   * Drawn as a card on the board, beside every agent's own card. It
-   * borrows nothing there — a terminal is drawn in one place — and a tile
-   * shows the agent's status and takes you to its card.
-   */
-  board: boolean;
+  /** Its tab is the active one, where the keyboard goes. */
+  current: boolean;
 };
-
-function paneIds(node: Node): string[] {
-  return node.type === "leaf" ? [node.paneId] : node.children.flatMap(paneIds);
-}
 
 const STATUS_LABEL: Record<AgentStatus, string> = {
   working: "working",
@@ -64,39 +57,49 @@ function columns(n: number): number {
 }
 
 /**
- * Every agent's terminal in one grid — Claude Code, Codex, OpenCode, …. The terminals are the
- * panes' own, lent for as long as the wall is on screen (see
- * `lendTerminal`), so a tile is live and takes input — answering a
- * permission prompt from here is the same as in the agent's tab.
- *
- * Agents in the wall's own tab are left out: they are already on screen,
- * and a terminal can only be drawn in one place.
+ * A tab's agents' terminals in one grid — Claude Code, Codex, OpenCode, …,
+ * drawn in place of the tab's splits. The terminals are the panes' own,
+ * lent for as long as the wall is on screen (see `lendTerminal`), so a
+ * tile is live and takes input — answering a permission prompt from here
+ * is the same as in the agent's pane.
  */
 export const AgentWall = memo(function AgentWall({
-  paneId,
   tabId,
   visible,
-  board,
+  current,
 }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
-  // The tab it shows; gone if that tab has closed since.
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const now = useNow(visible || board);
+  const now = useNow(visible);
 
-  const tiles = useMemo(() => {
-    const tabOf = new Map<string, { id: string; title: string }>();
-    for (const t of snapshot?.tabs ?? []) {
-      for (const p of paneIds(t.root))
-        tabOf.set(p, { id: t.id, title: t.title });
-    }
-    const ownTab = tabOf.get(paneId)?.id;
-    const tiles = (snapshot?.agents ?? []).filter(
-      (a) => a.tabId === tabId && tabOf.get(a.paneId)?.id !== ownTab,
-    );
-    return tiles;
-  }, [snapshot, paneId, tabId]);
+  const tiles = useMemo(
+    () => (snapshot?.agents ?? []).filter((a) => a.tabId === tabId),
+    [snapshot, tabId],
+  );
+
+  // Its tiles, or the tab's task board in their place. On the Tasks side
+  // no tile is mounted, so each lent terminal has gone back to its own
+  // pane under the wall, and the Agents side borrows them again.
+  const side: WallView = shown?.wallView ?? "agents";
+  const tilesShown = visible && side === "agents";
+
+  // The tab's focused pane is under the wall, so the keyboard would go
+  // nowhere: as the tiles come on screen in the active tab — on the board,
+  // as their tab becomes it — the wall gives it to that pane's tile, or
+  // the first. Only then — not on every snapshot, or a click in another
+  // tile would be undone. The tiles' own effects ran first, so their
+  // terminals are here by now — unless another wall holds one, and then
+  // it is not this wall's to focus.
+  const wallRef = useRef<HTMLDivElement>(null);
+  const keyboard = tilesShown && current;
+  useEffect(() => {
+    if (!keyboard) return;
+    const tile = tiles.find((a) => a.paneId === shown?.focusedPane) ?? tiles[0];
+    const term = tile && getTerminal(tile.paneId);
+    if (term?.element && wallRef.current?.contains(term.element)) term.focus();
+  }, [keyboard]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
@@ -104,9 +107,9 @@ export const AgentWall = memo(function AgentWall({
 
   // The roles of the directory a new agent would work in: the shown tab's
   // focused pane's, read each time the menu opens.
-  const rolesPane = shown?.focusedPane ?? paneId;
+  const rolesPane = shown?.focusedPane;
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen || !rolesPane) return;
     let live = true;
     agentRoles(rolesPane)
       .then((c) => live && setRoles(c.roles))
@@ -118,26 +121,21 @@ export const AgentWall = memo(function AgentWall({
 
   const start = (role: string | null) => {
     setMenuOpen(false);
+    if (!shown) return;
     // Like everywhere else, the agent joins a tab rather than getting its
-    // own: it splits the focused pane of the tab the wall shows (the
-    // wall's own tab is no place to work). That tab is behind the wall, so
-    // the wall stays on screen and gains a tile. With that tab gone, a tab
-    // of its own, also behind the wall.
-    const opened = shown
-      ? openAgent(role, null, shown.focusedPane, false)
-      : openAgent(role, null, paneId, true, true);
-    opened.catch((e) => console.error(`mirador: role ${role}: ${e}`));
+    // own: it splits the tab's focused pane, under the wall, so the wall
+    // stays on screen and gains a tile.
+    openAgent(role, null, shown.focusedPane, false).catch((e) =>
+      console.error(`mirador: role ${role}: ${e}`),
+    );
   };
 
   return (
-    <div className="pane agent-wall">
+    <div className="pane agent-wall" ref={wallRef}>
       <div className="wall-chrome">
         <span className="wall-badge">Agents</span>
         {shown && (
-          <span
-            className="wall-tab"
-            title="The tab this wall shows the agents of"
-          >
+          <span className="wall-tab" title="The tab whose agents these are">
             {shown.title}
           </span>
         )}
@@ -158,13 +156,31 @@ export const AgentWall = memo(function AgentWall({
             </>
           )}
         </span>
-        <button
-          className="wall-new-button"
-          title="The cards of the tasks this tab's agents were given, beside the wall"
-          onClick={() => void openTaskBoard(paneId, false)}
-        >
-          Task board
-        </button>
+        {shown && (
+          // Splits leaves the wall, so it is never the side shown here.
+          <div className="tb-switch" role="group">
+            <button
+              title="Show this tab's splits (⌘⇧A / Ctrl+Shift+A)"
+              onClick={() => void toggleAgentWall(shown.focusedPane)}
+            >
+              Splits
+            </button>
+            <button
+              className={side === "agents" ? "on" : ""}
+              title="This tab's agents' terminals"
+              onClick={() => void setWallView(shown.focusedPane, "agents")}
+            >
+              Agents
+            </button>
+            <button
+              className={side === "tasks" ? "on" : ""}
+              title="The cards of the tasks this tab's agents were given"
+              onClick={() => void setWallView(shown.focusedPane, "tasks")}
+            >
+              Tasks
+            </button>
+          </div>
+        )}
         <div className="wall-new">
           <button
             className="wall-new-button"
@@ -200,27 +216,17 @@ export const AgentWall = memo(function AgentWall({
             </div>
           )}
         </div>
-        <button
-          className="wall-close"
-          title="Close agent wall"
-          onClick={() => void closePane(paneId)}
-        >
-          ✕
-        </button>
       </div>
 
-      {tiles.length === 0 ? (
+      {side === "tasks" ? (
+        <TaskBoard tabId={tabId} visible={visible} />
+      ) : tiles.length === 0 ? (
         <div className="wall-empty">
-          <p>
-            {shown
-              ? `No agents in ${shown.title}.`
-              : "The tab this wall showed has closed."}
-          </p>
+          <p>No agents in {shown?.title ?? "this tab"}.</p>
           <p className="wall-empty-hint">
             Start one with <em>+ New agent</em>, or run <code>claude</code>,{" "}
             <code>codex</code>, <code>opencode</code> or another agent in a pane
-            of that tab. For another tab's agents, go to the tab and open the
-            wall from there.
+            of the tab: <em>Splits</em> shows them.
           </p>
         </div>
       ) : (
@@ -234,7 +240,7 @@ export const AgentWall = memo(function AgentWall({
               agent={a}
               unread={unread.includes(a.paneId)}
               visible={visible}
-              board={board}
+              current={current}
               now={now}
             />
           ))}
@@ -248,13 +254,13 @@ function WallTile({
   agent,
   unread,
   visible,
-  board,
+  current,
   now,
 }: {
   agent: AgentInfo;
   unread: boolean;
   visible: boolean;
-  board: boolean;
+  current: boolean;
   now: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -314,11 +320,6 @@ function WallTile({
   const tasks = activity?.session.tasks ?? null;
 
   const status = agent.status;
-  // On the board the agent's own card is a click away, at 100%.
-  const goToCard = () => {
-    void focusPane(pane);
-    flyToCard(pane);
-  };
   return (
     <div
       className={`wall-tile${status ? ` ${status}` : ""}${unread ? " unread" : ""}`}
@@ -326,10 +327,10 @@ function WallTile({
       <div
         className="wall-tile-head"
         title={
-          (board ? "Go to this agent's card" : "Show this agent in its tab") +
+          "Show this agent alone in its tab" +
           (agent.hasActivity ? " — right-click for its subagents" : "")
         }
-        onClick={board ? goToCard : () => void zoomPane(pane, true)}
+        onClick={() => void zoomPane(pane, true)}
         onContextMenu={(e) => {
           e.preventDefault();
           if (agent.hasActivity) useUiStore.getState().openActivity(pane);
@@ -364,18 +365,16 @@ function WallTile({
           className="wall-term"
           onMouseDown={() => {
             if (unread) void markPaneRead(pane);
+            // On the board, a wall in another tab's frame: its tab becomes
+            // the active one, with this agent focused, so the keyboard
+            // stays in the tile pressed.
+            if (!current) void focusPane(pane);
           }}
         >
           {/* The terminal's element is appended here by `lendTerminal`, so
               React must own nothing inside it. */}
           <div className="wall-term-host" ref={hostRef} />
-          {board ? (
-            <button className="wall-term-missing wall-term-go" onClick={goToCard}>
-              on the board — go to its card
-            </button>
-          ) : (
-            !shown && <span className="wall-term-missing">shown elsewhere</span>
-          )}
+          {!shown && <span className="wall-term-missing">shown elsewhere</span>}
         </div>
         {activity && (activity.subagents.length > 0 || tasks) && (
           <aside className="wall-side">
