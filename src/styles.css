@@ -117,7 +117,8 @@ body,
   cursor: pointer;
 }
 
-.sidebar-wall:hover {
+.sidebar-wall:hover,
+.sidebar-wall.selected {
   background: var(--surface);
   color: var(--text);
 }

@@ -12,7 +12,7 @@ import {
   checkUpdate,
   openGraph,
   openAgent,
-  openAgentWall,
+  toggleAgentWall,
   openAgentEditor,
   openTaskBoard,
   openWhatsNew,
@@ -174,10 +174,10 @@ export const actions: ActionDef[] = [
   },
   {
     id: "agent_wall",
-    title: "Agent Wall",
-    // Every agent's terminal in one grid; goes to the wall's
-    // tab when there already is one.
-    run: () => void openAgentWall(focusedPane() ?? null),
+    title: "Toggle Agent Wall",
+    // The tab's agents' terminals in one grid in place of its splits,
+    // or its splits again.
+    run: () => void toggleAgentWall(focusedPane() ?? null),
   },
   {
     id: "task_board",

@@ -7,7 +7,7 @@ import {
   agentLabel,
   TabSnapshot,
   newTab,
-  openAgentWall,
+  toggleAgentWall,
   zoomPane,
   closeTab,
   setActiveTab,
@@ -28,6 +28,7 @@ export function Sidebar() {
   const currentTab = useWorkspaceStore((s) => s.currentTab);
   const visible = useWorkspaceStore((s) => s.sidebarVisible);
   if (!snapshot || !visible) return null;
+  const walled = snapshot.tabs.find((t) => t.id === currentTab)?.wall ?? false;
 
   // Every tab says how many agents it holds, and lights up when one wants
   // you — the current tab too, so the count stays put when you switch.
@@ -64,9 +65,9 @@ export function Sidebar() {
                 <div className="sidebar-section">
                   <span>Agents</span>
                   <button
-                    className="sidebar-wall"
-                    title="Agent wall for this tab (⌘⇧A / Ctrl+Shift+A)"
-                    onClick={() => void openAgentWall(entry.agent.paneId)}
+                    className={`sidebar-wall${walled ? " selected" : ""}`}
+                    title="Show this tab as the agent wall, or its splits again (⌘⇧A / Ctrl+Shift+A)"
+                    onClick={() => void toggleAgentWall(entry.agent.paneId)}
                   >
                     ▦ Wall
                   </button>

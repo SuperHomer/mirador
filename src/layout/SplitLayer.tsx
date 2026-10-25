@@ -160,12 +160,19 @@ export function SplitLayer({
     window.addEventListener("pointerup", onUp);
   };
 
+  // The tab's agents as the wall, drawn over the whole layer. Its panes
+  // stay mounted under it, hidden as a zoom hides them; the wall borrows
+  // the agents' terminals while it is on screen. The board shows cards.
+  const walled = !board && tab.wall;
   // One pane shown alone: it fills the layer, and the rest stay mounted at
   // their own size but out of sight — hidden, not unmounted, so terminals
   // keep their buffers, and not resized, so their PTYs are left alone.
   // The board shows every pane.
   const zoomed =
-    !board && tab.zoomedPane && panes.some((p) => p.paneId === tab.zoomedPane)
+    !board &&
+    !walled &&
+    tab.zoomedPane &&
+    panes.some((p) => p.paneId === tab.zoomedPane)
       ? tab.zoomedPane
       : null;
   const FULL: Frac = { x: 0, y: 0, w: 1, h: 1 };
@@ -204,7 +211,7 @@ export function SplitLayer({
   return (
     <div className="split-layer" ref={layerRef}>
       {panes.map((p) => {
-        const hidden = zoomed !== null && p.paneId !== zoomed;
+        const hidden = walled || (zoomed !== null && p.paneId !== zoomed);
         const shown = active && !hidden;
         // On the board every tab is shown, and each has a focused pane:
         // only the active tab's takes the keyboard there.
@@ -250,9 +257,10 @@ export function SplitLayer({
             )}
             <div className={`pane-body${browser ? " browser" : ""}`}>
               {wall ? (
-                // On the board the wall borrows no terminal: each agent's own
-                // card is on screen already, and a terminal is drawn in one
-                // place.
+                // A wall pane restored from before the wall was a view of
+                // its tab. On the board it borrows no terminal: each agent's
+                // own card is on screen already, and a terminal is drawn in
+                // one place.
                 <AgentWall
                   paneId={p.paneId}
                   tabId={wall.tabId}
@@ -327,7 +335,15 @@ export function SplitLayer({
         );
       })}
       {held?.resize && <div className="card-ghost" style={px(held.rect)} />}
+      {walled && (
+        <div className="pane-slot" style={frac(FULL)}>
+          <div className="pane-body">
+            <AgentWall tabId={tab.id} visible={active} board={false} />
+          </div>
+        </div>
+      )}
       {!zoomed &&
+        !walled &&
         !board &&
         dividers.map((d) => (
           <div
