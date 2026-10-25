@@ -137,8 +137,7 @@ export default function BoardShowcase() {
         <p style={{ color: "var(--subtext)", fontSize: 15, lineHeight: 1.65, marginTop: 16 }}>
           Every tab becomes a frame and every pane a card. Drag the empty board to pan,
           pinch to zoom, and double-click a card’s header to fly to it at 100%. A
-          frame’s + adds a pane to it (its Agent wall item opens the wall in a frame of
-          its own); New frame adds a tab. Where a card sits on the board and how its tab
+          frame’s + adds a pane to it; New frame adds a tab. Where a card sits on the board and how its tab
           is split are two separate layouts. From 50% up the pointer reaches into the
           cards — click, select text, use the mouse in a program — and at 100% a browser
           page shows while its card is still, wholly in view and nothing (palette, panel,

@@ -234,10 +234,17 @@ mira agent edit [--tab]                       # a pane to edit them, and teams
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent list                               # pane, status, harness, name, model
-mira agent wall                               # this tab's agents, in a grid
+mira agent wall                               # this tab as its agents' grid, or its splits again
 mira agent activity [--pane <id>]             # its tasks and subagents
 mira agent trail [NAME | --pane <id>]         # what it did, turn by turn
 ```
+
+`agent wall` switches the tab it runs in between its splits and the wall,
+its agents' terminals in one grid, and prints the new state, `wall on` or
+`wall off` (`agent_wall` answers `{"wall": true}`). The same tab, not a
+tab of its own: its panes keep running under the wall, `read-screen` and
+`send-input` reach them as before, and the tab remembers the wall across
+restarts. Zooming one agent (`zoom_pane`) leaves the wall.
 
 A role is a Markdown file — its frontmatter says how it starts, its body is
 its prompt — and may follow a *way of working*, a playbook in `ways/` that
@@ -468,8 +475,9 @@ Without a name it is this tab's; with one, the tasks given to that agent
 or sent by it, the moves of its cards, and its turns.
 
 `agent board` opens a task-board pane showing the tab it was opened from
-(or, opened from the agent wall's *Task board* button, the tab the wall
-shows) — also the palette's *Agents: Task Board*. It switches between
+— also the palette's *Agents: Task Board*, and the agent wall's *Task
+board* button, which opens it in a tab of its own, since a split would be
+under the wall. It switches between
 this team and all agents, and between Cards, History (newest first) and
 Trail (below); a card's title opens its history, its agent's name goes to
 its pane, and its ⋯ opens Trail on its agent at the turn the card started
