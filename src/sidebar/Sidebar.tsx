@@ -14,12 +14,14 @@ import {
   setView,
   setWallMode,
   setWallView,
+  toggleAgentWall,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
 import { useConfigStore } from "../state/configStore";
 import { STATUS_LABEL, StatusMark, StatusPip } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
+import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
@@ -27,10 +29,20 @@ export function Sidebar() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const currentTab = useWorkspaceStore((s) => s.currentTab);
   const visible = useWorkspaceStore((s) => s.sidebarVisible);
+  const accels = acceleratorsByAction(
+    useConfigStore((s) => s.config?.keybindings),
+  );
   if (!snapshot || !visible) return null;
+  const accelOf = (action: string) => {
+    const accel = accels.get(action);
+    return accel ? formatAccel(accel) : undefined;
+  };
+  const tab = snapshot.tabs.find((t) => t.id === currentTab);
+  const waiting = snapshot.agents.filter((a) => a.status === "needsYou").length;
 
   return (
     <div className="sidebar">
+      {tab && <ViewSwitch view={snapshot.view} tab={tab} accelOf={accelOf} />}
       <div className="sidebar-tabs">
         {/* Tabs, numbered for the tab shortcuts. The current tab's agents
             hang under its row; any other tab shows a pip per agent. */}
@@ -58,22 +70,91 @@ export function Sidebar() {
       </div>
       <div className="sidebar-footer">
         <button className="sidebar-new-tab" onClick={() => void newTab()}>
-          + New Tab
+          + New tab
         </button>
-        <div className="view-switch" title="Tabs or board (⌘⇧O / Ctrl+Shift+O)">
-          {(["tabs", "board"] as const).map((view) => (
-            <button
-              key={view}
-              className={snapshot.view === view ? "selected" : undefined}
-              onClick={() => snapshot.view !== view && void setView(view)}
-            >
-              {view === "tabs" ? "Tabs" : "Board"}
-            </button>
-          ))}
-        </div>
+        <button
+          className={`sidebar-button${waiting > 0 ? " waiting" : ""}`}
+          title={
+            waiting > 0
+              ? `${waiting} ${waiting === 1 ? "agent needs" : "agents need"} you`
+              : "Notifications"
+          }
+          onClick={() => useUiStore.getState().toggleNotifications()}
+        >
+          Inbox {waiting}
+        </button>
+        <button
+          className="sidebar-button"
+          onClick={() => useUiStore.getState().togglePalette()}
+        >
+          Commands
+          {accelOf("command_palette") && (
+            <span className="sidebar-accel">{accelOf("command_palette")}</span>
+          )}
+        </button>
       </div>
       <ClaudeBanner />
       <UpdateBanner />
+    </div>
+  );
+}
+
+type Shown = "splits" | "wall" | "tasks" | "board";
+
+/**
+ * What the current tab shows, and the way to each other view of it: its
+ * splits, its wall's agents, its wall's task board, or every tab on the
+ * board. Every button but Board also leaves the board.
+ */
+function ViewSwitch({
+  view,
+  tab,
+  accelOf,
+}: {
+  view: "tabs" | "board";
+  tab: TabSnapshot;
+  accelOf: (action: string) => string | undefined;
+}) {
+  const shown: Shown =
+    view === "board"
+      ? "board"
+      : !tab.wall
+        ? "splits"
+        : tab.wallView === "tasks"
+          ? "tasks"
+          : "wall";
+  const pane = tab.focusedPane;
+  const show = async (next: Shown) => {
+    if (next === "board") return setView("board");
+    if (view === "board") await setView("tabs");
+    if (next === "splits") {
+      if (tab.wall) await toggleAgentWall(pane);
+    } else {
+      await setWallView(pane, next === "wall" ? "agents" : "tasks");
+    }
+  };
+  const hint = (title: string, action?: string) => {
+    const accel = action && accelOf(action);
+    return accel ? `${title} (${accel})` : title;
+  };
+  const buttons: [Shown, string, string][] = [
+    ["splits", "Splits", hint("This tab's splits")],
+    ["wall", "Wall", hint("This tab's agents, as the wall", "agent_wall")],
+    ["tasks", "Tasks", hint("This tab's task board")],
+    ["board", "Board", hint("Every tab on one board", "toggle_board")],
+  ];
+  return (
+    <div className="view-switch">
+      {buttons.map(([id, label, title]) => (
+        <button
+          key={id}
+          className={shown === id ? "selected" : undefined}
+          title={title}
+          onClick={() => shown !== id && void show(id)}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }

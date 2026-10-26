@@ -29,15 +29,16 @@ downloads, the feature tour and the keybinding reference.
   OpenCode, Pi, Gemini CLI, Amp, Aider and more, found by their process —
   each with its role, model and (Claude Code) whether it is working, idle,
   or waiting on you; type into any of them from there. The same key
-  switches back, and each tab remembers its view across restarts. Its
-  **Splits | Agents | Tasks** switch turns it over to the tab's task board.
+  switches back, and each tab remembers its view across restarts. The
+  sidebar's **Splits · Wall · Tasks · Board** switch, and the wall's own
+  **Splits | Agents | Tasks**, turn it over to the tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
   start Claude Code or Codex with their own model, prompt and shared way of
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
-- **Task board**, the agent wall's Tasks side (its **Splits | Agents | Tasks**
-  switch, the palette's *Agents: Task Board*, or `mira agent board`): what
+- **Task board**, the agent wall's Tasks side (**Tasks** in the sidebar's
+  view switch or the wall's own, the palette's *Agents: Task Board*, or `mira agent board`): what
   each agent was given and where it stands, in To do, Doing, Needs you and Done, for this team or every
   tab. Mirador adds a card whenever it gives an agent a task (`team start`,
   `agent new`, `mira agent send`) and, for Claude Code and Codex, moves it
@@ -50,8 +51,8 @@ downloads, the feature tour and the keybinding reference.
   it called, each opening to its full input and output — read from Claude
   Code's transcript or Codex's session file, never copied
   (`mira agent trail`; docs/AGENTS.md)
-- **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
-  in the sidebar): every tab as a frame and every pane as a card on one
+- **Board** (`mira view board`, `mod+shift+O`, or **Board** in the
+  sidebar's view switch): every tab as a frame and every pane as a card on one
   canvas — a tab showing its agent wall shows the wall in its frame instead,
   its agents' live tiles or its task board. Scroll over the focused card to scroll its content, at any zoom
   (a browser card pans away from 100%, where its page is not drawn);
@@ -546,7 +547,8 @@ tab's agents in a grid — roles, and any agent you started by hand:
 pane's process table (macOS and Linux; on Windows only Claude Code's hooks
 make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*
 and `mira agent wall` (which prints `wall on` or `wall off`)
-each switch the current tab between the two, and so does **Splits** in
+each switch the current tab between the two, and so do the sidebar's
+**Splits · Wall · Tasks · Board** switch, at its top, and **Splits** in
 the wall's header. Each tab keeps its view across restarts, and the
 board draws a walled tab's wall in its frame, in place of its cards. The tiles are the
 agents' real terminals, moved there while the wall is on screen, so you
@@ -584,7 +586,9 @@ clicking an agent shows the tab's wall with that agent large (or, with
 Each tab's agents are its own: switch tabs and the tree moves with you,
 and every other tab shows a pip per agent with its status. The tab
 shortcuts (`mod+1…9`, next and previous tab) go over tabs only, by the
-number beside each.
+number beside each. At the sidebar's foot, **Inbox** counts the agents that need you,
+across every tab, and opens the notifications; **Commands** opens the
+palette.
 
 Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).

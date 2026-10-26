@@ -428,11 +428,17 @@ body,
   color: var(--text);
 }
 
+/* The footer's one shrinkable item: on Windows "Ctrl+Shift+K" leaves it
+   little room, and it ellipsizes rather than pushing the buttons out. */
 .sidebar-new-tab {
-  margin: 6px;
-  padding: 7px;
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 4px;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--subtext);
   font-size: 12px;
@@ -441,33 +447,69 @@ body,
 }
 
 .sidebar-new-tab:hover {
-  background: var(--surface);
+  color: var(--text);
 }
 
 .sidebar-footer {
   display: flex;
   align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--surface);
 }
 
-.sidebar-footer .sidebar-new-tab {
-  flex: 1;
-}
-
-/* Tabs | Board: the view shown, and the way to the other. */
-.view-switch {
+/* Inbox and Commands. */
+.sidebar-button {
   display: flex;
-  margin-right: 6px;
+  align-items: baseline;
+  gap: 5px;
+  flex-shrink: 0;
   border: 1px solid var(--surface);
-  border-radius: 6px;
-  overflow: hidden;
+  border-radius: 5px;
+  padding: 3px 8px;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sidebar-button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* An agent is waiting on you. */
+.sidebar-button.waiting {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
+}
+
+.sidebar-accel {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+/* Splits · Wall · Tasks · Board: what the current tab shows, and the way to
+   each other view of it. */
+.view-switch {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  margin: 6px;
+  padding: 2px;
+  border: 1px solid var(--surface);
+  border-radius: 7px;
+  flex-shrink: 0;
 }
 
 .view-switch button {
   border: none;
+  border-radius: 5px;
   background: transparent;
   color: var(--subtext);
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 4px 0;
   cursor: pointer;
 }
 
