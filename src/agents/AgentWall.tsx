@@ -20,7 +20,6 @@ import { SubagentSheet } from "./SubagentSheet";
 import { STATUS_LABEL } from "./StatusMark";
 import { elapsed, useNow } from "./time";
 import { TaskBoard } from "./TaskBoard";
-import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import {
   fitTerminal,
@@ -322,15 +321,8 @@ function WallTile({
     >
       <div
         className="wall-tile-head"
-        title={
-          "Show this agent alone in its tab" +
-          (agent.hasActivity ? " — right-click for its subagents" : "")
-        }
+        title="Show this agent alone in its tab"
         onClick={() => void zoomPane(pane, true)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (agent.hasActivity) useUiStore.getState().openActivity(pane);
-        }}
       >
         <span className="wall-dot" />
         <span className="wall-role">{agentLabel(agent)}</span>

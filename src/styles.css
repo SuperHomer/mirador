@@ -937,6 +937,32 @@ body,
   position: relative;
 }
 
+/* The terminal, and an agent's subagent sheet over it. Fills the pane, as
+   the terminal did before it had a parent. */
+.pane-main {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* An agent's pane in the splits: its status bar takes the foot, edge to
+   edge, and the terminal the rest — refit by its ResizeObserver whenever
+   the bar comes, goes or wraps. */
+.pane.with-bar {
+  display: flex;
+  flex-direction: column;
+}
+
+.pane.with-bar .pane-main {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.pane.with-bar .agent-bar {
+  margin: 3px -3px -3px;
+}
+
 .pane-term {
   width: 100%;
   height: 100%;

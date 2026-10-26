@@ -185,8 +185,8 @@ export const actions: ActionDef[] = [
   {
     id: "agent_activity",
     title: "Agent Activity",
-    // The focused agent's task progress and its subagents, in a drawer —
-    // the same as right-clicking the agent in the sidebar.
+    // The focused agent's task progress and its subagents, in a drawer:
+    // the whole of what its status bar sums up.
     run: () => {
       const pane = focusedPane();
       const agent = useWorkspaceStore

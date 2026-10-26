@@ -101,8 +101,8 @@ export function useAgentActivity(pane: string | null, enabled = true) {
 }
 
 /**
- * A Claude Code agent's activity, opened by right-clicking it in the
- * sidebar or on the wall: its own task list, and every subagent it started
+ * An agent's activity, opened from the palette's Agent Activity for the
+ * focused agent: its own task list, and every subagent it started
  * with what each is on, how far through, and what it used. All of it is
  * read from the transcripts (`cmux_core::transcript`), so it says only
  * what they record — no cost, which would be an estimate.

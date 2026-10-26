@@ -338,7 +338,7 @@ job a `claude attach` names), whether given with `--name` or `/rename` or
 made up by Claude Code. Without one it goes by its role. The same file's
 busy/idle is the status of an agent whose hooks have not reported one.
 
-`agent activity` (or right-clicking the agent in the app) reads a Claude
+`agent activity` (or the palette's *Agent Activity* in the app) reads a Claude
 Code agent's transcripts: the session's tokens, context and task list
 (`TaskCreate`/`TaskUpdate`, or `TodoWrite`), then each subagent under
 `<session>/subagents/` with its state (`running`, `done`, or `stopped`

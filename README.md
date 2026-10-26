@@ -562,17 +562,15 @@ The header's **Splits | Agents | Tasks** switch leaves the wall, or turns
 it over to the tab's task board in place of the tiles, and back; the wall comes up again on
 the side it was left on, across restarts too.
 
-**Right-click an agent** (its sidebar row, or a wall tile's header; the
-palette's *Agent Activity* for the focused one) to open its activity: the
-tokens, context and time its Claude Code session has used, how far it is
-through its own task list, and every subagent it started, each with its
-type, model, tasks done (as `n/m` and a percentage), tokens and run time,
-running ones first. On the wall, every agent's tile ends in a status
-bar: its harness, model and effort, how full its context is (a meter
-against the model's window, when that is known), the tokens and time it
-has used, and, for Claude Code, a **Subagents** button that slides the
-same list over the right of its terminal, which stays live beside it.
-The task progress is in the tile's header. It is read from Claude Code's transcripts, which the
+Every agent ends in a **status bar** — its tile on the wall, and its
+pane in the splits: its harness, model and effort, how full its context
+is (a meter against the model's window, when that is known), the tokens
+and time it has used, and, for Claude Code, a **Subagents** button that
+slides its subagents over the right of its terminal, which stays live
+beside it: each with its type, model, tasks done (as `n/m` and a
+percentage), tokens and run time. On the wall the agent's own task
+progress is in the tile's header. The palette's *Agent Activity* opens
+all of it for the focused agent in a panel. It is read from Claude Code's transcripts, which the
 hooks point Mirador to, so it needs the integration set up; the CLI
 equivalent is `mira agent activity`. A Codex agent's activity is its
 model, tokens, context and time, read from the session file Codex

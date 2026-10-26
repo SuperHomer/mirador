@@ -13,6 +13,11 @@ import {
   watchTerminal,
 } from "./registry";
 import { useConfigStore } from "../state/configStore";
+import { useWorkspaceStore } from "../state/workspaceStore";
+import { useAgentActivity } from "../agents/ActivityPanel";
+import { AgentStatusBar } from "../agents/AgentStatusBar";
+import { SubagentSheet } from "../agents/SubagentSheet";
+import { useNow } from "../agents/time";
 import { atFullSize, useBoardStore } from "../state/boardStore";
 import {
   attachPane,
@@ -394,6 +399,15 @@ export const TerminalPane = memo(function TerminalPane({
     return () => clearTimeout(timer);
   }, [onScreen, onBoard, paneId]);
 
+  // An agent shown as a split gets its status bar, and its subagent sheet
+  // when asked; on the board and on the wall, others draw it. Only then is
+  // its activity read.
+  const agent = useWorkspaceStore((s) => s.snapshot?.agents.find((a) => a.paneId === paneId));
+  const withBar = !!agent && visible && !onBoard && !lent;
+  const { activity } = useAgentActivity(paneId, withBar && !!agent?.hasActivity);
+  const now = useNow(withBar);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
   // Also on becoming visible, and on coming back from the wall: showing an
   // agent alone from its tile means typing to it next.
   useEffect(() => {
@@ -402,14 +416,35 @@ export const TerminalPane = memo(function TerminalPane({
 
   return (
     <div
-      className={`pane${focused ? " focused" : ""}${unread ? " unread" : ""}`}
+      className={`pane${focused ? " focused" : ""}${unread ? " unread" : ""}${withBar ? " with-bar" : ""}`}
       onMouseDown={() => void focusPane(paneId)}
     >
-      <div
-        className="pane-term"
-        ref={containerRef}
-        style={visible ? undefined : OFFSCREEN}
-      />
+      {/* Always here, agent or not: a parent that came and went with the
+          bar would remount the terminal's container. The sheet lies over
+          the terminal in it, beside the element the wall borrows. */}
+      <div className="pane-main">
+        <div
+          className="pane-term"
+          ref={containerRef}
+          style={visible ? undefined : OFFSCREEN}
+        />
+        {withBar && sheetOpen && (
+          <SubagentSheet
+            activity={activity}
+            now={now}
+            onClose={() => setSheetOpen(false)}
+          />
+        )}
+      </div>
+      {withBar && agent && (
+        <AgentStatusBar
+          agent={agent}
+          activity={activity}
+          now={now}
+          sheetOpen={sheetOpen}
+          onToggleSheet={() => setSheetOpen(!sheetOpen)}
+        />
+      )}
       {remoteHost ? (
         <div className="agent-chip remote-chip" title={`ssh ${remoteHost}`}>
           ⇅ {remoteHost}

@@ -243,8 +243,7 @@ function AgentTree({
 /**
  * One agent: its status, its name and how long it has been so. Clicking
  * shows it on its tab's wall, large and pinned, or — with `agentClick`
- * set to "pane" — its pane alone, filling its tab. Right-clicking opens
- * its activity: task progress and subagents.
+ * set to "pane" — its pane alone, filling its tab.
  */
 function AgentRow({
   agent,
@@ -282,15 +281,7 @@ function AgentRow({
     <div
       className={classes.filter(Boolean).join(" ")}
       onClick={open}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (agent.hasActivity) useUiStore.getState().openActivity(agent.paneId);
-      }}
-      title={
-        [agent.cwd, agent.hasActivity ? "Right-click for its subagents" : null]
-          .filter(Boolean)
-          .join(" — ") || undefined
-      }
+      title={agent.cwd ?? undefined}
     >
       <div className="agent-line">
         <span className="agent-mark">
