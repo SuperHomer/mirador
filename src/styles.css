@@ -2433,55 +2433,98 @@ body,
   min-height: 30px;
 }
 
-.wall-badge {
+/* The Agents side's one row of controls: status filters, then Focus's pin
+   or Grid's page size, Focus | Grid, and + Agent. */
+.wall-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 8px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--surface);
+  font-size: 11px;
+  color: var(--subtext);
   flex-shrink: 0;
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 4px;
 }
 
-.wall-counts {
-  display: flex;
-  gap: 10px;
-  min-width: 0;
+.wall-toolbar-spacer {
+  flex: 1;
+}
+
+.wall-toolbar-note {
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.wall-toolbar-label {
+  white-space: nowrap;
+}
+
+.wall-filter,
+.wall-pill {
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--surface);
+  background: transparent;
+  color: var(--subtext);
   font-size: 11px;
   white-space: nowrap;
-  overflow: hidden;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
 }
 
-.wall-count.needs-you {
-  color: var(--wall-needs-you);
-  font-weight: 600;
+.wall-filter.needsYou {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
 }
 
-.wall-count.working {
-  color: var(--wall-working);
+.wall-filter.working {
+  border-color: var(--status-working);
+  color: var(--status-working);
 }
 
-/* The tab the wall shows. */
-.wall-tab {
+.wall-filter.idle {
+  border-color: var(--status-idle);
+  color: var(--status-idle);
+}
+
+.wall-filter.selected,
+.wall-pill.selected {
+  background: var(--surface);
+}
+
+.wall-pill:hover {
   color: var(--text);
-  font-weight: 600;
-  font-size: 12px;
-  white-space: nowrap;
+}
+
+/* Focus | Grid, and 4 | 6 | 9. */
+.wall-segments {
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 3em;
+}
+
+.wall-segments button {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.wall-segments button.selected {
+  background: var(--surface);
+  color: var(--text);
+  cursor: default;
 }
 
 .wall-new {
   position: relative;
   flex-shrink: 0;
-}
-
-.wall-new {
-  margin-left: auto;
 }
 
 .wall-new-button {
@@ -2496,6 +2539,12 @@ body,
 
 .wall-new-button:hover {
   background: var(--surface);
+  color: var(--text);
+}
+
+.wall-new-button.open {
+  border-color: var(--accent);
+  background: var(--tint-hover);
   color: var(--text);
 }
 
@@ -2999,11 +3048,6 @@ body,
 }
 
 .tb-switch + .tb-switch {
-  margin-left: 0;
-}
-
-/* The wall's Agents | Tasks keeps + New agent and Splits beside it. */
-.tb-switch + .wall-new {
   margin-left: 0;
 }
 

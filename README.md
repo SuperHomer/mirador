@@ -30,15 +30,15 @@ downloads, the feature tour and the keybinding reference.
   each with its role, model and (Claude Code) whether it is working, idle,
   or waiting on you; type into any of them from there. The same key
   switches back, and each tab remembers its view across restarts. The
-  sidebar's **Splits · Wall · Tasks · Board** switch, and the wall's own
-  **Splits | Agents | Tasks**, turn it over to the tab's task board.
+  sidebar's **Splits · Wall · Tasks · Board** switch turns it over to the
+  tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
   start Claude Code or Codex with their own model, prompt and shared way of
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Task board**, the agent wall's Tasks side (**Tasks** in the sidebar's
-  view switch or the wall's own, the palette's *Agents: Task Board*, or `mira agent board`): what
+  view switch, the palette's *Agents: Task Board*, or `mira agent board`): what
   each agent was given and where it stands, in To do, Doing, Needs you and Done, for this team or every
   tab. Mirador adds a card whenever it gives an agent a task (`team start`,
   `agent new`, `mira agent send`) and, for Claude Code and Codex, moves it
@@ -436,7 +436,7 @@ one, a way nobody wrote.
 Each role is an entry under the palette's *New Agent…* — Enter on it
 lists plain Claude Code and the roles, to search in turn (Esc or
 Backspace goes back; typing a role's name at the top finds it too, below
-the commands) — an entry in the wall's **+ New agent** menu, and a `mira
+the commands) — an entry in the wall's **+ Agent** menu, and a `mira
 agent new --role <role> [task…]` target — the roles of the directory you
 are in. Teams (*Start Team…*) and `~/.ssh/config` hosts (*SSH…*) are
 listed the same way. The agent opens in a pane
@@ -547,20 +547,24 @@ tab's agents in a grid — roles, and any agent you started by hand:
 pane's process table (macOS and Linux; on Windows only Claude Code's hooks
 make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*
 and `mira agent wall` (which prints `wall on` or `wall off`)
-each switch the current tab between the two, and so do the sidebar's
-**Splits · Wall · Tasks · Board** switch, at its top, and **Splits** in
-the wall's header. Each tab keeps its view across restarts, and the
+each switch the current tab between the two, and so does the sidebar's
+**Splits · Wall · Tasks · Board** switch, at its top. Each tab keeps its view across restarts, and the
 board draws a walled tab's wall in its frame, in place of its cards. The tiles are the
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
 the keyboard goes to the focused agent's tile when the wall comes up. A
-new agent from the wall's **+ New agent** splits the tab under the wall and
-gets a tile. Each tile shows the role, the model, and what the agent is
+new agent from the wall's **+ Agent** splits the tab under the wall and
+gets a tile. The wall's toolbar shows all its agents or only those that
+need you, are working or are idle, and switches between **Focus** and
+**Grid**. In Grid it sets how many agents a page holds (4, 6 or 9: the
+`agentsPerTab` key), and in Focus it pins the agent shown large or lets
+it follow whoever needs you. Tiles stand in the team's order, never
+reshuffled by status. Each tile shows the role, the model, and what the agent is
 doing: **working**, **needs you** (with what for), or **idle**. Click a
 tile's header to see that agent alone in its tab, which leaves the wall.
-The header's **Splits | Agents | Tasks** switch leaves the wall, or turns
-it over to the tab's task board in place of the tiles, and back; the wall comes up again on
-the side it was left on, across restarts too.
+The sidebar's switch turns the wall over to the tab's task board in
+place of the tiles, and back; the wall comes up again on the side it was
+left on, across restarts too.
 
 Every agent ends in a **status bar** — its tile on the wall, and its
 pane in the splits: its harness, model and effort, how full its context

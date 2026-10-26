@@ -1,4 +1,8 @@
 import { create } from "zustand";
+import { AgentStatus } from "../bindings";
+
+/** All of a wall's agents, or those in one status. */
+export type WallFilter = "all" | AgentStatus;
 
 interface UiStore {
   paletteOpen: boolean;
@@ -11,6 +15,9 @@ interface UiStore {
    *  (from the sidebar). Not persisted. */
   pinned: Record<string, string>;
   pinAgent: (tabId: string, paneId: string | null) => void;
+  /** Per tab, which agents its wall shows, by status. Not persisted. */
+  wallFilter: Record<string, WallFilter>;
+  setWallFilter: (tabId: string, filter: WallFilter) => void;
   setBoardMenuOpen: (open: boolean) => void;
   togglePalette: () => void;
   closePalette: () => void;
@@ -33,6 +40,9 @@ export const useUiStore = create<UiStore>((set) => ({
       else delete pinned[tabId];
       return { pinned };
     }),
+  wallFilter: {},
+  setWallFilter: (tabId, filter) =>
+    set((s) => ({ wallFilter: { ...s.wallFilter, [tabId]: filter } })),
   setBoardMenuOpen: (boardMenuOpen) => set({ boardMenuOpen }),
   togglePalette: () =>
     set((s) => ({ paletteOpen: !s.paletteOpen, notificationsOpen: false })),
