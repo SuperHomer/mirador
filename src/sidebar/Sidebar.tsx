@@ -138,9 +138,9 @@ function ViewSwitch({
     return accel ? `${title} (${accel})` : title;
   };
   const buttons: [Shown, string, string][] = [
-    ["splits", "Splits", hint("This tab's splits")],
+    ["splits", "Splits", hint("This tab's splits", "agent_wall")],
     ["wall", "Wall", hint("This tab's agents, as the wall", "agent_wall")],
-    ["tasks", "Tasks", hint("This tab's task board")],
+    ["tasks", "Tasks", hint("This tab's task board", "task_board")],
     ["board", "Board", hint("Every tab on one board", "toggle_board")],
   ];
   return (
