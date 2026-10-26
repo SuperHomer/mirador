@@ -268,17 +268,7 @@ function WallTile({
   const [shown, setShown] = useState(true);
   const pane = agent.paneId;
 
-  // Give the terminal back only when the tile goes away: while the wall is
-  // merely hidden it stays here, until its own tab is shown and takes it
-  // (see `lendTerminal` for why every move counts).
   const releaseRef = useRef<(() => void) | null>(null);
-  useEffect(
-    () => () => {
-      releaseRef.current?.();
-      releaseRef.current = null;
-    },
-    [pane],
-  );
 
   // Borrow the pane's terminal whenever the wall is on screen. The pane may
   // register after the wall mounts (tabs mount in order), remount, or have
@@ -313,6 +303,20 @@ function WallTile({
       unwatch();
     };
   }, [pane, visible]);
+
+  // Give the terminal back only when the tile goes away: while the wall is
+  // merely hidden it stays here, until its own tab is shown and takes it
+  // (see `lendTerminal` for why every move counts). Declared after the
+  // borrow so that React, which runs cleanups in order, unwatches first:
+  // the release announces the terminal free, and a tile still listening
+  // would borrow it again into a host leaving the page.
+  useEffect(
+    () => () => {
+      releaseRef.current?.();
+      releaseRef.current = null;
+    },
+    [pane],
+  );
 
   // Its subagents, read while the wall is on screen, for an agent that
   // has them to read (`hasActivity`, decided in Rust).
