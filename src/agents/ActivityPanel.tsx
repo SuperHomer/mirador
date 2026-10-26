@@ -183,7 +183,9 @@ export function ActivityPanel() {
             <SubagentList activity={activity} now={now} />
             {subagents.length === 0 && (
               <div className="notif-empty">
-                No subagents yet. They appear here as soon as it starts one.
+                {agent.harness === "codex"
+                  ? "Codex reports no tasks or subagents."
+                  : "No subagents yet. They appear here as soon as it starts one."}
               </div>
             )}
           </>
