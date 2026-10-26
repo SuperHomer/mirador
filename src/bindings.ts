@@ -524,7 +524,13 @@ export interface ResolvedConfig {
   customCommands: CustomCommand[];
   /** Only mirador.json's: a pane's roles come from `agentRoles()`. */
   agentRoles: AgentRole[];
+  /** How many agents a page of the wall's Grid layout holds: 4, 6 or 9. */
+  agentsPerTab: number;
+  agentClick: AgentClick;
 }
+
+/** A sidebar agent's click: its tab's wall on it, or its pane alone. */
+export type AgentClick = "wall" | "pane";
 
 export interface UpdateInfo {
   version: string;

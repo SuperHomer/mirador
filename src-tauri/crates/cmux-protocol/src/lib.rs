@@ -1361,6 +1361,19 @@ pub struct ResolvedConfig {
     pub keybindings: std::collections::HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     pub agent_roles: Vec<AgentRole>,
+    /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
+    pub agents_per_tab: u8,
+    pub agent_click: AgentClick,
+}
+
+/// What clicking an agent in the sidebar does: show its tab's wall in
+/// Focus with that agent pinned, or show its pane alone, filling its tab.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentClick {
+    #[default]
+    Wall,
+    Pane,
 }
 
 /// One line of a diff hunk.

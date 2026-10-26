@@ -588,6 +588,18 @@ one of them needs you. The tab shortcuts number rows in the order shown.
 Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).
 
+Two keys in `mirador.json` shape the wall. `agentClick` is what clicking
+an agent in the sidebar does: `"wall"` (the default) shows its tab's wall
+in Focus, with that agent large, and `"pane"` shows the agent's pane
+alone, filling its tab. `agentsPerTab` is how many agents a page of the
+wall's Grid layout holds: `4` (the default), `6` or `9`. Any other value
+of either is ignored for its default.
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "agentClick": "pane", "agentsPerTab": 6 }
+```
+
 
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).

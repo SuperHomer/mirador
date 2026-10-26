@@ -9,7 +9,7 @@ pub mod wezterm;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentRole, CustomCommand, ResolvedColors, ResolvedConfig};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, ResolvedColors, ResolvedConfig};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -56,6 +56,14 @@ pub struct Config {
     /// the next launch. On unless set to `false`; read when a pane opens,
     /// so changing it applies to new panes.
     pub persist_sessions: Option<bool>,
+    /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
+    /// Anything else is 4.
+    pub agents_per_tab: Option<u32>,
+    /// What clicking an agent in the sidebar does: "wall" (its tab's wall,
+    /// in Focus on that agent) or "pane" (the agent alone, filling its
+    /// tab). Anything else is "wall". A string rather than `AgentClick`, so
+    /// a bad value is ignored instead of failing the whole file.
+    pub agent_click: Option<String>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
@@ -335,6 +343,14 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         keybindings,
         custom_commands: cfg.custom_commands.clone(),
         agent_roles: agent_roles_in(cfg),
+        agents_per_tab: match cfg.agents_per_tab {
+            Some(n @ (4 | 6 | 9)) => n as u8,
+            _ => 4,
+        },
+        agent_click: match cfg.agent_click.as_deref() {
+            Some("pane") => AgentClick::Pane,
+            _ => AgentClick::Wall,
+        },
     }
 }
 
@@ -483,6 +499,29 @@ mod tests {
         assert!(persist_sessions_in(&on));
         let off: Config = serde_json::from_str(r#"{ "persistSessions": false }"#).unwrap();
         assert!(!persist_sessions_in(&off));
+    }
+
+    #[test]
+    fn agents_per_tab_is_4_6_or_9() {
+        let per_tab = |json: &str| resolve(&serde_json::from_str(json).unwrap()).agents_per_tab;
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 6 }"#), 6);
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 9 }"#), 9);
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 5 }"#), 4);
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 0 }"#), 4);
+        assert_eq!(per_tab("{}"), 4);
+    }
+
+    #[test]
+    fn agent_click_is_the_wall_unless_set_to_pane() {
+        let click = |json: &str| resolve(&serde_json::from_str(json).unwrap()).agent_click;
+        assert_eq!(click(r#"{ "agentClick": "pane" }"#), AgentClick::Pane);
+        assert_eq!(click(r#"{ "agentClick": "wall" }"#), AgentClick::Wall);
+        assert_eq!(click("{}"), AgentClick::Wall);
+        assert_eq!(click(r#"{ "agentClick": "zoom" }"#), AgentClick::Wall);
+        // A bad value costs only itself, not the rest of the file.
+        let cfg: Config =
+            serde_json::from_str(r#"{ "agentClick": "zoom", "fontSize": 15 }"#).unwrap();
+        assert_eq!(resolve(&cfg).font_size, 15.0);
     }
 
     #[test]
