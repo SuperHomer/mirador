@@ -187,8 +187,9 @@ export const AgentWall = memo(function AgentWall({
   // The tab's focused pane is under the wall, so the keyboard would go
   // nowhere: as the tiles come on screen in the active tab — on the board,
   // as their tab becomes it — the wall gives it to that pane's tile, or
-  // the first. Only then — not on every snapshot, or a click in another
-  // tile would be undone. The tiles' own effects ran first, so their
+  // the first shown. Then, and when the filter changes, which may have
+  // hidden the tile that had it — not on every snapshot, or a click in
+  // another tile would be undone. The tiles' own effects ran first, so their
   // terminals are here by now — unless another wall holds one, and then
   // it is not this wall's to focus.
   const wallRef = useRef<HTMLDivElement>(null);
@@ -198,7 +199,7 @@ export const AgentWall = memo(function AgentWall({
     const tile = tiles.find((a) => a.paneId === shown?.focusedPane) ?? tiles[0];
     const term = tile && getTerminal(tile.paneId);
     if (term?.element && wallRef.current?.contains(term.element)) term.focus();
-  }, [keyboard]);
+  }, [keyboard, filter]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const cols = columns(tiles.length);
