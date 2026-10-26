@@ -112,6 +112,9 @@ function WallToolbar({
           <button
             key={mode}
             className={tab.wallMode === mode ? "selected" : undefined}
+            // A click must not take the keyboard from the terminal first:
+            // switching asks which agent holds it, to keep it there.
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => onMode(mode)}
           >
             {mode === "focus" ? "Focus" : "Grid"}
