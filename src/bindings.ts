@@ -37,6 +37,10 @@ export interface TabSnapshot {
   wallMode: WallMode;
   /** How the Tasks side lays its board out. */
   taskLayout: TaskLayout;
+  /** Its agents' panes by urgency: who Focus shows when none is pinned. */
+  wallUrgency: string[];
+  /** Its agents' panes in team order, in pages of `agentsPerTab`. */
+  wallPages: string[][];
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
   /** Its frame on the board; its cards are placed relative to `x`, `y`. */
@@ -767,6 +771,8 @@ export const setWallMode = (paneId: string | null, mode: WallMode) =>
   invoke<void>("set_wall_mode", { paneId, mode });
 export const setTaskLayout = (paneId: string | null, layout: TaskLayout) =>
   invoke<void>("set_task_layout", { paneId, layout });
+/** Writes `agentsPerTab` (4, 6 or 9) to mirador.json. */
+export const setAgentsPerTab = (n: number) => invoke<void>("set_agents_per_tab", { n });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
 /** Its last `turns` turns, and any begun at or after `sinceMs`. */

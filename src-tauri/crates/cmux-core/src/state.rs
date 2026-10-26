@@ -794,6 +794,10 @@ impl Workspace {
                         wall_view: t.wall_view,
                         wall_mode: t.wall_mode,
                         task_layout: t.task_layout,
+                        // Filled from the agents, which the app adds
+                        // (`wall::fill`).
+                        wall_urgency: Vec::new(),
+                        wall_pages: Vec::new(),
                         frame: t.frame_rect(),
                         cards: layout::pane_ids(&t.root)
                             .into_iter()

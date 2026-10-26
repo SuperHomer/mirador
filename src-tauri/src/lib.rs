@@ -371,6 +371,7 @@ pub fn run() {
             commands::set_wall_view,
             commands::set_wall_mode,
             commands::set_task_layout,
+            commands::set_agents_per_tab,
             commands::get_agent_activity,
             commands::get_agent_trail,
             commands::get_trail_detail,

@@ -112,6 +112,8 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .collect()
     };
     snapshot.agents = agent_infos(state);
+    let per_tab = state.config.lock().unwrap().agents_per_tab;
+    cmux_core::wall::fill(&mut snapshot, per_tab);
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -421,7 +423,7 @@ pub fn emit_workspace(app: &AppHandle) {
 
 /// Sends a fresh snapshot without scheduling a session save: for changes
 /// the session file doesn't hold, like derived pane titles.
-fn broadcast_workspace(app: &AppHandle) {
+pub(crate) fn broadcast_workspace(app: &AppHandle) {
     let state = app.state::<AppState>();
     let snapshot = build_snapshot(&state);
     let _ = app.emit("workspace-changed", snapshot);
@@ -1884,6 +1886,14 @@ pub fn set_task_layout(
     }
     emit_workspace(&app);
     Ok(())
+}
+
+/// Sets how many agents a page of the wall's Grid holds: 4, 6 or 9, in
+/// mirador.json. The config watcher picks the file up like any edit, and
+/// a new snapshot refills the pages.
+#[tauri::command]
+pub fn set_agents_per_tab(n: u8) -> Result<(), String> {
+    cmux_core::config::set_agents_per_tab(n)
 }
 
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY

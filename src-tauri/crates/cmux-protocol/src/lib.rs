@@ -80,6 +80,14 @@ pub struct TabSnapshot {
     /// How the Tasks side lays its board out.
     #[serde(default)]
     pub task_layout: TaskLayout,
+    /// Its agents' panes by urgency — needs you, working, idle, then the
+    /// rest, ties in team order: who Focus shows when none is pinned.
+    #[serde(default)]
+    pub wall_urgency: Vec<String>,
+    /// Its agents' panes in team order, cut into the Grid's pages of
+    /// `agentsPerTab`; none without agents.
+    #[serde(default)]
+    pub wall_pages: Vec<Vec<String>>,
     /// Where the tab's frame sits on the board, and its size (derived from
     /// its cards). Card positions are relative to the frame's `x`, `y`.
     #[serde(default)]
