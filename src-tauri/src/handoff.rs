@@ -37,7 +37,8 @@ pub fn find(state: &AppState, name: &str, caller: Option<String>) -> Result<Stri
 
 /// Types `message` into `to`'s terminal, said to be from the caller when
 /// the caller is an agent, and logs it on `card` — a card written by hand
-/// — when given one. Returns the recipient's pane.
+/// — when given one, else on a card of its own titled `title` (or from the
+/// message). Returns the recipient's pane.
 pub fn send(
     app: &tauri::AppHandle,
     to: &str,
@@ -45,6 +46,7 @@ pub fn send(
     caller: Option<String>,
     force: bool,
     card: Option<String>,
+    title: Option<String>,
 ) -> Result<String, String> {
     use tauri::Manager;
     let state = &*app.state::<AppState>();
@@ -73,7 +75,7 @@ pub fn send(
     std::thread::sleep(std::time::Duration::from_millis(120));
     state.pty.write(&pane, &enter)?;
     let from = from.unwrap_or_else(|| "you".into());
-    crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card);
+    crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card, title);
     Ok(pane)
 }
 

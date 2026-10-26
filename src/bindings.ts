@@ -409,6 +409,9 @@ export type TaskSource = "teamStart" | "agentNew" | "agentSend" | "manual";
 export interface TaskCard {
   id: string;
   title: string;
+  /** The whole task when it says more than the title; a card written by
+   *  hand's own description. */
+  description: string | null;
   source: TaskSource;
   from: string;
   assignee: string | null;
@@ -418,6 +421,8 @@ export interface TaskCard {
   column: TaskColumn;
   createdMs: number;
   updatedMs: number;
+  /** In Doing: the failed actions in its agent's latest turn. */
+  failing: number;
 }
 
 /** One line of the task log (`cmux_protocol::TaskHistoryEntry`): the
@@ -441,6 +446,19 @@ export const taskHistory = (tabId: string | null, card: string | null) =>
  *  ones, only the latest. */
 export const taskCards = (tabId: string | null) =>
   invoke<TaskCard[]>("task_cards", { tabId });
+/** Writes a card in a tab, as `mira task add`; its id. */
+export const taskAdd = (
+  tabId: string,
+  title: string,
+  description: string | null,
+  assignee: string | null,
+) => invoke<string>("task_add", { tabId, title, description, assignee });
+/** Sends a card written by hand to an agent and puts it in Doing. */
+export const taskSend = (card: string, paneId: string) =>
+  invoke<string>("task_send", { card, paneId });
+/** Sends an agent its own first To do card, else its tab's first unassigned. */
+export const sendNextTask = (paneId: string) =>
+  invoke<string>("send_next_task", { paneId });
 
 /** Where a role or a way of working was defined (`cmux_protocol::RoleSource`). */
 export type RoleSource = "repo" | "global" | "config" | "builtin";

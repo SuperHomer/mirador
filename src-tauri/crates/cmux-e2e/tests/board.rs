@@ -261,7 +261,7 @@ fn a_walled_tab_on_the_board_draws_its_wall() {
     sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
     let agents: Vec<String> = (0..2)
         .map(|_| {
-            let agent = sb.call(Request::AgentNew { role: None, harness: None, task: None, target: None, pane_id: Some(first.clone()) })
+            let agent = sb.call(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()) })
                 ["paneId"]
                 .as_str()
                 .unwrap()

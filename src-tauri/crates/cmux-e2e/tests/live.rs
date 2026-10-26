@@ -37,7 +37,7 @@ fn real_agents_start() {
     sb.launch();
     let first = sb.first_pane();
     let start = |role: &str| {
-        sb.call(Request::AgentNew { role: Some(role.into()), harness: None, task: None, target: None, pane_id: Some(first.clone()) })
+        sb.call(Request::AgentNew { role: Some(role.into()), harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()) })
             ["paneId"]
             .as_str()
             .unwrap()
@@ -91,7 +91,7 @@ fn mirador_test_team_hands_off() {
     std::process::Command::new("git").arg("init").current_dir(&sb.project).output().unwrap();
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart {
+    sb.call(Request::TeamStart { title: None,
         team: "mirador-test".into(),
         task: Some(
             "Hand codex one job with `mira agent send codex`: create pong.txt in the project directory \

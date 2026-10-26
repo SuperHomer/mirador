@@ -99,6 +99,27 @@ pub fn compact(path: &Path, now_ms: u64) -> std::io::Result<()> {
     atomic_write(path, text.as_bytes())
 }
 
+/// The longest a title made from a message gets, in characters.
+pub const TITLE_CHARS: usize = 80;
+
+/// A card's title and description from the message it was made from: the
+/// first line, cut at a word to [`TITLE_CHARS`] with `…` when longer, and
+/// the whole message as its description when that says more.
+pub fn split_title(text: &str) -> (String, Option<String>) {
+    let text = text.trim();
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let title = if line.chars().count() <= TITLE_CHARS {
+        line.to_string()
+    } else {
+        let cut: String = line.chars().take(TITLE_CHARS).collect();
+        // At the last word boundary, unless that leaves too little.
+        let at = cut.rfind(char::is_whitespace).filter(|&i| i >= TITLE_CHARS / 2).unwrap_or(cut.len());
+        format!("{}…", cut[..at].trim_end())
+    };
+    let description = (text != title).then(|| text.to_string());
+    (title, description)
+}
+
 /// The board the log adds up to: one card per task given, oldest first.
 pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
     let mut cards: Vec<TaskCard> = Vec::new();
@@ -106,7 +127,7 @@ pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
     for event in events {
         let at = event.at_ms;
         match &event.what {
-            TaskEventKind::Given { card, source, from, to, pane, team, tab, text } => {
+            TaskEventKind::Given { card, source, from, to, pane, team, tab, text, title, description } => {
                 if *source != TaskSource::Manual {
                     // The agent has moved on: whatever it was given before is over.
                     for older in cards.iter_mut().filter(|c| following(c) && c.pane == *pane) {
@@ -118,15 +139,32 @@ pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
                 // A task sent for a card written by hand (`agent send
                 // --card`) is that card's, which stays where it was put.
                 if let Some(&i) = by_id.get(card) {
-                    cards[i].updated_ms = at;
-                    cards[i].history.push(event.clone());
+                    let c = &mut cards[i];
+                    c.updated_ms = at;
+                    c.history.push(event.clone());
+                    // Written for nobody, it is now the agent's it was sent to.
+                    if c.pane.is_none() {
+                        c.pane = pane.clone();
+                        c.assignee = to.clone();
+                    }
                     continue;
                 }
                 let column = if *source == TaskSource::Manual { TaskColumn::Todo } else { TaskColumn::Doing };
                 by_id.insert(card.clone(), cards.len());
+                let (title, description) = match title {
+                    Some(title) => {
+                        let more = (text.trim() != title.trim()).then(|| text.trim().to_string());
+                        (title.trim().to_string(), description.clone().or(more))
+                    }
+                    None => {
+                        let (title, more) = split_title(text);
+                        (title, description.clone().or(more))
+                    }
+                };
                 cards.push(TaskCard {
                     id: card.clone(),
-                    title: text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").to_string(),
+                    title,
+                    description,
                     source: *source,
                     from: from.clone(),
                     assignee: to.clone(),
@@ -137,6 +175,7 @@ pub fn cards(events: &[TaskEvent]) -> Vec<TaskCard> {
                     created_ms: at,
                     updated_ms: at,
                     history: vec![event.clone()],
+                    failing: 0,
                 });
             }
             TaskEventKind::Moved { card, column, .. } => {
@@ -398,6 +437,15 @@ pub fn span(ms: u64) -> String {
 }
 
 /// Whether `card` still follows its agent: given by Mirador, and not over.
+/// The card the agent in `pane`, in `tab`, should take on next: its own
+/// first To do card, else the first in its tab that is no one's yet.
+pub fn next_task<'a>(cards: &'a [TaskCard], pane: &str, tab: Option<&str>) -> Option<&'a TaskCard> {
+    let todo = || cards.iter().filter(|c| c.column == TaskColumn::Todo);
+    todo()
+        .find(|c| c.pane.as_deref() == Some(pane))
+        .or_else(|| todo().find(|c| c.pane.is_none() && c.tab.as_deref() == tab && tab.is_some()))
+}
+
 fn following(card: &TaskCard) -> bool {
     card.source != TaskSource::Manual && matches!(card.column, TaskColumn::Doing | TaskColumn::NeedsYou)
 }
@@ -418,8 +466,92 @@ mod tests {
                 team: Some("omakase".into()),
                 tab: Some("tab-1".into()),
                 text: text.into(),
+                title: None,
+                description: None,
             },
         }
+    }
+
+    /// A card written by hand, for `to` or nobody.
+    fn written_card(at_ms: u64, card: &str, to: Option<&str>, title: &str) -> TaskEvent {
+        TaskEvent {
+            at_ms,
+            what: TaskEventKind::Given {
+                card: card.into(),
+                source: TaskSource::Manual,
+                from: "you".into(),
+                to: to.map(String::from),
+                pane: to.map(|t| format!("pane-{t}")),
+                team: None,
+                tab: Some("tab-1".into()),
+                text: title.into(),
+                title: None,
+                description: None,
+            },
+        }
+    }
+
+    #[test]
+    fn a_title_is_the_first_line_cut_at_a_word() {
+        assert_eq!(split_title("  Fix the build  "), ("Fix the build".into(), None));
+        let eighty = "x".repeat(TITLE_CHARS);
+        assert_eq!(split_title(&eighty), (eighty.clone(), None));
+        let long = format!("{} tail", "word ".repeat(20));
+        let (title, description) = split_title(&long);
+        assert!(title.ends_with("word…"), "{title}");
+        assert!(title.chars().count() <= TITLE_CHARS + 1);
+        assert_eq!(description.as_deref(), Some(long.trim()));
+        let lines = "Step 2: the toolbar
+Keep the chips.
+Then the pill.";
+        assert_eq!(split_title(lines), ("Step 2: the toolbar".into(), Some(lines.into())));
+    }
+
+    #[test]
+    fn a_card_takes_its_given_title_and_description() {
+        let mut sent = given(100, "a", TaskSource::AgentSend, "worker", "Step 3: the layout
+All of it.");
+        if let TaskEventKind::Given { title, .. } = &mut sent.what {
+            *title = Some("Focus layout".into());
+        }
+        let mut written = written_card(200, "b", None, "Write the docs");
+        if let TaskEventKind::Given { description, .. } = &mut written.what {
+            *description = Some("README and AGENTS.md".into());
+        }
+        let cards = cards(&[sent, written, given(300, "c", TaskSource::AgentNew, "dev", "One line")]);
+        assert_eq!(cards[0].title, "Focus layout");
+        assert_eq!(cards[0].description.as_deref(), Some("Step 3: the layout\nAll of it."));
+        assert_eq!(cards[1].title, "Write the docs");
+        assert_eq!(cards[1].description.as_deref(), Some("README and AGENTS.md"));
+        assert_eq!((cards[2].title.as_str(), cards[2].description.as_deref()), ("One line", None));
+    }
+
+    #[test]
+    fn the_next_task_is_the_agents_own_then_its_tabs_unassigned() {
+        let events = [
+            written_card(100, "free", None, "anyone"),
+            written_card(200, "mine", Some("worker"), "for worker"),
+            written_card(300, "theirs", Some("reviewer"), "for reviewer"),
+        ];
+        let all = cards(&events);
+        assert_eq!(next_task(&all, "pane-worker", Some("tab-1")).map(|c| c.id.as_str()), Some("mine"));
+        assert_eq!(next_task(&all, "pane-dev", Some("tab-1")).map(|c| c.id.as_str()), Some("free"));
+        assert_eq!(next_task(&all, "pane-dev", Some("tab-2")), None);
+        // Once in Doing, it is no one's next.
+        let all = cards(&[events[0].clone(), moved(400, "free", TaskColumn::Doing)]);
+        assert_eq!(next_task(&all, "pane-dev", Some("tab-1")), None);
+    }
+
+    #[test]
+    fn a_card_sent_to_an_agent_becomes_its_own() {
+        let mut sent = given(200, "free", TaskSource::AgentSend, "worker", "anyone");
+        if let TaskEventKind::Given { card, .. } = &mut sent.what {
+            *card = "free".into();
+        }
+        let all = cards(&[written_card(100, "free", None, "anyone"), sent]);
+        let [card] = all.as_slice() else { panic!("{all:?}") };
+        assert_eq!((card.assignee.as_deref(), card.pane.as_deref()), (Some("worker"), Some("pane-worker")));
+        assert_eq!(card.column, TaskColumn::Todo, "sent, a card written by hand stays where it was put");
     }
 
     fn moved(at_ms: u64, card: &str, column: TaskColumn) -> TaskEvent {

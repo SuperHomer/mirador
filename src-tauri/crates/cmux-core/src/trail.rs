@@ -290,6 +290,12 @@ pub fn version(path: &Path, consumed: u64, limit: Option<u32>, since_ms: Option<
 
 /// One call's full input and output, read from the transcript at `path`:
 /// absent when the transcript is gone or holds no call `id`.
+/// How many actions failed in the latest of `turns`: what a card in Doing
+/// says about the turn its agent is in.
+pub fn failing(turns: &[TrailTurn]) -> u32 {
+    turns.last().map_or(0, |t| t.actions.iter().filter(|a| a.status == ActionStatus::Error).count() as u32)
+}
+
 pub fn action_detail(path: &Path, id: &str) -> Option<ActionDetail> {
     let file = std::fs::File::open(path).ok()?;
     let mut detail: Option<ActionDetail> = None;
@@ -356,6 +362,25 @@ mod tests {
             trail.feed(line);
         }
         trail.asking().map(|a| (a.tool, a.summary))
+    }
+
+    #[test]
+    fn counts_the_failures_of_the_latest_turn_only() {
+        let failed = |id: &str, at: &str| result(id, r#""Exit code 1""#, true, at);
+        let turns = trail(&[
+            &prompt("First", "00"),
+            &call("a", "Bash", r#"{"command":"false"}"#, "01"),
+            &failed("a", "02"),
+            &prompt("Second", "03"),
+            &call("b", "Bash", r#"{"command":"false"}"#, "04"),
+            &failed("b", "05"),
+            &call("c", "Bash", r#"{"command":"true"}"#, "06"),
+            &result("c", r#""ok""#, false, "07"),
+            &call("d", "Bash", r#"{"command":"false"}"#, "08"),
+            &failed("d", "09"),
+        ]);
+        assert_eq!(failing(&turns), 2);
+        assert_eq!(failing(&[]), 0);
     }
 
     #[test]

@@ -28,8 +28,17 @@ pub fn record(app: &AppHandle, what: TaskEventKind) {
 
 /// Logs `text` as given to the agent in `pane` by `from`, with its name as
 /// `agent list` shows it, and its tab and team: on `card`, a card written
-/// by hand, or else a card of its own. Nothing for an empty text.
-pub fn given(app: &AppHandle, source: TaskSource, from: String, pane: &str, text: &str, card: Option<String>) {
+/// by hand, or else a card of its own, titled `title` when given (else
+/// from the text). Nothing for an empty text.
+pub fn given(
+    app: &AppHandle,
+    source: TaskSource,
+    from: String,
+    pane: &str,
+    text: &str,
+    card: Option<String>,
+    title: Option<String>,
+) {
     if text.trim().is_empty() {
         return;
     }
@@ -45,15 +54,19 @@ pub fn given(app: &AppHandle, source: TaskSource, from: String, pane: &str, text
             team,
             tab,
             text: text.to_string(),
+            title: title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
+            description: None,
         },
     );
 }
 
-/// Writes a card titled `title` in `caller`'s tab, for the agent `to`
-/// names there — which must be one — or for nobody yet. Its id.
+/// Writes a card titled `title`, with `description` when given, in
+/// `caller`'s tab, for the agent `to` names there — which must be one — or
+/// for nobody yet. Its id.
 pub fn add(
     app: &AppHandle,
     title: &str,
+    description: Option<String>,
     to: Option<String>,
     caller: Option<String>,
     from: String,
@@ -82,6 +95,8 @@ pub fn add(
             team,
             tab,
             text: title.trim().to_string(),
+            title: None,
+            description: description.map(|d| d.trim().to_string()).filter(|d| !d.is_empty()),
         },
     );
     Ok(card)
@@ -135,13 +150,89 @@ pub fn list(state: &AppState, all: bool, pane_id: Option<String>) -> Result<Vec<
 }
 
 /// The cards of the tab `tab`, or of every tab: every one not done, and
-/// the latest done.
+/// the latest done. A card in Doing says how many actions failed in its
+/// agent's turn so far.
 fn board(state: &AppState, tab: Option<String>) -> Vec<TaskCard> {
     let cards = cmux_core::tasks::cards(&events(state))
         .into_iter()
         .filter(|c| tab.is_none() || c.tab == tab)
         .collect();
-    cmux_core::tasks::recent(cards, BOARD_DONE)
+    let mut cards = cmux_core::tasks::recent(cards, BOARD_DONE);
+    for card in cards.iter_mut().filter(|c| c.column == TaskColumn::Doing) {
+        if let Some(pane) = card.pane.clone() {
+            card.failing = failing(state, &pane);
+        }
+    }
+    cards
+}
+
+/// The failed actions in the latest turn of the agent in `pane`, from its
+/// trail — read through the trail's caches, which read only what the file
+/// gained — or 0 when it has none to read.
+fn failing(state: &AppState, pane: &str) -> u32 {
+    use crate::commands::TrailFile;
+    match crate::commands::trail_file(state, pane) {
+        Ok(TrailFile::Claude(path)) => {
+            state.trails.lock().unwrap().read(&path).map_or(0, |t| cmux_core::trail::failing(t.turns()))
+        }
+        Ok(TrailFile::Codex(known)) => {
+            state.codex_trails.lock().unwrap().read(&known.path).map_or(0, |t| cmux_core::trail::failing(t.turns()))
+        }
+        Err(_) => 0,
+    }
+}
+
+/// Writes a card in the tab `tab_id`, from the board: as `task add` does,
+/// for the agent `assignee` names there or nobody. Its id.
+#[tauri::command]
+pub fn task_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tab_id: String,
+    title: String,
+    description: Option<String>,
+    assignee: Option<String>,
+) -> Result<String, String> {
+    let caller = {
+        let ws = state.workspace.lock().unwrap();
+        ws.tabs.iter().find(|t| t.id == tab_id).map(|t| t.focused.clone())
+    }
+    .ok_or_else(|| format!("no tab {tab_id}"))?;
+    add(&app, &title, description, assignee, Some(caller), "you".into())
+}
+
+/// Sends the card written by hand `card` to the agent in `pane_id` as its
+/// next prompt, as `agent send --card` does — refused for an agent waiting
+/// on a person — and puts the card in Doing.
+#[tauri::command]
+pub fn task_send(app: AppHandle, state: State<'_, AppState>, card: String, pane_id: String) -> Result<String, String> {
+    let cards = cmux_core::tasks::cards(&events(&state));
+    let card = cmux_core::tasks::written(&cards, &card)?.clone();
+    send_card(&app, &card, &pane_id)
+}
+
+/// Sends the agent in `pane_id` its next task: its own first To do card,
+/// else the first in its tab that is no one's (`tasks::next_task`).
+#[tauri::command]
+pub fn send_next_task(app: AppHandle, state: State<'_, AppState>, pane_id: String) -> Result<String, String> {
+    let tab = tab_of(&state, Some(pane_id.clone()))?;
+    let cards = cmux_core::tasks::cards(&events(&state));
+    let card = cmux_core::tasks::next_task(&cards, &pane_id, Some(&tab))
+        .cloned()
+        .ok_or("no card in To do for this agent, or for no one in its tab")?;
+    send_card(&app, &card, &pane_id)
+}
+
+/// Types `card`'s title, and its description when it has one, into the
+/// agent in `pane` (logged on the card), then puts the card in Doing.
+fn send_card(app: &AppHandle, card: &TaskCard, pane: &str) -> Result<String, String> {
+    let text = match &card.description {
+        Some(more) => format!("{}\n\n{more}", card.title),
+        None => card.title.clone(),
+    };
+    let pane = crate::handoff::send(app, pane, &text, None, false, Some(card.id.clone()), None)?;
+    record(app, TaskEventKind::Moved { card: card.id.clone(), column: TaskColumn::Doing, by: "you".into() });
+    Ok(pane)
 }
 
 /// The log of the card `card`, else of the agent `name` from `pane_id`'s

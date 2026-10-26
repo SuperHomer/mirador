@@ -413,6 +413,9 @@ pub enum Request {
         /// Without a role, what to start: Claude Code (default) or Codex.
         #[serde(default)]
         harness: Option<Harness>,
+        /// The title of the task's card, instead of one made from `task`.
+        #[serde(default)]
+        title: Option<String>,
         /// The first prompt, typed in as Claude's initial message.
         #[serde(default)]
         task: Option<String>,
@@ -473,6 +476,9 @@ pub enum Request {
         /// one: it is logged on that card rather than on one of its own.
         #[serde(default)]
         card: Option<String>,
+        /// The title of the message's card, instead of one made from it.
+        #[serde(default)]
+        title: Option<String>,
     },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {
@@ -489,6 +495,9 @@ pub enum Request {
         task: Option<String>,
         #[serde(default)]
         pane_id: Option<String>,
+        /// The title of the task's card, instead of one made from `task`.
+        #[serde(default)]
+        title: Option<String>,
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,
@@ -507,6 +516,9 @@ pub enum Request {
         to: Option<String>,
         #[serde(default)]
         pane_id: Option<String>,
+        /// More about it than the title says.
+        #[serde(default)]
+        description: Option<String>,
     },
     /// Puts a card written by hand in `column`; `card` is its id, or a
     /// prefix of one card's only.
@@ -1243,6 +1255,13 @@ pub enum TaskEventKind {
         team: Option<String>,
         tab: Option<String>,
         text: String,
+        /// The card's title when one was given (`--title`, a card written
+        /// by hand); else it comes from `text`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// More about a card written by hand (`task add --description`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
     },
     /// A card put in a column by hand.
     Moved {
@@ -1281,8 +1300,12 @@ pub struct TaskHistoryEntry {
 #[serde(rename_all = "camelCase")]
 pub struct TaskCard {
     pub id: String,
-    /// The first line of the task's text.
+    /// The title it was given, or else the first line of the task's text,
+    /// cut short (`cmux_core::tasks::split_title`).
     pub title: String,
+    /// The rest: the whole task when it says more than the title.
+    #[serde(default)]
+    pub description: Option<String>,
     pub source: TaskSource,
     pub from: String,
     pub assignee: Option<String>,
@@ -1294,6 +1317,10 @@ pub struct TaskCard {
     pub updated_ms: u64,
     /// The events that touched it, oldest first.
     pub history: Vec<TaskEvent>,
+    /// For a card in Doing: the failed actions in its agent's latest turn,
+    /// from its trail; 0 when that is not known.
+    #[serde(default)]
+    pub failing: u32,
 }
 
 /// Where a role or a way of working was defined. A repository's wins over

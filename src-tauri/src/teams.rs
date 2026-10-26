@@ -44,17 +44,19 @@ pub fn start_team(
     task: Option<String>,
     pane_id: Option<String>,
 ) -> Result<String, String> {
-    start_team_from(app, state, team, task, pane_id, "you".into())
+    start_team_from(app, state, team, task, pane_id, None, "you".into())
 }
 
 /// [`start_team`], its task logged as given by `from`: a person, from the
-/// app; whoever ran `mira team start`, from the socket.
+/// app; whoever ran `mira team start`, from the socket. `title` is the
+/// task's card's, instead of one made from the task.
 pub fn start_team_from(
     app: AppHandle,
     state: State<'_, AppState>,
     team: String,
     task: Option<String>,
     pane_id: Option<String>,
+    title: Option<String>,
     from: String,
 ) -> Result<String, String> {
     let cwd = cwd_of(&state, pane_id.as_deref());
@@ -98,7 +100,7 @@ pub fn start_team_from(
     emit_workspace(&app);
     let lead = seats.iter().zip(&panes).find(|(s, _)| s.lead).map(|(_, p)| p);
     if let (Some(lead), Some(task)) = (lead, &task) {
-        crate::tasks::given(&app, cmux_protocol::TaskSource::TeamStart, from, lead, task, None);
+        crate::tasks::given(&app, cmux_protocol::TaskSource::TeamStart, from, lead, task, None, title);
     }
     Ok(tab)
 }

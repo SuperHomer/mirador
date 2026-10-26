@@ -14,7 +14,7 @@ fn pane_of(sb: &Sandbox, name: &str) -> String {
 }
 
 fn send(sb: &Sandbox, from: &str, to: &str, message: &str) -> Result<serde_json::Value, String> {
-    sb.request(Request::AgentSend {
+    sb.request(Request::AgentSend { title: None,
         to: to.into(),
         message: message.into(),
         pane_id: Some(from.into()),
@@ -36,7 +36,7 @@ fn agents_hand_each_other_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { team: "squad".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()) });
     sb.wait_for("the planner", LONG, || sb.member("planner"));
     let planner = pane_of(&sb, "planner");
     let r1 = pane_of(&sb, "reviewer-1");
@@ -88,7 +88,7 @@ fn agents_hand_each_other_work() {
     assert_eq!(code, Some(2), "a wait ends with 2 on a permission prompt");
     let refused = send(&sb, &r1, "reviewer-2", "are you there?").unwrap_err();
     assert!(refused.contains("waiting on a person"), "{refused}");
-    sb.request(Request::AgentSend {
+    sb.request(Request::AgentSend { title: None,
         to: "reviewer-2".into(),
         message: "yes, go ahead".into(),
         pane_id: Some(r1.clone()),

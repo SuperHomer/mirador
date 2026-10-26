@@ -12,6 +12,7 @@ fn agent_new(sb: &Sandbox, role: &str, from: &str) -> Result<String, String> {
     sb.request(Request::AgentNew {
         role: Some(role.into()),
         harness: None,
+        title: None,
         task: None,
         target: None,
         pane_id: Some(from.into()),

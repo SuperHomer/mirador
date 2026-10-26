@@ -204,6 +204,9 @@ enum TeamAction {
     /// own. TASK goes to its lead as its first message.
     Start {
         team: String,
+        /// The title of the task's card, instead of its first line.
+        #[arg(long)]
+        title: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -245,6 +248,9 @@ enum TaskAction {
         /// `agent send` takes it.
         #[arg(long)]
         to: Option<String>,
+        /// More about it than the title says.
+        #[arg(long)]
+        description: Option<String>,
     },
     /// Put a card written with `task add` in a column: todo, doing,
     /// needs-you or done. ID may be the start of one card's id. A card
@@ -269,6 +275,9 @@ enum AgentAction {
         /// Open a new tab instead of splitting this pane.
         #[arg(long)]
         tab: bool,
+        /// The title of the task's card, instead of its first line.
+        #[arg(long)]
+        title: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -299,6 +308,9 @@ enum AgentAction {
         /// or the start of it): logged on that card, not on a new one.
         #[arg(long)]
         card: Option<String>,
+        /// The title of the message's card, instead of its first line.
+        #[arg(long, conflicts_with = "card")]
+        title: Option<String>,
         /// Then wait for it to finish, as `agent wait` does.
         #[arg(long)]
         wait: bool,
@@ -660,8 +672,9 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Agent { action } => match action {
-            AgentAction::New { role, harness, tab, task } => Request::AgentNew {
+            AgentAction::New { role, harness, tab, title, task } => Request::AgentNew {
                 role,
+                title,
                 harness: harness.map(|h| match h.as_str() {
                     "codex" => cmux_protocol::Harness::Codex,
                     _ => cmux_protocol::Harness::Claude,
@@ -679,7 +692,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
                 target: tab.then(|| "tab".to_string()),
             },
-            AgentAction::Send { to, message, force, card, wait, timeout } => {
+            AgentAction::Send { to, message, force, card, title, wait, timeout } => {
                 let started = now_ms();
                 let resp = send_request(Request::AgentSend {
                     to: to.clone(),
@@ -687,6 +700,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     pane_id: own_pane(),
                     force,
                     card,
+                    title,
                 })?;
                 if !wait || !resp.ok {
                     return render(resp, cli.json, false, None);
@@ -741,10 +755,11 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Team { action } => match action {
-            TeamAction::Start { team, task } => Request::TeamStart {
+            TeamAction::Start { team, title, task } => Request::TeamStart {
                 team,
                 task: (!task.is_empty()).then(|| task.join(" ")),
                 pane_id: own_pane(),
+                title,
             },
             TeamAction::List { defined: true } => return defined_teams(cli.json),
             TeamAction::List { defined: false } => Request::TeamList,
@@ -753,7 +768,9 @@ fn run(cli: Cli) -> Result<(), String> {
         },
         Command::Task { action } => match action {
             TaskAction::List { all } => Request::TaskList { all, pane_id: own_pane() },
-            TaskAction::Add { title, to } => Request::TaskAdd { title: title.join(" "), to, pane_id: own_pane() },
+            TaskAction::Add { title, to, description } => {
+                Request::TaskAdd { title: title.join(" "), to, pane_id: own_pane(), description }
+            }
             TaskAction::Move { id, column } => Request::TaskMove {
                 card: id,
                 column: cmux_core::tasks::parse_column(&column)?,
@@ -1803,7 +1820,7 @@ mod tests {
             &["task", "add", "--to", "worker", "Step", "1:", "the", "model"],
             &["task", "add", "Step 1: the model", "--to", "worker"],
         ] {
-            let Command::Task { action: TaskAction::Add { title, to } } = parse(args) else { panic!("{args:?}") };
+            let Command::Task { action: TaskAction::Add { title, to, .. } } = parse(args) else { panic!("{args:?}") };
             assert_eq!((title.join(" ").as_str(), to.as_deref()), ("Step 1: the model", Some("worker")), "{args:?}");
         }
         for args in [
@@ -1819,8 +1836,27 @@ mod tests {
                 "{args:?}"
             );
         }
+        // A card's description, and a title for a message's card.
+        let Command::Task { action: TaskAction::Add { title, description, .. } } =
+            parse(&["task", "add", "Write the docs", "--description", "README and AGENTS.md"])
+        else {
+            panic!()
+        };
+        assert_eq!((title.join(" ").as_str(), description.as_deref()), ("Write the docs", Some("README and AGENTS.md")));
+        let Command::Agent { action: AgentAction::Send { title, .. } } =
+            parse(&["agent", "send", "worker", "--title", "Focus layout", "Step 3", "all of it"])
+        else {
+            panic!()
+        };
+        assert_eq!(title.as_deref(), Some("Focus layout"));
+        let Command::Agent { action: AgentAction::New { title, task, .. } } =
+            parse(&["agent", "new", "--title", "Docs", "update", "the", "README"])
+        else {
+            panic!()
+        };
+        assert_eq!((title.as_deref(), task.join(" ").as_str()), (Some("Docs"), "update the README"));
         // A word that looks like an option is still text after `--`.
-        let Command::Task { action: TaskAction::Add { title, to } } = parse(&["task", "add", "--", "drop", "--to"]) else {
+        let Command::Task { action: TaskAction::Add { title, to, .. } } = parse(&["task", "add", "--", "drop", "--to"]) else {
             panic!()
         };
         assert_eq!((title.join(" ").as_str(), to), ("drop --to", None));

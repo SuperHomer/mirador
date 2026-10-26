@@ -302,6 +302,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::AgentNew {
             role,
             harness,
+            title,
             task,
             target,
             pane_id,
@@ -317,6 +318,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 // a tab of its own only when asked for one.
                 target.as_deref() == Some("tab"),
                 harness,
+                title,
                 from,
             )?;
             Ok(json!({ "paneId": pane_id }))
@@ -339,24 +341,24 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::AgentSend { to, message, pane_id, force, card } => {
-            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card)?;
+        Request::AgentSend { to, message, pane_id, force, card, title } => {
+            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentFind { name, pane_id } => {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::TeamStart { team, task, pane_id } => {
+        Request::TeamStart { team, task, pane_id, title } => {
             let from = sender(&state, pane_id.as_deref());
-            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, from)?;
+            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from)?;
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
         Request::TaskList { all, pane_id } => Ok(json!({ "cards": crate::tasks::list(&state, all, pane_id)? })),
-        Request::TaskAdd { title, to, pane_id } => {
+        Request::TaskAdd { title, to, pane_id, description } => {
             let from = sender(&state, pane_id.as_deref());
-            Ok(json!({ "cardId": crate::tasks::add(app, &title, to, pane_id, from)? }))
+            Ok(json!({ "cardId": crate::tasks::add(app, &title, description, to, pane_id, from)? }))
         }
         Request::TaskMove { card, column, pane_id } => {
             let by = sender(&state, pane_id.as_deref());

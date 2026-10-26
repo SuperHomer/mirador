@@ -405,7 +405,7 @@ before letting it reach Mirador's socket.
 ### Handoffs
 
 ```bash
-mira agent send <name|pane> <message…> [--force] [--wait [--timeout N]]
+mira agent send <name|pane> <message…> [--force] [--title <t>] [--wait [--timeout N]]
 mira agent wait <name|pane> [--timeout N]     # 0 idle, 2 needs you, 3 exited, 124 timeout
 ```
 
@@ -428,7 +428,7 @@ wait by exiting.
 ### Tasks, the board and history
 
 ```bash
-mira task add <title…> [--to <name>]          # a card in this tab, in To do; prints its id
+mira task add <title…> [--to <name>] [--description <text>]   # a card in this tab, in To do; prints its id
 mira task move <id> <todo|doing|needs-you|done>
 mira task done <id>                            # same as move <id> done
 mira task list [--all]                         # this tab's cards by column; every tab's
@@ -471,9 +471,16 @@ Done:
   `task move` / `task done`. A card Mirador made is not moved by hand
   (refused: its agent moves it).
 - `agent send --card <id>` logs the message on that written card, in its
-  history, and makes no card of its own; the card stays in its column. An
+  history, and makes no card of its own; the card stays in its column (a
+  card written for no one becomes the agent's it was sent to). An
   unknown id, an ambiguous prefix or a card Mirador made refuses the send
   before anything is typed.
+- A card's title is the first line of its task, cut at a word to 80
+  characters (with `…`), and its description the whole task when that
+  says more. `--title <t>` on `agent new`, `agent send` and `team start`
+  gives the card that title instead, the task becoming its description;
+  `task add --description <text>` gives a written card one. The log keeps
+  the whole task either way, and `agent history` shows its first line.
 
 Options go before or after a title or a message, in `task add` as in
 `agent send`; words after `--` are text, so a message or title with a

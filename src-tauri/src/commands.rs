@@ -1599,12 +1599,13 @@ pub fn open_agent(
     tab: bool,
     harness: Option<cmux_protocol::Harness>,
 ) -> Result<String, String> {
-    open_agent_from(app, state, role, task, pane_id, tab, harness, "you".into())
+    open_agent_from(app, state, role, task, pane_id, tab, harness, None, "you".into())
 }
 
 /// [`open_agent`], its task logged as given by `from`: a person, from the
 /// app; whoever ran `mira agent new`, from the socket. `harness` is for an
-/// agent without a role: Claude Code, else Codex.
+/// agent without a role: Claude Code, else Codex. `title` is the task's
+/// card's, instead of one made from the task.
 #[allow(clippy::too_many_arguments)]
 pub fn open_agent_from(
     app: AppHandle,
@@ -1614,6 +1615,7 @@ pub fn open_agent_from(
     pane_id: Option<String>,
     tab: bool,
     harness: Option<cmux_protocol::Harness>,
+    title: Option<String>,
     from: String,
 ) -> Result<String, String> {
     if role.is_some() && harness.is_some() {
@@ -1650,7 +1652,7 @@ pub fn open_agent_from(
     }
     emit_workspace(&app);
     if let Some(task) = &task {
-        crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None);
+        crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None, title);
     }
     Ok(new_pane)
 }
