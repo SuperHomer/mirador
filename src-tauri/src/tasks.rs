@@ -158,9 +158,11 @@ fn board(state: &AppState, tab: Option<String>) -> Vec<TaskCard> {
         .filter(|c| tab.is_none() || c.tab == tab)
         .collect();
     let mut cards = cmux_core::tasks::recent(cards, BOARD_DONE);
+    // Once per agent: several cards in Doing can share one.
+    let mut by_pane: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for card in cards.iter_mut().filter(|c| c.column == TaskColumn::Doing) {
-        if let Some(pane) = card.pane.clone() {
-            card.failing = failing(state, &pane);
+        if let Some(pane) = &card.pane {
+            card.failing = *by_pane.entry(pane.clone()).or_insert_with(|| failing(state, pane));
         }
     }
     cards
