@@ -3280,12 +3280,18 @@ body,
   pointer-events: none;
 }
 
+/* The terminal at a fixed scale, its bottom-left corner pinned to the
+   tile's, so the latest lines and any prompt show and the rest is cropped.
+   Scaled to fit, a wide terminal came out a third of its size and could
+   not be read: readable text beats seeing the whole screen. The wrapper
+   is the terminal's own height, so it stays pinned as that changes. */
 .mini-host {
+  --mini-scale: 0.65;
   position: absolute;
-  top: 0;
   left: 0;
-  transform: scale(var(--scale, 0.5));
-  transform-origin: 0 0;
+  bottom: 0;
+  transform: scale(var(--mini-scale));
+  transform-origin: 0 100%;
 }
 
 .mini-foot {

@@ -267,39 +267,8 @@ function FocusedTile({
   );
 }
 
-/**
- * How much to shrink a terminal lent at its own size to fit `body`: it
- * keeps its columns and rows, and so its PTY, and is drawn smaller. Kept
- * up to date as the body or the terminal changes size.
- */
-function useScale(pane: string, bodyRef: React.RefObject<HTMLDivElement | null>, shown: boolean) {
-  const [scale, setScale] = useState(0.5);
-  useEffect(() => {
-    const body = bodyRef.current;
-    const term = getTerminal(pane);
-    const el = term?.element;
-    if (!body || !term || !el || !shown) return;
-    const measure = () => {
-      // Layout sizes, which the scale itself does not change.
-      const w = el.offsetWidth;
-      const h = el.offsetHeight;
-      if (w > 0 && h > 0) setScale(Math.min(body.clientWidth / w, body.clientHeight / h));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(body);
-    observer.observe(el);
-    const resized = term.onResize(measure);
-    return () => {
-      observer.disconnect();
-      resized.dispose();
-    };
-  }, [pane, shown, bodyRef]);
-  return scale;
-}
-
-/** An agent on the rail: its live terminal, shrunk, and what it is on.
- *  Clicking it pins it large. */
+/** An agent on the rail: its live terminal, drawn smaller and cropped to
+ *  its latest lines, and what it is on. Clicking it pins it large. */
 function MiniTile({
   agent,
   visible,
@@ -313,8 +282,6 @@ function MiniTile({
 }) {
   const pane = agent.paneId;
   const { hostRef, shown } = useLentTerminal(pane, visible, { fit: false });
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const scale = useScale(pane, bodyRef, shown);
   const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
   const session = activity?.session;
   const pct =
@@ -334,14 +301,10 @@ function MiniTile({
           <span className={`mini-elapsed ${status}`}>{elapsed(agent.sinceMs, now)}</span>
         )}
       </div>
-      <div className="mini-body" ref={bodyRef}>
+      <div className="mini-body">
         {/* The tile's own wrapper takes the scale; the terminal's element,
             appended into it by `lendTerminal`, is left untouched. */}
-        <div
-          className="mini-host"
-          ref={hostRef}
-          style={{ "--scale": scale } as React.CSSProperties}
-        />
+        <div className="mini-host" ref={hostRef} />
         {!shown && <span className="wall-term-missing">shown elsewhere</span>}
       </div>
       <div className="mini-foot">
