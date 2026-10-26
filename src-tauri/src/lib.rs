@@ -365,6 +365,8 @@ pub fn run() {
             tasks::task_history,
             commands::toggle_agent_wall,
             commands::set_wall_view,
+            commands::set_wall_mode,
+            commands::set_task_layout,
             commands::get_agent_activity,
             commands::get_agent_trail,
             commands::get_trail_detail,

@@ -1819,6 +1819,44 @@ pub fn set_wall_view(
     Ok(())
 }
 
+/// Lays the Agents side of the wall of `pane_id`'s tab (the focused pane's
+/// when absent) out as `mode`, without turning the wall on.
+#[tauri::command]
+pub fn set_wall_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    mode: cmux_protocol::WallMode,
+) -> Result<(), String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if !state.workspace.lock().unwrap().set_wall_mode(&pane, mode) {
+        return Err(format!("no pane {pane}"));
+    }
+    emit_workspace(&app);
+    Ok(())
+}
+
+/// Lays the Tasks side of the wall of `pane_id`'s tab (the focused pane's
+/// when absent) out as `layout`, without turning the wall on.
+#[tauri::command]
+pub fn set_task_layout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    layout: cmux_protocol::TaskLayout,
+) -> Result<(), String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if !state.workspace.lock().unwrap().set_task_layout(&pane, layout) {
+        return Err(format!("no pane {pane}"));
+    }
+    emit_workspace(&app);
+    Ok(())
+}
+
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY
 /// runs `ssh -tt <host>`, so auth/agent/2FA behave exactly as in any
 /// terminal; disconnect leaves the pane idle and a keypress reconnects.

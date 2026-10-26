@@ -74,6 +74,12 @@ pub struct TabSnapshot {
     /// The side of the wall it shows, or will when the wall is next on.
     #[serde(default)]
     pub wall_view: WallView,
+    /// How the Agents side lays its agents out.
+    #[serde(default)]
+    pub wall_mode: WallMode,
+    /// How the Tasks side lays its board out.
+    #[serde(default)]
+    pub task_layout: TaskLayout,
     /// Where the tab's frame sits on the board, and its size (derived from
     /// its cards). Card positions are relative to the frame's `x`, `y`.
     #[serde(default)]
@@ -106,6 +112,38 @@ pub enum WallView {
 impl WallView {
     pub fn is_agents(&self) -> bool {
         *self == WallView::Agents
+    }
+}
+
+/// How the Agents side of a wall lays its agents out: one large with the
+/// rest in a strip beside it, or all of them in an even grid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WallMode {
+    #[default]
+    Focus,
+    Grid,
+}
+
+impl WallMode {
+    pub fn is_focus(&self) -> bool {
+        *self == WallMode::Focus
+    }
+}
+
+/// How the Tasks side of a wall lays its board out: a column per status,
+/// or a row per agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskLayout {
+    #[default]
+    Columns,
+    Swimlanes,
+}
+
+impl TaskLayout {
+    pub fn is_columns(&self) -> bool {
+        *self == TaskLayout::Columns
     }
 }
 

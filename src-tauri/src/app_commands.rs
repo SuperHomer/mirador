@@ -62,6 +62,8 @@ pub const APP_COMMANDS: &[&str] = &[
     "task_history",
     "toggle_agent_wall",
     "set_wall_view",
+    "set_wall_mode",
+    "set_task_layout",
     "get_agent_activity",
     "get_agent_trail",
     "get_trail_detail",

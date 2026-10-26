@@ -33,6 +33,10 @@ export interface TabSnapshot {
   wall: boolean;
   /** The side of the wall it shows, or will when the wall is next on. */
   wallView: WallView;
+  /** How the Agents side lays its agents out. */
+  wallMode: WallMode;
+  /** How the Tasks side lays its board out. */
+  taskLayout: TaskLayout;
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
   /** Its frame on the board; its cards are placed relative to `x`, `y`. */
@@ -46,6 +50,12 @@ export type View = "tabs" | "board";
 
 /** The side of a tab's wall: its agents' terminals, or its task board. */
 export type WallView = "agents" | "tasks";
+
+/** The Agents side: one agent large with a strip beside it, or a grid. */
+export type WallMode = "focus" | "grid";
+
+/** The Tasks side: a column per status, or a row per agent. */
+export type TaskLayout = "columns" | "swimlanes";
 
 /** The board point at the viewport's top-left, and screen px per unit. */
 export interface Camera {
@@ -740,6 +750,11 @@ export const toggleAgentWall = (paneId: string | null) =>
   invoke<boolean>("toggle_agent_wall", { paneId });
 export const setWallView = (paneId: string | null, view: WallView) =>
   invoke<void>("set_wall_view", { paneId, view });
+/** Lays out a side of the wall of `paneId`'s tab; neither turns it on. */
+export const setWallMode = (paneId: string | null, mode: WallMode) =>
+  invoke<void>("set_wall_mode", { paneId, mode });
+export const setTaskLayout = (paneId: string | null, layout: TaskLayout) =>
+  invoke<void>("set_task_layout", { paneId, layout });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
 /** Its last `turns` turns, and any begun at or after `sinceMs`. */

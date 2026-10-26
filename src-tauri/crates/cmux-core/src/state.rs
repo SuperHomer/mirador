@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use cmux_protocol::{
-    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, View,
-    WallView, WorkspaceSnapshot,
+    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, TaskLayout,
+    View, WallMode, WallView, WorkspaceSnapshot,
 };
 
 use crate::{board, layout};
@@ -281,6 +281,12 @@ pub struct Tab {
     /// The side of the wall it shows. Kept while the wall is off, so the
     /// wall comes back on the side last shown. Persisted.
     pub wall_view: WallView,
+    /// How the wall's Agents side lays its agents out. Kept while the wall
+    /// is off, like `wall_view`. Persisted.
+    pub wall_mode: WallMode,
+    /// How the wall's Tasks side lays its board out. Kept while the wall is
+    /// off, like `wall_view`. Persisted.
+    pub task_layout: TaskLayout,
     /// Where the tab's frame sits on the board.
     pub frame: BoardPoint,
     /// Each pane's card on the board, relative to `frame`. Kept for every
@@ -312,6 +318,8 @@ impl Tab {
             team: None,
             wall: false,
             wall_view: WallView::default(),
+            wall_mode: WallMode::default(),
+            task_layout: TaskLayout::default(),
             frame: BoardPoint::default(),
         }
     }
@@ -600,6 +608,26 @@ impl Workspace {
         true
     }
 
+    /// Lays the Agents side of the wall of the tab holding `pane` out as
+    /// `mode`; false when no tab holds `pane`. It does not turn the wall on.
+    pub fn set_wall_mode(&mut self, pane: &str, mode: WallMode) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        tab.wall_mode = mode;
+        true
+    }
+
+    /// Lays the Tasks side of the wall of the tab holding `pane` out as
+    /// `layout`; false when no tab holds `pane`. It does not turn the wall on.
+    pub fn set_task_layout(&mut self, pane: &str, layout: TaskLayout) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        tab.task_layout = layout;
+        true
+    }
+
     /// Shows the whole of the tab holding `pane` again.
     pub fn unzoom(&mut self, pane: &str) -> bool {
         match self.tab_of_pane_mut(pane) {
@@ -755,6 +783,8 @@ impl Workspace {
                         zoomed_pane: t.zoomed.clone(),
                         wall: t.wall,
                         wall_view: t.wall_view,
+                        wall_mode: t.wall_mode,
+                        task_layout: t.task_layout,
                         frame: t.frame_rect(),
                         cards: layout::pane_ids(&t.root)
                             .into_iter()
@@ -1072,6 +1102,29 @@ mod tests {
         assert_eq!(side(&ws), WallView::Tasks);
         assert!(ws.show_wall(&claude, WallView::Agents));
         assert_eq!(side(&ws), WallView::Agents);
+    }
+
+    #[test]
+    fn a_walls_layouts_are_its_tabs_own() {
+        let mut ws = Workspace::default();
+        let first = ws.focused_pane();
+        ws.new_tab();
+        let tab = |ws: &Workspace, i: usize| ws.snapshot(&HashMap::new()).tabs[i].clone();
+        assert_eq!(tab(&ws, 0).wall_mode, WallMode::Focus);
+        assert_eq!(tab(&ws, 0).task_layout, TaskLayout::Columns);
+
+        // Set through one pane, only that pane's tab changes, and the wall
+        // stays off.
+        assert!(ws.set_wall_mode(&first, WallMode::Grid));
+        assert!(ws.set_task_layout(&first, TaskLayout::Swimlanes));
+        assert_eq!(tab(&ws, 0).wall_mode, WallMode::Grid);
+        assert_eq!(tab(&ws, 0).task_layout, TaskLayout::Swimlanes);
+        assert!(!tab(&ws, 0).wall);
+        assert_eq!(tab(&ws, 1).wall_mode, WallMode::Focus);
+        assert_eq!(tab(&ws, 1).task_layout, TaskLayout::Columns);
+
+        assert!(!ws.set_wall_mode("nope", WallMode::Grid));
+        assert!(!ws.set_task_layout("nope", TaskLayout::Swimlanes));
     }
 
     #[test]
