@@ -2422,17 +2422,6 @@ body,
   --wall-idle: #a6e3a1;
 }
 
-.wall-chrome {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 6px;
-  background: var(--bg-alt);
-  border-bottom: 1px solid var(--surface);
-  flex-shrink: 0;
-  min-height: 30px;
-}
-
 /* The Agents side's one row of controls: status filters, then Focus's pin
    or Grid's page size, Focus | Grid, and + Agent. */
 .wall-toolbar {
@@ -3674,40 +3663,205 @@ body,
   container-type: inline-size;
 }
 
-.tb-switch {
+/* The board's one row: Cards · History · Trail, then the scope and + Card. */
+.tb-toolbar {
   display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--surface);
+  font-size: 11px;
   flex-shrink: 0;
-  margin-left: auto;
-  border: 1px solid var(--surface);
-  border-radius: 4px;
-  overflow: hidden;
 }
 
-.tb-switch + .tb-switch {
-  margin-left: 0;
-}
-
-.tb-switch button {
+.tb-tab {
   border: none;
+  border-bottom: 2px solid transparent;
+  padding: 2px 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tb-tab.selected {
+  border-bottom-color: var(--text);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tb-toolbar-spacer {
+  flex: 1;
+}
+
+.tb-popover-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tb-scope,
+.tb-add,
+.tb-outline {
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  padding: 2px 8px;
   background: transparent;
   color: var(--subtext);
-  font: inherit;
   font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
   white-space: nowrap;
+  cursor: pointer;
 }
 
-.tb-switch button.on {
-  background: var(--surface);
+.tb-scope:hover,
+.tb-add:hover,
+.tb-outline:hover {
   color: var(--text);
 }
 
+.tb-add.open {
+  border-color: var(--accent);
+  background: var(--tint-hover);
+  color: var(--text);
+}
+
+/* The scope's choices, and an unassigned card's agents. */
+.tb-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--overlay);
+  border-radius: 9px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.tb-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-menu button:hover,
+.tb-menu button.selected {
+  background: var(--surface);
+}
+
+.tb-menu button:disabled {
+  color: var(--muted);
+  background: transparent;
+  cursor: default;
+}
+
+.tb-menu-note {
+  padding: 5px 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* + Card: like + Agent's popover. */
+.tb-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--overlay);
+  border-radius: 9px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+}
+
+.tb-popover-label {
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tb-popover-label:first-child {
+  margin-top: 0;
+}
+
+.tb-popover-input {
+  padding: 5px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg-alt);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  resize: vertical;
+}
+
+.tb-popover-input:focus {
+  border-color: var(--accent);
+}
+
+.tb-popover-error {
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.tb-popover-foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tb-popover-primary,
+.tb-popover-secondary {
+  padding: 3px 12px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tb-popover-primary {
+  border: none;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.tb-popover-secondary {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
+
+.tb-popover-primary:disabled,
+.tb-popover-secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Needs you · To do · Doing · Done, each scrolling on its own. */
 .tb-columns {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding: 6px;
 }
@@ -3720,28 +3874,29 @@ body,
   }
 }
 
-/* Each column scrolls on its own. */
 .tb-column {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--surface);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--bg);
-  --tb-status: var(--muted);
-}
-
-.tb-column.doing {
-  --tb-status: var(--wall-working);
+  --tb-status: var(--subtext);
 }
 
 .tb-column.needsYou {
-  --tb-status: var(--wall-needs-you);
+  --tb-status: var(--status-needs-you);
+  border-color: var(--status-needs-you);
+  background: var(--tint-needs-you-area);
+}
+
+.tb-column.doing {
+  --tb-status: var(--status-working);
 }
 
 .tb-column.done {
-  --tb-status: var(--wall-idle);
+  --tb-status: var(--status-idle);
 }
 
 .tb-column-head {
@@ -3749,17 +3904,31 @@ body,
   align-items: center;
   gap: 6px;
   margin: 0;
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
   color: var(--tb-status);
-  border-bottom: 1px solid var(--surface);
   flex-shrink: 0;
 }
 
 .tb-count {
-  color: var(--muted);
+  color: var(--subtext);
   font-weight: 400;
+}
+
+.tb-done-mark {
+  font-size: 11px;
+}
+
+.tb-done-toggle {
+  margin-left: auto;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11px;
+  font-weight: 400;
+  cursor: pointer;
 }
 
 .tb-cards {
@@ -3768,18 +3937,113 @@ body,
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 4px;
+  gap: 6px;
+  padding: 0 6px 6px;
 }
 
 .tb-card {
   flex-shrink: 0;
-  padding: 5px 7px;
+  padding: 9px 10px;
   border: 1px solid var(--surface);
-  border-left: 3px solid var(--tb-status);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--bg-alt);
-  font-size: 12px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.tb-card.needs-you {
+  border-color: var(--overlay);
+  background: var(--bg);
+}
+
+.tb-card.needs-you .tb-title {
+  font-weight: 600;
+}
+
+/* Written for no one yet. */
+.tb-card.unassigned {
+  border-style: dashed;
+  border-color: var(--overlay);
+  background: transparent;
+}
+
+/* Two lines of it, all of it once clicked. */
+.tb-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  width: 100%;
+  margin-top: 3px;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11.5px;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.tb-description.full {
+  display: block;
+}
+
+/* What a waiting agent asks for. */
+.tb-asks {
+  display: flex;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: var(--tint-needs-you-row);
+  color: var(--status-needs-you);
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.tb-asks-label {
+  flex-shrink: 0;
+}
+
+.tb-progress {
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.tb-progress > span {
+  display: block;
+  height: 100%;
+  width: var(--fill);
+  background: var(--accent);
+}
+
+.tb-failing {
+  flex-shrink: 0;
+  color: var(--danger);
+}
+
+.tb-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.tb-open {
+  border: none;
+  border-radius: 5px;
+  padding: 2px 10px;
+  background: var(--status-needs-you);
+  color: #181825;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 /* The title opens the card's history: a button that reads as text. */
@@ -3805,20 +4069,15 @@ body,
 .tb-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 3px;
+  gap: 5px;
+  margin-top: 6px;
   font-size: 11px;
   color: var(--muted);
   min-width: 0;
 }
 
-.tb-mark {
-  flex-shrink: 0;
-  color: var(--subtext);
-}
-
 .tb-assignee {
-  color: var(--subtext);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3903,7 +4162,6 @@ button.tb-assignee:hover {
 
 .tb-age {
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 /* A card's way to its agent's trail, beside its age. */

@@ -12,7 +12,6 @@ import {
   setActiveTab,
   renameTab,
   setView,
-  setWallMode,
   setWallView,
   toggleAgentWall,
 } from "../bindings";
@@ -22,6 +21,7 @@ import { useConfigStore } from "../state/configStore";
 import { STATUS_LABEL, StatusMark, StatusPip } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
 import { AskingLine } from "../agents/AskingLine";
+import { showOnWall } from "../agents/showOnWall";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
@@ -265,11 +265,7 @@ function AgentRow({
       void zoomPane(agent.paneId, true);
       return;
     }
-    useUiStore.getState().pinAgent(agent.tabId, agent.paneId);
-    void (async () => {
-      await setWallMode(agent.paneId, "focus");
-      await setWallView(agent.paneId, "agents");
-    })();
+    showOnWall(agent.tabId, agent.paneId);
   };
   const status = agent.status;
   const classes = [

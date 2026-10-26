@@ -497,17 +497,25 @@ turn ended and how long it took (since the task, or since it resumed).
 Without a name it is this tab's; with one, the tasks given to that agent
 or sent by it, the moves of its cards, and its turns.
 
-The task board is the agent wall's other side: the wall's **Splits |
-Agents | Tasks** switch shows the tab's task board in place of its agents' tiles.
+The task board is the agent wall's other side: **Tasks** in the
+sidebar's view switch shows the tab's task board in place of its agents' tiles.
 `agent board` turns the tab it runs in to its wall on the Tasks side and
 prints `wall on: tasks` (`agent_board` answers `{"wall": true,
 "wallView": "tasks"}`) — also the palette's *Agents: Task Board*. Its
 old `--tab`, from when the board was a pane of its own, is still taken
-and does nothing. The board switches between this team and all agents, and between Cards, History (newest first) and
-Trail (below); a card's title opens its history, its agent's name goes to
-its pane, and its ⋯ opens Trail on its agent at the turn the card started
-— the first to begin since it was given; going to an agent of this tab
-turns the wall back to its tiles. It reads the log again whenever
+and does nothing. The board's one row switches between Cards, History (newest first) and
+Trail (below), its scope between this team and all agents, and its
+**+ Card** writes a card (a title, a description, and an agent it is for
+or no one; for an idle agent, *Add and send* sends it at once). Its
+columns read Needs you, To do, Doing, Done (today's, or all of them).
+A card's title opens its history, its description opens in full, its
+agent's name goes to its pane. A card waiting on a person says what its
+agent asks and **Open** shows the agent large on the wall; one written
+for no one has **Assign ▾**, which sends it to an agent of the tab; one
+in Doing has **History** and **Trail** (Trail on its agent at the turn
+the card started — the first to begin since it was given), and the
+failed steps of that turn. Going to an agent of this tab turns the wall
+back to its tiles. It reads the log again whenever
 something is appended.
 
 The log is `tasks.jsonl` in the data directory (on macOS

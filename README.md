@@ -39,7 +39,7 @@ downloads, the feature tour and the keybinding reference.
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Task board**, the agent wall's Tasks side (**Tasks** in the sidebar's
   view switch, the palette's *Agents: Task Board*, or `mira agent board`): what
-  each agent was given and where it stands, in To do, Doing, Needs you and Done, for this team or every
+  each agent was given and where it stands, in Needs you, To do, Doing and Done, for this team or every
   tab. Mirador adds a card whenever it gives an agent a task (`team start`,
   `agent new`, `mira agent send`) and, for Claude Code and Codex, moves it
   as the agent's turns end; agents write their own with `mira task add` and

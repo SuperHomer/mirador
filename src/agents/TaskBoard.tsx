@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   ActionDetail,
@@ -16,10 +16,16 @@ import {
   getAgentTrail,
   getTrailDetail,
   setWallView,
+  taskAdd,
   taskCards,
   taskHistory,
+  taskSend,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { percent, useAgentActivity } from "./ActivityPanel";
+import { AskingLine } from "./AskingLine";
+import { showOnWall } from "./showOnWall";
+import { StatusMark } from "./StatusMark";
 
 type Props = {
   /** The tab whose wall it is the Tasks side of, and whose cards it shows. */
@@ -28,10 +34,11 @@ type Props = {
   visible: boolean;
 };
 
+/** The columns, left to right: what needs you first. */
 const COLUMNS: [TaskColumn, string][] = [
+  ["needsYou", "Needs you"],
   ["todo", "To do"],
   ["doing", "Doing"],
-  ["needsYou", "Needs you"],
   ["done", "Done"],
 ];
 
@@ -71,8 +78,38 @@ function age(ms: number, now: number): string {
   return `${Math.floor(s / 86400)}d`;
 }
 
+/** Local midnight before `now`: where "today" starts for the Done column. */
+function startOfDay(now: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 /** What the board reads: every tab's ("*"), one tab's, or nothing (""). */
 const scopeOf = (key: string) => (key === "*" ? null : key);
+
+type View = "cards" | "history" | "trail";
+
+/** Closes a popover on a click outside it and the button that opens it
+ *  (its parent), and on Esc while the keyboard is inside it — never an Esc
+ *  typed into a terminal. */
+function usePopover(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const down = (e: MouseEvent) => {
+      if (!ref.current?.parentElement?.contains(e.target as globalThis.Node)) onClose();
+    };
+    document.addEventListener("mousedown", down);
+    return () => document.removeEventListener("mousedown", down);
+  }, [onClose]);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onClose();
+    }
+  };
+  return { ref, onKeyDown };
+}
 
 /**
  * The task log's cards (`cmux_core::tasks`), in four columns — the tasks
@@ -83,7 +120,7 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [all, setAll] = useState(false);
-  const [view, setView] = useState<"cards" | "history" | "trail">("cards");
+  const [view, setView] = useState<View>("cards");
   // The agent the Trail view shows, and the time of the card it was
   // opened from, to scroll to that card's turn.
   const [trailOf, setTrailOf] = useState<{ pane: string; label: string; at: number | null } | null>(null);
@@ -127,6 +164,11 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
     () => (snapshot?.agents ?? []).filter((a) => all || a.tabId === tabId),
     [snapshot, all, tabId],
   );
+  // The agents a card can go to: this tab's, idle first, then working.
+  const tabAgents = useMemo(
+    () => (snapshot?.agents ?? []).filter((a) => a.tabId === tabId),
+    [snapshot, tabId],
+  );
   const showTrail = (card: TaskCard) => {
     setTrailOf({ pane: card.pane!, label: card.assignee ?? "its agent", at: card.createdMs });
     setView("trail");
@@ -134,38 +176,15 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
 
   return (
     <div className="task-board">
-      <div className="wall-chrome">
-        <div className="tb-switch" role="group">
-          <button
-            className={view === "cards" ? "on" : ""}
-            onClick={() => setView("cards")}
-          >
-            Cards
-          </button>
-          <button
-            className={view === "history" ? "on" : ""}
-            title="Every task given and every turn ended, newest first"
-            onClick={() => setView("history")}
-          >
-            History
-          </button>
-          <button
-            className={view === "trail" ? "on" : ""}
-            title="What each agent did, turn by turn, from its own transcript"
-            onClick={() => setView("trail")}
-          >
-            Trail
-          </button>
-        </div>
-        <div className="tb-switch" role="group">
-          <button className={all ? "" : "on"} onClick={() => setAll(false)}>
-            {shown?.team ? "This team" : "This tab"}
-          </button>
-          <button className={all ? "on" : ""} onClick={() => setAll(true)}>
-            All agents
-          </button>
-        </div>
-      </div>
+      <BoardToolbar
+        view={view}
+        onView={setView}
+        all={all}
+        onAll={setAll}
+        team={!!shown?.team}
+        tabId={tabId}
+        agents={tabAgents}
+      />
 
       {view === "trail" ? (
         <TrailView
@@ -188,59 +207,275 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
         <Empty />
       ) : (
         <div className="tb-columns">
-          {COLUMNS.map(([column, label]) => {
-            const here = cards
-              .filter((c) => c.column === column)
-              .sort((a, b) => b.updatedMs - a.updatedMs);
-            return (
-              <section key={column} className={`tb-column ${column}`}>
-                <h3 className="tb-column-head">
-                  {label}
-                  <span className="tb-count">{here.length}</span>
-                </h3>
-                <div className="tb-cards">
-                  {here.map((c) => (
-                    <Card
-                      key={c.id}
-                      card={c}
-                      place={
-                        all ? ((c.tab && placeOf.get(c.tab)) ?? "closed tab") : null
-                      }
-                      reachable={!!c.pane && panes.has(c.pane)}
-                      live={live}
-                      now={now}
-                      onGoTo={goTo}
-                      onTrail={showTrail}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
+          {COLUMNS.map(([column, label]) => (
+            <Column
+              key={column}
+              column={column}
+              label={label}
+              cards={cards.filter((c) => c.column === column).sort((a, b) => b.updatedMs - a.updatedMs)}
+              now={now}
+            >
+              {(c) => (
+                <Card
+                  key={c.id}
+                  card={c}
+                  agent={snapshot?.agents.find((a) => a.paneId === c.pane) ?? null}
+                  tabAgents={tabAgents}
+                  place={all ? ((c.tab && placeOf.get(c.tab)) ?? "closed tab") : null}
+                  reachable={!!c.pane && panes.has(c.pane)}
+                  live={live}
+                  now={now}
+                  onGoTo={goTo}
+                  onTrail={showTrail}
+                />
+              )}
+            </Column>
+          ))}
         </div>
       )}
     </div>
   );
 });
 
+/**
+ * The board's one row: Cards · History · Trail on the left; the scope and
+ * + Card on the right.
+ */
+function BoardToolbar({
+  view,
+  onView,
+  all,
+  onAll,
+  team,
+  tabId,
+  agents,
+}: {
+  view: View;
+  onView: (view: View) => void;
+  all: boolean;
+  onAll: (all: boolean) => void;
+  /** The tab runs a team: its scope is "This team". */
+  team: boolean;
+  tabId: string;
+  agents: AgentInfo[];
+}) {
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const closeScope = useCallback(() => setScopeOpen(false), []);
+  const closeAdd = useCallback(() => setAddOpen(false), []);
+  const mine = team ? "This team" : "This tab";
+  const tabs: [View, string, string][] = [
+    ["cards", "Cards", "The tasks given, by where each stands"],
+    ["history", "History", "Every task given and every turn ended, newest first"],
+    ["trail", "Trail", "What each agent did, turn by turn, from its own transcript"],
+  ];
+  return (
+    <div className="tb-toolbar">
+      {tabs.map(([id, label, title]) => (
+        <button
+          key={id}
+          className={`tb-tab${view === id ? " selected" : ""}`}
+          title={title}
+          onClick={() => onView(id)}
+        >
+          {label}
+        </button>
+      ))}
+      <span className="tb-toolbar-spacer" />
+      <div className="tb-popover-anchor">
+        <button className="tb-scope" onClick={() => setScopeOpen((o) => !o)}>
+          Scope: {all ? "All agents" : mine} ▾
+        </button>
+        {scopeOpen && (
+          <ScopeMenu
+            options={[
+              [false, mine],
+              [true, "All agents"],
+            ]}
+            value={all}
+            onPick={(v) => {
+              onAll(v);
+              closeScope();
+            }}
+            onClose={closeScope}
+          />
+        )}
+      </div>
+      <div className="tb-popover-anchor">
+        <button className={`tb-add${addOpen ? " open" : ""}`} onClick={() => setAddOpen((o) => !o)}>
+          + Card
+        </button>
+        {addOpen && <AddCard tabId={tabId} agents={agents} onClose={closeAdd} />}
+      </div>
+    </div>
+  );
+}
+
+function ScopeMenu({
+  options,
+  value,
+  onPick,
+  onClose,
+}: {
+  options: [boolean, string][];
+  value: boolean;
+  onPick: (value: boolean) => void;
+  onClose: () => void;
+}) {
+  const { ref, onKeyDown } = usePopover(onClose);
+  return (
+    <div className="tb-menu" ref={ref} onKeyDown={onKeyDown}>
+      {options.map(([v, label]) => (
+        <button key={label} className={v === value ? "selected" : undefined} onClick={() => onPick(v)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * + Card: a card written in this tab, for one of its agents or no one —
+ * and, for an agent with nothing on, sent to it at once.
+ */
+function AddCard({ tabId, agents, onClose }: { tabId: string; agents: AgentInfo[]; onClose: () => void }) {
+  const { ref, onKeyDown } = usePopover(onClose);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const to = agents.find((a) => a.paneId === assignee);
+  const add = async (send: boolean) => {
+    try {
+      const id = await taskAdd(tabId, title.trim(), description.trim() || null, assignee || null);
+      if (send && to) await taskSend(id, to.paneId);
+      onClose();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+  return (
+    <div className="tb-popover" ref={ref} onKeyDown={onKeyDown}>
+      <label className="tb-popover-label" htmlFor="tb-card-title">
+        Title
+      </label>
+      <input
+        id="tb-card-title"
+        className="tb-popover-input"
+        value={title}
+        autoFocus
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <label className="tb-popover-label" htmlFor="tb-card-description">
+        Description (optional)
+      </label>
+      <textarea
+        id="tb-card-description"
+        className="tb-popover-input"
+        rows={3}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+      <label className="tb-popover-label" htmlFor="tb-card-assignee">
+        Assign to
+      </label>
+      <select
+        id="tb-card-assignee"
+        className="tb-popover-input"
+        value={assignee}
+        onChange={(e) => setAssignee(e.target.value)}
+      >
+        <option value="">No one yet</option>
+        {agents.map((a) => (
+          <option key={a.paneId} value={a.paneId}>
+            {agentLabel(a)}
+          </option>
+        ))}
+      </select>
+      {error && <div className="tb-popover-error">{error}</div>}
+      <div className="tb-popover-foot">
+        <button className="tb-popover-primary" disabled={!title.trim()} onClick={() => void add(false)}>
+          Add
+        </button>
+        {to?.status === "idle" && (
+          <button className="tb-popover-secondary" disabled={!title.trim()} onClick={() => void add(true)}>
+            Add and send
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One column: its head, and its cards scrolling on their own. Done shows
+ *  only today's until asked for all of them. */
+function Column({
+  column,
+  label,
+  cards,
+  now,
+  children,
+}: {
+  column: TaskColumn;
+  label: string;
+  cards: TaskCard[];
+  now: number;
+  children: (card: TaskCard) => React.ReactNode;
+}) {
+  const [everything, setEverything] = useState(false);
+  const done = column === "done";
+  const today = startOfDay(now);
+  const shown = done && !everything ? cards.filter((c) => c.updatedMs >= today) : cards;
+  const mark =
+    column === "needsYou" ? (
+      <StatusMark status="needsYou" small />
+    ) : column === "todo" ? (
+      <StatusMark status={null} small />
+    ) : column === "doing" ? (
+      <StatusMark status="working" small />
+    ) : (
+      <span className="tb-done-mark">✓</span>
+    );
+  return (
+    <section className={`tb-column ${column}`}>
+      <h3 className="tb-column-head">
+        {mark}
+        {label}
+        <span className="tb-count">{cards.length}</span>
+        {done && (
+          <button className="tb-done-toggle" onClick={() => setEverything((e) => !e)}>
+            {everything ? "all ▴" : "today ▾"}
+          </button>
+        )}
+      </h3>
+      <div className="tb-cards">{shown.map(children)}</div>
+    </section>
+  );
+}
+
 function Empty() {
   return (
     <div className="wall-empty">
       <p className="wall-empty-hint">
         No cards yet: giving an agent a task (<code>mira agent send</code>,{" "}
-        <code>team start</code>) adds one, and <code>mira task add</code>{" "}
-        writes one.
+        <code>team start</code>) adds one, and <em>+ Card</em> or{" "}
+        <code>mira task add</code> writes one.
       </p>
     </div>
   );
 }
 
 /**
- * One card: its title opens its history under it; its agent's name, when
- * that agent's pane is still open, goes to it.
+ * One card: its title opens its history under it, its description opens
+ * in full, its agent's name goes to the agent while its pane is open.
+ * Waiting on a person, it says what the agent asks and leads to it; given
+ * to no one, it can be sent to an agent; in Doing, it leads to its history
+ * and its trail and says how its turn is going.
  */
 function Card({
   card,
+  agent,
+  tabAgents,
   place,
   reachable,
   live,
@@ -249,6 +484,9 @@ function Card({
   onTrail,
 }: {
   card: TaskCard;
+  /** Its agent, while running. */
+  agent: AgentInfo | null;
+  tabAgents: AgentInfo[];
   place: string | null;
   reachable: boolean;
   live: boolean;
@@ -257,15 +495,21 @@ function Card({
   onTrail: (card: TaskCard) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [full, setFull] = useState(false);
   const history = useLogRead(
     live,
     open ? card.id : "",
     (id) => taskHistory(null, id),
     NO_HISTORY,
   );
-  const manual = card.source === "manual";
+  const asking = card.column === "needsYou";
+  const unassigned = !card.pane;
+  // Its agent's own task list, read only while it waits on a person.
+  const { activity } = useAgentActivity(card.pane, live && asking && !!agent?.hasActivity);
+  const tasks = activity?.session.tasks ?? null;
+  const variant = asking ? " needs-you" : unassigned ? " unassigned" : "";
   return (
-    <div className={`tb-card${open ? " open" : ""}`}>
+    <div className={`tb-card${variant}`}>
       <button
         className="tb-title"
         title={open ? "Hide its history" : "Show its history"}
@@ -273,45 +517,140 @@ function Card({
       >
         {card.title}
       </button>
-      <div className="tb-meta">
-        <span
-          className="tb-mark"
-          title={
-            manual
-              ? `Written with mira task add (${card.id})`
-              : "Given to its agent: follows its turns"
-          }
+      {card.description && (
+        <button
+          className={`tb-description${full ? " full" : ""}`}
+          title={full ? "Show less" : "Show all of it"}
+          onClick={() => setFull((f) => !f)}
         >
-          {manual ? "✎" : "⇢"}
-        </span>
-        {reachable && card.pane ? (
-          <button
-            className="tb-assignee reachable"
-            title="Go to this agent"
-            onClick={() => onGoTo(card.pane!)}
-          >
+          {card.description}
+        </button>
+      )}
+      {asking && agent && (agent.asking || agent.message) && (
+        <div className="tb-asks">
+          <span className="tb-asks-label">Asks:</span>
+          <AskingLine agent={agent} className="tb-asks-line" />
+        </div>
+      )}
+      {asking && tasks && (
+        <div className="tb-progress" title={tasks.current ?? "Its task list"}>
+          <span style={{ "--fill": `${percent(tasks)}%` } as React.CSSProperties} />
+        </div>
+      )}
+      <div className="tb-meta">
+        {unassigned ? (
+          <span className="tb-assignee">Unassigned</span>
+        ) : reachable && card.pane ? (
+          <button className="tb-assignee reachable" title="Go to this agent" onClick={() => onGoTo(card.pane!)}>
             {card.assignee ?? "its agent"}
           </button>
         ) : (
-          <span className="tb-assignee">{card.assignee ?? "nobody yet"}</span>
+          <span className="tb-assignee">{card.assignee ?? "its agent"}</span>
         )}
+        <span className="tb-age">· {age(card.updatedMs, now)}</span>
         {place && <span className="tb-place">{place}</span>}
-        <span className="tb-age">{age(card.updatedMs, now)}</span>
-        {card.pane && (
-          <button
-            className="tb-trail-open"
-            title="What its agent did for it: the Trail view, at this task's turn"
-            onClick={() => onTrail(card)}
-          >
-            ⋯
-          </button>
+        {card.column === "doing" && card.failing > 0 && (
+          <span className="tb-failing">
+            {card.failing} failing {card.failing === 1 ? "step" : "steps"}
+          </span>
         )}
+        <span className="tb-actions-right">
+          {asking && agent ? (
+            <button className="tb-open" title="Show this agent large on its wall" onClick={() => {
+              void focusPane(agent.paneId);
+              showOnWall(agent.tabId, agent.paneId);
+            }}>
+              Open
+            </button>
+          ) : unassigned && card.source === "manual" ? (
+            <AssignMenu card={card} agents={tabAgents} />
+          ) : card.column === "doing" && card.pane ? (
+            <>
+              <button className="tb-outline" onClick={() => setOpen((o) => !o)}>
+                History
+              </button>
+              <button className="tb-outline" onClick={() => onTrail(card)}>
+                Trail
+              </button>
+            </>
+          ) : card.pane ? (
+            <button
+              className="tb-trail-open"
+              title="What its agent did for it: the Trail view, at this task's turn"
+              onClick={() => onTrail(card)}
+            >
+              ⋯
+            </button>
+          ) : null}
+        </span>
       </div>
       {open && (
         <div className="tb-card-history">
           <HistoryLines entries={history} now={now} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Assign ▾: sends a card written for no one to one of the tab's agents —
+ *  the idle first, then the working; one waiting on a person cannot take
+ *  it. */
+function AssignMenu({ card, agents }: { card: TaskCard; agents: AgentInfo[] }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const close = useCallback(() => setOpen(false), []);
+  const rank = (a: AgentInfo) => (a.status === "idle" ? 0 : a.status === "needsYou" ? 2 : 1);
+  const sorted = [...agents].sort((a, b) => rank(a) - rank(b));
+  return (
+    <span className="tb-popover-anchor">
+      <button className="tb-outline" onClick={() => setOpen((o) => !o)}>
+        Assign ▾
+      </button>
+      {open && (
+        <AssignList
+          agents={sorted}
+          error={error}
+          onPick={(a) =>
+            taskSend(card.id, a.paneId).then(close, (e) => setError(String(e)))
+          }
+          onClose={close}
+        />
+      )}
+    </span>
+  );
+}
+
+function AssignList({
+  agents,
+  error,
+  onPick,
+  onClose,
+}: {
+  agents: AgentInfo[];
+  error: string | null;
+  onPick: (agent: AgentInfo) => void;
+  onClose: () => void;
+}) {
+  const { ref, onKeyDown } = usePopover(onClose);
+  return (
+    <div className="tb-menu right" ref={ref} onKeyDown={onKeyDown}>
+      {agents.length === 0 && <div className="tb-menu-note">No agents in this tab.</div>}
+      {agents.map((a) => {
+        const waiting = a.status === "needsYou";
+        return (
+          <button
+            key={a.paneId}
+            disabled={waiting}
+            title={waiting ? "It is waiting on a person: answer it first" : undefined}
+            onClick={() => onPick(a)}
+          >
+            <StatusMark status={a.status} small />
+            <span>{agentLabel(a)}</span>
+          </button>
+        );
+      })}
+      {error && <div className="tb-popover-error">{error}</div>}
     </div>
   );
 }
