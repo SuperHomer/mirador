@@ -367,6 +367,7 @@ function WallTile({
       <div className="wall-body">
         <div
           className="wall-term"
+          data-pane={pane}
           onMouseDown={() => {
             if (unread) void markPaneRead(pane);
             // On the board, a wall in another tab's frame: its tab becomes
