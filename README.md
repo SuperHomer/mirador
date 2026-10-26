@@ -571,8 +571,11 @@ running ones first. The wall shows the same list in every Claude Code
 tile, beside its terminal (under it, when the tile is narrow), with the
 task progress in the tile's header; its ⤢ opens the full panel. It is read from Claude Code's transcripts, which the
 hooks point Mirador to, so it needs the integration set up; the CLI
-equivalent is `mira agent activity`. There is no cost figure: tokens are
-what the transcripts record, and a price would be an estimate.
+equivalent is `mira agent activity`. A Codex agent's activity is its
+model, tokens, context and time, read from the session file Codex
+writes; it has no task list or subagents to show. There is no cost
+figure: tokens are what the transcripts record, and a price would be an
+estimate.
 
 In the sidebar, every tab is listed as usual, and directly under the tab
 you are on, the agents running in it, each with its status (a "!" square

@@ -65,6 +65,8 @@ pub struct AppState {
     /// trails.
     pub trails: Mutex<cmux_core::transcript::Cache<cmux_core::trail::Trail>>,
     pub codex_trails: Mutex<cmux_core::transcript::Cache<cmux_core::codex_trail::CodexTrail>>,
+    /// Codex rollouts read so far, for agent activity.
+    pub codex_stats: Mutex<cmux_core::transcript::Cache<cmux_core::codex_trail::CodexStats>>,
     /// The file each pane's agent last wrote its trail to, by pane: kept
     /// after the agent exits, until another starts there or the pane
     /// closes.
@@ -270,6 +272,7 @@ pub fn run() {
             transcripts: Mutex::new(Default::default()),
             trails: Mutex::new(Default::default()),
             codex_trails: Mutex::new(Default::default()),
+            codex_stats: Mutex::new(Default::default()),
             trail_files: Mutex::new(Default::default()),
             codex_tails: Mutex::new(Default::default()),
             task_log: Mutex::new(task_log),

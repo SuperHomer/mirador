@@ -148,6 +148,15 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
             })
             .collect()
     };
+    // Before `meta`: `trail_file` takes these two locks the other way round.
+    let rollouts: std::collections::HashSet<String> = state
+        .trail_files
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, file)| matches!(file, TrailFile::Codex(_)))
+        .map(|(pane, _)| pane.clone())
+        .collect();
     let meta = state.meta.lock().unwrap();
     panes
         .into_iter()
@@ -160,7 +169,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 member,
                 role: m.agent_role.clone(),
                 name: m.agent_name.clone(),
-                has_activity: m.has_activity(),
+                has_activity: m.has_activity(rollouts.contains(&pane)),
                 model: m.agent_model.clone(),
                 effort: m.agent_effort.clone(),
                 status: m.status(),
@@ -179,16 +188,34 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
 
 /// A Claude Code agent's progress and its subagents', read from its
 /// transcripts. Its hooks say where the session's transcript is; until one
-/// has, there is nothing to read.
+/// has, there is nothing to read. A Codex agent's, from the rollout it
+/// holds open: its model and counts, and no tasks or subagents.
 pub fn agent_activity(
     state: &AppState,
     pane_id: &str,
 ) -> Result<cmux_protocol::AgentActivity, String> {
+    let harness = {
+        let meta = state.meta.lock().unwrap();
+        meta.get(pane_id).filter(|m| m.is_agent()).ok_or("not an agent pane")?.harness()
+    };
+    if harness == Some(cmux_protocol::Harness::Codex) {
+        let TrailFile::Codex(known) = trail_file(state, pane_id)? else {
+            return Err("no Codex session found".into());
+        };
+        let session = state
+            .codex_stats
+            .lock()
+            .unwrap()
+            .read(&known.path)
+            .map(cmux_core::codex_trail::CodexStats::summary)
+            .ok_or("its Codex session file cannot be read")?;
+        return Ok(cmux_protocol::AgentActivity { pane_id: pane_id.to_string(), session, subagents: Vec::new() });
+    }
     let (transcript, live) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(pane_id).filter(|m| m.is_agent()).ok_or("not an agent pane")?;
         if m.harness() != Some(cmux_protocol::Harness::Claude) {
-            return Err("only Claude Code agents report their subagents".into());
+            return Err("only Claude Code and Codex agents report their activity".into());
         }
         let transcript = m.agent_transcript.clone().ok_or(
             "no transcript yet: Claude Code reports it with its hooks \

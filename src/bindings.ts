@@ -277,7 +277,8 @@ export interface AgentInfo {
   role: string | null;
   /** Its name in its tab's team, when it is a member. */
   member: string | null;
-  /** A Claude Code agent whose transcript is known: activity to show. */
+  /** A Claude Code agent with a known transcript, or a Codex one with a
+   *  known rollout: `getAgentActivity` has something to read. */
   hasActivity: boolean;
   /** The Claude Code session's name, as `claude agents` lists it. */
   name: string | null;

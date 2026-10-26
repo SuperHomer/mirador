@@ -345,6 +345,10 @@ Code agent's transcripts: the session's tokens, context and task list
 when the Claude Code hosting it is gone), tasks done/total, tokens,
 context and run time. The hooks tell Mirador where the transcript is
 (`transcript_path`), and only a `<session_id>.jsonl` path is accepted.
+For a Codex agent it reads the rollout its process holds open, the one
+`agent trail` reads: the model, tokens (input not from the cache, plus
+output), the last call's context, and the context window Codex itself
+reports. There are no tasks or subagents for Codex.
 
 For Claude Code, `agent list` reads what the hooks reported: `working`, `needs-you` (with the
 message, e.g. the tool awaiting permission), `idle`, or `-` before the first

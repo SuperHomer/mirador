@@ -163,9 +163,10 @@ export function ActivityPanel() {
           <div className="notif-empty">This agent has exited.</div>
         ) : !agent.hasActivity ? (
           <div className="notif-empty">
-            Only a Claude Code agent has activity to show, once its hooks have
-            reported its transcript (the palette's Set Up Claude Code
-            Integration installs them).
+            Only Claude Code and Codex agents have activity to show: Claude
+            Code once its hooks have reported its transcript (the palette's
+            Set Up Claude Code Integration installs them), Codex once its
+            session file is found.
           </div>
         ) : !session ? (
           <div className="notif-empty">{error ?? "Reading its transcripts…"}</div>

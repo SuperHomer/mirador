@@ -252,9 +252,15 @@ impl PaneMeta {
     }
 
     /// Whether its activity can be read: a Claude Code agent whose hooks
-    /// reported its transcript.
-    pub fn has_activity(&self) -> bool {
-        self.harness() == Some(cmux_protocol::Harness::Claude) && self.agent_transcript.is_some()
+    /// reported its transcript, or a Codex one whose rollout is known.
+    /// The app finds a rollout (`lsof`), not the pane, so it says whether
+    /// it has: `rollout_known`.
+    pub fn has_activity(&self, rollout_known: bool) -> bool {
+        match self.harness() {
+            Some(cmux_protocol::Harness::Claude) => self.agent_transcript.is_some(),
+            Some(cmux_protocol::Harness::Codex) => rollout_known,
+            _ => false,
+        }
     }
 
     /// What the agent is doing: what its hooks said, else what Claude
