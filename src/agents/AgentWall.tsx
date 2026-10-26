@@ -14,7 +14,9 @@ import {
   WallView,
   zoomPane,
 } from "../bindings";
-import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
+import { percent, useAgentActivity } from "./ActivityPanel";
+import { AgentStatusBar } from "./AgentStatusBar";
+import { SubagentSheet } from "./SubagentSheet";
 import { STATUS_LABEL } from "./StatusMark";
 import { elapsed, useNow } from "./time";
 import { TaskBoard } from "./TaskBoard";
@@ -252,6 +254,7 @@ function WallTile({
   now: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   // Assumed until a lend fails, so a tile does not flash the placeholder.
   const [shown, setShown] = useState(true);
   const pane = agent.paneId;
@@ -306,8 +309,9 @@ function WallTile({
     [pane],
   );
 
-  // Its subagents, read while the wall is on screen, for an agent that
-  // has them to read (`hasActivity`, decided in Rust).
+  // Its activity, read while the wall is on screen, for an agent that has
+  // it to read (`hasActivity`, decided in Rust): the status bar and the
+  // subagent sheet.
   const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
   const tasks = activity?.session.tasks ?? null;
 
@@ -369,21 +373,23 @@ function WallTile({
           <div className="wall-term-host" ref={hostRef} />
           {!shown && <span className="wall-term-missing">shown elsewhere</span>}
         </div>
-        {activity && (activity.subagents.length > 0 || tasks) && (
-          <aside className="wall-side">
-            <div className="wall-side-head">
-              <span>Subagents · {activity.subagents.length}</span>
-              <button
-                title="The full activity panel"
-                onClick={() => useUiStore.getState().openActivity(pane)}
-              >
-                ⤢
-              </button>
-            </div>
-            <SubagentList activity={activity} now={now} compact />
-          </aside>
+        {/* Over the terminal, not in it: the lent host is not React's, and
+            the terminal keeps its size and stays live beside the sheet. */}
+        {sheetOpen && (
+          <SubagentSheet
+            activity={activity}
+            now={now}
+            onClose={() => setSheetOpen(false)}
+          />
         )}
       </div>
+      <AgentStatusBar
+        agent={agent}
+        activity={activity}
+        now={now}
+        sheetOpen={sheetOpen}
+        onToggleSheet={() => setSheetOpen(!sheetOpen)}
+      />
     </div>
   );
 }

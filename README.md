@@ -567,9 +567,12 @@ palette's *Agent Activity* for the focused one) to open its activity: the
 tokens, context and time its Claude Code session has used, how far it is
 through its own task list, and every subagent it started, each with its
 type, model, tasks done (as `n/m` and a percentage), tokens and run time,
-running ones first. The wall shows the same list in every Claude Code
-tile, beside its terminal (under it, when the tile is narrow), with the
-task progress in the tile's header; its ⤢ opens the full panel. It is read from Claude Code's transcripts, which the
+running ones first. On the wall, every agent's tile ends in a status
+bar: its harness, model and effort, how full its context is (a meter
+against the model's window, when that is known), the tokens and time it
+has used, and, for Claude Code, a **Subagents** button that slides the
+same list over the right of its terminal, which stays live beside it.
+The task progress is in the tile's header. It is read from Claude Code's transcripts, which the
 hooks point Mirador to, so it needs the integration set up; the CLI
 equivalent is `mira agent activity`. A Codex agent's activity is its
 model, tokens, context and time, read from the session file Codex
