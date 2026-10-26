@@ -66,6 +66,18 @@ impl Trail {
         &self.turns
     }
 
+    /// The call the agent is waiting on: its latest one still without a
+    /// result. What a permission prompt is about, since Claude Code asks
+    /// before it runs the call and writes the result after.
+    pub fn asking(&self) -> Option<cmux_protocol::Asking> {
+        let action = self
+            .turns
+            .iter()
+            .flat_map(|t| &t.actions)
+            .rfind(|a| a.status == ActionStatus::Running)?;
+        Some(cmux_protocol::Asking { tool: action.tool.clone(), summary: action.summary.clone() })
+    }
+
     fn assistant(&mut self, message: &Value, ms: Option<u64>) {
         let blocks = message["content"].as_array().map(Vec::as_slice).unwrap_or(&[]);
         for block in blocks.iter().filter(|b| b["type"] == "tool_use") {
@@ -336,6 +348,34 @@ mod tests {
 
     fn result(id: &str, content: &str, error: bool, at: &str) -> String {
         format!(r#"{{"type":"user","timestamp":"2026-10-25T09:00:{at}.000Z","message":{{"role":"user","content":[{{"tool_use_id":"{id}","type":"tool_result","content":{content},"is_error":{error}}}]}},"toolUseResult":{{}}}}"#)
+    }
+
+    fn asking(lines: &[&str]) -> Option<(String, String)> {
+        let mut trail = Trail::default();
+        for line in lines {
+            trail.feed(line);
+        }
+        trail.asking().map(|a| (a.tool, a.summary))
+    }
+
+    #[test]
+    fn asks_about_the_latest_call_without_a_result() {
+        let ask = |tool: &str, summary: &str| Some((tool.to_string(), summary.to_string()));
+        // A command waiting to run.
+        let bash = call("t1", "Bash", r#"{"command":"rm -rf build","description":"Clean"}"#, "01");
+        assert_eq!(asking(&[&prompt("Clean up", "00"), &bash]), ask("Bash", "rm -rf build"));
+        // An edit waiting to be made: its file.
+        let edit = call("t2", "Edit", r#"{"file_path":"/src/app.rs","old_string":"a","new_string":"b"}"#, "02");
+        assert_eq!(asking(&[&prompt("Fix it", "00"), &edit]), ask("Edit", "/src/app.rs"));
+        // Answered already: nothing is waiting.
+        assert_eq!(asking(&[&prompt("Clean up", "00"), &bash, &result("t1", r#""ok""#, false, "03")]), None);
+        assert_eq!(asking(&[&prompt("Hello", "00")]), None);
+        // Several calls in one message, one of them unanswered: that one.
+        let both = r#"{"type":"assistant","timestamp":"2026-10-25T09:00:04.000Z","message":{"id":"m-x","role":"assistant","content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/a.md"}},{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"/b.md","content":"x"}}]}}"#;
+        assert_eq!(
+            asking(&[&prompt("Copy it", "00"), both, &result("r1", r#""text""#, false, "05")]),
+            ask("Write", "/b.md")
+        );
     }
 
     #[test]

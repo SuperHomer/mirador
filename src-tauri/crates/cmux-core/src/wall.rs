@@ -73,6 +73,7 @@ mod tests {
             effort: None,
             status,
             message: None,
+            asking: None,
             topic: None,
             since_ms: None,
             cwd: None,

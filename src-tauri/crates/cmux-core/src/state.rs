@@ -87,6 +87,9 @@ pub struct PaneMeta {
     pub agent_status: Option<cmux_protocol::AgentStatus>,
     /// The last Notification message from the agent's hooks.
     pub agent_message: Option<String>,
+    /// The tool call it waits on a permission for, read from its
+    /// transcript when the prompt came; gone once it stops waiting.
+    pub agent_asking: Option<cmux_protocol::Asking>,
     /// Unix millis of the last `agent_status` change.
     pub agent_since_ms: Option<u64>,
     /// Agent-editor pane: the role, way and team files its directory sees,
@@ -147,6 +150,7 @@ impl PaneMeta {
         self.agent_effort = None;
         self.agent_status = None;
         self.agent_message = None;
+        self.agent_asking = None;
         self.agent_since_ms = None;
     }
 

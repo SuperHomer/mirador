@@ -176,6 +176,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 effort: m.agent_effort.clone(),
                 status: m.status(),
                 message: m.agent_message.clone(),
+                asking: m.agent_asking.clone().filter(|_| m.status() == Some(cmux_protocol::AgentStatus::NeedsYou)),
                 topic: m.title.as_deref().and_then(|t| {
                     cmux_core::agents::title_topic(t, harness, &[m.agent_role.as_deref(), m.agent_name.as_deref()])
                 }),

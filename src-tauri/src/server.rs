@@ -272,9 +272,24 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                         cmux_protocol::AgentStatus::NeedsYou => message,
                         _ => None,
                     };
+                    if status != cmux_protocol::AgentStatus::NeedsYou {
+                        entry.agent_asking = None;
+                    }
                 }
                 cmux_core::tasks::status_event(&pane, before, entry.status())
             };
+            // A permission prompt is about a tool call, which the transcript
+            // has: read once, as the prompt comes, not on every poll, and
+            // through the trail's cache, which reads only what was added.
+            let permission = status == Some(cmux_protocol::AgentStatus::NeedsYou)
+                && notification_type.as_deref() == Some("permission_prompt");
+            let transcript = state.meta.lock().unwrap().get(&pane).and_then(|m| m.agent_transcript.clone());
+            if let Some(path) = transcript.filter(|_| permission) {
+                let asking = state.trails.lock().unwrap().read(&path).and_then(|t| t.asking());
+                if let Some(entry) = state.meta.lock().unwrap().get_mut(&pane) {
+                    entry.agent_asking = asking;
+                }
+            }
             if let Some(turn) = turn {
                 crate::tasks::record(app, turn);
             }

@@ -232,6 +232,12 @@ export interface GraphPaneInfo {
 
 export type AgentStatus = "working" | "needsYou" | "idle";
 
+/** A tool call an agent asks permission for, summed up as in its trail. */
+export interface Asking {
+  tool: string;
+  summary: string;
+}
+
 /** The agent program a pane runs (`cmux_protocol::Harness`). */
 export type Harness =
   | "claude"
@@ -292,6 +298,8 @@ export interface AgentInfo {
   /** Its hooks' status, or else busy/idle from Claude Code's session file. */
   status: AgentStatus | null;
   message: string | null;
+  /** The tool call a Claude Code agent waits on a permission for. */
+  asking: Asking | null;
   /** What its own terminal title says it is on, when that adds to the role. */
   topic: string | null;
   sinceMs: number | null;

@@ -847,6 +847,10 @@ pub struct AgentInfo {
     pub status: Option<AgentStatus>,
     /// The last Notification message, e.g. what it needs permission for.
     pub message: Option<String>,
+    /// The tool call a Claude Code agent waits on a permission for, read
+    /// from its transcript when it started waiting; absent otherwise.
+    #[serde(default)]
+    pub asking: Option<Asking>,
     /// What its own terminal title says it is on — the session's name or a
     /// task summary — when that adds to the role (`agents::title_topic`).
     #[serde(default)]
@@ -879,6 +883,15 @@ pub enum SubagentState {
     Done,
     /// Was running when the Claude Code hosting it exited.
     Stopped,
+}
+
+/// A tool call an agent asks permission for: its tool, and what it is
+/// about in a line, as its trail sums it up (a command, a path).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asking {
+    pub tool: String,
+    pub summary: String,
 }
 
 /// What one transcript adds up to: the model, the tokens, the tasks.
