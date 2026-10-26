@@ -315,7 +315,13 @@ function MiniTile({
             <span className={`mini-pct ${fullness(pct)}`}>{pct}%</span>
           </>
         )}
-        {task && <span className="mini-task">{task}</span>}
+        {/* Waiting, what it asks for takes the task's place: the tile's
+            110px have no room for another line. */}
+        {status === "needsYou" ? (
+          <AskingLine agent={agent} className="mini-task" />
+        ) : (
+          task && <span className="mini-task">{task}</span>
+        )}
       </div>
     </div>
   );
