@@ -18,12 +18,16 @@ export function AgentStatusBar({
   now,
   sheetOpen,
   onToggleSheet,
+  compact = false,
 }: {
   agent: AgentInfo;
   activity: AgentActivity | null;
   now: number;
   sheetOpen: boolean;
   onToggleSheet: () => void;
+  /** A grid tile's footer: the model, the context and the subagents,
+   *  without the chips, the effort or the usage. */
+  compact?: boolean;
 }) {
   const session = activity?.session ?? null;
   const model = modelName(session?.model ?? null) ?? modelName(agent.model);
@@ -32,6 +36,30 @@ export function AgentStatusBar({
   const pct = window ? Math.min(100, Math.round((used / window) * 100)) : null;
   const end = agent.status === "working" ? now : (session?.lastMs ?? null);
   const subagents = agent.harness === "claude" && agent.hasActivity;
+  const pill = subagents && (
+    <button
+      className={`agent-bar-subagents${sheetOpen ? " open" : ""}`}
+      onClick={onToggleSheet}
+    >
+      Subagents {activity?.subagents.length ?? 0} {sheetOpen ? "▾" : "▸"}
+    </button>
+  );
+  if (compact) {
+    return (
+      <div className="agent-bar compact">
+        {model && <span className="agent-bar-model">{model}</span>}
+        {pct !== null && (
+          <>
+            <span className={`agent-bar-meter ${fullness(pct)}`}>
+              <span style={{ "--fill": `${pct}%` } as React.CSSProperties} />
+            </span>
+            <span className="agent-bar-pct">{pct}%</span>
+          </>
+        )}
+        {pill}
+      </div>
+    );
+  }
   return (
     <div className="agent-bar">
       <span className="agent-bar-chips">
@@ -68,14 +96,7 @@ export function AgentStatusBar({
           </>
         )
       )}
-      {subagents && (
-        <button
-          className={`agent-bar-subagents${sheetOpen ? " open" : ""}`}
-          onClick={onToggleSheet}
-        >
-          Subagents {activity?.subagents.length ?? 0} {sheetOpen ? "▾" : "▸"}
-        </button>
-      )}
+      {pill}
     </div>
   );
 }

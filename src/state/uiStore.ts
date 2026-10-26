@@ -18,6 +18,9 @@ interface UiStore {
   /** Per tab, which agents its wall shows, by status. Not persisted. */
   wallFilter: Record<string, WallFilter>;
   setWallFilter: (tabId: string, filter: WallFilter) => void;
+  /** Per tab, the page of its wall's Grid on show. Not persisted. */
+  gridPage: Record<string, number>;
+  setGridPage: (tabId: string, page: number) => void;
   setBoardMenuOpen: (open: boolean) => void;
   togglePalette: () => void;
   closePalette: () => void;
@@ -43,6 +46,9 @@ export const useUiStore = create<UiStore>((set) => ({
   wallFilter: {},
   setWallFilter: (tabId, filter) =>
     set((s) => ({ wallFilter: { ...s.wallFilter, [tabId]: filter } })),
+  gridPage: {},
+  setGridPage: (tabId, page) =>
+    set((s) => ({ gridPage: { ...s.gridPage, [tabId]: page } })),
   setBoardMenuOpen: (boardMenuOpen) => set({ boardMenuOpen }),
   togglePalette: () =>
     set((s) => ({ paletteOpen: !s.paletteOpen, notificationsOpen: false })),

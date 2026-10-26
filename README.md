@@ -562,8 +562,12 @@ it follow whoever needs you. Focus shows that agent's terminal large and
 the others down a rail: those that need you and those at work as live
 thumbnails (drawn smaller, never resized), the idle one line each; click
 one to pin it. Following moves only once nobody has typed into the large
-one for two seconds. Tiles stand in the team's order, never reshuffled
-by status. Each tile shows the role, the model, and what the agent is
+one for two seconds. Grid shows every agent's terminal at full size, a
+page of 4, 6 or 9 at a time, with a tab per page once there are more
+than one (each with a pip per agent, and a count when one needs you);
+each tile's **Focus ›** shows it large. Switching between the two keeps
+the keyboard on the agent that had it. Tiles stand in the team's order,
+never reshuffled by status. Each tile shows the role, the model, and what the agent is
 doing: **working**, **needs you** (with what for), or **idle**. Click a
 tile's header to see that agent alone in its tab, which leaves the wall.
 The sidebar's switch turns the wall over to the tab's task board in

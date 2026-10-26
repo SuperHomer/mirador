@@ -2626,13 +2626,235 @@ body,
   line-height: 1.5;
 }
 
-.wall-grid {
+/* Grid (20a–20c): the tab's agents in pages of agentsPerTab, every
+   terminal live and full size. */
+.grid-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The pages' tabs, once there is more than one page. */
+.grid-strip {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--overlay);
+  flex-shrink: 0;
+}
+
+.grid-page {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.grid-page.active {
+  background: var(--bg);
+  border-color: var(--overlay);
+  margin-bottom: -1px;
+  color: var(--text);
+  cursor: default;
+}
+
+.grid-page.asking {
+  background: var(--tint-needs-you-head);
+}
+
+.grid-page-asking {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--status-needs-you);
+}
+
+/* A page: fixed columns and rows for its size, so a tile keeps its size
+   as agents come and go. */
+.grid-page-tiles {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-auto-rows: minmax(0, 1fr);
   gap: 6px;
   padding: 6px;
+}
+
+.grid-page-tiles.per-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.grid-page-tiles.per-6 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.grid-page-tiles.per-9 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+/* The last page's free cells. */
+.grid-space {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border: 1px dashed var(--surface);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.grid-space.cols-1 {
+  grid-column: span 1;
+}
+
+.grid-space.cols-2 {
+  grid-column: span 2;
+}
+
+.grid-space.rows-1,
+.grid-space.rows-2,
+.grid-space.rows-all {
+  grid-column: 1 / -1;
+}
+
+.grid-space.rows-2 {
+  grid-row: span 2;
+}
+
+.grid-space.rows-all {
+  grid-row: 1 / -1;
+}
+
+.grid-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  background: var(--term-bg, var(--bg));
+  overflow: hidden;
+}
+
+.grid-tile.needsYou {
+  border: 1.5px solid var(--status-needs-you);
+}
+
+/* The same attention ring a pane gets: an agent here said something. */
+.grid-tile.unread {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(137, 180, 250, 0.35);
+}
+
+.grid-tile-head {
+  padding: 6px 10px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--surface);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.grid-tile.needsYou .grid-tile-head {
+  background: var(--tint-needs-you-head);
+}
+
+.grid-tile-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.grid-tile-name {
+  min-width: 0;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-tile-status {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-tile-status.working {
+  color: var(--status-working);
+}
+
+.grid-tile-status.needsYou {
+  color: var(--status-needs-you);
+}
+
+.grid-tile-status.idle {
+  color: var(--status-idle);
+}
+
+.grid-tile-focus {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.grid-tile-focus:hover {
+  color: var(--text);
+}
+
+.grid-tile-ask,
+.grid-tile-task {
+  margin-top: 3px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-tile-task {
+  color: var(--subtext);
+}
+
+/* Its terminal, and its subagent sheet over it when open. */
+.grid-tile-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.grid-tile-term {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 3px;
+}
+
+.grid-tile-host {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Focus (18a): one agent large, the rest down a rail by status. */
@@ -2978,68 +3200,6 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-.wall-tile {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid var(--surface);
-  border-radius: 5px;
-  overflow: hidden;
-  background: var(--term-bg, var(--bg));
-  --wall-status: var(--muted);
-}
-
-.wall-tile.working {
-  --wall-status: var(--wall-working);
-}
-
-.wall-tile.needsYou {
-  --wall-status: var(--wall-needs-you);
-  border-color: var(--wall-needs-you);
-}
-
-.wall-tile.idle {
-  --wall-status: var(--wall-idle);
-}
-
-/* The same attention ring a pane gets: an agent here said something. */
-.wall-tile.unread {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(137, 180, 250, 0.35);
-}
-
-.wall-tile-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
-  background: var(--bg-alt);
-  border-bottom: 1px solid var(--surface);
-  font-size: 11px;
-  flex-shrink: 0;
-  cursor: pointer;
-  /* Every item but the location keeps its size; the location is the one
-     that may give way, and it has a floor so it never collapses to "…". */
-  min-width: 0;
-}
-
-.wall-tile-head:hover {
-  background: var(--surface);
-}
-
-.wall-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--wall-status);
-  flex-shrink: 0;
-}
-
-.wall-tile.working .wall-dot {
-  animation: wall-pulse 1.4s ease-in-out infinite;
-}
-
 @keyframes wall-pulse {
   50% {
     opacity: 0.35;
@@ -3117,84 +3277,9 @@ body,
 
 @media (prefers-reduced-motion: reduce) {
   .card-header.working .card-dot,
-  .wall-tile.working .wall-dot,
   .status-mark.working {
     animation: none;
   }
-}
-
-.wall-role {
-  color: var(--text);
-  font-weight: 600;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.wall-model {
-  color: var(--subtext);
-  background: var(--surface);
-  border-radius: 4px;
-  padding: 0 5px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.wall-where {
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 3em;
-  flex: 1 1 auto;
-}
-
-.wall-status {
-  color: var(--wall-status);
-  white-space: nowrap;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-/* The agent's own task list, beside its status. */
-.wall-tasks {
-  color: var(--subtext);
-  white-space: nowrap;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.wall-message {
-  padding: 3px 8px;
-  font-size: 11px;
-  color: var(--wall-needs-you);
-  background: color-mix(in srgb, var(--wall-needs-you) 12%, var(--bg-alt));
-  border-bottom: 1px solid var(--surface);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
-}
-
-/* The terminal, and its subagent sheet over it when open. */
-.wall-body {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-.wall-term {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  padding: 3px;
-}
-
-.wall-term-host {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
 }
 
 .wall-term-missing {
@@ -3221,6 +3306,22 @@ body,
   color: var(--subtext);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* A grid tile's footer: model, context and subagents. */
+.agent-bar.compact {
+  padding: 4px 10px;
+  font-size: 10.5px;
+  gap: 4px 8px;
+}
+
+.agent-bar-model {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.agent-bar.compact .agent-bar-meter {
+  width: 50px;
 }
 
 .agent-bar-chips {
