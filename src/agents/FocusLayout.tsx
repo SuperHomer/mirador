@@ -7,6 +7,7 @@ import { AgentStatusBar, fullness } from "./AgentStatusBar";
 import { STATUS_LABEL, StatusMark } from "./StatusMark";
 import { SubagentSheet } from "./SubagentSheet";
 import { elapsed } from "./time";
+import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
 
 /** How long after the last keystroke into the focused agent Focus may
@@ -229,9 +230,7 @@ function FocusedTile({
             </button>
           )}
         </div>
-        {status === "needsYou" && agent.message && (
-          <div className="focus-message">{agent.message}</div>
-        )}
+        {status === "needsYou" && <AskingLine agent={agent} className="focus-message" />}
         {status === "idle" && agent.sinceMs && (
           <div className="focus-note">Idle. Its last turn ended {elapsed(agent.sinceMs, now)} ago.</div>
         )}

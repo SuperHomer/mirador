@@ -15,6 +15,7 @@ import { AgentStatusBar } from "./AgentStatusBar";
 import { STATUS_LABEL, StatusMark, StatusPip } from "./StatusMark";
 import { SubagentSheet } from "./SubagentSheet";
 import { elapsed } from "./time";
+import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
 
 /** Columns and rows of a page, fixed by its size so tiles keep theirs as
@@ -181,7 +182,7 @@ function GridTile({
           </button>
         </div>
         {status === "needsYou" ? (
-          agent.message && <div className="grid-tile-ask">{agent.message}</div>
+          <AskingLine agent={agent} className="grid-tile-ask" />
         ) : status === "idle" ? (
           agent.topic && <div className="grid-tile-task">Last: {agent.topic}</div>
         ) : (

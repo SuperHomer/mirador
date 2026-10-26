@@ -3381,6 +3381,23 @@ body,
   }
 }
 
+/* What a waiting agent asks for, on one line wherever it shows: the
+   tool, then its command or path in monospace, cut off with an ellipsis. */
+.asking-line {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asking-tool {
+  font-weight: 600;
+}
+
+.asking-summary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 /* An agent's status, the same everywhere it is shown: needs you is a
    square with a "!", so it reads without colour; working a pulsing dot;
    idle a ring. A pip is the 7px form, for rows that list several. */

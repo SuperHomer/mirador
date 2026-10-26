@@ -21,6 +21,7 @@ import { useUiStore } from "../state/uiStore";
 import { useConfigStore } from "../state/configStore";
 import { STATUS_LABEL, StatusMark, StatusPip } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
+import { AskingLine } from "../agents/AskingLine";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
@@ -305,9 +306,7 @@ function AgentRow({
           </span>
         )}
       </div>
-      {status === "needsYou" && agent.message && (
-        <div className="agent-prompt">{agent.message}</div>
-      )}
+      {status === "needsYou" && <AskingLine agent={agent} className="agent-prompt" />}
     </div>
   );
 }
