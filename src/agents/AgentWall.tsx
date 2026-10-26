@@ -15,6 +15,8 @@ import {
   zoomPane,
 } from "../bindings";
 import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
+import { STATUS_LABEL } from "./StatusMark";
+import { elapsed, useNow } from "./time";
 import { TaskBoard } from "./TaskBoard";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
@@ -36,20 +38,6 @@ type Props = {
   /** Its tab is the active one, where the keyboard goes. */
   current: boolean;
 };
-
-const STATUS_LABEL: Record<AgentStatus, string> = {
-  working: "working",
-  needsYou: "needs you",
-  idle: "idle",
-};
-
-/** "42s", "3m", "1h" — how long it has been in its status. */
-function elapsed(sinceMs: number, now: number): string {
-  const s = Math.max(0, Math.floor((now - sinceMs) / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  return `${Math.floor(s / 3600)}h`;
-}
 
 /** Columns for `n` tiles: as square as it gets, never taller than wide. */
 function columns(n: number): number {
@@ -398,16 +386,4 @@ function WallTile({
       </div>
     </div>
   );
-}
-
-/** The current time, ticking each second while `active`. */
-function useNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
 }

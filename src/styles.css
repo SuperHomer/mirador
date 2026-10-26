@@ -12,6 +12,24 @@
   --subtext: #a6adc8;
   --muted: #6c7086;
   --accent: #89b4fa;
+  --overlay: #45475a;
+  --status-working: #89b4fa;
+  --status-needs-you: #fab387;
+  --status-idle: #a6e3a1;
+  --danger: #f38ba8;
+  --warn: #f9e2af;
+  --merged: #cba6f7;
+  /* Needs-you tints, by where they sit: sidebar rows and "Asks" boxes;
+     tile heads and the tab strip's tab; the Needs-you column, inbox cards
+     and swimlane cells; the Trail's waiting turn and "It's asking". */
+  --tint-needs-you-row: #3a2f2c;
+  --tint-needs-you-head: #2c2630;
+  --tint-needs-you-area: #2a2430;
+  --tint-needs-you-panel: #211f2a;
+  --tint-hover: #262637;
+  --tint-info: #1e2433;
+  --tint-warn: #2e2c25;
+  --tint-error-row: #3b2a33;
 }
 
 /* Scrollbars. WebKit on macOS draws these as overlays that fade out, so
@@ -2515,6 +2533,83 @@ body,
 @keyframes wall-pulse {
   50% {
     opacity: 0.35;
+  }
+}
+
+/* An agent's status, the same everywhere it is shown: needs you is a
+   square with a "!", so it reads without colour; working a pulsing dot;
+   idle a ring. A pip is the 7px form, for rows that list several. */
+.status-mark,
+.status-pip {
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+}
+
+.status-mark {
+  width: 8px;
+  height: 8px;
+}
+
+.status-mark.small {
+  width: 7px;
+  height: 7px;
+}
+
+.status-mark.needs-you {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 4px;
+  background: var(--status-needs-you);
+  color: #181825;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.status-mark.needs-you.small {
+  width: 12px;
+  height: 12px;
+  font-size: 9px;
+}
+
+.status-mark.working {
+  border: none;
+  background: var(--status-working);
+  animation: wall-pulse 1.4s ease-in-out infinite;
+}
+
+.status-mark.idle,
+.status-pip.idle {
+  border-color: var(--status-idle);
+}
+
+.status-pip {
+  width: 7px;
+  height: 7px;
+}
+
+.status-pip.needs-you {
+  border: none;
+  border-radius: 2px;
+  background: var(--status-needs-you);
+}
+
+.status-pip.working {
+  border: none;
+  background: var(--status-working);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-header.working .card-dot,
+  .wall-tile.working .wall-dot,
+  .status-mark.working {
+    animation: none;
   }
 }
 
