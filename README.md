@@ -544,9 +544,8 @@ tab's agents in a grid — roles, and any agent you started by hand:
 `claude`, `codex`, `opencode`, `pi`, `gemini`, `amp`, `cursor-agent`,
 `copilot`, `aider`, `goose`, `qwen`, `crush` or `droid`, found in the
 pane's process table (macOS and Linux; on Windows only Claude Code's hooks
-make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*, the
-**▦ Wall** button beside the sidebar's Agents heading (lit while the tab
-is a wall) and `mira agent wall` (which prints `wall on` or `wall off`)
+make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*
+and `mira agent wall` (which prints `wall on` or `wall off`)
 each switch the current tab between the two, and so does **Splits** in
 the wall's header. Each tab keeps its view across restarts, and the
 board draws a walled tab's wall in its frame, in place of its cards. The tiles are the
@@ -573,17 +572,19 @@ hooks point Mirador to, so it needs the integration set up; the CLI
 equivalent is `mira agent activity`. There is no cost figure: tokens are
 what the transcripts record, and a price would be an estimate.
 
-In the sidebar, every tab is listed as usual, and below them, under an
-**Agents** heading, the agents running in the tab you are on, each on one
-line: ✳ and its name — the Claude Code session's, as `claude agents`
-lists it (given with `--name` or `/rename`, or made up by Claude Code),
-else its role, else the harness.
+In the sidebar, every tab is listed as usual, and directly under the tab
+you are on, the agents running in it, each with its status (a "!" square
+when it needs you, with what it asks on a second line; a pulsing dot while
+it works; a ring when idle), how long it has been so, and its name — the
+Claude Code session's, as `claude agents` lists it (given with `--name` or
+`/rename`, or made up by Claude Code), else its role, else the harness.
 Clicking a tab shows the whole tab — Claude beside your dev server, say;
-clicking an agent shows that agent's pane alone, filling its tab, while
-the other panes keep running untouched. Click the tab again for the split.
-Each tab's agents are its own: switch tabs and the section switches with
-you, and every tab shows how many agents it holds (✳ 2), filled in when
-one of them needs you. The tab shortcuts number rows in the order shown.
+clicking an agent shows the tab's wall with that agent large (or, with
+`agentClick` set to `"pane"`, the agent's pane alone, filling its tab).
+Each tab's agents are its own: switch tabs and the tree moves with you,
+and every other tab shows a pip per agent with its status. The tab
+shortcuts (`mod+1…9`, next and previous tab) go over tabs only, by the
+number beside each.
 
 Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).

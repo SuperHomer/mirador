@@ -21,13 +21,7 @@ import {
   installUpdate,
   quitEndingSessions,
 } from "../bindings";
-import {
-  useWorkspaceStore,
-  activeTab,
-  sidebarEntries,
-  isCurrentEntry,
-  SidebarEntry,
-} from "../state/workspaceStore";
+import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
@@ -45,18 +39,13 @@ function focusedPane(): string | undefined {
   return activeTab(snapshot)?.focusedPane;
 }
 
-/** Shows a sidebar row: a whole tab, or an agent's pane alone. */
-export function openEntry(entry: SidebarEntry) {
-  if (entry.kind === "tab") void setActiveTab(entry.tab.id);
-  else void zoomPane(entry.agent.paneId, true);
-}
-
+/** Moves `offset` tabs along the sidebar's order, wrapping around. */
 function cycleTab(offset: number) {
-  const { snapshot, currentTab } = useWorkspaceStore.getState();
-  const entries = sidebarEntries(snapshot, currentTab);
-  if (!snapshot || entries.length < 2) return;
-  const idx = entries.findIndex((e) => isCurrentEntry(snapshot, e));
-  openEntry(entries[(idx + offset + entries.length) % entries.length]);
+  const { snapshot } = useWorkspaceStore.getState();
+  if (!snapshot || snapshot.tabs.length < 2) return;
+  const tabs = snapshot.tabs;
+  const idx = tabs.findIndex((t) => t.id === snapshot.activeTab);
+  void setActiveTab(tabs[(idx + offset + tabs.length) % tabs.length].id);
 }
 
 export const actions: ActionDef[] = [
@@ -324,12 +313,12 @@ export function runAction(id: string): boolean {
     def.run();
     return true;
   }
-  // tab_1 .. tab_9
+  // tab_1 .. tab_9: tabs only, by the number beside each in the sidebar.
   const tabJump = id.match(/^tab_([1-9])$/);
   if (tabJump) {
-    const { snapshot, currentTab } = useWorkspaceStore.getState();
-    const target = sidebarEntries(snapshot, currentTab)[Number(tabJump[1]) - 1];
-    if (target) openEntry(target);
+    const { snapshot } = useWorkspaceStore.getState();
+    const target = snapshot?.tabs[Number(tabJump[1]) - 1];
+    if (target) void setActiveTab(target.id);
     return true;
   }
   return false;

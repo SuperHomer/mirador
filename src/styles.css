@@ -86,7 +86,7 @@ body,
 /* ---------- Sidebar ---------- */
 
 .sidebar {
-  width: 220px;
+  width: 248px;
   flex-shrink: 0;
   background: var(--bg-alt);
   border-right: 1px solid var(--surface);
@@ -103,60 +103,11 @@ body,
   gap: 2px;
 }
 
-/* Heads the tabs running agents. Auto top margin pushes it, and the agent
-   tabs after it, to the foot of the list; when the list overflows it is
-   simply the boundary between the two groups. */
-.sidebar-section {
+/* A tab's row, and the tree of its agents under it when it is current. */
+.sidebar-tab {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding: 10px 8px 4px;
-  border-top: 1px solid var(--surface);
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-
-/* Opens the agent wall for the current tab, beside the Agents heading. */
-.sidebar-wall {
-  border: 1px solid var(--surface);
-  background: transparent;
-  color: var(--subtext);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-  padding: 1px 7px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.sidebar-wall:hover,
-.sidebar-wall.selected {
-  background: var(--surface);
-  color: var(--text);
-}
-
-/* How many agents a tab holds. */
-.tab-agents {
-  flex-shrink: 0;
-  font-size: 10.5px;
-  color: #d97757;
-  border: 1px solid color-mix(in srgb, #d97757 40%, transparent);
-  border-radius: 8px;
-  padding: 0 6px;
-  line-height: 16px;
-  white-space: nowrap;
-}
-
-.tab-agents.attention {
-  background: #d97757;
-  color: var(--bg-alt);
-  font-weight: 700;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tab-row {
@@ -170,7 +121,7 @@ body,
 }
 
 .tab-row:hover {
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  background: var(--tint-hover);
 }
 
 .tab-row.active {
@@ -193,12 +144,44 @@ body,
   gap: 1px;
 }
 
+/* The title, then a team's name in small print. The team takes at most
+   half the line, so neither can squeeze the other out to nothing. */
+.tab-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
 .tab-title {
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tab-team {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 50%;
+  flex-shrink: 0;
+}
+
+/* Another tab's agents, a pip each, wrapping onto a second row. */
+.tab-pips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: center;
+  gap: 3px;
+  max-width: 70px;
+  flex-shrink: 0;
 }
 
 .tab-cwd {
@@ -211,50 +194,119 @@ body,
   text-align: left;
 }
 
-/* An agent's row: a single line, so it does not keep the two-line height. */
-.tab-row.agent {
-  min-height: 0;
+/* The current tab's agents, indented under its row. */
+.agent-tree {
+  margin-left: 22px;
+  padding-left: 8px;
+  border-left: 1px solid var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
-/* One width for every mark, so titles line up whatever their harness. */
+.agent-row {
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: default;
+  min-width: 0;
+}
+
+.agent-row:hover {
+  background: var(--tint-hover);
+}
+
+.agent-row.active {
+  background: var(--surface);
+}
+
+.agent-row.needs-you {
+  background: var(--tint-needs-you-row);
+}
+
+/* The agent the tab's wall shows large. */
+.agent-row.pinned {
+  box-shadow: inset 2px 0 0 #cdd6f4;
+}
+
+.agent-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agent-mark {
+  width: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.agent-row.idle .agent-name {
+  color: var(--subtext);
+}
+
+.agent-row.needs-you .agent-name {
+  font-weight: 600;
+}
+
+.agent-name.has-unread {
+  color: var(--accent);
+}
+
+/* The harness, neutral, so no colour competes with the status. */
 .tab-harness {
   flex-shrink: 0;
-  width: 14px;
-  text-align: center;
   color: var(--subtext);
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
-}
-
-/* Claude Code keeps its own color; the others take the row's. */
-.tab-harness.claude {
-  color: #d97757;
 }
 
 .tab-harness svg {
   display: block;
-  width: 11px;
-  height: 11px;
-  margin: 0 auto;
+  width: 10px;
+  height: 10px;
 }
 
-/* A team's tab: a mark before its title, the members in its tooltip. */
-.tab-team {
-  color: var(--accent);
-  margin-right: 5px;
-  font-size: 11px;
-}
-
-.tab-row.agent .tab-title {
-  flex: 1;
-  min-width: 0;
-}
-
-.tab-agent-needs {
+.agent-status {
+  margin-left: auto;
+  padding-left: 6px;
   flex-shrink: 0;
   font-size: 10px;
-  color: #fab387;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-status.working {
+  color: var(--status-working);
+}
+
+.agent-status.needsYou {
+  color: var(--status-needs-you);
+}
+
+.agent-status.idle {
+  color: var(--status-idle);
+}
+
+/* What a waiting agent asks, under its name. */
+.agent-prompt {
+  margin-top: 2px;
+  padding-left: 21px;
+  font-size: 10.5px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tab-title.has-unread {

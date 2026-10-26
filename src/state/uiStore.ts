@@ -7,6 +7,10 @@ interface UiStore {
   activityPane: string | null;
   /** A frame's "+" menu is open on the board. */
   boardMenuOpen: boolean;
+  /** Per tab, the agent its wall shows large in Focus, when one was picked
+   *  (from the sidebar). Not persisted. */
+  pinned: Record<string, string>;
+  pinAgent: (tabId: string, paneId: string | null) => void;
   setBoardMenuOpen: (open: boolean) => void;
   togglePalette: () => void;
   closePalette: () => void;
@@ -21,6 +25,14 @@ export const useUiStore = create<UiStore>((set) => ({
   notificationsOpen: false,
   activityPane: null,
   boardMenuOpen: false,
+  pinned: {},
+  pinAgent: (tabId, paneId) =>
+    set((s) => {
+      const pinned = { ...s.pinned };
+      if (paneId) pinned[tabId] = paneId;
+      else delete pinned[tabId];
+      return { pinned };
+    }),
   setBoardMenuOpen: (boardMenuOpen) => set({ boardMenuOpen }),
   togglePalette: () =>
     set((s) => ({ paletteOpen: !s.paletteOpen, notificationsOpen: false })),
