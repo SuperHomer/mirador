@@ -617,6 +617,13 @@ impl Workspace {
         true
     }
 
+    /// Shows the tab holding `pane` as its wall's agents, laid out as
+    /// `mode`; false when no tab holds `pane`. Unlike `toggle_wall`, it
+    /// never turns the wall off.
+    pub fn show_wall_in(&mut self, pane: &str, mode: WallMode) -> bool {
+        self.set_wall_mode(pane, mode) && self.show_wall(pane, WallView::Agents)
+    }
+
     /// Lays the Agents side of the wall of the tab holding `pane` out as
     /// `mode`; false when no tab holds `pane`. It does not turn the wall on.
     pub fn set_wall_mode(&mut self, pane: &str, mode: WallMode) -> bool {
@@ -1140,6 +1147,25 @@ mod tests {
 
         assert!(!ws.set_wall_mode("nope", WallMode::Grid));
         assert!(!ws.set_task_layout("nope", TaskLayout::Swimlanes));
+    }
+
+    #[test]
+    fn showing_the_wall_in_a_layout_turns_it_on_and_never_off() {
+        let mut ws = Workspace::default();
+        let pane = ws.focused_pane();
+        // Off, on its Tasks side: shown, on the Agents side, in Grid.
+        ws.show_wall(&pane, WallView::Tasks);
+        ws.toggle_wall(&pane);
+        assert!(ws.show_wall_in(&pane, WallMode::Grid));
+        let tab = &ws.snapshot(&HashMap::new()).tabs[0];
+        assert!(tab.wall);
+        assert_eq!((tab.wall_view, tab.wall_mode), (WallView::Agents, WallMode::Grid));
+        // Again, in Focus: still on.
+        assert!(ws.show_wall_in(&pane, WallMode::Focus));
+        let tab = &ws.snapshot(&HashMap::new()).tabs[0];
+        assert!(tab.wall);
+        assert_eq!(tab.wall_mode, WallMode::Focus);
+        assert!(!ws.show_wall_in("nope", WallMode::Grid));
     }
 
     #[test]

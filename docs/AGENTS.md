@@ -235,14 +235,20 @@ mira agent new --role reviewer "review the auth change"   # a pane beside this o
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent new --harness codex "fix the flaky test"   # plain codex, beside this one
 mira agent list                               # pane, status, harness, name, model
-mira agent wall                               # this tab as its agents' grid, or its splits again
+mira agent wall                               # this tab as its agents' wall, or its splits again
+mira agent wall --focus | --grid              # the wall, in that layout (never turns it off)
 mira agent activity [--pane <id>]             # its tasks and subagents
 mira agent trail [NAME | --pane <id>]         # what it did, turn by turn
 ```
 
 `agent wall` switches the tab it runs in between its splits and the wall,
-its agents' terminals in one grid, and prints the new state, `wall on` or
-`wall off` (`agent_wall` answers `{"wall": true}`). The same tab, not a
+its agents' terminals, and prints the new state, `wall on` or `wall off`
+(`agent_wall` answers `{"wall": true, "wallMode": "focus"}`). With `--focus`
+or `--grid` it shows the wall's agents in that layout instead of
+switching, turning the wall on if it is off, and prints `wall on: focus` or
+`wall on: grid` (`agent_wall` with `"mode"`). Focus fits one agent's
+terminal to the large tile and draws the others as thumbnails that are
+never resized; Grid fits every terminal on the page shown. The same tab, not a
 tab of its own: its panes keep running under the wall, `read-screen` and
 `send-input` reach them as before, and the tab remembers the wall, and
 which side of it (agents or tasks, `wallView` in `list-tabs --json`), across

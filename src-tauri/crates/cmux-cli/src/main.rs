@@ -367,9 +367,17 @@ enum AgentAction {
         #[arg(long, hide = true)]
         tab: bool,
     },
-    /// Show this tab as the agent wall, its agents' terminals in one
-    /// grid in place of its splits; again to show the splits.
-    Wall,
+    /// Show this tab as the agent wall, its agents' terminals in place of
+    /// its splits; again to show the splits. With --focus or --grid, show
+    /// the wall in that layout (turning it on, never off).
+    Wall {
+        /// One agent large, the others down a rail.
+        #[arg(long, conflicts_with = "grid")]
+        focus: bool,
+        /// Every agent at full size, a page at a time.
+        #[arg(long)]
+        grid: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -713,13 +721,22 @@ fn run(cli: Cli) -> Result<(), String> {
                 println!("wall on: tasks");
                 return Ok(());
             }
-            AgentAction::Wall => {
-                let resp = send_request(Request::AgentWall { pane_id: own_pane() })?;
+            AgentAction::Wall { focus, grid } => {
+                let mode = if grid {
+                    Some(cmux_protocol::WallMode::Grid)
+                } else {
+                    focus.then_some(cmux_protocol::WallMode::Focus)
+                };
+                let resp = send_request(Request::AgentWall { pane_id: own_pane(), mode })?;
                 if cli.json || !resp.ok {
                     return render(resp, cli.json, false, None);
                 }
                 let on = resp.data.as_ref().and_then(|d| d["wall"].as_bool()).unwrap_or(false);
-                println!("wall {}", if on { "on" } else { "off" });
+                match mode {
+                    Some(cmux_protocol::WallMode::Grid) => println!("wall on: grid"),
+                    Some(cmux_protocol::WallMode::Focus) => println!("wall on: focus"),
+                    None => println!("wall {}", if on { "on" } else { "off" }),
+                }
                 return Ok(());
             }
         },

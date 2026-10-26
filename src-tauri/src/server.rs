@@ -371,9 +371,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::commands::set_wall_view(app.clone(), app.state(), pane_id, WallView::Tasks)?;
             Ok(json!({ "wall": true, "wallView": WallView::Tasks }))
         }
-        Request::AgentWall { pane_id } => {
-            let on = crate::commands::toggle_agent_wall(app.clone(), app.state(), pane_id)?;
-            Ok(json!({ "wall": on }))
+        Request::AgentWall { pane_id, mode: Some(mode) } => {
+            crate::commands::show_wall_in(app, &state, pane_id, mode)?;
+            Ok(json!({ "wall": true, "wallView": WallView::Agents, "wallMode": mode }))
+        }
+        Request::AgentWall { pane_id, mode: None } => {
+            let on = crate::commands::toggle_agent_wall(app.clone(), app.state(), pane_id.clone())?;
+            let mode = crate::commands::wall_mode(&state, pane_id.as_deref());
+            Ok(json!({ "wall": on, "wallMode": mode }))
         }
         Request::Run {
             command,

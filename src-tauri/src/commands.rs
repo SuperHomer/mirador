@@ -1824,6 +1824,32 @@ pub fn agent_roles(state: State<'_, AppState>, pane_id: Option<String>) -> cmux_
     cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new))
 }
 
+/// Shows the tab of `pane_id` (the focused pane when absent) as its wall's
+/// agents in the `mode` layout, turning the wall on if it is off.
+pub fn show_wall_in(
+    app: &AppHandle,
+    state: &AppState,
+    pane_id: Option<String>,
+    mode: cmux_protocol::WallMode,
+) -> Result<(), String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if !state.workspace.lock().unwrap().show_wall_in(&pane, mode) {
+        return Err(format!("no pane {pane}"));
+    }
+    emit_workspace(app);
+    Ok(())
+}
+
+/// The layout of the wall of `pane_id`'s tab (the focused pane's when
+/// absent).
+pub fn wall_mode(state: &AppState, pane_id: Option<&str>) -> cmux_protocol::WallMode {
+    let ws = state.workspace.lock().unwrap();
+    let pane = pane_id.map(String::from).unwrap_or_else(|| ws.focused_pane());
+    ws.tab_of_pane(&pane).map(|t| t.wall_mode).unwrap_or_default()
+}
+
 /// Shows the tab of `pane_id` (the focused pane when absent) as the wall
 /// of its agents, or its splits again when it already is. The new state.
 #[tauri::command]

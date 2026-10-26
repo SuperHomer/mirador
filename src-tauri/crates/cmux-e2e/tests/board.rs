@@ -286,10 +286,11 @@ fn a_walled_tab_on_the_board_draws_its_wall() {
         agent_pty(&sb, sized).filter(|&(rows, cols)| rows <= 12 && cols <= 40)
     });
 
-    // The wall on: the frame shows it, and the terminal is the tile's, half
-    // the frame across and most of it down.
-    let (code, out, err) = sb.mira(Some(sized), &["agent", "wall"]);
-    assert_eq!((code, out.trim()), (0, "wall on"), "{err}");
+    // The wall on, in Grid, where every tile fits its terminal: the frame
+    // shows it, and the terminal is the tile's, half the frame across and
+    // half of it down.
+    let (code, out, err) = sb.mira(Some(sized), &["agent", "wall", "--grid"]);
+    assert_eq!((code, out.trim()), (0, "wall on: grid"), "{err}");
     let snap = sb.snapshot();
     assert_eq!(snap["view"], "board");
     assert!(snap["tabs"][0]["wall"].as_bool().unwrap(), "{snap}");

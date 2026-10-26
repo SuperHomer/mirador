@@ -433,11 +433,14 @@ pub enum Request {
         pane_id: Option<String>,
     },
     /// Shows the tab of `pane_id` (the focused pane when absent) as the
-    /// wall of its agents, or its splits again when it already is.
-    /// Answers `{"wall": bool}`, the new state.
+    /// wall of its agents, or its splits again when it already is. With a
+    /// `mode`, shows the wall's agents in that layout instead, turning it
+    /// on if it is off. Answers `{"wall": bool, "wallMode": …}`.
     AgentWall {
         #[serde(default)]
         pane_id: Option<String>,
+        #[serde(default)]
+        mode: Option<WallMode>,
     },
     /// Shows the tab of `pane_id` (the focused pane's when absent) as its
     /// wall, on the Tasks side: its task board. Answers `{"wall": true,

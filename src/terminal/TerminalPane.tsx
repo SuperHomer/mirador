@@ -342,7 +342,12 @@ export const TerminalPane = memo(function TerminalPane({
 
     void attach();
 
-    const observer = new ResizeObserver(() => fit.fit());
+    // Lent, the terminal is sized by whoever borrowed it, or kept as it is
+    // by a wall thumbnail: fitting it from here would size it to the
+    // borrower's box.
+    const observer = new ResizeObserver(() => {
+      if (!isLent(paneId)) fit.fit();
+    });
     observer.observe(container);
 
     return () => {
@@ -401,9 +406,14 @@ export const TerminalPane = memo(function TerminalPane({
 
   // An agent shown as a split gets its status bar, and its subagent sheet
   // when asked; on the board and on the wall, others draw it. Only then is
-  // its activity read.
+  // its activity read. Under its tab's wall a pane is not shown, whether or
+  // not the wall borrowed its terminal: a bar there would only resize a
+  // terminal nobody sees, each time its text wrapped.
   const agent = useWorkspaceStore((s) => s.snapshot?.agents.find((a) => a.paneId === paneId));
-  const withBar = !!agent && visible && !onBoard && !lent;
+  const walled = useWorkspaceStore(
+    (s) => !!agent && !!s.snapshot?.tabs.find((t) => t.id === agent.tabId)?.wall,
+  );
+  const withBar = !!agent && visible && !onBoard && !lent && !walled;
   const { activity } = useAgentActivity(paneId, withBar && !!agent?.hasActivity);
   const now = useNow(withBar);
   const [sheetOpen, setSheetOpen] = useState(false);
