@@ -215,6 +215,7 @@ impl Stats {
             model: self.model.clone(),
             tokens: self.tokens,
             context: self.context,
+            context_window: self.model.as_deref().and_then(context_window),
             tool_calls: self.tool_calls,
             tasks: self.progress(),
             started_ms: self.started_ms,
@@ -241,6 +242,16 @@ impl Stats {
             current,
         })
     }
+}
+
+/// How many tokens `model`'s context holds, as far as Mirador can tell.
+///
+/// A guess for now: Claude Code reports its window only to a statusline
+/// command (`context_window.context_window_size`), not in transcripts or
+/// hook payloads, so until Mirador reads that, every Claude model counts
+/// as 1M. Any other model is unknown.
+pub fn context_window(model: &str) -> Option<u64> {
+    model.starts_with("claude-").then_some(1_000_000)
 }
 
 pub(crate) fn text(value: &Value) -> Option<String> {
@@ -393,6 +404,19 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_claude_model_counts_as_a_million_tokens() {
+        assert_eq!(context_window("claude-opus-5-5"), Some(1_000_000));
+        assert_eq!(context_window("claude-haiku-5-5"), Some(1_000_000));
+        assert_eq!(context_window("gpt-6-luna"), None);
+        assert_eq!(context_window("<synthetic>"), None);
+        assert_eq!(context_window(""), None);
+        // A summary carries its model's window, or none without a model.
+        let stats = feed(&[r#"{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":1}}}"#]);
+        assert_eq!(stats.summary().context_window, Some(1_000_000));
+        assert_eq!(Stats::default().summary().context_window, None);
+    }
 
     fn feed(lines: &[&str]) -> Stats {
         let mut stats = Stats::default();

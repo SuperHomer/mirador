@@ -162,6 +162,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 name: m.agent_name.clone(),
                 has_activity: m.has_activity(),
                 model: m.agent_model.clone(),
+                effort: m.agent_effort.clone(),
                 status: m.status(),
                 message: m.agent_message.clone(),
                 topic: m.title.as_deref().and_then(|t| {
@@ -1759,6 +1760,7 @@ pub(crate) fn mark_launched(entry: &mut cmux_core::state::PaneMeta, launch: Laun
             entry.agent_harness = Some(role.harness);
         }
         entry.agent_model = role.model;
+        entry.agent_effort = role.effort;
         entry.agent_role = Some(role.name);
         entry.agent_settings = launch.settings;
     }
@@ -2017,5 +2019,37 @@ fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
         crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);
         cmux_core::session::delete_scrollback(pane);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn launch(role: Option<cmux_protocol::AgentRole>) -> Launch {
+        Launch { input: "claude\n".into(), role, settings: None }
+    }
+
+    #[test]
+    fn a_launched_agent_shows_its_roles_model_and_effort() {
+        let role = cmux_protocol::AgentRole {
+            name: "planner".into(),
+            model: Some("opus".into()),
+            effort: Some("high".into()),
+            ..Default::default()
+        };
+        let mut m = cmux_core::state::PaneMeta::default();
+        mark_launched(&mut m, launch(Some(role)), None);
+        assert_eq!(m.agent_model.as_deref(), Some("opus"));
+        assert_eq!(m.agent_effort.as_deref(), Some("high"));
+
+        // A role that sets no effort, and no role at all, show none.
+        let mut m = cmux_core::state::PaneMeta::default();
+        let plain = cmux_protocol::AgentRole { name: "dev".into(), ..Default::default() };
+        mark_launched(&mut m, launch(Some(plain)), None);
+        assert_eq!(m.agent_effort, None);
+        let mut m = cmux_core::state::PaneMeta::default();
+        mark_launched(&mut m, launch(None), None);
+        assert_eq!(m.agent_effort, None);
     }
 }

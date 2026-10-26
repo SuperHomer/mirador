@@ -822,6 +822,10 @@ pub struct AgentInfo {
     /// The role's model, or the `--model` (`-m`) its process was started
     /// with; absent when it runs the harness's default.
     pub model: Option<String>,
+    /// Its role's effort ("high", "max"); absent without a role, or when
+    /// the role sets none.
+    #[serde(default)]
+    pub effort: Option<String>,
     /// What its hooks last said, or else what Claude Code's session file
     /// says (busy or idle); always absent for a harness other than Claude
     /// Code.
@@ -873,6 +877,10 @@ pub struct TranscriptSummary {
     pub tokens: u64,
     /// The size of its context at the last reply.
     pub context: u64,
+    /// How large that context can grow, for its model, when known
+    /// (`cmux_core::transcript::context_window`).
+    #[serde(default)]
+    pub context_window: Option<u64>,
     pub tool_calls: u32,
     /// Absent when it keeps no task list.
     pub tasks: Option<TaskProgress>,

@@ -80,6 +80,8 @@ pub struct PaneMeta {
     pub agent_session_status: Option<cmux_protocol::AgentStatus>,
     /// The `--model` the poller saw the pane's agent started with.
     pub agent_model: Option<String>,
+    /// Its role's effort, when the role sets one.
+    pub agent_effort: Option<String>,
     /// What the agent's hooks last said it is doing (not persisted: a
     /// restarted app has not heard from it yet).
     pub agent_status: Option<cmux_protocol::AgentStatus>,
@@ -142,6 +144,7 @@ impl PaneMeta {
         self.agent_name = None;
         self.agent_session_status = None;
         self.agent_model = None;
+        self.agent_effort = None;
         self.agent_status = None;
         self.agent_message = None;
         self.agent_since_ms = None;
@@ -958,6 +961,7 @@ mod tests {
             agent_session: Some("claude-fg:s1".into()),
             agent_role: Some("reviewer".into()),
             agent_model: Some("opus".into()),
+            agent_effort: Some("high".into()),
             agent_status: Some(cmux_protocol::AgentStatus::Idle),
             ..Default::default()
         };
@@ -967,6 +971,7 @@ mod tests {
         assert_eq!(m.agent_session, None);
         assert_eq!(m.agent_role, None);
         assert_eq!(m.agent_model, None);
+        assert_eq!(m.agent_effort, None);
         assert_eq!(m.agent_status, None);
     }
 

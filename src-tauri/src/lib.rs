@@ -152,8 +152,9 @@ pub fn run() {
         let role = role.filter(|r| r.harness == cmux_protocol::Harness::Claude);
         let role_model = role.as_ref().and_then(|r| r.model.clone());
         m.agent_model = role_model.clone();
+        m.agent_effort = role.as_ref().and_then(|r| r.effort.clone());
         let quoted_model = role_model.as_deref().map(cmux_core::pty::shell::quote_arg);
-        let quoted_effort = role.and_then(|r| r.effort).as_deref().map(cmux_core::pty::shell::quote_arg);
+        let quoted_effort = m.agent_effort.as_deref().map(cmux_core::pty::shell::quote_arg);
         // Its limits too, from the file it started with. A file gone since
         // drops the pane's resume rather than its limits: an agent meant
         // to be held to some tools must not come back with all of them.

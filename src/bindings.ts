@@ -282,6 +282,8 @@ export interface AgentInfo {
   /** The Claude Code session's name, as `claude agents` lists it. */
   name: string | null;
   model: string | null;
+  /** Its role's effort ("high", "max"); null without one. */
+  effort: string | null;
   /** Its hooks' status, or else busy/idle from Claude Code's session file. */
   status: AgentStatus | null;
   message: string | null;
@@ -309,6 +311,9 @@ export interface TranscriptSummary {
   tokens: number;
   /** Context size at the last reply. */
   context: number;
+  /** How large the context can grow, when known: a guess of 1M for every
+   *  Claude model for now. */
+  contextWindow: number | null;
   toolCalls: number;
   /** Null when it keeps no task list. */
   tasks: TaskProgress | null;
