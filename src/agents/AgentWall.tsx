@@ -24,14 +24,9 @@ import { TaskBoard } from "./TaskBoard";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore, WallFilter } from "../state/uiStore";
 import { useConfigStore } from "../state/configStore";
-import {
-  fitTerminal,
-  getTerminal,
-  isLent,
-  isLentTo,
-  lendTerminal,
-  watchTerminal,
-} from "../terminal/registry";
+import { getTerminal } from "../terminal/registry";
+import { useLentTerminal } from "./useLentTerminal";
+import { FocusLayout } from "./FocusLayout";
 
 type Props = {
   /** The tab whose agents it shows, and in place of whose splits. */
@@ -194,12 +189,14 @@ export const AgentWall = memo(function AgentWall({
   // it is not this wall's to focus.
   const wallRef = useRef<HTMLDivElement>(null);
   const keyboard = tilesShown && current;
+  const mode = shown?.wallMode ?? "focus";
   useEffect(() => {
-    if (!keyboard) return;
+    // Focus hands the keyboard to the agent it shows large itself.
+    if (!keyboard || mode !== "grid") return;
     const tile = tiles.find((a) => a.paneId === shown?.focusedPane) ?? tiles[0];
     const term = tile && getTerminal(tile.paneId);
     if (term?.element && wallRef.current?.contains(term.element)) term.focus();
-  }, [keyboard, filter]);
+  }, [keyboard, filter, mode]);
 
   const unread = snapshot?.unreadPanes ?? [];
   const cols = columns(tiles.length);
@@ -289,6 +286,17 @@ export const AgentWall = memo(function AgentWall({
             of the tab: <em>Splits</em> shows them.
           </p>
         </div>
+      ) : mode === "focus" && shown ? (
+        <FocusLayout
+          tab={shown}
+          agents={agents}
+          filter={filter}
+          unread={unread}
+          visible={visible}
+          current={current}
+          keyboard={keyboard}
+          now={now}
+        />
       ) : tiles.length === 0 ? (
         <div className="wall-empty">
           <p>None of its agents {FILTER_EMPTY[filter]} right now.</p>
@@ -327,61 +335,9 @@ function WallTile({
   current: boolean;
   now: number;
 }) {
-  const hostRef = useRef<HTMLDivElement>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  // Assumed until a lend fails, so a tile does not flash the placeholder.
-  const [shown, setShown] = useState(true);
   const pane = agent.paneId;
-
-  const releaseRef = useRef<(() => void) | null>(null);
-
-  // Borrow the pane's terminal whenever the wall is on screen. The pane may
-  // register after the wall mounts (tabs mount in order), remount, or have
-  // been taken back while the wall was hidden; a terminal lent nowhere is
-  // picked up whenever it appears.
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!visible || !host) return;
-    const borrow = () => {
-      if (isLentTo(pane, host)) {
-        setShown(true);
-        return;
-      }
-      if (isLent(pane)) {
-        setShown(false);
-        return;
-      }
-      const release = lendTerminal(pane, host);
-      if (release) releaseRef.current = release;
-      setShown(!!release);
-    };
-    borrow();
-    // The tile may have changed size while the wall was hidden.
-    if (isLentTo(pane, host)) fitTerminal(pane);
-    const unwatch = watchTerminal(pane, borrow);
-    const observer = new ResizeObserver(() => {
-      if (isLentTo(pane, host)) fitTerminal(pane);
-    });
-    observer.observe(host);
-    return () => {
-      observer.disconnect();
-      unwatch();
-    };
-  }, [pane, visible]);
-
-  // Give the terminal back only when the tile goes away: while the wall is
-  // merely hidden it stays here, until its own tab is shown and takes it
-  // (see `lendTerminal` for why every move counts). Declared after the
-  // borrow so that React, which runs cleanups in order, unwatches first:
-  // the release announces the terminal free, and a tile still listening
-  // would borrow it again into a host leaving the page.
-  useEffect(
-    () => () => {
-      releaseRef.current?.();
-      releaseRef.current = null;
-    },
-    [pane],
-  );
+  const { hostRef, shown } = useLentTerminal(pane, visible, { fit: true });
 
   // Its activity, read while the wall is on screen, for an agent that has
   // it to read (`hasActivity`, decided in Rust): the status bar and the

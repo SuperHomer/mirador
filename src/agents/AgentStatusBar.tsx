@@ -2,7 +2,7 @@ import { AgentActivity, AgentInfo, HARNESS_LABEL } from "../bindings";
 import { duration, modelName, tokens } from "./ActivityPanel";
 
 /** Green under half full, yellow to 80%, red past it. */
-function fullness(pct: number): string {
+export function fullness(pct: number): string {
   return pct < 50 ? "low" : pct <= 80 ? "mid" : "high";
 }
 

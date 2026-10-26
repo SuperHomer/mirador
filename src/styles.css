@@ -2635,6 +2635,349 @@ body,
   padding: 6px;
 }
 
+/* Focus (18a): one agent large, the rest down a rail by status. */
+.focus-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
+  gap: 6px;
+  padding: 6px;
+}
+
+.focus-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1.5px solid var(--surface);
+  border-radius: 6px;
+  background: var(--term-bg, var(--bg));
+  overflow: hidden;
+}
+
+.focus-tile.needsYou {
+  border-color: var(--status-needs-you);
+}
+
+.focus-head {
+  padding: 7px 10px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--overlay);
+  flex-shrink: 0;
+}
+
+.focus-tile.needsYou .focus-head {
+  background: var(--tint-needs-you-head);
+}
+
+.focus-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.focus-name {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 0;
+  max-width: 40%;
+}
+
+.focus-status {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-status.working,
+.mini-elapsed.working {
+  color: var(--status-working);
+}
+
+.focus-status.needsYou,
+.mini-elapsed.needsYou {
+  color: var(--status-needs-you);
+}
+
+.focus-status.idle,
+.mini-elapsed.idle {
+  color: var(--status-idle);
+}
+
+.focus-task {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-waiting {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--status-needs-you);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.focus-message,
+.focus-note {
+  margin-top: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-note {
+  color: var(--subtext);
+}
+
+/* Its terminal, and its subagent sheet over it when open. */
+.focus-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.focus-term {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px;
+}
+
+.focus-term-host {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.focus-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+/* The working take whatever height the others leave. */
+.rail-section.working {
+  flex: 1 0 auto;
+}
+
+.rail-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rail-section.needs-you .rail-label {
+  color: var(--status-needs-you);
+}
+
+.rail-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(110px, 1fr);
+  gap: 6px;
+}
+
+.rail-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rail-empty {
+  padding: 12px;
+  border: 1px dashed var(--surface);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* An agent on the rail: its live terminal, shrunk to fit, never resized. */
+.mini-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  background: var(--term-bg, var(--bg));
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.rail-section.needs-you .mini-tile {
+  height: 110px;
+}
+
+.mini-tile.needsYou {
+  border-color: var(--status-needs-you);
+}
+
+.mini-tile:hover {
+  border-color: var(--muted);
+}
+
+.mini-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: var(--bg-alt);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.mini-tile.needsYou .mini-head {
+  background: var(--tint-needs-you-head);
+}
+
+.mini-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mini-elapsed {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A thumbnail: a click picks the tile, it never reaches the terminal. */
+.mini-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.mini-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: scale(var(--scale, 0.5));
+  transform-origin: 0 0;
+}
+
+.mini-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  background: var(--bg-alt);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.agent-bar-meter.mini-meter {
+  width: 40px;
+  height: 5px;
+  flex-shrink: 0;
+}
+
+.mini-pct {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--status-idle);
+}
+
+.mini-pct.mid {
+  color: var(--warn);
+}
+
+.mini-pct.high {
+  color: var(--danger);
+}
+
+.mini-task {
+  margin-left: auto;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idle-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  font-size: 11px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.idle-line:hover {
+  border-color: var(--muted);
+}
+
+.idle-name {
+  flex-shrink: 0;
+  max-width: 45%;
+  color: var(--subtext);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idle-task {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idle-elapsed {
+  flex-shrink: 0;
+  color: var(--status-idle);
+  font-variant-numeric: tabular-nums;
+}
+
 .wall-tile {
   display: flex;
   flex-direction: column;

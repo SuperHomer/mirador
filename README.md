@@ -558,8 +558,12 @@ gets a tile. The wall's toolbar shows all its agents or only those that
 need you, are working or are idle, and switches between **Focus** and
 **Grid**. In Grid it sets how many agents a page holds (4, 6 or 9: the
 `agentsPerTab` key), and in Focus it pins the agent shown large or lets
-it follow whoever needs you. Tiles stand in the team's order, never
-reshuffled by status. Each tile shows the role, the model, and what the agent is
+it follow whoever needs you. Focus shows that agent's terminal large and
+the others down a rail: those that need you and those at work as live
+thumbnails (drawn smaller, never resized), the idle one line each; click
+one to pin it. Following moves only once nobody has typed into the large
+one for two seconds. Tiles stand in the team's order, never reshuffled
+by status. Each tile shows the role, the model, and what the agent is
 doing: **working**, **needs you** (with what for), or **idle**. Click a
 tile's header to see that agent alone in its tab, which leaves the wall.
 The sidebar's switch turns the wall over to the tab's task board in
