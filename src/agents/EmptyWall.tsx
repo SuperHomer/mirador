@@ -1,5 +1,5 @@
-import { openAgent, openAgentEditor, TabSnapshot, toggleAgentWall } from "../bindings";
-import { roleLine, startTeamStep, useRoleCatalog } from "./AgentMenu";
+import { openAgent, openAgentEditor, startTeam, TabSnapshot, toggleAgentWall } from "../bindings";
+import { roleLine, useRoleCatalog } from "./AgentMenu";
 
 /**
  * The wall of a tab with no agents yet (21d): the ways to start one — a
@@ -54,7 +54,12 @@ export function EmptyWall({ tab }: { tab: TabSnapshot }) {
                 <span className="empty-wall-role-meta">
                   {t.problem ?? t.members.map((m) => (m.count > 1 ? `${m.role}×${m.count}` : m.role)).join(", ")}
                 </span>
-                <button className="empty-wall-link" onClick={startTeamStep}>
+                <button
+                  className="empty-wall-link"
+                  onClick={() =>
+                    startTeam(t.name, null, pane).catch((e) => console.error(`mirador: team ${t.name}: ${e}`))
+                  }
+                >
                   Start team…
                 </button>
               </div>

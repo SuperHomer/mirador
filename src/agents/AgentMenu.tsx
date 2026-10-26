@@ -48,6 +48,23 @@ export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void
   const [message, setMessage] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // Whatever had the keyboard when the menu opened — read while rendering,
+  // before the input's autofocus takes it — gets it back when the menu
+  // closes having started nothing, unless something else took it since: a
+  // click outside on another terminal keeps that one.
+  const [before] = useState(() => document.activeElement as HTMLElement | null);
+  const acted = useRef(false);
+  useEffect(
+    () => () => {
+      if (acted.current) return;
+      requestAnimationFrame(() => {
+        const now = document.activeElement;
+        if (before?.isConnected && (!now || now === document.body)) before.focus();
+      });
+    },
+    [before],
+  );
+
   // Outside the menu and its button: the button toggles it itself.
   useEffect(() => {
     const down = (e: MouseEvent) => {
@@ -58,12 +75,14 @@ export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void
   }, [onClose]);
 
   const start = (role: string | null, harness: Harness | null) => {
+    acted.current = true;
     onClose();
     openAgent(role, message.trim() || null, pane, false, harness).catch((e) =>
       console.error(`mirador: ${role ?? harness}: ${e}`),
     );
   };
   const edit = () => {
+    acted.current = true;
     onClose();
     void openAgentEditor(pane, false);
   };
@@ -131,6 +150,7 @@ export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void
         <button
           className="agent-menu-link"
           onClick={() => {
+            acted.current = true;
             onClose();
             startTeamStep();
           }}

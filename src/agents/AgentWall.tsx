@@ -203,6 +203,9 @@ export const AgentWall = memo(function AgentWall({
               <button
                 className={`wall-new-button${menuOpen ? " open" : ""}`}
                 title="Start an agent in this tab"
+                // The menu remembers which terminal had the keyboard, to
+                // give it back; a click must not move it here first.
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => setMenuOpen((o) => !o)}
               >
                 + Agent ▾
