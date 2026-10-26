@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   workspaceSnapshot,
   getConfig,
@@ -23,12 +24,32 @@ import {
   setBrowserVisible,
 } from "./bindings";
 import { useUiStore } from "./state/uiStore";
-import { readScreenText, saveAllScrollbacks } from "./terminal/registry";
+import {
+  getTerminal,
+  readScreenText,
+  saveAllScrollbacks,
+} from "./terminal/registry";
 import { invoke } from "@tauri-apps/api/core";
 
 function collectPaneIds(node: Node): string[] {
   if (node.type === "leaf") return [node.paneId];
   return node.children.flatMap(collectPaneIds);
+}
+
+const isWindows = navigator.platform.toUpperCase().startsWith("WIN");
+
+/**
+ * A dropped path, quoted to stay in one piece. Elsewhere than Windows, POSIX
+ * single quotes, each `'` closed and escaped: one literal word. On Windows,
+ * double quotes (a name cannot contain `"`) only keep a path with spaces
+ * together; the shell still expands what is inside — `$` and backticks in
+ * PowerShell and Git Bash, `%…%` (and `!…!` with delayed expansion) in
+ * cmd. Those are rare in paths, and quoting each shell its own way would
+ * mean knowing which shell each pane runs.
+ */
+function quotePath(path: string): string {
+  if (isWindows) return `"${path}"`;
+  return `'${path.replaceAll("'", `'\\''`)}'`;
 }
 
 const resolveScreenRead = (requestId: number, text: string) =>
@@ -99,10 +120,24 @@ export default function App() {
     const unlistenScrollback = listen("scrollback-save-request", () =>
       saveAllScrollbacks(),
     );
+    // Files dropped on a pane are typed into it as paths, as a terminal
+    // does. A drop on no pane, or on a pane with no terminal, does nothing.
+    const unlistenDrop = getCurrentWebview().onDragDropEvent((e) => {
+      if (e.payload.type !== "drop" || e.payload.paths.length === 0) return;
+      const { x, y } = e.payload.position.toLogical(window.devicePixelRatio);
+      const pane = document
+        .elementFromPoint(x, y)
+        ?.closest<HTMLElement>("[data-pane]")?.dataset.pane;
+      if (!pane) return;
+      getTerminal(pane)?.paste(
+        e.payload.paths.map(quotePath).join(" ") + " ",
+      );
+    });
     const onBlur = () => saveAllScrollbacks();
     window.addEventListener("blur", onBlur);
     return () => {
       void unlistenScrollback.then((fn) => fn());
+      void unlistenDrop.then((fn) => fn());
       window.removeEventListener("blur", onBlur);
       void unlistenRead.then((fn) => fn());
       disposed = true;
