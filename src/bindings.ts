@@ -750,12 +750,14 @@ export const agentFileDelete = (paneId: string, path: string) =>
 /** The roles `paneId`'s directory sees: its repository's, then yours. */
 export const agentRoles = (paneId: string | null) =>
   invoke<RoleCatalog>("agent_roles", { paneId });
+/** `harness`: without a role, Claude Code (default) or Codex. */
 export const openAgent = (
   role: string | null,
   task: string | null,
   paneId: string | null,
   tab: boolean,
-) => invoke<string>("open_agent", { role, task, paneId, tab });
+  harness: Harness | null = null,
+) => invoke<string>("open_agent", { role, task, paneId, tab, harness });
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });

@@ -233,6 +233,7 @@ mira agent roles                              # the roles and ways this director
 mira agent edit [--tab]                       # a pane to edit them, and teams
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
+mira agent new --harness codex "fix the flaky test"   # plain codex, beside this one
 mira agent list                               # pane, status, harness, name, model
 mira agent wall                               # this tab as its agents' grid, or its splits again
 mira agent activity [--pane <id>]             # its tasks and subagents
@@ -306,7 +307,10 @@ way's) through `--append-system-prompt-file`; the session resumes like any
 other, on the role's model and effort, and keeps that prompt. Codex gets
 `--model`, `model_reasoning_effort`, `--profile` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
-It also gets `-c` overrides for a permissions profile, `mirador`, that
+Without a role, `--harness codex` starts plain Codex instead of plain
+Claude Code (no other harness can be started that way, and `--harness`
+with `--role` is refused: a role names its own).
+Any Codex, a role's or plain, also gets `-c` overrides for a permissions profile, `mirador`, that
 extends the one Codex would run on — your `default_permissions`, else
 `:workspace` in a trusted project and `:read-only` elsewhere — with
 Mirador's socket and nothing else (network only through Codex's proxy),

@@ -11,6 +11,7 @@ const WAY: &str = "---\ndescription: Tests first\n---\nWrite the failing test fi
 fn agent_new(sb: &Sandbox, role: &str, from: &str) -> Result<String, String> {
     sb.request(Request::AgentNew {
         role: Some(role.into()),
+        harness: None,
         task: None,
         target: None,
         pane_id: Some(from.into()),

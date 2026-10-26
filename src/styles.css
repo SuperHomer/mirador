@@ -2548,63 +2548,232 @@ body,
   color: var(--text);
 }
 
-.wall-menu {
+/* + Agent (21c): a first message, then a role or a plain harness. */
+.agent-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
   z-index: 20;
-  min-width: 220px;
-  max-width: 320px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
   display: flex;
   flex-direction: column;
-  padding: 4px;
+  gap: 4px;
+  padding: 10px 12px;
   background: var(--bg);
-  border: 1px solid var(--surface);
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-}
-
-.wall-menu button {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  border: none;
-  background: transparent;
-  color: var(--text);
+  border: 1px solid var(--overlay);
+  border-radius: 9px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   font-size: 12px;
-  text-align: left;
+  color: var(--text);
+}
+
+.agent-menu-label,
+.empty-wall-label {
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.agent-menu-label:first-child {
+  margin-top: 0;
+}
+
+.agent-menu-input {
   padding: 5px 8px;
-  border-radius: 4px;
-  cursor: pointer;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg-alt);
+  color: var(--text);
+  font: inherit;
+  outline: none;
 }
 
-.wall-menu button:hover {
-  background: var(--surface);
+.agent-menu-input:focus {
+  border-color: var(--accent);
 }
 
-.wall-menu-model {
+.agent-menu-hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.agent-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  min-width: 0;
+}
+
+.agent-menu-name {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.agent-menu-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
-  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* A role that cannot start: listed, with why in its title. */
-.wall-menu button:disabled {
-  opacity: 0.5;
+/* A role that cannot start: listed, greyed, with why in peach. */
+.agent-menu-row.problem .agent-menu-name {
+  color: var(--muted);
+}
+
+.agent-menu-row.problem .agent-menu-meta {
+  color: var(--status-needs-you);
+}
+
+.agent-menu-start,
+.empty-wall-start {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.empty-wall-start:disabled {
+  background: var(--surface);
+  color: var(--muted);
   cursor: default;
 }
 
-.wall-menu button:disabled:hover {
-  background: transparent;
+.agent-menu-link,
+.empty-wall-link {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
 }
 
-.wall-menu-hint {
-  color: var(--muted);
+.agent-menu-link:hover,
+.empty-wall-link:hover {
+  color: #b4befe;
+}
+
+.agent-menu-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface);
+}
+
+.agent-menu-joins {
+  margin-left: auto;
   font-size: 11px;
-  padding: 6px 8px 4px;
-  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* A wall with no agents yet (21d): the ways to start one. */
+.empty-wall {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 48px 16px;
+}
+
+.empty-wall-column {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty-wall-title {
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.empty-wall-body {
+  font-size: 13px;
+  color: var(--subtext);
+  line-height: 1.5;
+}
+
+.empty-wall-roles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.empty-wall-role {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.empty-wall-role-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.empty-wall-role-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty-wall-role.problem .empty-wall-role-meta {
+  color: var(--status-needs-you);
+}
+
+.empty-wall-role .empty-wall-start {
+  margin-top: 4px;
+}
+
+.empty-wall-team {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.empty-wall-team .empty-wall-role-meta {
+  flex: 1;
+}
+
+.empty-wall-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
 }
 
 .wall-empty {

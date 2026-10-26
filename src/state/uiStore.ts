@@ -6,6 +6,8 @@ export type WallFilter = "all" | AgentStatus;
 
 interface UiStore {
   paletteOpen: boolean;
+  /** The palette step to open on (e.g. "team"), when it was asked for. */
+  paletteStep: string | null;
   notificationsOpen: boolean;
   /** The agent pane whose activity panel is open. */
   activityPane: string | null;
@@ -23,6 +25,8 @@ interface UiStore {
   setGridPage: (tabId: string, page: number) => void;
   setBoardMenuOpen: (open: boolean) => void;
   togglePalette: () => void;
+  /** Opens the palette on one of its steps. */
+  openPalette: (step: string) => void;
   closePalette: () => void;
   toggleNotifications: () => void;
   closeNotifications: () => void;
@@ -32,6 +36,7 @@ interface UiStore {
 
 export const useUiStore = create<UiStore>((set) => ({
   paletteOpen: false,
+  paletteStep: null,
   notificationsOpen: false,
   activityPane: null,
   boardMenuOpen: false,
@@ -51,7 +56,9 @@ export const useUiStore = create<UiStore>((set) => ({
     set((s) => ({ gridPage: { ...s.gridPage, [tabId]: page } })),
   setBoardMenuOpen: (boardMenuOpen) => set({ boardMenuOpen }),
   togglePalette: () =>
-    set((s) => ({ paletteOpen: !s.paletteOpen, notificationsOpen: false })),
+    set((s) => ({ paletteOpen: !s.paletteOpen, paletteStep: null, notificationsOpen: false })),
+  openPalette: (step) =>
+    set({ paletteOpen: true, paletteStep: step, notificationsOpen: false, activityPane: null }),
   closePalette: () => set({ paletteOpen: false }),
   toggleNotifications: () =>
     set((s) => ({

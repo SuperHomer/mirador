@@ -88,6 +88,7 @@ fn a_role_pane_comes_back_resumed_with_its_model_and_limits() {
 
     let pane = sb.call(Request::AgentNew {
         role: Some("reviewer".into()),
+        harness: None,
         task: Some("look at main".into()),
         target: None,
         pane_id: Some(first.clone()),
@@ -194,7 +195,7 @@ fn the_wall_is_a_view_of_its_tab_and_comes_back() {
     sb.launch();
     let first = sb.first_pane();
     sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
-    let agent = sb.call(Request::AgentNew { role: None, task: None, target: None, pane_id: Some(first.clone()) })
+    let agent = sb.call(Request::AgentNew { role: None, harness: None, task: None, target: None, pane_id: Some(first.clone()) })
         ["paneId"]
         .as_str()
         .unwrap()

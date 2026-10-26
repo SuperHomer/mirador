@@ -407,9 +407,12 @@ pub enum Request {
     /// tab): plain Claude Code, or a role's harness, model and prompt.
     AgentNew {
         /// A role the calling pane's directory sees (`RoleCatalog`); none
-        /// starts plain `claude`.
+        /// starts plain `claude`, or `harness`.
         #[serde(default)]
         role: Option<String>,
+        /// Without a role, what to start: Claude Code (default) or Codex.
+        #[serde(default)]
+        harness: Option<Harness>,
         /// The first prompt, typed in as Claude's initial message.
         #[serde(default)]
         task: Option<String>,

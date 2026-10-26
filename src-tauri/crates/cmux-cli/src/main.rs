@@ -263,6 +263,9 @@ enum AgentAction {
         /// A role this directory sees (`mira agent roles` lists them).
         #[arg(short, long)]
         role: Option<String>,
+        /// Without a role: start Codex instead of Claude Code.
+        #[arg(long, value_parser = ["claude", "codex"], conflicts_with = "role")]
+        harness: Option<String>,
         /// Open a new tab instead of splitting this pane.
         #[arg(long)]
         tab: bool,
@@ -649,8 +652,12 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Agent { action } => match action {
-            AgentAction::New { role, tab, task } => Request::AgentNew {
+            AgentAction::New { role, harness, tab, task } => Request::AgentNew {
                 role,
+                harness: harness.map(|h| match h.as_str() {
+                    "codex" => cmux_protocol::Harness::Codex,
+                    _ => cmux_protocol::Harness::Claude,
+                }),
                 task: (!task.is_empty()).then(|| task.join(" ")),
                 target: Some(if tab { "tab" } else { "split" }.to_string()),
                 pane_id: own_pane(),

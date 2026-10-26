@@ -286,6 +286,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::AgentNew {
             role,
+            harness,
             task,
             target,
             pane_id,
@@ -300,6 +301,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 // Beside the pane it was asked from, in the tab you work in;
                 // a tab of its own only when asked for one.
                 target.as_deref() == Some("tab"),
+                harness,
                 from,
             )?;
             Ok(json!({ "paneId": pane_id }))

@@ -1,11 +1,7 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
-  AgentRole,
-  agentRoles,
-  roleHint,
   AgentInfo,
   agentLabel,
-  openAgent,
   setAgentsPerTab,
   setWallMode,
   WallMode,
@@ -20,6 +16,8 @@ import { useConfigStore } from "../state/configStore";
 import { getTerminal } from "../terminal/registry";
 import { FocusLayout } from "./FocusLayout";
 import { GridLayout } from "./GridLayout";
+import { AgentMenu } from "./AgentMenu";
+import { EmptyWall } from "./EmptyWall";
 
 type Props = {
   /** The tab whose agents it shows, and in place of whose splits. */
@@ -141,8 +139,8 @@ export const AgentWall = memo(function AgentWall({
 }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
-  const [roles, setRoles] = useState<AgentRole[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   const now = useNow(visible);
 
   // The tab's agents in team order, which never moves with status.
@@ -190,31 +188,6 @@ export const AgentWall = memo(function AgentWall({
 
   const unread = snapshot?.unreadPanes ?? [];
 
-  // The roles of the directory a new agent would work in: the shown tab's
-  // focused pane's, read each time the menu opens.
-  const rolesPane = shown?.focusedPane;
-  useEffect(() => {
-    if (!menuOpen || !rolesPane) return;
-    let live = true;
-    agentRoles(rolesPane)
-      .then((c) => live && setRoles(c.roles))
-      .catch(() => live && setRoles([]));
-    return () => {
-      live = false;
-    };
-  }, [menuOpen, rolesPane]);
-
-  const start = (role: string | null) => {
-    setMenuOpen(false);
-    if (!shown) return;
-    // Like everywhere else, the agent joins a tab rather than getting its
-    // own: it splits the tab's focused pane, under the wall, so the wall
-    // stays on screen and gains a tile.
-    openAgent(role, null, shown.focusedPane, false).catch((e) =>
-      console.error(`mirador: role ${role}: ${e}`),
-    );
-  };
-
   return (
     <div className="pane agent-wall" ref={wallRef}>
       {/* The Tasks side has no toolbar here: the task board has its own,
@@ -229,37 +202,12 @@ export const AgentWall = memo(function AgentWall({
             <div className="wall-new">
               <button
                 className={`wall-new-button${menuOpen ? " open" : ""}`}
-                title="Start a Claude Code agent"
+                title="Start an agent in this tab"
                 onClick={() => setMenuOpen((o) => !o)}
               >
                 + Agent ▾
               </button>
-              {menuOpen && (
-                <div className="wall-menu" onMouseLeave={() => setMenuOpen(false)}>
-                  <button onClick={() => start(null)}>
-                    <span>Claude</span>
-                    <span className="wall-menu-model">default model</span>
-                  </button>
-                  {roles.map((r) => (
-                    <button
-                      key={r.name}
-                      disabled={!!r.problem}
-                      title={r.problem ?? r.description ?? undefined}
-                      onClick={() => start(r.name)}
-                    >
-                      <span>{r.name}</span>
-                      <span className="wall-menu-model">{roleHint(r)}</span>
-                    </button>
-                  ))}
-                  {roles.length === 0 && (
-                    <p className="wall-menu-hint">
-                      Add <code>.mirador/roles/&lt;name&gt;.md</code> to the
-                      repository for roles with their own model, prompt and way of
-                      working.
-                    </p>
-                  )}
-                </div>
-              )}
+              {menuOpen && <AgentMenu pane={shown.focusedPane} onClose={closeMenu} />}
             </div>
           }
         />
@@ -268,14 +216,7 @@ export const AgentWall = memo(function AgentWall({
       {side === "tasks" ? (
         <TaskBoard tabId={tabId} visible={visible} />
       ) : agents.length === 0 ? (
-        <div className="wall-empty">
-          <p>No agents in {shown?.title ?? "this tab"}.</p>
-          <p className="wall-empty-hint">
-            Start one with <em>+ Agent</em>, or run <code>claude</code>,{" "}
-            <code>codex</code>, <code>opencode</code> or another agent in a pane
-            of the tab: <em>Splits</em> shows them.
-          </p>
-        </div>
+        shown && <EmptyWall tab={shown} />
       ) : mode === "focus" && shown ? (
         <FocusLayout
           tab={shown}

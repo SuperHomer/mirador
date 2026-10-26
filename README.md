@@ -553,8 +553,11 @@ board draws a walled tab's wall in its frame, in place of its cards. The tiles a
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
 the keyboard goes to the focused agent's tile when the wall comes up. A
-new agent from the wall's **+ Agent** splits the tab under the wall and
-gets a tile. The wall's toolbar shows all its agents or only those that
+new agent from the wall's **+ Agent** — a role of the repository, or
+plain Claude Code or Codex, with an optional first message that also
+becomes its card — splits the tab under the wall and gets a tile. A tab
+with no agents yet shows its roles and teams there instead, ready to
+start. The wall's toolbar shows all its agents or only those that
 need you, are working or are idle, and switches between **Focus** and
 **Grid**. In Grid it sets how many agents a page holds (4, 6 or 9: the
 `agentsPerTab` key), and in Focus it pins the agent shown large or lets

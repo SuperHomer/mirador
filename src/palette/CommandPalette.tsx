@@ -254,7 +254,9 @@ export function CommandPalette() {
         });
       setQuery("");
       setSelected(0);
-      setStepId(null);
+      // Opened on a step (the wall's "Start a team…"), else the top level.
+      // A step with no entries yet is shown once they are read.
+      setStepId(useUiStore.getState().paletteStep);
       // Focus after the overlay renders.
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {

@@ -1596,12 +1596,15 @@ pub fn open_agent(
     task: Option<String>,
     pane_id: Option<String>,
     tab: bool,
+    harness: Option<cmux_protocol::Harness>,
 ) -> Result<String, String> {
-    open_agent_from(app, state, role, task, pane_id, tab, "you".into())
+    open_agent_from(app, state, role, task, pane_id, tab, harness, "you".into())
 }
 
 /// [`open_agent`], its task logged as given by `from`: a person, from the
-/// app; whoever ran `mira agent new`, from the socket.
+/// app; whoever ran `mira agent new`, from the socket. `harness` is for an
+/// agent without a role: Claude Code, else Codex.
+#[allow(clippy::too_many_arguments)]
 pub fn open_agent_from(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1609,8 +1612,13 @@ pub fn open_agent_from(
     task: Option<String>,
     pane_id: Option<String>,
     tab: bool,
+    harness: Option<cmux_protocol::Harness>,
     from: String,
 ) -> Result<String, String> {
+    if role.is_some() && harness.is_some() {
+        return Err("a role names its own harness: give a role or a harness, not both".into());
+    }
+    let plain = cmux_core::agents::plain_harness(harness)?;
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
@@ -1623,7 +1631,7 @@ pub fn open_agent_from(
         .get(&source)
         .and_then(|m| m.cwd.clone())
         .or_else(cmux_core::config::default_cwd);
-    let launch = prepare_launch(role.as_deref(), None, cwd.as_deref(), None, None, task.as_deref())?;
+    let launch = prepare_launch(role.as_deref(), plain, None, cwd.as_deref(), None, None, task.as_deref())?;
 
     let new_pane = if tab {
         state.workspace.lock().unwrap().new_tab().1
@@ -1650,17 +1658,21 @@ pub fn open_agent_from(
 /// remember about it on the pane.
 pub(crate) struct Launch {
     pub input: String,
+    /// What it runs: the role's harness, or the plain one.
+    pub harness: cmux_protocol::Harness,
     pub role: Option<cmux_protocol::AgentRole>,
     pub settings: Option<String>,
 }
 
 /// Works out how to start an agent in `cwd`: plain Claude Code, or `role`
 /// (looked up in `catalog`, else in what `cwd` sees) with its prompt and
-/// limits. `extra` follows the role's prompt — a team member's roster —
+/// limits; without a role, `plain` (`agents::plain_harness`). `extra`
+/// follows the role's prompt — a team member's roster —
 /// and `name` is the session's name instead of the role's. Every file it
 /// needs is written; nothing is opened, so a refusal changes nothing.
 pub(crate) fn prepare_launch(
     role: Option<&str>,
+    plain: cmux_protocol::Harness,
     catalog: Option<&cmux_protocol::RoleCatalog>,
     cwd: Option<&str>,
     extra: Option<&str>,
@@ -1733,33 +1745,34 @@ pub(crate) fn prepare_launch(
     let named = role.clone().map(|r| cmux_protocol::AgentRole { name: name.unwrap_or(&r.name).to_string(), ..r });
     // Codex is allowed Mirador's socket on top of the profile it would run
     // on anyway — on Unix: Windows has a named pipe, and no such sandbox.
-    let codex_socket = match &role {
-        Some(r) if cfg!(unix) && r.harness == cmux_protocol::Harness::Codex => {
-            let home = std::env::var_os("CODEX_HOME")
-                .map(std::path::PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
-            // No file is no config; one that cannot be read is not guessed at.
-            let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
-                Some(Ok(text)) => Some(Some(text)),
-                Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
-                _ => Some(None),
-            };
-            config
-                .and_then(|c| {
-                    // Codex 0.164 keeps a profile in its own file beside
-                    // config.toml; a missing one is Codex's to report.
-                    let profile = r.profile.as_ref().and_then(|p| {
-                        let file = home.as_ref()?.join(format!("{p}.config.toml"));
-                        std::fs::read_to_string(file).ok()
-                    });
-                    cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
-                })
-                .map(|base| (base, cmux_core::ipc::default_socket_path()))
-        }
-        _ => None,
+    let harness = role.as_ref().map_or(plain, |r| r.harness);
+    let codex_socket = if cfg!(unix) && harness == cmux_protocol::Harness::Codex {
+        let home = std::env::var_os("CODEX_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
+        // No file is no config; one that cannot be read is not guessed at.
+        let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
+            Some(Ok(text)) => Some(Some(text)),
+            Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
+            _ => Some(None),
+        };
+        config
+            .and_then(|c| {
+                // Codex 0.164 keeps a profile in its own file beside
+                // config.toml; a missing one is Codex's to report.
+                let profile = role.as_ref().and_then(|r| r.profile.as_ref()).and_then(|p| {
+                    let file = home.as_ref()?.join(format!("{p}.config.toml"));
+                    std::fs::read_to_string(file).ok()
+                });
+                cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
+            })
+            .map(|base| (base, cmux_core::ipc::default_socket_path()))
+    } else {
+        None
     };
     let input = cmux_core::agents::launch_command(
         named.as_ref(),
+        plain,
         prompt.as_deref(),
         prompt_file.as_deref(),
         settings_file.as_deref(),
@@ -1769,6 +1782,7 @@ pub(crate) fn prepare_launch(
     );
     Ok(Launch {
         input,
+        harness,
         role,
         settings: settings_file.map(|f| f.to_string_lossy().into_owned()),
     })
@@ -1781,13 +1795,13 @@ pub(crate) fn mark_launched(entry: &mut cmux_core::state::PaneMeta, launch: Laun
     entry.startup_input = Some(launch.input);
     entry.agent_launched = true;
     entry.agent_started_at = Some(std::time::Instant::now());
+    // A Codex is a Codex agent from the start, not a Claude one until the
+    // poller sees otherwise — and on Windows, which lists no processes, the
+    // poller never would.
+    if launch.harness != cmux_protocol::Harness::Claude {
+        entry.agent_harness = Some(launch.harness);
+    }
     if let Some(role) = launch.role {
-        // A Codex role is a Codex agent from the start, not a Claude one
-        // until the poller sees otherwise — and on Windows, which lists no
-        // processes, the poller never would.
-        if role.harness != cmux_protocol::Harness::Claude {
-            entry.agent_harness = Some(role.harness);
-        }
         entry.agent_model = role.model;
         entry.agent_effort = role.effort;
         entry.agent_role = Some(role.name);
@@ -2064,7 +2078,7 @@ mod tests {
     use super::*;
 
     fn launch(role: Option<cmux_protocol::AgentRole>) -> Launch {
-        Launch { input: "claude\n".into(), role, settings: None }
+        Launch { input: "claude\n".into(), harness: cmux_protocol::Harness::Claude, role, settings: None }
     }
 
     #[test]

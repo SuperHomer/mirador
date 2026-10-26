@@ -73,7 +73,7 @@ pub fn start_team_from(
     for seat in &seats {
         let roster = cmux_core::teams::member_prompt(def, seat, &seats, team_way(&catalog, def, &seat.role), &mira);
         let task = task.as_deref().filter(|_| seat.lead);
-        let launch = prepare_launch(Some(&seat.role), Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), task)
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), task)
             .map_err(|e| format!("team `{team}`, member `{}`: {e}", seat.name))?;
         launches.push(launch);
     }
@@ -217,7 +217,7 @@ pub fn team_add(
     let cwd = cwd_of(&state, Some(&source));
     let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
     let roster = roster_now(&run, &catalog, &seat, Some(&seat));
-    let launch = prepare_launch(Some(&role), Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), None)?;
+    let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), None)?;
 
     let pane = {
         let mut ws = state.workspace.lock().unwrap();
@@ -301,7 +301,7 @@ pub fn team_restart(
         }
         let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
         let roster = roster_now(&run, &catalog, &me, None);
-        let launch = prepare_launch(Some(&seat.role), Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), None)
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), None)
             .map_err(|e| format!("member `{}`: {e}", seat.name))?;
 
         match seat_state {
