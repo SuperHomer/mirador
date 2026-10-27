@@ -169,7 +169,11 @@ export const AgentEditor = memo(function AgentEditor({
   const [refreshed, setRefreshed] = useState(0);
   // The selected member's role has unsaved edits in the inspector.
   const [roleDirty, setRoleDirty] = useState(false);
-  const [pendingMember, setPendingMember] = useState<number | null>(null);
+  // What waits on the member's unsaved role edits: what to say, and what
+  // to do once they are discarded.
+  const [pendingRole, setPendingRole] = useState<{ message: string; then: () => void } | null>(null);
+  // Bumped to drop the inspector's role edits: it starts again.
+  const [roleEpoch, setRoleEpoch] = useState(0);
   const charterRef = useRef<HTMLTextAreaElement>(null);
 
   const formMode = form !== null && !raw;
@@ -245,7 +249,7 @@ export const AgentEditor = memo(function AgentEditor({
     setSel(item);
     setRaw(false);
     setMember(null);
-    setPendingMember(null);
+    setPendingRole(null);
     setRoleDirty(false);
     setStale(false);
     setConfirmOverwrite(false);
@@ -292,8 +296,18 @@ export const AgentEditor = memo(function AgentEditor({
 
   // Another member drops the role edits of this one: asked first.
   const selectMember = (i: number | null) => {
-    if (roleDirty && i !== member) setPendingMember(i);
-    else setMember(i);
+    if (roleDirty && i !== member) {
+      setPendingRole({ message: "Unsaved changes to this member's role.", then: () => setMember(i) });
+    } else setMember(i);
+  };
+  const removeMember = (i: number) => {
+    const remove = () => {
+      setForm((f) => f && { ...f, members: f.members.filter((_, j) => j !== i) });
+      setMember(null);
+    };
+    if (roleDirty) {
+      setPendingRole({ message: "Unsaved changes to this member's role: removing the member drops them.", then: remove });
+    } else remove();
   };
 
   /** Saves what is unsaved; whether there is nothing left unsaved. Over a
@@ -402,8 +416,19 @@ export const AgentEditor = memo(function AgentEditor({
   // Save, then what the page is for: start the role; start the team, or
   // restart what of it can be; restart the teams following the way. A
   // restart is confirmed in the header first.
-  const primary = async () => {
-    if (!sel || !(await save())) return;
+  const primary = async (roleChecked = false) => {
+    if (!sel) return;
+    // The role is saved apart from the team: starting with its edits
+    // unsaved would start it as it was.
+    if (sel.kind === "team" && roleDirty && !roleChecked) {
+      setPendingRole({
+        message:
+          "This member's role has unsaved edits, which the team's Save does not write: Save role first, or discard them and go on.",
+        then: () => void primary(true),
+      });
+      return;
+    }
+    if (!(await save())) return;
     const fail = (e: unknown) => setStatus(String(e));
     const snapshot = useWorkspaceStore.getState().snapshot;
     if (sel.kind === "role") {
@@ -585,18 +610,21 @@ export const AgentEditor = memo(function AgentEditor({
               <button onClick={() => setPending(null)}>Keep editing</button>
             </div>
           )}
-          {pendingMember !== null && (
+          {pendingRole && (
             <div className="editor-bar warn">
-              <span>Unsaved changes to this member's role.</span>
+              <span>{pendingRole.message}</span>
               <button
                 onClick={() => {
-                  setMember(pendingMember);
-                  setPendingMember(null);
+                  const { then } = pendingRole;
+                  setPendingRole(null);
+                  setRoleEpoch((n) => n + 1);
+                  setRoleDirty(false);
+                  then();
                 }}
               >
                 Discard
               </button>
-              <button onClick={() => setPendingMember(null)}>Keep editing</button>
+              <button onClick={() => setPendingRole(null)}>Keep editing</button>
             </div>
           )}
           {pendingRaw !== null && (
@@ -763,7 +791,7 @@ export const AgentEditor = memo(function AgentEditor({
                     />
                     {member !== null && form!.members[member] ? (
                       <MemberInspector
-                        key={`${member}:${form!.members[member].role}`}
+                        key={`${member}:${form!.members[member].role}:${roleEpoch}`}
                         paneId={paneId}
                         cat={cat}
                         refreshed={refreshed}
@@ -778,7 +806,7 @@ export const AgentEditor = memo(function AgentEditor({
                         teamDirty={dirty}
                         onCatalog={setCat}
                         onRoleDirty={setRoleDirty}
-                        onRemove={() => setMember(null)}
+                        onRemove={() => removeMember(member)}
                         onOpenWay={(way) => {
                           const item = list.find((i) => i.kind === "way" && i.name === way && !i.shadowedBy);
                           if (item) choose(item);

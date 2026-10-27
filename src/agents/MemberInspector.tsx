@@ -31,6 +31,8 @@ type Props = {
   teamDirty: boolean;
   onCatalog: (cat: EditorCatalog) => void;
   onRoleDirty: (dirty: boolean) => void;
+  /** Asks the editor to remove this member: it asks first when the
+   *  role has unsaved edits, which removing would drop. */
   onRemove: () => void;
   onOpenWay: (way: string) => void;
   onEditCharter: () => void;
@@ -272,10 +274,7 @@ export function MemberInspector(props: Props) {
             {!teamReadOnly && (
               <button
                 className="inspector-remove"
-                onClick={() => {
-                  onFields({ ...fields, members: fields.members.filter((_, i) => i !== index) });
-                  props.onRemove();
-                }}
+                onClick={props.onRemove}
               >
                 Remove member
               </button>
@@ -403,7 +402,12 @@ export function MemberInspector(props: Props) {
               <p className="inspector-note">The saved version: unsaved edits are not in it yet.</p>
             )}
             {toldError ? (
-              <p className="inspector-note problem">{toldError}</p>
+              // A member added since the team was saved is not in the file.
+              /no member/.test(toldError) ? (
+                <p className="inspector-note">Save the team to see what this member is told.</p>
+              ) : (
+                <p className="inspector-note problem">{toldError}</p>
+              )
             ) : (
               told?.layers.map((l, i) => {
                 const edit =
