@@ -1,11 +1,28 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView, tabAgents } from "../bindings";
+import {
+  Camera,
+  TabSnapshot,
+  closeTab,
+  newTab,
+  setFramePosition,
+  setView,
+  tabAgents,
+  waitingAgents,
+} from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useConfigStore } from "../state/configStore";
 import { StatusPips } from "../agents/StatusMark";
-import { arrangeBoard, atFullSize, fitBoard, panToCard, takesPointer, useBoardStore } from "../state/boardStore";
+import {
+  arrangeBoard,
+  atFullSize,
+  fitBoard,
+  flyToCard,
+  panToCard,
+  takesPointer,
+  useBoardStore,
+} from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -405,6 +422,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       >
         {children}
       </div>
+      {board && <BoardBanner />}
       {board && (
         <div className="board-controls">
           <button
@@ -524,6 +542,39 @@ export function boardDrag(
   el.addEventListener("pointerup", onUp);
   el.addEventListener("pointercancel", onCancel);
   window.addEventListener("keydown", onKey, { capture: true });
+}
+
+/**
+ * The board's corner, while anyone waits on you: how many, in how many
+ * frames, and a way to each in turn — the agents waiting as the sidebar
+ * and the Inbox count them, flown to one after another, round again.
+ */
+function BoardBanner() {
+  const snapshot = useWorkspaceStore((s) => s.snapshot);
+  // The pane last flown to: the next click goes to the one after it.
+  const [last, setLast] = useState<string | null>(null);
+  if (!snapshot) return null;
+  const waiting = waitingAgents(snapshot);
+  if (waiting.length === 0) return null;
+  const frames = new Set(waiting.map((a) => a.tabId)).size;
+  const flyToNext = () => {
+    // After the last one flown to; from the first when it is gone.
+    const at = waiting.findIndex((a) => a.paneId === last);
+    const next = waiting[(at + 1) % waiting.length];
+    setLast(next.paneId);
+    flyToCard(next.paneId);
+  };
+  return (
+    <div className="board-banner">
+      <span className="board-banner-count">
+        {waiting.length} {waiting.length === 1 ? "agent needs" : "agents need"} you
+      </span>{" "}
+      in {frames} {frames === 1 ? "frame" : "frames"} ·{" "}
+      <button className="board-banner-fly" onClick={flyToNext}>
+        Fly to next
+      </button>
+    </div>
+  );
 }
 
 /**

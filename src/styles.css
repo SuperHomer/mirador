@@ -850,6 +850,42 @@ body,
   pointer-events: none;
 }
 
+/* Bottom left, across from the zoom controls and never over them: it is
+   no wider than half the board, and only its own box takes the pointer. */
+.board-banner {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  max-width: calc(50% - 24px);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--subtext);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.board-banner-count {
+  color: var(--status-needs-you);
+  font-weight: 600;
+}
+
+.board-banner-fly {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.board-banner-fly:hover {
+  color: #b4befe;
+}
+
 .board-controls {
   position: absolute;
   right: 12px;
