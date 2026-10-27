@@ -346,7 +346,8 @@ impl Tab {
     }
 
     /// The name the sidebar shows: an explicit rename, else the focused
-    /// pane's OSC title, else the basename of its cwd, else "shell".
+    /// pane's OSC title, else the basename of its cwd, else what its card
+    /// on the board would say — "Settings", a page's URL, "shell".
     pub fn resolved_title(&self, meta: &HashMap<String, PaneMeta>) -> String {
         let pane_meta = meta.get(&self.focused);
         self.title
@@ -356,7 +357,7 @@ impl Tab {
                 pane_meta
                     .and_then(|m| m.cwd.as_deref())
                     .map(display_dir)
-                    .unwrap_or_else(|| "shell".to_string())
+                    .unwrap_or_else(|| pane_title(pane_meta))
             })
     }
 }
@@ -1529,6 +1530,19 @@ mod tests {
         assert_eq!(meta(PaneMeta { title: Some(r"C:\pwsh.exe".into()), ..Default::default() }), "shell");
         assert_eq!(meta(PaneMeta { diff_repo: Some("/src/mirador".into()), ..Default::default() }), "Diff · mirador");
         assert_eq!(meta(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
+    }
+
+    #[test]
+    fn a_tab_with_no_cwd_says_what_its_pane_is() {
+        let ws = Workspace::default();
+        let pane = ws.focused_pane();
+        let title = |m: PaneMeta| ws.active_tab().resolved_title(&HashMap::from([(pane.clone(), m)]));
+        assert_eq!(title(PaneMeta { settings: true, ..Default::default() }), "Settings");
+        assert_eq!(title(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
+        assert_eq!(title(PaneMeta::default()), "shell");
+        assert_eq!(ws.active_tab().resolved_title(&HashMap::new()), "shell");
+        // A cwd still names the tab, as before.
+        assert_eq!(title(PaneMeta { settings: true, cwd: Some("/tmp/project".into()), ..Default::default() }), "project");
     }
 
     #[test]
