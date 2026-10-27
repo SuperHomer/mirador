@@ -46,3 +46,10 @@ pub fn open_settings(
 pub fn settings_view() -> Result<Vec<SettingRow>, String> {
     cmux_core::config::settings::settings_view()
 }
+
+/// Sets `key` in mirador.json to `value`, or removes it when null. The
+/// pane shows the result when the config watcher sees the file change.
+#[tauri::command]
+pub fn set_config_value(key: String, value: Option<serde_json::Value>) -> Result<(), String> {
+    cmux_core::config::settings::set_config_value(&key, value)
+}

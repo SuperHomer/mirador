@@ -834,6 +834,8 @@ export const startTeam = (
 /** The settings pane: at most one, showing mirador.json's settings. */
 export interface SettingsPaneInfo {
   paneId: string;
+  /** The mirador.json it shows. */
+  path: string;
 }
 
 /** What a setting holds, and so how it can be edited. */
@@ -863,6 +865,9 @@ export const openSettings = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_settings", { paneId, tab });
 /** Every setting, or why mirador.json cannot be read. */
 export const settingsView = () => invoke<SettingRow[]>("settings_view");
+/** Sets `key` in mirador.json, or removes it with null. */
+export const setConfigValue = (key: string, value: unknown) =>
+  invoke<void>("set_config_value", { key, value });
 
 /** An agent-editor pane, and the directory whose files it edits. */
 export interface AgentEditorPaneInfo {

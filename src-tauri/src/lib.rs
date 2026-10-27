@@ -367,6 +367,7 @@ pub fn run() {
             agent_editor::agent_file_delete,
             settings::open_settings,
             settings::settings_view,
+            settings::set_config_value,
             teams::start_team,
             teams::list_teams,
             teams::team_add,

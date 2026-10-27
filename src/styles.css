@@ -5744,7 +5744,7 @@ button.tb-line-row:hover {
 
 .settings-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 16px;
   padding: 6px 16px;
   border-bottom: 1px solid var(--surface);
@@ -5776,7 +5776,7 @@ button.tb-line-row:hover {
   min-width: 0;
   display: flex;
   justify-content: flex-end;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   font-size: 12px;
 }
@@ -5805,6 +5805,64 @@ button.tb-line-row:hover {
   border-radius: 4px;
   color: var(--status-needs-you);
   font-size: 10px;
+}
+
+/* Where a key the pane cannot edit is edited, path and all: selectable,
+   for copying. */
+.settings-where {
+  color: var(--muted);
+  font-size: 11px;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.settings-error {
+  color: var(--status-needs-you);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.settings-input,
+.settings-select {
+  min-width: 0;
+  width: 220px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--surface);
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+
+.settings-input[type="number"] {
+  width: 100px;
+}
+
+.settings-select {
+  width: auto;
+  max-width: 220px;
+}
+
+/* Unset: the default shows chosen, muted, until another is picked. */
+.settings-select.unset,
+.settings-toggle.unset {
+  opacity: 0.6;
+}
+
+.settings-toggle {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.settings-reset {
+  flex-shrink: 0;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
 }
 
 .editor-menu-anchor {

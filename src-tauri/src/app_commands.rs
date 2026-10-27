@@ -59,6 +59,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "agent_file_delete",
     "open_settings",
     "settings_view",
+    "set_config_value",
     "start_team",
     "list_teams",
     "team_add",

@@ -54,6 +54,7 @@ permissions = [
   "allow-agent-file-delete",
   "allow-open-settings",
   "allow-settings-view",
+  "allow-set-config-value",
   "allow-start-team",
   "allow-list-teams",
   "allow-team-add",

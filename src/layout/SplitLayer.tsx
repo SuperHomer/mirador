@@ -224,7 +224,7 @@ export function SplitLayer({
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
-        const settings = settingsPanes.some((s) => s.paneId === p.paneId);
+        const settings = settingsPanes.find((s) => s.paneId === p.paneId);
         const hide: React.CSSProperties = hidden
           ? { visibility: "hidden", pointerEvents: "none" }
           : {};
@@ -254,7 +254,7 @@ export function SplitLayer({
             )}
             <div className={`pane-body${browser ? " browser" : ""}`}>
               {settings ? (
-                <SettingsPane paneId={p.paneId} focused={focused} />
+                <SettingsPane paneId={p.paneId} path={settings.path} focused={focused} />
               ) : editor ? (
                 <AgentEditor
                   paneId={p.paneId}

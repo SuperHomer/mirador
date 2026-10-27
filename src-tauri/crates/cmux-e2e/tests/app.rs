@@ -204,6 +204,9 @@ fn there_is_one_settings_pane() {
     };
     assert_eq!(listed(&sb), std::slice::from_ref(&settings));
     assert_eq!(sb.panes(), [first.clone(), settings.clone()]);
+    // The file it shows, for the keys edited in the file itself.
+    let path = sb.config.join("mirador/mirador.json");
+    assert_eq!(sb.snapshot()["settingsPanes"][0]["path"], path.to_string_lossy().as_ref());
     // A render throw in the pane takes the whole tree down with it: the
     // terminal beside it still answering says the page survived it.
     sb.type_into(&first, "echo still-$((40+2))\r");

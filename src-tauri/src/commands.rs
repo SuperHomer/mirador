@@ -113,9 +113,10 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
     };
     snapshot.settings_panes = {
         let meta = state.meta.lock().unwrap();
+        let path = cmux_core::config::config_path().to_string_lossy().into_owned();
         meta.iter()
             .filter(|(_, m)| m.settings)
-            .map(|(pane, _)| cmux_protocol::SettingsPane { pane_id: pane.clone() })
+            .map(|(pane, _)| cmux_protocol::SettingsPane { pane_id: pane.clone(), path: path.clone() })
             .collect()
     };
     snapshot.agents = agent_infos(state);

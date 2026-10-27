@@ -1776,6 +1776,8 @@ pub struct AgentEditorPane {
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPane {
     pub pane_id: String,
+    /// The mirador.json it shows, for keys edited in the file itself.
+    pub path: String,
 }
 
 /// A pane showing a commit graph, and the repository it reads.
