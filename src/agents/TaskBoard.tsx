@@ -65,7 +65,7 @@ const MARKS: Record<TrailAction["status"], string> = {
   interrupted: "-",
 };
 
-const NO_CARDS: TaskCard[] = [];
+export const NO_CARDS: TaskCard[] = [];
 const NO_AGENTS: AgentInfo[] = [];
 const NO_HISTORY: TaskHistoryEntry[] = [];
 
@@ -1627,7 +1627,7 @@ function HistoryLines({
  * read takes it from, so a new one is one more reason to read rather than
  * a second reader.
  */
-function useLogRead<T>(
+export function useLogRead<T>(
   live: boolean,
   key: string,
   read: (key: string) => Promise<T>,

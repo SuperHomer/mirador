@@ -9,6 +9,7 @@ import { SubagentSheet } from "./SubagentSheet";
 import { elapsed } from "./time";
 import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
+import { SendNextTask } from "./SendNextTask";
 
 /** How long after the last keystroke into the focused agent Focus may
  *  move to another: never out from under someone typing. */
@@ -75,6 +76,7 @@ export function FocusLayout({
   visible,
   current,
   keyboard,
+  sendable,
   now,
 }: {
   tab: TabSnapshot;
@@ -85,6 +87,8 @@ export function FocusLayout({
   current: boolean;
   /** The wall is on screen in the active tab: the keyboard is its. */
   keyboard: boolean;
+  /** The agents with a next task to be sent. */
+  sendable: Set<string>;
   now: number;
 }) {
   const focused = useFocusedAgent(tab, agents);
@@ -139,6 +143,7 @@ export function FocusLayout({
           unread={unread.includes(focused.paneId)}
           visible={visible}
           current={current}
+          canSend={sendable.has(focused.paneId)}
           now={now}
         />
       ) : (
@@ -172,7 +177,7 @@ export function FocusLayout({
           <section className="rail-section">
             <div className="rail-label">Idle · {idle.length}</div>
             {idle.map((a) => (
-              <IdleLine key={a.paneId} agent={a} now={now} onPick={pin} />
+              <IdleLine key={a.paneId} agent={a} canSend={sendable.has(a.paneId)} now={now} onPick={pin} />
             ))}
           </section>
         )}
@@ -190,9 +195,12 @@ function FocusedTile({
   unread,
   visible,
   current,
+  canSend,
   now,
 }: {
   agent: AgentInfo;
+  /** It has a next task to be sent. */
+  canSend: boolean;
   /** The others that need you, most urgent first. */
   waiting: AgentInfo[];
   onPin: (pane: string) => void;
@@ -231,8 +239,11 @@ function FocusedTile({
           )}
         </div>
         {status === "needsYou" && <AskingLine agent={agent} className="focus-message" />}
-        {status === "idle" && agent.sinceMs && (
-          <div className="focus-note">Idle. Its last turn ended {elapsed(agent.sinceMs, now)} ago.</div>
+        {status === "idle" && (agent.sinceMs || canSend) && (
+          <div className="focus-note">
+            {agent.sinceMs ? `Idle. Its last turn ended ${elapsed(agent.sinceMs, now)} ago. ` : "Idle. "}
+            {canSend && <SendNextTask pane={agent.paneId} label="Send next task…" />}
+          </div>
         )}
       </div>
       <div className="focus-body">
@@ -330,10 +341,12 @@ function MiniTile({
 /** An idle agent on the rail, in one line. Clicking it pins it large. */
 function IdleLine({
   agent,
+  canSend,
   now,
   onPick,
 }: {
   agent: AgentInfo;
+  canSend: boolean;
   now: number;
   onPick: (pane: string) => void;
 }) {
@@ -342,6 +355,7 @@ function IdleLine({
       <StatusMark status="idle" small />
       <span className="idle-name">{agentLabel(agent)}</span>
       <span className="idle-task">{agent.topic ?? ""}</span>
+      {canSend && <SendNextTask pane={agent.paneId} label="Send task" />}
       {agent.sinceMs && <span className="idle-elapsed">{elapsed(agent.sinceMs, now)}</span>}
     </div>
   );

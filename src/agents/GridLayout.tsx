@@ -17,6 +17,7 @@ import { SubagentSheet } from "./SubagentSheet";
 import { elapsed } from "./time";
 import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
+import { SendNextTask } from "./SendNextTask";
 
 /** Columns and rows of a page, fixed by its size so tiles keep theirs as
  *  agents come and go. */
@@ -36,6 +37,7 @@ export function GridLayout({
   current,
   keyboard,
   handover,
+  sendable,
   now,
 }: {
   tab: TabSnapshot;
@@ -48,6 +50,8 @@ export function GridLayout({
   keyboard: boolean;
   /** The agent that held the keyboard in Focus, to keep it here. */
   handover: React.MutableRefObject<string | null>;
+  /** The agents with a next task to be sent. */
+  sendable: Set<string>;
   now: number;
 }) {
   const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
@@ -121,6 +125,7 @@ export function GridLayout({
             unread={unread.includes(a.paneId)}
             visible={visible}
             current={current}
+            canSend={sendable.has(a.paneId)}
             now={now}
           />
         ))}
@@ -145,6 +150,7 @@ function GridTile({
   unread,
   visible,
   current,
+  canSend,
   now,
 }: {
   tab: TabSnapshot;
@@ -152,6 +158,8 @@ function GridTile({
   unread: boolean;
   visible: boolean;
   current: boolean;
+  /** It has a next task to be sent. */
+  canSend: boolean;
   now: number;
 }) {
   const pane = agent.paneId;
@@ -184,7 +192,12 @@ function GridTile({
         {status === "needsYou" ? (
           <AskingLine agent={agent} className="grid-tile-ask" />
         ) : status === "idle" ? (
-          agent.topic && <div className="grid-tile-task">Last: {agent.topic}</div>
+          (agent.topic || canSend) && (
+            <div className="grid-tile-task">
+              {agent.topic ? `Last: ${agent.topic} ` : ""}
+              {canSend && <SendNextTask pane={agent.paneId} label="Send next task…" />}
+            </div>
+          )
         ) : (
           task && <div className="grid-tile-task">Task: {task}</div>
         )}

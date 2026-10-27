@@ -7,9 +7,10 @@ import {
   WallMode,
   TabSnapshot,
   WallView,
+  taskCards,
 } from "../bindings";
 import { useNow } from "./time";
-import { TaskBoard } from "./TaskBoard";
+import { NO_CARDS, TaskBoard, useLogRead } from "./TaskBoard";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore, WallFilter } from "../state/uiStore";
 import { useConfigStore } from "../state/configStore";
@@ -156,6 +157,17 @@ export const AgentWall = memo(function AgentWall({
   }, [snapshot, shown, tabId]);
   const filter = useUiStore((s) => s.wallFilter[tabId] ?? "all");
 
+  // The tab's cards, once for the wall and only while its agents are on
+  // screen: which idle agent has a next task to be sent — an open To do
+  // card of its own, or one of the tab's for no one.
+  const agentsShown = visible && (shown?.wallView ?? "agents") === "agents";
+  const cards = useLogRead(agentsShown, agentsShown ? tabId : "", (k) => taskCards(k), NO_CARDS);
+  const sendable = useMemo(() => {
+    const todo = cards.filter((c) => c.column === "todo");
+    const anyone = todo.some((c) => !c.pane);
+    return new Set(agents.filter((a) => anyone || todo.some((c) => c.pane === a.paneId)).map((a) => a.paneId));
+  }, [cards, agents]);
+
   // Its tiles, or the tab's task board in their place. On the Tasks side
   // no tile is mounted, so each lent terminal has gone back to its own
   // pane under the wall, and the Agents side borrows them again.
@@ -229,6 +241,7 @@ export const AgentWall = memo(function AgentWall({
           visible={visible}
           current={current}
           keyboard={keyboard}
+          sendable={sendable}
           now={now}
         />
       ) : (
@@ -242,6 +255,7 @@ export const AgentWall = memo(function AgentWall({
             current={current}
             keyboard={keyboard}
             handover={handover}
+            sendable={sendable}
             now={now}
           />
         )

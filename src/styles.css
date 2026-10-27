@@ -3370,6 +3370,36 @@ body,
   }
 }
 
+/* Send next task…: a link, dimmed once sent until the agent is seen at
+   work; a refusal says why in its place for a moment. */
+.send-next {
+  flex-shrink: 0;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.send-next:hover {
+  color: #b4befe;
+}
+
+.send-next.sent {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.send-next-error {
+  flex-shrink: 1;
+  min-width: 0;
+  color: var(--danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* What a waiting agent asks for, on one line wherever it shows: the
    tool, then its command or path in monospace, cut off with an ellipsis. */
 .asking-line {
