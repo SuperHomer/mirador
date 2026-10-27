@@ -329,9 +329,13 @@ graph a split beside the focused pane. Three keys change that, each
 
 Any other value is ignored for the default (`editorOpensIn` `"tab"`, the
 other two `"split"`), and an edit applies at once. In a tab, the editor or
-a graph already open on the same repository is shown again instead of a
-second one; a diff always opens a new pane, and so does a split. The
-`mira` commands keep their own `--tab` flag and ignore these keys.
+a graph already open on the same repository (for the editor outside a
+repository, the same directory) is shown again instead of a second one; a
+diff always opens a new pane, and so does a split. The `mira` commands
+ignore these keys and keep their own `--tab` flag — which reuses the same
+way: `mira graph --tab` and `mira agent edit --tab` focus the graph or
+editor already open on that repository and print its pane, and open one
+only when there is none.
 
 ## Agent roles and the agent wall
 
@@ -425,7 +429,8 @@ your own. Codex roles cannot be limited yet: a Codex role with any of
 these fields does not start.
 
 **Edit them in the app:** *Agents: Edit Roles, Ways & Teams* in the palette (or
-`mira agent edit`) opens a pane beside the one you are in, listing every
+`mira agent edit`) opens a pane — from the app in a tab of its own (see
+`editorOpensIn`), from `mira agent edit` beside the pane it ran in — listing every
 role, way of working and team its directory sees — marked `repo`, `yours`
 or `mirador.json` — with what is wrong with any of them. Pick one to edit
 its file; `+` starts a new one from a template, in the repository or in

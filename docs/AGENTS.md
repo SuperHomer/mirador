@@ -218,19 +218,22 @@ transcript.
 
 ```bash
 mira graph                     # the commit graph, in a reviewable pane
-mira graph --tab               # new tab instead of a split
+mira graph --tab               # in a tab: this repository's graph, if one is open, else a new tab
 ```
 
 The graph pane draws every ref's history with branch lines, and clicking a
 commit opens its diff — it keeps one diff pane and retargets it, so walking
 history does not bury the graph under a pane per commit. Like `mira diff`,
 it takes the repository from the pane it ran in and refuses outside one.
+With `--tab`, a graph of the same repository already open in some tab is
+focused and its pane id printed, rather than a second one opened; without
+it, a graph always opens as a split beside your pane.
 
 ## 6. Agents with roles, and the wall
 
 ```bash
 mira agent roles                              # the roles and ways this directory sees
-mira agent edit [--tab]                       # a pane to edit them, and teams
+mira agent edit [--tab]                       # a pane to edit them, and teams; --tab shows the one open on this repository (outside one, this directory)
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent new --harness codex "fix the flaky test"   # plain codex, beside this one

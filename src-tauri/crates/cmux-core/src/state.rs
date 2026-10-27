@@ -903,12 +903,50 @@ fn abbreviate_home(path: &str) -> String {
     path.to_string()
 }
 
+/// Whether two panes show the same files — what decides whether an open
+/// graph or editor is shown again rather than another opened: the same
+/// repository when both are in one, compared after resolving the paths so
+/// that two spellings of one directory agree; the same directory when
+/// neither is in one; and never when only one is, whatever its directory.
+pub fn same_place(a_root: Option<&str>, a_cwd: Option<&str>, b_root: Option<&str>, b_cwd: Option<&str>) -> bool {
+    let real = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| std::path::PathBuf::from(p));
+    match (a_root, b_root) {
+        (Some(a), Some(b)) => real(a) == real(b),
+        (None, None) => matches!((a_cwd, b_cwd), (Some(a), Some(b)) if real(a) == real(b)),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
         crate::agents::RunningAgent { harness, pid: 42, args: args.into() }
+    }
+
+    #[test]
+    fn panes_show_the_same_files_by_repository_else_by_directory() {
+        let root = std::env::temp_dir().join(format!("mira-same-place-{}", std::process::id()));
+        let (repo, other, plain) = (root.join("repo"), root.join("other"), root.join("plain"));
+        for d in [&repo, &other, &plain] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        let spelled = s(&repo.join("..").join("repo").join("."));
+        // One repository, spelled two ways; another one.
+        assert!(same_place(Some(&s(&repo)), None, Some(&spelled), None));
+        assert!(!same_place(Some(&s(&repo)), None, Some(&s(&other)), None));
+        // Only one side in a repository: not the same, even in one directory.
+        assert!(!same_place(Some(&s(&repo)), Some(&s(&repo)), None, Some(&s(&repo))));
+        assert!(!same_place(None, Some(&s(&repo)), Some(&s(&repo)), Some(&s(&repo))));
+        // Neither in one: the directory decides; none known is not the same.
+        assert!(same_place(None, Some(&s(&plain)), None, Some(&s(&plain.join(".")))));
+        assert!(!same_place(None, Some(&s(&plain)), None, Some(&s(&other))));
+        assert!(!same_place(None, None, None, None));
+        // A path that cannot be resolved is compared as written.
+        assert!(same_place(Some("/no/such/repo"), None, Some("/no/such/repo"), None));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

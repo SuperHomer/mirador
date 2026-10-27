@@ -1486,7 +1486,10 @@ pub fn open_graph(
         let mut ws = state.workspace.lock().unwrap();
         let existing = {
             let meta = state.meta.lock().unwrap();
-            ws.find_pane(|p| meta.get(p).and_then(|m| m.graph_repo.as_deref()) == Some(repo.as_str()))
+            ws.find_pane(|p| {
+                let graph = meta.get(p).and_then(|m| m.graph_repo.as_deref());
+                graph.is_some_and(|g| cmux_core::state::same_place(Some(&repo), None, Some(g), None))
+            })
         };
         if let Some(pane) = existing {
             ws.focus_pane(&pane);

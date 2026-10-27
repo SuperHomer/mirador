@@ -43,10 +43,12 @@ pub fn open_agent_editor(
             ws.find_pane(|p| {
                 meta.get(p).is_some_and(|m| {
                     m.agent_editor
-                        && match (&repo_root, &m.repo_root) {
-                            (Some(a), Some(b)) => a == b,
-                            _ => m.cwd == cwd,
-                        }
+                        && cmux_core::state::same_place(
+                            repo_root.as_deref(),
+                            cwd.as_deref(),
+                            m.repo_root.as_deref(),
+                            m.cwd.as_deref(),
+                        )
                 })
             })
         };
