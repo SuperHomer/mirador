@@ -1,8 +1,10 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView } from "../bindings";
+import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView, tabAgents } from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { useConfigStore } from "../state/configStore";
+import { StatusPips } from "../agents/StatusMark";
 import { arrangeBoard, atFullSize, fitBoard, panToCard, takesPointer, useBoardStore } from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
@@ -545,6 +547,20 @@ export function TabLayer({
   const at = held ?? tab.frame;
   // Where the "+" that opened the menu is on screen, while it is open.
   const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
+  // The snapshot, not a list made from it: a selector that builds a new
+  // array each time never settles.
+  const snapshot = useWorkspaceStore((s) => s.snapshot);
+  const agents = snapshot ? tabAgents(snapshot, tab.id) : [];
+  const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
+  // What the frame shows, as its tab would.
+  const view = !tab.wall
+    ? "Splits"
+    : tab.wallView === "tasks"
+      ? "Wall · Tasks"
+      : tab.wallMode === "grid"
+        ? `Wall · Grid · ${perTab} per tab`
+        : "Wall · Focus";
+  const waiting = agents.some((a) => a.status === "needsYou");
 
   const drag = (e: React.PointerEvent) => {
     let to = { x: tab.frame.x, y: tab.frame.y };
@@ -565,7 +581,7 @@ export function TabLayer({
 
   return (
     <div
-      className={`tab-layer${current ? " current" : ""}${held ? " dragging" : ""}`}
+      className={`tab-layer${current ? " current" : ""}${board && waiting ? " needs-you" : ""}${held ? " dragging" : ""}`}
       style={
         board
           ? { left: at.x, top: at.y, width: tab.frame.w, height: tab.frame.h }
@@ -575,6 +591,8 @@ export function TabLayer({
       {board && (
         <div className="frame-label" onPointerDown={drag}>
           <span className="frame-title">{tab.title}</span>
+          <StatusPips agents={agents} />
+          <span className="frame-view">{view}</span>
           <button
             className="frame-button"
             data-frame-menu

@@ -1,4 +1,4 @@
-import { AgentStatus } from "../bindings";
+import { AgentInfo, AgentStatus } from "../bindings";
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   working: "working",
@@ -26,6 +26,19 @@ export function StatusMark({ status, small }: Props & { small?: boolean }) {
       title={label}
     >
       {status === "needsYou" ? "!" : null}
+    </span>
+  );
+}
+
+/** A pip per agent, in order: a tab's agents at a glance, in the sidebar
+ *  and on its board frame. Nothing for none. */
+export function StatusPips({ agents }: { agents: AgentInfo[] }) {
+  if (agents.length === 0) return null;
+  return (
+    <span className="tab-pips">
+      {agents.map((a) => (
+        <StatusPip key={a.paneId} status={a.status} />
+      ))}
     </span>
   );
 }

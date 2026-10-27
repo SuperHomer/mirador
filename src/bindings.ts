@@ -277,6 +277,11 @@ export const HARNESS_LABEL: Record<Harness, string> = {
 export const agentLabel = (a: AgentInfo): string =>
   a.member ?? a.name ?? a.role ?? HARNESS_LABEL[a.harness];
 
+/** The agents of tab `tabId`, in the snapshot's order: the sidebar's pips
+ *  for it, and its frame's on the board. */
+export const tabAgents = (s: WorkspaceSnapshot, tabId: string): AgentInfo[] =>
+  s.agents.filter((a) => a.tabId === tabId);
+
 /** The agents waiting on you — the Inbox's cards and the count on its
  *  button — tabs in sidebar order, each tab's in its wall's order. */
 export const waitingAgents = (s: WorkspaceSnapshot): AgentInfo[] =>

@@ -13,13 +13,14 @@ import {
   renameTab,
   setView,
   setWallView,
+  tabAgents,
   toggleAgentWall,
   waitingAgents,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
 import { useConfigStore } from "../state/configStore";
-import { STATUS_LABEL, StatusMark, StatusPip } from "../agents/StatusMark";
+import { STATUS_LABEL, StatusMark, StatusPips } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
 import { AskingLine } from "../agents/AskingLine";
 import { showOnWall } from "../agents/showOnWall";
@@ -49,7 +50,7 @@ export function Sidebar() {
         {/* Tabs, numbered for the tab shortcuts. The current tab's agents
             hang under its row; any other tab shows a pip per agent. */}
         {snapshot.tabs.map((tab, i) => {
-          const agents = snapshot.agents.filter((a) => a.tabId === tab.id);
+          const agents = tabAgents(snapshot, tab.id);
           const current = tab.id === currentTab;
           return (
             <div key={tab.id} className="sidebar-tab">
@@ -408,13 +409,7 @@ function TabRow({
           </span>
         )}
       </div>
-      {pips.length > 0 && (
-        <span className="tab-pips">
-          {pips.map((a) => (
-            <StatusPip key={a.paneId} status={a.status} />
-          ))}
-        </span>
-      )}
+      <StatusPips agents={pips} />
       {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
       <CloseTab tabId={tab.id} />
     </div>

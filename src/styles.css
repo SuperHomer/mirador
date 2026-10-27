@@ -585,6 +585,11 @@ body,
   border-color: var(--muted);
 }
 
+/* An agent in it waits on you: that wins over being the current one. */
+.tabs-host.board .tab-layer.needs-you {
+  border-color: var(--status-needs-you);
+}
+
 /* The frame's title bar: its label, and the handle that moves it. */
 .frame-label {
   position: absolute;
@@ -606,12 +611,29 @@ body,
   cursor: move;
 }
 
+/* The title gives way first; its pips and view keep their room, and the
+   buttons sit at the far end. */
 .frame-title {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.frame-label .tab-pips {
+  margin-left: 6px;
+  max-width: none;
+  flex-wrap: nowrap;
+}
+
+.frame-view {
+  flex-shrink: 0;
+  margin: 0 auto 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .frame-button,
