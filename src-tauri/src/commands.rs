@@ -1115,10 +1115,12 @@ fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<Str
         return;
     }
     let last = last.unwrap_or_default();
+    // Said in the body too: an agent's notification is titled with the
+    // agent and its tab, and that title replaces this one.
     let body = if count == 1 {
-        last
+        format!("While Mirador was closed: {last}")
     } else {
-        format!("{count} notifications — the last: {last}")
+        format!("While Mirador was closed: {count} notifications — the last: {last}")
     };
     notify::handle_notification(app, pane_id, Some("While Mirador was closed".into()), body);
 }
