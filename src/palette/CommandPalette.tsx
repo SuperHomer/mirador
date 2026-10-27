@@ -51,7 +51,31 @@ interface Step {
   entries: Entry[];
 }
 
-type Row = { kind: "entry"; entry: Entry } | { kind: "step"; step: Step };
+/** `key` tells apart a row shown twice: once in RECENT, once in its group. */
+type Row = { kind: "entry"; entry: Entry; key?: string } | { kind: "step"; step: Step };
+
+/** The commands last run from the palette, newest first, by entry id. */
+const RECENT_KEY = "mirador.palette.recent";
+const RECENT_MAX = 5;
+
+// The webview's storage can throw (or be empty): the palette works without.
+function readRecent(): string[] {
+  try {
+    const ids: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecent(id: string) {
+  try {
+    const ids = [id, ...readRecent().filter((r) => r !== id)].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(ids));
+  } catch {
+    // Not remembered; nothing else depends on it.
+  }
+}
 
 /** The groups an empty query lists, in order. */
 const GROUPS: [ActionGroup, string][] = [
@@ -70,7 +94,7 @@ interface Section {
 }
 
 const rowId = (r: Row) =>
-  r.kind === "entry" ? r.entry.id : `step:${r.step.id}`;
+  r.kind === "entry" ? (r.key ?? r.entry.id) : `step:${r.step.id}`;
 
 /** Subsequence fuzzy match; higher is better, null = no match. */
 function fuzzyScore(query: string, text: string): number | null {
@@ -107,6 +131,7 @@ export function CommandPalette() {
   const [hosts, setHosts] = useState<string[]>([]);
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [teams, setTeams] = useState<AgentTeam[]>([]);
+  const [recent, setRecent] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // The step open, if any: its entries replace the top level.
@@ -258,14 +283,25 @@ export function CommandPalette() {
       return [{ label: null, rows }];
     }
     if (!query) {
-      // Each group's steps, then its commands, in the actions' order.
-      return GROUPS.map(([group, label]) => ({
+      // What was run last, when it can still run: a step's entry by the
+      // name it has from the top ("New Agent › reviewer").
+      const runnable = new Map<string, Entry>(entries.map((e) => [e.id, e]));
+      for (const st of steps) {
+        for (const e of st.entries) runnable.set(e.id, { ...e, title: `${st.crumb} › ${e.title}` });
+      }
+      const recentRows: Row[] = recent.flatMap((id) => {
+        const entry = runnable.get(id);
+        return entry ? [{ kind: "entry" as const, entry, key: `recent:${id}` }] : [];
+      });
+      // Then each group's steps and commands, in the actions' order.
+      const groups = GROUPS.map(([group, label]) => ({
         label,
         rows: [
           ...steps.filter((st) => st.group === group).map((st) => ({ kind: "step" as const, step: st })),
           ...entries.filter((e) => e.group === group).map((entry) => ({ kind: "entry" as const, entry })),
         ],
-      })).filter((sec) => sec.rows.length > 0);
+      }));
+      return [{ label: "RECENT", rows: recentRows }, ...groups].filter((sec) => sec.rows.length > 0);
     }
     const top: Row[] = rank<Row>(
       [
@@ -284,7 +320,7 @@ export function CommandPalette() {
       })),
     );
     return [{ label: null, rows: [...top, ...deep] }];
-  }, [entries, steps, step, query]);
+  }, [entries, steps, step, query, recent]);
   // The rows in the order shown, which the arrow keys walk.
   const filtered = useMemo(() => sections.flatMap((sec) => sec.rows), [sections]);
   const found = filtered.findIndex((r) => rowId(r) === selectedId);
@@ -310,6 +346,7 @@ export function CommandPalette() {
           setTeams([]);
         });
       setQuery("");
+      setRecent(readRecent());
       lastIndex.current = 0;
       setSelectedId(null);
       // Opened on a step (the wall's "Start a team…"), else the top level.
@@ -354,6 +391,9 @@ export function CommandPalette() {
       enter(row.step);
       return;
     }
+    // By the id it has inside its step, so a deep entry and the same
+    // entry picked in its step are one recent command.
+    rememberRecent(row.entry.id.replace(/^deep:/, ""));
     close();
     row.entry.run();
   };
