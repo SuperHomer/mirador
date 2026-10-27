@@ -783,6 +783,7 @@ function Card({
   const { activity } = useAgentActivity(card.pane, live && asking && !compact && !!agent?.hasActivity);
   const tasks = activity?.session.tasks ?? null;
   const variant = (asking ? " needs-you" : unassigned ? " unassigned" : "") + (compact ? " compact" : "");
+  const description = shownDescription(card.title, card.description);
   return (
     <div className={`tb-card${variant}`}>
       <button
@@ -792,13 +793,10 @@ function Card({
       >
         {card.title}
       </button>
-      {card.description && (
-        <button
-          className={`tb-description${full ? " full" : ""}`}
-          title={full ? "Show less" : "Show all of it"}
-          onClick={() => setFull((f) => !f)}
-        >
-          {card.description}
+      {description && (
+        <button className="tb-description-toggle" title={card.description ?? undefined} onClick={() => setFull((f) => !f)}>
+          {/* The clamp is on the text: WebKit does not clamp a button. */}
+          <span className={`tb-description${full ? " full" : ""}`}>{description}</span>
         </button>
       )}
       {/* Compact, what it waits on in one line, in place of the box. */}
@@ -868,6 +866,18 @@ function Card({
       )}
     </div>
   );
+}
+
+/** A card's description as the card shows it. A title made from a task's
+ *  first words (cut short with "…") is how its description begins, so the
+ *  card shows only what follows, after "…" — nothing when that is all. */
+function shownDescription(title: string, description: string | null): string | null {
+  if (!description) return null;
+  const head = title.replace(/…$/, "").trim();
+  const text = description.trim();
+  if (!head || !text.startsWith(head)) return description;
+  const rest = text.slice(head.length).trimStart();
+  return rest ? `…${rest}` : null;
 }
 
 /** Assign ▾: sends a card written for no one to one of the tab's agents —
