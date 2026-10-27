@@ -4291,28 +4291,174 @@ button.tb-assignee:hover {
   padding: 6px 10px;
 }
 
+/* The History view's chips, agent picker and search. */
+.tb-history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tb-chip.needs-you {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
+}
+
+.tb-history-search {
+  margin-left: auto;
+  width: 160px;
+  min-width: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+
+.tb-history-search:focus {
+  border-color: var(--accent);
+}
+
+.tb-history-day {
+  margin: 10px 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tb-history-foot {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tb-history-older {
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tb-history-older:hover {
+  color: #b4befe;
+}
+
 .tb-lines {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.5;
 }
 
 .tb-line {
-  display: block;
-  color: var(--subtext);
-  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
-.tb-line summary {
+/* Time, who to whom, kind, what. */
+.tb-line-row {
+  display: grid;
+  grid-template-columns: 52px 150px 92px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  text-align: left;
+  min-width: 0;
+}
+
+button.tb-line-row {
   cursor: pointer;
 }
 
-.tb-line.turnEnded,
-.tb-line.resumed,
-.tb-line.moved {
+button.tb-line-row:hover {
+  background: var(--tint-hover);
+}
+
+/* A card's narrow history: the time, then the rest wrapping under it. */
+.tb-lines.compact .tb-line-row {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.tb-lines.compact .tb-line-who,
+.tb-lines.compact .tb-kind,
+.tb-lines.compact .tb-line-text {
+  grid-column: 2;
+}
+
+.tb-lines.compact .tb-kind {
+  justify-self: start;
+}
+
+.tb-line-time {
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-line-who,
+.tb-line-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-line-who {
+  color: var(--text);
+}
+
+.tb-kind {
+  justify-self: start;
+  padding: 0 7px;
+  border: 1px solid var(--muted);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.tb-kind.message {
+  border-color: var(--status-working);
+  color: var(--status-working);
+}
+
+.tb-kind.needs-you {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
+}
+
+.tb-kind.moved {
+  border-color: var(--subtext);
+  color: var(--subtext);
+}
+
+.tb-kind.resumed {
+  border-color: var(--status-idle);
+  color: var(--status-idle);
+}
+
+/* A message's whole text, under its line. */
+.tb-line-full {
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tb-when {

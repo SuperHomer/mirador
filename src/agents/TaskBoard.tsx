@@ -244,7 +244,7 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
           <Empty />
         ) : (
           <div className="tb-history">
-            <HistoryLines entries={[...history].reverse()} now={now} />
+            <HistoryView entries={history} now={now} />
           </div>
         )
       ) : cards.length === 0 && layout === "columns" ? (
@@ -863,7 +863,7 @@ function Card({
       </div>
       {open && (
         <div className="tb-card-history">
-          <HistoryLines entries={history} now={now} />
+          <HistoryLines entries={history} now={now} compact />
         </div>
       )}
     </div>
@@ -1150,7 +1150,7 @@ function Timeline({
       </div>
       {cardHistoryOpen && card && (
         <div className="tb-card-history tb-trail-card-history">
-          <HistoryLines entries={cardHistory} now={now} />
+          <HistoryLines entries={cardHistory} now={now} compact />
         </div>
       )}
       <ol className="tb-turns">
@@ -1396,41 +1396,218 @@ function useWindowVisible(): boolean {
   return visible;
 }
 
+/** What a line of the log is, as its pill says. */
+type HistoryKind = "message" | "needs you" | "moved" | "turn ended" | "resumed";
+
+/** The kind of `e`: a task given is a message; a turn that stopped to ask
+ *  a person, or a card moved into Needs you, is a needs you. */
+function historyKind(e: TaskHistoryEntry): HistoryKind {
+  switch (e.kind) {
+    case "given":
+      return "message";
+    case "moved":
+      return e.column === "needsYou" ? "needs you" : "moved";
+    case "turnEnded":
+      return e.end === "needsYou" ? "needs you" : "turn ended";
+    case "resumed":
+      return "resumed";
+  }
+}
+
+const COLUMN_NAME: Record<TaskColumn, string> = {
+  todo: "To do",
+  doing: "Doing",
+  needsYou: "Needs you",
+  done: "Done",
+};
+
+/** Who and to whom: a task's sender and agent, a move's mover, a turn's
+ *  agent. */
+function historyWho(e: TaskHistoryEntry): string {
+  if (e.kind === "given") return `${e.from ?? "-"} → ${e.to ?? "no one"}`;
+  if (e.kind === "moved") return e.by ?? "-";
+  return e.agent ?? "-";
+}
+
+/** What happened, in a line. */
+function historyText(e: TaskHistoryEntry): string {
+  switch (e.kind) {
+    case "given":
+      return (e.text ?? "").split("\n").find((l) => l.trim())?.trim() ?? "";
+    case "moved":
+      return `${e.card ?? ""} → ${e.column ? COLUMN_NAME[e.column] : ""}`;
+    case "turnEnded": {
+      const how = e.end === "needsYou" ? "asked a person" : e.end === "exited" ? "exited" : "done";
+      return e.turnMs === null ? how : `${how} after ${took(e.turnMs)}`;
+    }
+    case "resumed":
+      return "back to work";
+  }
+}
+
+/** "TODAY", "YESTERDAY", or the date: the day a line is grouped under. */
+function dayLabel(ms: number, now: number): string {
+  const today = startOfDay(now);
+  if (ms >= today) return "Today";
+  if (ms >= today - 86_400_000) return "Yesterday";
+  return new Date(ms).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+type HistoryFilter = "all" | "messages" | "turns" | "moves" | "needsYou";
+
+/** How many lines the History view shows at first, and how many more each
+ *  "Load older" adds. */
+const HISTORY_PAGE = 200;
+
 /**
- * Lines of the log as `mira agent history` prints them (each entry's
- * `summary`, made in Rust); a task given opens to its whole text.
+ * The History view (21b): the log, newest first, grouped by day — every
+ * task given, card moved and turn ended — narrowed by kind, by agent and
+ * by what it says, and shown [`HISTORY_PAGE`] lines at a time.
+ */
+function HistoryView({ entries, now }: { entries: TaskHistoryEntry[]; now: number }) {
+  const [filter, setFilter] = useState<HistoryFilter>("all");
+  const [agent, setAgent] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [shown, setShown] = useState(HISTORY_PAGE);
+  const [picking, setPicking] = useState(false);
+  const closePicker = useCallback(() => setPicking(false), []);
+  const names = useMemo(() => {
+    const seen = new Set<string>();
+    for (const e of entries) {
+      for (const n of [e.from, e.to, e.by, e.agent]) if (n && n !== "you") seen.add(n);
+    }
+    return [...seen].sort();
+  }, [entries]);
+  const q = query.trim().toLowerCase();
+  const matching = [...entries].reverse().filter((e) => {
+    const kind = historyKind(e);
+    const byKind =
+      filter === "all" ||
+      (filter === "messages" && kind === "message") ||
+      (filter === "turns" && (kind === "turn ended" || kind === "resumed")) ||
+      (filter === "moves" && kind === "moved") ||
+      (filter === "needsYou" && kind === "needs you");
+    const byAgent = !agent || [e.from, e.to, e.by, e.agent].includes(agent);
+    const byText = !q || e.summary.toLowerCase().includes(q) || (e.text ?? "").toLowerCase().includes(q);
+    return byKind && byAgent && byText;
+  });
+  const page = matching.slice(0, shown);
+  // The lines under their day, in order.
+  const days: { label: string; lines: TaskHistoryEntry[] }[] = [];
+  for (const e of page) {
+    const label = dayLabel(e.atMs, now);
+    if (days[days.length - 1]?.label !== label) days.push({ label, lines: [] });
+    days[days.length - 1].lines.push(e);
+  }
+  const chips: [HistoryFilter, string][] = [
+    ["all", "All"],
+    ["messages", "Messages"],
+    ["turns", "Turns"],
+    ["moves", "Moves"],
+    ["needsYou", "Needs you"],
+  ];
+  return (
+    <div className="tb-history">
+      <div className="tb-history-filters">
+        {chips.map(([id, label]) => (
+          <button
+            key={id}
+            className={`tb-chip${id === "needsYou" ? " needs-you" : ""}${filter === id ? " selected" : ""}`}
+            onClick={() => setFilter(id)}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="tb-popover-anchor">
+          <button className="tb-scope" onClick={() => setPicking((o) => !o)}>
+            Agent: {agent ?? "all"} ▾
+          </button>
+          {picking && (
+            <PickList
+              items={[{ key: "", label: "all" }, ...names.map((n) => ({ key: n, label: n }))]}
+              empty="No agents in the log."
+              error={null}
+              onPick={(key) => {
+                setAgent(key || null);
+                closePicker();
+              }}
+              onClose={closePicker}
+            />
+          )}
+        </span>
+        <input
+          className="tb-history-search"
+          type="search"
+          placeholder="Search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      {days.length === 0 ? (
+        <p className="tb-reason">Nothing matches.</p>
+      ) : (
+        days.map((day) => (
+          <section key={day.label}>
+            <h4 className="tb-history-day">{day.label}</h4>
+            <HistoryLines entries={day.lines} now={now} />
+          </section>
+        ))
+      )}
+      <div className="tb-history-foot">
+        Kept 30 days
+        {matching.length > shown && (
+          <>
+            {" · "}
+            <button className="tb-history-older" onClick={() => setShown((n) => n + HISTORY_PAGE)}>
+              Load older
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Lines of the log, in the order given: time, who to whom, a kind pill and
+ * what happened in a line; a task given opens to its whole text. `compact`
+ * stacks them for a card's narrow history.
  */
 function HistoryLines({
   entries,
   now,
+  compact = false,
 }: {
   entries: TaskHistoryEntry[];
   now: number;
+  compact?: boolean;
 }) {
+  const [open, setOpen] = useState<number | null>(null);
   return (
-    <ol className="tb-lines">
+    <ol className={`tb-lines${compact ? " compact" : ""}`}>
       {entries.map((e, i) => {
-        const when = (
-          <span className="tb-when" title={new Date(e.atMs).toLocaleString()}>
-            {age(e.atMs, now)}
-          </span>
+        const kind = historyKind(e);
+        const opens = e.kind === "given" && !!e.text;
+        const row = (
+          <>
+            <span className="tb-line-time" title={`${new Date(e.atMs).toLocaleString()} · ${age(e.atMs, now)} ago`}>
+              {clock(e.atMs)}
+            </span>
+            <span className="tb-line-who">{historyWho(e)}</span>
+            <span className={`tb-kind ${kind.replace(/ /g, "-")}`}>{kind}</span>
+            <span className="tb-line-text">{historyText(e)}</span>
+          </>
         );
         return (
-          <li key={`${e.atMs}-${i}`} className={`tb-line ${e.kind}`}>
-            {e.kind === "given" && e.text ? (
-              <details>
-                <summary>
-                  {when}
-                  <span className="tb-what">{e.summary}</span>
-                </summary>
-                <pre className="tb-text">{e.text}</pre>
-              </details>
+          <li key={`${e.atMs}-${i}`} className="tb-line">
+            {opens ? (
+              <button className="tb-line-row" onClick={() => setOpen((o) => (o === i ? null : i))}>
+                {row}
+              </button>
             ) : (
-              <>
-                {when}
-                <span className="tb-what">{e.summary}</span>
-              </>
+              <div className="tb-line-row">{row}</div>
             )}
+            {opens && open === i && <pre className="tb-line-full">{e.text}</pre>}
           </li>
         );
       })}

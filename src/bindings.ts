@@ -438,6 +438,14 @@ export interface TaskHistoryEntry {
   card?: string;
   /** A task given: its whole text. */
   text?: string;
+  /** A task given: who gave it (`you` for a person), and to whom. */
+  from?: string;
+  to?: string | null;
+  /** A move: the column, and who made it. */
+  column?: TaskColumn;
+  by?: string;
+  /** A turn end: how it ended. */
+  end?: "done" | "needsYou" | "exited";
   agent: string | null;
   turnMs: number | null;
   summary: string;
