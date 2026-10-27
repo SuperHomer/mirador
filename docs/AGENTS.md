@@ -31,7 +31,7 @@ mira hooks remove     # uninstall
 ```
 
 Mirador offers this on first launch when it finds `~/.claude` (once — "Not
-now" is remembered; the palette's *Set Up Claude Code Integration* runs it
+now" is remembered; the palette's *App: Set Up Claude Code Integration* runs it
 later). The hooks call `mira` by its absolute path, so they work whether or
 not `mira` is on PATH; if the app moves, the next launch points them at the
 new location.
@@ -211,7 +211,7 @@ neither has files to diff.
 Because the repository comes from the calling pane, `mira diff` refuses to
 run outside one: from another terminal it has no way to tell which repo you
 mean, and guessing would show the human someone else's work. Inside the app,
-the command palette's "New Diff Pane" is the same action.
+the command palette's "Git: New Diff Pane" is the same action.
 
 Opening one when you finish a turn beats asking the human to scroll your
 transcript.
@@ -348,7 +348,7 @@ job a `claude attach` names), whether given with `--name` or `/rename` or
 made up by Claude Code. Without one it goes by its role. The same file's
 busy/idle is the status of an agent whose hooks have not reported one.
 
-`agent activity` (or the palette's *Agent Activity* in the app) reads a Claude
+`agent activity` (or the palette's *Agents: Show Activity* in the app) reads a Claude
 Code agent's transcripts: the session's tokens, context and task list
 (`TaskCreate`/`TaskUpdate`, or `TodoWrite`), then each subagent under
 `<session>/subagents/` with its state (`running`, `done`, or `stopped`

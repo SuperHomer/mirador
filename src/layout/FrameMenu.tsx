@@ -75,8 +75,8 @@ export function FrameMenu({
     };
   }, []);
 
-  // The roles of the frame's focused pane's directory, as "New Agent…" in
-  // the palette lists them.
+  // The roles of the frame's focused pane's directory, as the palette's
+  // "Agents: New Agent…" lists them.
   useEffect(() => {
     if (!agents) return;
     let live = true;
@@ -125,7 +125,7 @@ export function FrameMenu({
       ) : (
         <>
           <button onClick={run(() => splitPane(pane, "row"))}>Terminal</button>
-          {/* As the palette's "New Browser Pane": a blank page, its URL
+          {/* As the palette's "Pane: New Browser Pane": a blank page, its URL
               typed in the pane's own bar. */}
           <button onClick={run(() => openBrowser(pane, false, "about:blank"))}>
             Browser

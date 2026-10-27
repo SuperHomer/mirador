@@ -101,7 +101,7 @@ export function useAgentActivity(pane: string | null, enabled = true) {
 }
 
 /**
- * An agent's activity, opened from the palette's Agent Activity for the
+ * An agent's activity, opened from the palette's Agents: Show Activity for the
  * focused agent: its own task list, and every subagent it started
  * with what each is on, how far through, and what it used. All of it is
  * read from the transcripts (`cmux_core::transcript`), so it says only
@@ -164,7 +164,7 @@ export function ActivityPanel() {
         ) : !agent.hasActivity ? (
           <div className="notif-empty">
             Only Claude Code and Codex agents have activity to show: Claude
-            Code once its hooks have reported its transcript (the palette's
+            Code once its hooks have reported its transcript (the palette's App:
             Set Up Claude Code Integration installs them), Codex once its
             session file is found.
           </div>

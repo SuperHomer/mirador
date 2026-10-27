@@ -96,7 +96,7 @@ downloads, the feature tour and the keybinding reference.
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself
-  once with that release's notes (`What's New` in the palette reopens it)
+  once with that release's notes (`App: What's New` in the palette reopens it)
 
 ## Install (macOS)
 
@@ -278,7 +278,7 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |
-| ⌘I | Ctrl+Shift+I | notifications panel |
+| ⌘I | Ctrl+Shift+I | Inbox |
 | ⌘B | Ctrl+Shift+B | toggle sidebar |
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
 
@@ -406,7 +406,7 @@ it shows before a project's own settings apply. Put `allow` in a role of
 your own. Codex roles cannot be limited yet: a Codex role with any of
 these fields does not start.
 
-**Edit them in the app:** *Edit Roles, Ways & Teams* in the palette (or
+**Edit them in the app:** *Agents: Edit Roles, Ways & Teams* in the palette (or
 `mira agent edit`) opens a pane beside the one you are in, listing every
 role, way of working and team its directory sees — marked `repo`, `yours`
 or `mirador.json` — with what is wrong with any of them. Pick one to edit
@@ -433,12 +433,12 @@ what the current directory sees and where each came from, and warns about
 anything it could not use: a file that does not parse, a field that is not
 one, a way nobody wrote.
 
-Each role is an entry under the palette's *New Agent…* — Enter on it
+Each role is an entry under the palette's *Agents: New Agent…* — Enter on it
 lists plain Claude Code and the roles, to search in turn (Esc or
 Backspace goes back; typing a role's name at the top finds it too, below
 the commands) — an entry in the wall's **+ Agent** menu, and a `mira
 agent new --role <role> [task…]` target — the roles of the directory you
-are in. Teams (*Start Team…*) and `~/.ssh/config` hosts (*SSH…*) are
+are in. Teams (*Agents: Start Team…*) and `~/.ssh/config` hosts (*Pane: SSH…*) are
 listed the same way. The agent opens in a pane
 beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
@@ -477,7 +477,7 @@ The planner splits the work into tasks; devs build; nothing merges
 until gate has read the diff.
 ```
 
-`mira team start squad "add OAuth"` (or the palette's *Start Team…* ›
+`mira team start squad "add OAuth"` (or the palette's *Agents: Start Team…* ›
 *squad*) opens the tab with every member in an even grid, its `⚑` mark in
 the sidebar. Each member gets its role's prompt, then the charter, the
 team's way of working, and its teammates by name with the commands that
@@ -492,7 +492,7 @@ the Rails doctrine's taste: the codebase's conventions, the simplest thing
 that works, small steps that ship with their tests, nothing pushed. The
 planner splits the task, puts each step on the task board, and hands the
 worker one step at a time (`--wait`), then asks the reviewer, who answers
-it with APPROVE or CHANGES; the planner's edit tools are off. Start it with the palette's *Start Team…* ›
+it with APPROVE or CHANGES; the planner's edit tools are off. Start it with the palette's *Agents: Start Team…* ›
 *omakase*, or `mira team start omakase "…"`. Its roles
 (`omakase-planner`, `-worker`, `-reviewer`), its way of working and the
 team are *built-in*: the same for everyone, read-only, and replaced by any
@@ -545,7 +545,7 @@ tab's agents in a grid — roles, and any agent you started by hand:
 `claude`, `codex`, `opencode`, `pi`, `gemini`, `amp`, `cursor-agent`,
 `copilot`, `aider`, `goose`, `qwen`, `crush` or `droid`, found in the
 pane's process table (macOS and Linux; on Windows only Claude Code's hooks
-make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*
+make an agent). `mod+shift+A`, the palette's *Agents: Show Wall*
 and `mira agent wall` (which prints `wall on` or `wall off`)
 each switch the current tab between the two, and so does the sidebar's
 **Splits · Wall · Tasks · Board** switch, at its top. Each tab keeps its view across restarts, and the
@@ -584,7 +584,7 @@ and time it has used, and, for Claude Code, a **Subagents** button that
 slides its subagents over the right of its terminal, which stays live
 beside it: each with its type, model, tasks done (as `n/m` and a
 percentage), tokens and run time. On the wall the agent's own task
-progress is in the tile's header. The palette's *Agent Activity* opens
+progress is in the tile's header. The palette's *Agents: Show Activity* opens
 all of it for the focused agent in a panel. It is read from Claude Code's transcripts, which the
 hooks point Mirador to, so it needs the integration set up; the CLI
 equivalent is `mira agent activity`. A Codex agent's activity is its
@@ -609,7 +609,7 @@ number beside each. At the sidebar's foot, **Inbox** counts the agents that need
 across every tab, and opens the notifications; **Commands** opens the
 palette.
 
-Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
+Any pane can be shown alone that way: *Pane: Toggle Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).
 
 Two keys in `mirador.json` shape the wall. `agentClick` is what clicking
@@ -635,7 +635,7 @@ agents keep going, and the next launch reattaches to them — the same
 processes, with what they printed while Mirador was closed.
 
 - **Closing a pane** ends it and everything in it, as before.
-- **Quit and End All Sessions** in the palette (or `mira quit --end-sessions`)
+- **App: Quit and End All Sessions** in the palette (or `mira quit --end-sessions`)
   ends every session, then quits. Cmd+Q keeps them.
 - **Notifications** raised while Mirador was closed arrive as one when it
   reopens.
@@ -661,7 +661,7 @@ stranded. Design:
 When the running version differs from the one last launched, Mirador opens a
 read-only pane with that release's notes, in a tab of its own that does
 *not* steal focus — the pane you were typing in keeps the cursor. The
-palette's **What's New** reopens it any time.
+palette's **App: What's New** reopens it any time.
 
 Notes are the GitHub release body for the running tag, fetched once and
 cached under the app's data directory, so reopening works offline. A fresh

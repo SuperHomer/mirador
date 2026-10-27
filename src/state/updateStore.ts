@@ -4,7 +4,7 @@ import { UpdateInfo } from "../bindings";
 /**
  * Outcome of the most recent *user-initiated* check. Background checks leave
  * this alone: they are allowed to find nothing silently, but a person who
- * picked "Check for Updates" is owed an answer either way.
+ * picked "App: Check for Updates…" is owed an answer either way.
  */
 export type CheckResult = null | "checking" | "uptodate" | "error";
 

@@ -27,10 +27,10 @@ interface Entry {
 }
 
 /**
- * An entry that opens a second step rather than running: "New Agent…"
- * lists the roles, "Start Team…" the teams, "SSH…" the hosts. A palette
- * with every role, team and host at the top buried its commands once
- * there were a dozen of each.
+ * An entry that opens a second step rather than running: "Agents: New
+ * Agent…" lists the roles, "Agents: Start Team…" the teams, "Pane: SSH…"
+ * the hosts. A palette with every role, team and host at the top buried
+ * its commands once there were a dozen of each.
  */
 interface Step {
   id: string;
@@ -96,11 +96,12 @@ export function CommandPalette() {
       return accel ? formatAccel(accel) : undefined;
     };
     const base: Entry[] = actions
-      // "New Agent…" is a step now, whose first entry is this action.
+      // "Agents: New Agent…" is a step now, whose first entry is this action.
       .filter((a) => a.id !== "command_palette" && a.id !== "new_agent")
       .map((a) => ({
         id: a.id,
         title: a.title,
+        hint: a.hint,
         accel: accelOf(a.id),
         run: a.run,
       }));
@@ -123,7 +124,7 @@ export function CommandPalette() {
     // are working in.
     const agents: Step = {
       id: "agent",
-      title: "New Agent…",
+      title: "Agents: New Agent…",
       hint: roles.length
         ? `Claude Code, or one of ${roles.length} ${roles.length === 1 ? "role" : "roles"}`
         : "Claude Code",
@@ -153,7 +154,7 @@ export function CommandPalette() {
     // Teams the same way, each in a tab of its own.
     const teamStep: Step = {
       id: "team",
-      title: "Start Team…",
+      title: "Agents: Start Team…",
       hint: `${teams.length} ${teams.length === 1 ? "team" : "teams"}`,
       crumb: "Start Team",
       placeholder: "Search teams…",
@@ -185,7 +186,7 @@ export function CommandPalette() {
     // ~/.ssh/config aliases.
     const ssh: Step = {
       id: "ssh",
-      title: "SSH…",
+      title: "Pane: SSH…",
       hint: `${hosts.length} ${hosts.length === 1 ? "host" : "hosts"} in ~/.ssh/config`,
       crumb: "SSH",
       placeholder: "Search hosts…",
@@ -197,8 +198,8 @@ export function CommandPalette() {
         run: () => void openSsh(null, false, host),
       })),
     };
-    // A step with nothing in it is not offered; "New Agent…" always has
-    // plain Claude Code.
+    // A step with nothing in it is not offered; "Agents: New Agent…" always
+    // has plain Claude Code.
     const steps = [agents, teamStep, ssh].filter((st) => st.entries.length > 0);
     return { entries: [...custom, ...base], steps };
   }, [customCommands, roles, teams, hosts, keybindings]);

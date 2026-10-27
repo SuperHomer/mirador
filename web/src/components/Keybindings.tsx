@@ -11,7 +11,7 @@ const KEYS: [string, string, string][] = [
   ["Focus pane by direction", "⌘⌥arrows", "Ctrl+Alt+arrows"],
   ["Jump to tab", "⌘1…9", "Alt+1…9"],
   ["Command palette", "⌘K", "Ctrl+Shift+K"],
-  ["Notifications panel", "⌘I", "Ctrl+Shift+I"],
+  ["Inbox", "⌘I", "Ctrl+Shift+I"],
   ["Toggle sidebar", "⌘B", "Ctrl+Shift+B"],
   ["Copy / paste", "⌘C · ⌘V", "Ctrl+Shift+C · Ctrl+Shift+V"],
 ];

@@ -9,8 +9,8 @@ const TRANSIENT_MS = 6000;
  * Foot of the sidebar, above the update banner. Offers the Claude Code
  * integration once — when Claude Code is used here and Mirador's hooks are
  * not installed — rather than editing another tool's settings unasked.
- * "Not now" is remembered; the palette's "Set Up Claude Code Integration"
- * runs the same setup later and answers here.
+ * "Not now" is remembered; the palette's "App: Set Up Claude Code
+ * Integration" runs the same setup later and answers here.
  */
 export function ClaudeBanner() {
   const state = useClaudeStore((s) => s.state);
@@ -52,7 +52,7 @@ export function ClaudeBanner() {
             setState("idle");
             void dismissClaudeIntegration();
           }}
-          title="The palette's “Set Up Claude Code Integration” does it later"
+          title="The palette's “App: Set Up Claude Code Integration” does it later"
         >
           Not now
         </button>
