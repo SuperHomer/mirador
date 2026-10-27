@@ -31,19 +31,22 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
   const [adding, setAdding] = useState(false);
   const snapshot = useWorkspaceStore((s) => s.snapshot);
 
-  // Where the team runs, each seat's status by its name — the seat names
-  // `teams::seats` gives: `dev` twice is `dev-1` and `dev-2`.
-  const statusOf = new Map<string, AgentStatus | null>();
+  // Where the team runs — in every tab running it — each seat's statuses
+  // by its name, the seat names `teams::seats` gives: `dev` twice is
+  // `dev-1` and `dev-2`.
+  const statusOf = new Map<string, (AgentStatus | null)[]>();
   for (const tab of snapshot?.tabs ?? []) {
     if (tab.team?.name !== name) continue;
     for (const seat of tab.team.members) {
       const agent = snapshot?.agents.find((a) => a.paneId === seat.pane);
-      if (agent) statusOf.set(seat.name, agent.status);
+      if (agent) statusOf.set(seat.name, [...(statusOf.get(seat.name) ?? []), agent.status]);
     }
   }
+  // The most urgent of a member's seats, across every run: undefined when
+  // none of them runs, null when running with no status known.
   const seatStatus = (base: string, count: number): AgentStatus | null | undefined => {
     const seats = count > 1 ? Array.from({ length: count }, (_, i) => `${base}-${i + 1}`) : [base];
-    const found = seats.filter((s) => statusOf.has(s)).map((s) => statusOf.get(s) ?? null);
+    const found = seats.flatMap((s) => statusOf.get(s) ?? []);
     if (found.length === 0) return undefined;
     return URGENCY.find((u) => found.includes(u)) ?? null;
   };
