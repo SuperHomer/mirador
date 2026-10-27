@@ -4365,7 +4365,7 @@ button.tb-assignee:hover {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
 }
 
 .tb-agents {
@@ -4399,26 +4399,6 @@ button.tb-assignee:hover {
 .tb-agent.on {
   background: var(--surface);
   color: var(--text);
-}
-
-.tb-agent-dot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-.tb-agent-dot.working {
-  background: var(--wall-working);
-}
-
-.tb-agent-dot.needsYou {
-  background: var(--wall-needs-you);
-}
-
-.tb-agent-dot.idle {
-  background: var(--wall-idle);
 }
 
 .tb-agent-name {
@@ -4504,11 +4484,133 @@ button.tb-assignee:hover {
   padding: 0;
 }
 
+/* The picked agent: its name, how it stands, its card, and the chips that
+   narrow what is shown. */
+.tb-trail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.tb-trail-name {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.tb-trail-status {
+  font-size: 11px;
+}
+
+.tb-trail-status.working {
+  color: var(--status-working);
+}
+
+.tb-trail-status.needsYou {
+  color: var(--status-needs-you);
+}
+
+.tb-trail-status.idle {
+  color: var(--status-idle);
+}
+
+.tb-trail-card {
+  min-width: 0;
+  max-width: 40%;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.tb-trail-card:hover {
+  color: #b4befe;
+}
+
+.tb-trail-card-history {
+  margin: 0 0 8px;
+}
+
+.tb-chip {
+  padding: 1px 9px;
+  border: 1px solid var(--surface);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-chip.failures {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.tb-chip.selected {
+  background: var(--surface);
+}
+
+/* A turn: a bordered block, summed up in its first line. */
 .tb-turn {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 7px;
+  min-width: 0;
+}
+
+/* The turn waiting on you. */
+.tb-turn.waiting {
+  border-color: var(--status-needs-you);
+  background: var(--tint-needs-you-panel);
+}
+
+.tb-turn-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.tb-turn-line.folded .tb-prompt {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-turn-fold {
+  flex-shrink: 0;
+}
+
+.tb-turn-summary {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-turn-summary.failed {
+  color: var(--danger);
 }
 
 .tb-turn-head {
+  margin: 4px 0;
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -4522,25 +4624,37 @@ button.tb-assignee:hover {
   color: var(--text);
 }
 
-/* Actions under their prompt, past its time. */
-.tb-actions {
-  margin-left: 3.8em;
-}
-
 .tb-action {
   --tb-action: var(--muted);
+  border-radius: 4px;
 }
 
 .tb-action.ok {
-  --tb-action: var(--wall-idle);
+  --tb-action: var(--status-idle);
 }
 
 .tb-action.error {
-  --tb-action: #f38ba8;
+  --tb-action: var(--danger);
+  background: var(--tint-error-row);
 }
 
 .tb-action.running {
-  --tb-action: var(--wall-working);
+  --tb-action: var(--status-working);
+}
+
+/* The call a waiting agent asks permission for. */
+.tb-action.asking {
+  --tb-action: var(--status-needs-you);
+}
+
+/* A failed action's output, under it without opening it. */
+.tb-action-error {
+  padding: 0 6px 5px 1.9em;
+}
+
+.tb-action-error .tb-detail-text {
+  background: var(--bg-alt);
+  max-height: 120px;
 }
 
 .tb-action-line {
@@ -4553,10 +4667,12 @@ button.tb-assignee:hover {
   background: none;
   color: var(--subtext);
   font: inherit;
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.5;
   text-align: left;
   cursor: pointer;
+  padding: 1px 6px;
+  min-width: 0;
 }
 
 .tb-action-line:hover .tb-action-summary {
@@ -4581,11 +4697,6 @@ button.tb-assignee:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.tb-action-exit {
-  flex-shrink: 0;
-  color: #f38ba8;
 }
 
 .tb-action-took {

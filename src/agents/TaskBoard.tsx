@@ -153,7 +153,8 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
   const scope = all ? "*" : tabId;
   const cards = useLogRead(
     live,
-    view === "cards" ? scope : "",
+    // The Trail view names each agent's card in Doing too.
+    view === "cards" || view === "trail" ? scope : "",
     (k) => taskCards(scopeOf(k)),
     NO_CARDS,
   );
@@ -232,6 +233,7 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
         <TrailView
           agents={agents}
           running={snapshot?.agents ?? NO_AGENTS}
+          cards={cards}
           picked={trailOf}
           onPick={(a) => setTrailOf({ pane: a.paneId, label: agentLabel(a), at: null })}
           live={live}
@@ -940,15 +942,16 @@ function PickList({
 }
 
 /**
- * The Trail view: the scope's agents, and what the picked one did, turn
- * by turn, newest first, read from its own transcript or rollout while on
- * screen — its latest [`TRAIL_TURNS`] turns, more on asking, and from a
- * card, back to that card's turn. An agent that has exited stays pickable
- * from its cards: the app keeps its last file.
+ * The Trail view (21a): the scope's agents, and what the picked one did,
+ * turn by turn, newest first, read from its own transcript or rollout
+ * while on screen — its latest [`TRAIL_TURNS`] turns, more on asking, and
+ * from a card, back to that card's turn. An agent that has exited stays
+ * pickable from its cards: the app keeps its last file.
  */
 function TrailView({
   agents,
   running,
+  cards,
   picked,
   onPick,
   live,
@@ -958,6 +961,8 @@ function TrailView({
   agents: AgentInfo[];
   /** Every agent running, in any tab. */
   running: AgentInfo[];
+  /** The scope's cards: an agent's own in Doing heads its trail. */
+  cards: TaskCard[];
   picked: { pane: string; label: string; at: number | null } | null;
   onPick: (agent: AgentInfo) => void;
   live: boolean;
@@ -971,8 +976,10 @@ function TrailView({
   const since = at === null ? null : at - GIVEN_SLACK_MS;
   const { trail, readSince } = useTrail(pane, live && windowVisible, limit, since);
   const listed = agents.some((a) => a.paneId === pane);
-  // Picked from a card: out of this scope but running, or gone.
-  const alive = running.some((a) => a.paneId === pane);
+  const agent = running.find((a) => a.paneId === pane) ?? null;
+  const name = agent ? agentLabel(agent) : (picked?.label ?? "");
+  const card = cards.find((c) => c.pane === pane && c.column === "doing") ?? null;
+  const total = trail ? trail.older + trail.gap + trail.turns.length : null;
   return (
     <div className="tb-trail">
       <ul className="tb-agents">
@@ -980,10 +987,11 @@ function TrailView({
           <li>
             <button
               className="tb-agent on"
-              title={alive ? "Its agent runs in another tab" : "Its agent is no longer running"}
+              title={agent ? "Its agent runs in another tab" : "Its agent is no longer running"}
             >
+              <StatusMark status={agent?.status ?? null} small />
               <span className="tb-agent-name">{picked.label}</span>
-              <span className="tb-agent-meta">{alive ? "other tab" : "exited"}</span>
+              <span className="tb-agent-meta">{agent ? "other tab" : "exited"}</span>
             </button>
           </li>
         )}
@@ -993,9 +1001,13 @@ function TrailView({
               className={`tb-agent${a.paneId === pane ? " on" : ""}`}
               onClick={() => onPick(a)}
             >
-              <span className={`tb-agent-dot ${a.status ?? "unknown"}`} />
+              <StatusMark status={a.status} small />
               <span className="tb-agent-name">{agentLabel(a)}</span>
-              <span className="tb-agent-meta">{HARNESS_LABEL[a.harness]}</span>
+              <span className="tb-agent-meta">
+                {a.paneId === pane && total !== null
+                  ? `${total} ${total === 1 ? "turn" : "turns"}`
+                  : HARNESS_LABEL[a.harness]}
+              </span>
             </button>
           </li>
         ))}
@@ -1008,7 +1020,16 @@ function TrailView({
         ) : (
           <>
             {/* Scrolled to a card's turn only once read back to it. */}
-            <Timeline key={pane} trail={trail} at={readSince === since ? at : null} now={now} />
+            <Timeline
+              key={pane}
+              trail={trail}
+              name={name}
+              agent={agent}
+              card={card}
+              live={live}
+              at={readSince === since ? at : null}
+              now={now}
+            />
             {trail.older + trail.gap > 0 && (
               <button className="tb-older" onClick={() => setOlder({ pane, turns: limit + TRAIL_TURNS })}>
                 Show older turns
@@ -1021,85 +1042,219 @@ function TrailView({
   );
 }
 
+type TrailFilter = "all" | "failures" | "edits";
+
+/** "14:05": the time of day a turn began. */
+function clock(ms: number | null): string {
+  if (ms === null) return "–";
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** How a turn stands: waiting on you, running, or done — only the latest
+ *  of an agent can be anything but done. */
+function turnState(latest: boolean, agent: AgentInfo | null): "waiting on you" | "running" | "done" {
+  if (!latest) return "done";
+  if (agent?.status === "needsYou") return "waiting on you";
+  if (agent?.status === "working") return "running";
+  return "done";
+}
+
 /**
- * Turns, newest first, each with its actions in order; one action open at
- * a time, its detail read when opened. Opened from a card, it scrolls once
- * to that card's turn: the first to begin after the card was given.
+ * The picked agent's trail: who it is, its card in Doing, and chips to
+ * narrow the actions shown to failures or edits; then its turns, newest
+ * first, each summed up in a line, the latest open and the rest folded.
+ * Opened from a card, it opens and scrolls once to that card's turn: the
+ * first to begin after the card was given.
  */
 function Timeline({
   trail,
+  name,
+  agent,
+  card,
+  live,
   at,
   now,
 }: {
   trail: AgentTrail;
+  name: string;
+  agent: AgentInfo | null;
+  card: TaskCard | null;
+  live: boolean;
   at: number | null;
   now: number;
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [filter, setFilter] = useState<TrailFilter>("all");
+  const [cardHistoryOpen, setCardHistoryOpen] = useState(false);
+  const cardHistory = useLogRead(
+    live,
+    cardHistoryOpen && card ? card.id : "",
+    (id) => taskHistory(null, id),
+    NO_HISTORY,
+  );
   const target = useRef<HTMLLIElement>(null);
   // The card it last scrolled to: once per link, not on every read.
   const scrolledTo = useRef<number | null>(null);
   const turns = trail.turns;
+  const latest = turns.length - 1;
   const after = at === null ? -1 : turns.findIndex((t) => t.startedMs !== null && t.startedMs >= at - GIVEN_SLACK_MS);
   // No turn begun since yet: the latest, where its turn will come.
-  const goal = at !== null && after === -1 ? turns.length - 1 : after;
+  const goal = at !== null && after === -1 ? latest : after;
+  // Turns opened or folded by hand, by index; the latest and a card's
+  // own start open.
+  const [toggled, setToggled] = useState<Map<number, boolean>>(new Map());
+  const isOpen = (i: number) => toggled.get(i) ?? (i === latest || i === goal);
   useEffect(() => {
     if (at === null || scrolledTo.current === at) return;
     target.current?.scrollIntoView({ block: "start" });
     scrolledTo.current = at;
   }, [at, trail]);
+  const all = turns.flatMap((t) => t.actions);
+  const failures = all.filter((a) => a.status === "error").length;
+  const edits = all.filter((a) => a.kind === "edit").length;
+  const shows = (a: TrailAction) =>
+    filter === "all" || (filter === "failures" ? a.status === "error" : a.kind === "edit");
+  // The turn's number among all the agent's: those not read come first,
+  // and a card's gap after the first one shown.
+  const number = (i: number) => trail.older + i + 1 + (trail.gap > 0 && i > 0 ? trail.gap : 0);
   return (
-    <ol className="tb-turns">
-      {turns
-        .map((turn, i) => ({ turn, i }))
-        .reverse()
-        .map(({ turn, i }) => (
-          <li key={`${turn.startedMs}-${i}`} ref={i === goal ? target : undefined} className="tb-turn">
-            {i === 0 && trail.gap > 0 && (
-              <p className="tb-gap">
-                {trail.gap} {trail.gap === 1 ? "turn" : "turns"} not shown
-              </p>
-            )}
-            <TurnHead turn={turn} now={now} />
-            <ol className="tb-actions">
-              {turn.actions.map((a) => (
-                <ActionLine
-                  key={a.id}
-                  pane={trail.paneId}
-                  action={a}
-                  open={open === a.id}
-                  onToggle={() => setOpen((o) => (o === a.id ? null : a.id))}
-                />
-              ))}
-            </ol>
-          </li>
+    <>
+      <div className="tb-trail-head">
+        <span className="tb-trail-name">{name}</span>
+        {agent?.status && (
+          <span className={`tb-trail-status ${agent.status}`}>{STATUS_LABEL[agent.status]}</span>
+        )}
+        {card && (
+          <button className="tb-trail-card" title="Its history" onClick={() => setCardHistoryOpen((o) => !o)}>
+            Card: {card.title}
+          </button>
+        )}
+        <span className="tb-toolbar-spacer" />
+        {(
+          [
+            ["all", "All", null],
+            ["failures", "Failures", failures],
+            ["edits", "Edits", edits],
+          ] as [TrailFilter, string, number | null][]
+        ).map(([id, label, n]) => (
+          <button
+            key={id}
+            className={`tb-chip ${id}${filter === id ? " selected" : ""}`}
+            onClick={() => setFilter(id)}
+          >
+            {label}
+            {n !== null ? ` ${n}` : ""}
+          </button>
         ))}
-    </ol>
+      </div>
+      {cardHistoryOpen && card && (
+        <div className="tb-card-history tb-trail-card-history">
+          <HistoryLines entries={cardHistory} now={now} />
+        </div>
+      )}
+      <ol className="tb-turns">
+        {turns
+          .map((turn, i) => ({ turn, i }))
+          .reverse()
+          .map(({ turn, i }) => {
+            const state = turnState(i === latest, agent);
+            const actions = turn.actions.filter(shows);
+            return (
+              <li
+                key={`${turn.startedMs}-${i}`}
+                ref={i === goal ? target : undefined}
+                className={`tb-turn${state === "waiting on you" ? " waiting" : ""}`}
+              >
+                {i === 0 && trail.gap > 0 && (
+                  <p className="tb-gap">
+                    {trail.gap} {trail.gap === 1 ? "turn" : "turns"} not shown
+                  </p>
+                )}
+                {isOpen(i) ? (
+                  <>
+                    <button
+                      className="tb-turn-line"
+                      title="Fold it"
+                      onClick={() => setToggled((m) => new Map(m).set(i, false))}
+                    >
+                      ▾ <TurnSummary turn={turn} number={number(i)} state={state} now={now} />
+                    </button>
+                    <TurnHead turn={turn} />
+                    <ol className="tb-actions">
+                      {actions.map((a) => (
+                        <ActionLine
+                          key={a.id}
+                          pane={trail.paneId}
+                          action={a}
+                          asking={state === "waiting on you"}
+                          open={open === a.id}
+                          onToggle={() => setOpen((o) => (o === a.id ? null : a.id))}
+                        />
+                      ))}
+                    </ol>
+                  </>
+                ) : (
+                  <button
+                    className="tb-turn-line folded"
+                    title={turn.startedMs ? new Date(turn.startedMs).toLocaleString() : undefined}
+                    onClick={() => setToggled((m) => new Map(m).set(i, true))}
+                  >
+                    <span className="tb-turn-fold">▸</span>
+                    <span className="tb-when">{clock(turn.startedMs)}</span>
+                    <span className="tb-prompt">{turn.prompt ?? "(no prompt)"}</span>
+                  </button>
+                )}
+              </li>
+            );
+          })}
+      </ol>
+    </>
   );
 }
 
-function TurnHead({ turn, now }: { turn: TrailTurn; now: number }) {
-  const when = (
-    <span className="tb-when" title={turn.startedMs ? new Date(turn.startedMs).toLocaleString() : undefined}>
-      {turn.startedMs ? age(turn.startedMs, now) : "–"}
-    </span>
+/** A turn in one line: when, which, how it stands, what it did. */
+function TurnSummary({
+  turn,
+  number,
+  state,
+  now,
+}: {
+  turn: TrailTurn;
+  number: number;
+  state: string;
+  now: number;
+}) {
+  const reads = turn.actions.filter((a) => a.kind === "read").length;
+  const edits = turn.actions.filter((a) => a.kind === "edit").length;
+  const failed = turn.actions.filter((a) => a.status === "error").length;
+  const end = state === "done" ? turn.lastMs : now;
+  const lasted = turn.startedMs !== null && end !== null ? took(Math.max(0, end - turn.startedMs)) : null;
+  const parts = [
+    clock(turn.startedMs),
+    `Turn ${number}`,
+    state,
+    `${reads} ${reads === 1 ? "read" : "reads"}`,
+    `${edits} ${edits === 1 ? "edit" : "edits"}`,
+    `${failed} failed`,
+    lasted,
+  ];
+  return (
+    <span className={`tb-turn-summary${failed > 0 ? " failed" : ""}`}>{parts.filter(Boolean).join(" · ")}</span>
   );
+}
+
+/** The turn's prompt: its first line, opening to all of it when it says
+ *  more. */
+function TurnHead({ turn }: { turn: TrailTurn }) {
   const prompt = <span className="tb-prompt">{turn.prompt ?? "(no prompt)"}</span>;
   // Only a prompt with more than its first line opens.
   if (!turn.text || turn.text === turn.prompt) {
-    return (
-      <div className="tb-turn-head">
-        {when}
-        {prompt}
-      </div>
-    );
+    return <div className="tb-turn-head">{prompt}</div>;
   }
   return (
     <details className="tb-turn-head">
-      <summary>
-        {when}
-        {prompt}
-      </summary>
+      <summary>{prompt}</summary>
       <pre className="tb-text">{turn.text}</pre>
     </details>
   );
@@ -1108,24 +1263,36 @@ function TurnHead({ turn, now }: { turn: TrailTurn; now: number }) {
 function ActionLine({
   pane,
   action,
+  asking,
   open,
   onToggle,
 }: {
   pane: string;
   action: TrailAction;
+  /** Its turn waits on a person: a call still running is what it asks. */
+  asking: boolean;
   open: boolean;
   onToggle: () => void;
 }) {
   const exit = action.exitCode !== null && action.exitCode !== 0 ? `exit ${action.exitCode}` : null;
+  const waiting = asking && action.status === "running";
+  const mark = waiting ? "?" : action.status === "running" ? "●" : MARKS[action.status];
   return (
-    <li className={`tb-action ${action.status}`}>
+    <li className={`tb-action ${action.status}${waiting ? " asking" : ""}`}>
       <button className="tb-action-line" title={action.output || undefined} onClick={onToggle}>
-        <span className="tb-action-mark">{MARKS[action.status]}</span>
+        <span className="tb-action-mark">{mark}</span>
         <span className="tb-action-tool">{action.tool}</span>
         <span className="tb-action-summary">{action.summary}</span>
-        {exit && <span className="tb-action-exit">{exit}</span>}
-        <span className="tb-action-took">{action.durationMs === null ? "" : took(action.durationMs)}</span>
+        <span className="tb-action-took">
+          {exit ?? (action.durationMs === null ? "" : took(action.durationMs))}
+        </span>
       </button>
+      {action.status === "error" && action.output && !open && (
+        <div className="tb-action-error">
+          <div className="tb-detail-head">output (error)</div>
+          <pre className="tb-detail-text">{action.output}</pre>
+        </div>
+      )}
       {open && <ActionDetailView pane={pane} id={action.id} />}
     </li>
   );
