@@ -65,8 +65,8 @@ function updates(
   log: TaskHistoryEntry[],
 ): Update[] {
   const tabTitle = (id: string | null | undefined) => snapshot.tabs.find((t) => t.id === id)?.title ?? null;
-  const alive = (pane: string | null | undefined) =>
-    pane && snapshot.agents.some((a) => a.paneId === pane) ? pane : null;
+  // A pane is worth going to while it exists, its agent exited or not.
+  const existing = (pane: string | null | undefined) => (pane && tabOfPane.has(pane) ? pane : null);
   const out: Update[] = [];
   for (const n of notifications) {
     const tab = tabOfPane.get(n.paneId) ?? null;
@@ -80,7 +80,7 @@ function updates(
       what: "",
       detail: [agent ? null : tab?.title, n.body].filter(Boolean).join(" · "),
       tabId: tab?.id ?? null,
-      pane: tab ? n.paneId : null,
+      pane: existing(n.paneId),
     });
   }
   // Each card's title and place, and each pane's latest card, from the
@@ -103,7 +103,7 @@ function updates(
         what: `moved ${card?.title || "a card"} to ${COLUMN_NAME[e.column]}`,
         detail: tabTitle(card?.tab) ?? "",
         tabId: card?.tab ?? null,
-        pane: alive(card?.pane),
+        pane: existing(card?.pane),
       });
     } else if (e.kind === "turnEnded" && e.pane && e.end !== "needsYou") {
       const tab = tabOfPane.get(e.pane) ?? null;
@@ -122,7 +122,7 @@ function updates(
         what,
         detail: [tab?.title, cardOfPane.get(e.pane)].filter(Boolean).join(" · "),
         tabId: tab?.id ?? null,
-        pane: alive(e.pane),
+        pane: existing(e.pane),
       });
     }
   });
