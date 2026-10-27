@@ -38,6 +38,13 @@ type Card = {
 /** The app's --wall-working, --wall-needs-you and --wall-idle. */
 const COLUMNS: { label: string; color: string; cards: Card[] }[] = [
   {
+    label: "Needs you",
+    color: "#fab387",
+    cards: [
+      { title: "APPROVE — rotation is atomic and the test pins reuse.", manual: false, agent: "planner", age: "40s" },
+    ],
+  },
+  {
     label: "To do",
     color: "var(--muted)",
     cards: [
@@ -49,13 +56,6 @@ const COLUMNS: { label: string; color: string; cards: Card[] }[] = [
     label: "Doing",
     color: "var(--accent)",
     cards: [{ title: "Step 3: expire refresh tokens after 30 days", manual: true, agent: "worker", age: "1m" }],
-  },
-  {
-    label: "Needs you",
-    color: "#fab387",
-    cards: [
-      { title: "APPROVE — rotation is atomic and the test pins reuse.", manual: false, agent: "planner", age: "40s" },
-    ],
   },
   {
     label: "Done",
