@@ -277,6 +277,15 @@ export const HARNESS_LABEL: Record<Harness, string> = {
 export const agentLabel = (a: AgentInfo): string =>
   a.member ?? a.name ?? a.role ?? HARNESS_LABEL[a.harness];
 
+/** The agents waiting on you — the Inbox's cards and the count on its
+ *  button — tabs in sidebar order, each tab's in its wall's order. */
+export const waitingAgents = (s: WorkspaceSnapshot): AgentInfo[] =>
+  s.tabs.flatMap((t) =>
+    s.agents
+      .filter((a) => a.tabId === t.id && a.status === "needsYou")
+      .sort((a, b) => t.wallUrgency.indexOf(a.paneId) - t.wallUrgency.indexOf(b.paneId)),
+  );
+
 /** A pane running a coding agent: Claude Code, Codex, OpenCode, … */
 export interface AgentInfo {
   paneId: string;

@@ -14,6 +14,7 @@ import {
   setView,
   setWallView,
   toggleAgentWall,
+  waitingAgents,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
@@ -39,7 +40,7 @@ export function Sidebar() {
     return accel ? formatAccel(accel) : undefined;
   };
   const tab = snapshot.tabs.find((t) => t.id === currentTab);
-  const waiting = snapshot.agents.filter((a) => a.status === "needsYou").length;
+  const waiting = waitingAgents(snapshot).length;
 
   return (
     <div className="sidebar">
