@@ -4,7 +4,6 @@ import {
   AgentTeam,
   EditorCatalog,
   RoleSource,
-  TabSnapshot,
   TeamFields,
   agentEditorCatalog,
   agentEditorUsedBy,
@@ -18,10 +17,12 @@ import {
   focusPane,
   openAgent,
   startTeam,
-  teamRestart,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { MemberInspector } from "./MemberInspector";
 import { TeamPage } from "./TeamPage";
+import { Confirm, RestartConfirm, restart, teamRuns } from "./teamRestart";
+import { useDiskCheck } from "./useDiskCheck";
 
 type Props = {
   paneId: string;
@@ -130,35 +131,6 @@ const teamOf = (cat: EditorCatalog | null, item: Item) =>
 const same = (a: Item | null, b: Item | null) =>
   !!a && !!b && a.kind === b.kind && a.name === b.name && a.source === b.source;
 
-/** Each team tab with members `concerned` — by its team's name and the
- *  member's role — those of them that are not running, which `team
- *  restart` starts again, and those that are. A tab with none is left out. */
-function teamRuns(
-  tabs: TabSnapshot[],
-  agentPanes: Set<string>,
-  concerned: (team: string, role: string) => boolean,
-) {
-  return tabs.flatMap((t) => {
-    const members = (t.team?.members ?? []).filter((m) => concerned(t.team!.name, m.role));
-    if (members.length === 0) return [];
-    return [
-      {
-        tab: t,
-        stopped: members.filter((m) => !agentPanes.has(m.pane)).map((m) => m.name),
-        running: members.filter((m) => agentPanes.has(m.pane)).map((m) => m.name),
-      },
-    ];
-  });
-}
-
-/** A restart waiting for a yes in the header: what it would do. */
-interface Confirm {
-  /** Each team tab and the members `team restart` would start again. */
-  runs: ReturnType<typeof teamRuns>;
-  /** Running agents it cannot restart: no command restarts one. */
-  keep: string[];
-}
-
 /**
  * The role, way-of-working and team files the pane's directory sees —
  * the repository's `.mirador`, and yours — to read, edit, create and
@@ -192,11 +164,13 @@ export const AgentEditor = memo(function AgentEditor({
   const [raw, setRaw] = useState(false);
   const [pendingRaw, setPendingRaw] = useState<boolean | null>(null);
   const [member, setMember] = useState<number | null>(null);
-  // The open file changed on disk under unsaved edits, and whether Save
-  // is asking before it writes over that.
-  const [stale, setStale] = useState(false);
+  // Whether Save is asking before it writes over a file changed on disk.
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [refreshed, setRefreshed] = useState(0);
+  // The selected member's role has unsaved edits in the inspector.
+  const [roleDirty, setRoleDirty] = useState(false);
+  const [pendingMember, setPendingMember] = useState<number | null>(null);
+  const charterRef = useRef<HTMLTextAreaElement>(null);
 
   const formMode = form !== null && !raw;
   const dirty = formMode ? JSON.stringify(form) !== formSaved : text !== saved;
@@ -221,39 +195,22 @@ export const AgentEditor = memo(function AgentEditor({
     wasFocused.current = focused;
   }, [focused, refresh]);
 
-  // What is open and unsaved now, for a read that returns later.
-  const latest = useRef({ path: sel?.path, dirty, saved, cat });
-  latest.current = { path: sel?.path, dirty, saved, cat };
-
-  // After a refresh, the open file as it is now: taken as it is when
-  // nothing is unsaved — the form and the text alike — else the edits
-  // stay and the header says the file changed. The answer is for the
-  // file open when it comes back, and is judged by what is unsaved then:
-  // another file opened meanwhile drops it, edits begun meanwhile keep.
-  useEffect(() => {
-    if (!sel?.path || isNew || sel.source === "config") return;
-    const path = sel.path;
-    const item = sel;
-    let cancelled = false;
-    agentFileRead(paneId, path)
-      .then((t) => {
-        const cur = latest.current;
-        if (cancelled || cur.path !== path || t === cur.saved) return;
-        if (cur.dirty) {
-          setStale(true);
-          return;
-        }
-        setText(t);
-        setSaved(t);
-        resetForm(teamOf(cur.cat, item));
-      })
-      .catch((e: unknown) => {
-        if (!cancelled && latest.current.path === path) setStatus(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshed]);
+  // The open file changed on disk: taken as it is when nothing is
+  // unsaved — the form and the text alike — else the edits stay and the
+  // header says so.
+  const [stale, setStale] = useDiskCheck(
+    paneId,
+    sel && !isNew && sel.source !== "config" ? sel.path : null,
+    refreshed,
+    saved,
+    dirty,
+    (t) => {
+      setText(t);
+      setSaved(t);
+      if (sel) resetForm(teamOf(cat, sel));
+    },
+    (e) => setStatus(String(e)),
+  );
 
   // Checked as you type: why it cannot be saved, or what is ignored.
   useEffect(() => {
@@ -288,6 +245,8 @@ export const AgentEditor = memo(function AgentEditor({
     setSel(item);
     setRaw(false);
     setMember(null);
+    setPendingMember(null);
+    setRoleDirty(false);
     setStale(false);
     setConfirmOverwrite(false);
     resetForm(teamOf(catalog, item));
@@ -327,8 +286,14 @@ export const AgentEditor = memo(function AgentEditor({
 
   // Leaving unsaved text asks first.
   const choose = (item: Item) => {
-    if (dirty && !same(item, sel)) setPending(item);
+    if ((dirty || roleDirty) && !same(item, sel)) setPending(item);
     else open(item);
+  };
+
+  // Another member drops the role edits of this one: asked first.
+  const selectMember = (i: number | null) => {
+    if (roleDirty && i !== member) setPendingMember(i);
+    else setMember(i);
   };
 
   /** Saves what is unsaved; whether there is nothing left unsaved. Over a
@@ -441,14 +406,12 @@ export const AgentEditor = memo(function AgentEditor({
     if (!sel || !(await save())) return;
     const fail = (e: unknown) => setStatus(String(e));
     const snapshot = useWorkspaceStore.getState().snapshot;
-    const tabs = snapshot?.tabs ?? [];
-    const agentPanes = new Set((snapshot?.agents ?? []).map((a) => a.paneId));
     if (sel.kind === "role") {
       openAgent(sel.name, null, paneId, false)
         .then(() => setStatus(`Started ${sel.name}`))
         .catch(fail);
     } else if (sel.kind === "team") {
-      const runs = teamRuns(tabs, agentPanes, (team) => team === sel.name);
+      const runs = teamRuns(snapshot, (team) => team === sel.name);
       if (runs.length === 0) {
         startTeam(sel.name, null, paneId)
           .then(() => setStatus(`Started team ${sel.name}`))
@@ -468,35 +431,13 @@ export const AgentEditor = memo(function AgentEditor({
       // does, whatever its team's own way.
       const teams = users.filter((u) => u.kind === "team").map((u) => u.name);
       const roles = users.filter((u) => u.kind === "role").map((u) => u.name);
-      const runs = teamRuns(
-        tabs,
-        agentPanes,
-        (team, role) => teams.includes(team) || roles.includes(role),
-      );
+      const runs = teamRuns(snapshot, (team, m) => teams.includes(team) || roles.includes(m.role));
       // Agents started with a role that follows it, outside a team.
       const alone = (snapshot?.agents ?? [])
         .filter((a) => !a.member && a.role && roles.includes(a.role))
         .map((a) => a.name ?? a.role!);
       setConfirm({ runs, keep: [...runs.flatMap((r) => r.running), ...alone] });
     }
-  };
-
-  const restart = () => {
-    if (!confirm) return;
-    const runs = confirm.runs.filter((r) => r.stopped.length > 0);
-    setConfirm(null);
-    Promise.all(
-      // Those members by name, in their tab: any of its panes names the
-      // team, and its focused one is still there.
-      runs.map((r) => teamRestart(r.stopped, r.tab.focusedPane)),
-    )
-      .then((done) => {
-        // Each member's outcome: one whose shell is running something
-        // else is "busy", and was not restarted.
-        const outcomes = done.flat().map((d) => `${d.name} ${d.outcome}`);
-        setStatus(outcomes.length ? outcomes.join(", ") : "Nothing restarted");
-      })
-      .catch((e: unknown) => setStatus(String(e)));
   };
 
   // What the header says under the title: where the file is, and whether
@@ -522,8 +463,6 @@ export const AgentEditor = memo(function AgentEditor({
       .filter(Boolean)
       .join(" · ");
   };
-
-  const stopped = confirm?.runs.flatMap((r) => r.stopped) ?? [];
 
   return (
     <div
@@ -646,6 +585,20 @@ export const AgentEditor = memo(function AgentEditor({
               <button onClick={() => setPending(null)}>Keep editing</button>
             </div>
           )}
+          {pendingMember !== null && (
+            <div className="editor-bar warn">
+              <span>Unsaved changes to this member's role.</span>
+              <button
+                onClick={() => {
+                  setMember(pendingMember);
+                  setPendingMember(null);
+                }}
+              >
+                Discard
+              </button>
+              <button onClick={() => setPendingMember(null)}>Keep editing</button>
+            </div>
+          )}
           {pendingRaw !== null && (
             <div className="editor-bar warn">
               <span>Unsaved changes to {sel?.name}.</span>
@@ -761,23 +714,17 @@ export const AgentEditor = memo(function AgentEditor({
                 </div>
               )}
               {confirm && (
-                <div className="editor-bar confirm">
-                  <span>
-                    {stopped.length > 0
-                      ? `Restart ${stopped.join(", ")}?`
-                      : "Nothing to restart."}
-                    {confirm.keep.length > 0 &&
-                      ` ${confirm.keep.join(", ")} ${confirm.keep.length === 1 ? "is" : "are"} running and keep${confirm.keep.length === 1 ? "s" : ""} the prompt ${confirm.keep.length === 1 ? "it" : "they"} started with: nothing restarts a running agent, so stop ${confirm.keep.length === 1 ? "it" : "them"} first.`}
-                  </span>
-                  {stopped.length > 0 && (
-                    <button className="primary" onClick={restart}>
-                      Restart
-                    </button>
-                  )}
-                  <button onClick={() => setConfirm(null)}>
-                    {stopped.length > 0 ? "Cancel" : "OK"}
-                  </button>
-                </div>
+                <RestartConfirm
+                  confirm={confirm}
+                  onRestart={() => {
+                    const c = confirm;
+                    setConfirm(null);
+                    restart(c)
+                      .then(setStatus)
+                      .catch((e: unknown) => setStatus(String(e)));
+                  }}
+                  onCancel={() => setConfirm(null)}
+                />
               )}
               {!formMode && invalid && <div className="editor-bar error">{invalid}</div>}
               {!invalid && sel.problem && !dirty && (
@@ -800,18 +747,50 @@ export const AgentEditor = memo(function AgentEditor({
                     }
                   }}
                 >
-                  <TeamPage
-                    name={sel.name}
-                    fields={form!}
-                    onChange={(f) => {
-                      setForm(f);
-                      setStatus(null);
-                    }}
-                    catalog={cat.catalog}
-                    readOnly={readOnly}
-                    selected={member}
-                    onSelect={setMember}
-                  />
+                  <div className="team-layout">
+                    <TeamPage
+                      name={sel.name}
+                      fields={form!}
+                      onChange={(f) => {
+                        setForm(f);
+                        setStatus(null);
+                      }}
+                      catalog={cat.catalog}
+                      readOnly={readOnly}
+                      selected={member}
+                      onSelect={selectMember}
+                      charterRef={charterRef}
+                    />
+                    {member !== null && form!.members[member] ? (
+                      <MemberInspector
+                        key={`${member}:${form!.members[member].role}`}
+                        paneId={paneId}
+                        cat={cat}
+                        refreshed={refreshed}
+                        team={sel.name}
+                        fields={form!}
+                        onFields={(f) => {
+                          setForm(f);
+                          setStatus(null);
+                        }}
+                        index={member}
+                        teamReadOnly={readOnly}
+                        teamDirty={dirty}
+                        onCatalog={setCat}
+                        onRoleDirty={setRoleDirty}
+                        onRemove={() => setMember(null)}
+                        onOpenWay={(way) => {
+                          const item = list.find((i) => i.kind === "way" && i.name === way && !i.shadowedBy);
+                          if (item) choose(item);
+                        }}
+                        onEditCharter={() => charterRef.current?.focus()}
+                      />
+                    ) : (
+                      <aside className="inspector empty">
+                        <p className="inspector-note">Pick a member to see its settings, its role and what it is told.</p>
+                      </aside>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <textarea

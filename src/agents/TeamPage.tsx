@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Ref, useState } from "react";
 import {
   AgentStatus,
   HARNESS_LABEL,
@@ -17,6 +17,8 @@ type Props = {
   readOnly: boolean;
   selected: number | null;
   onSelect: (member: number) => void;
+  /** The charter's editor, for the inspector's Edit link to focus. */
+  charterRef?: Ref<HTMLTextAreaElement>;
 };
 
 /** How much a status wants you, to show a member's most urgent seat. */
@@ -27,7 +29,7 @@ const URGENCY: AgentStatus[] = ["needsYou", "working", "idle"];
  * description, and its charter. Every edit goes to `fields`; saving them
  * into the file is the editor's.
  */
-export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, onSelect }: Props) {
+export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, onSelect, charterRef }: Props) {
   const [adding, setAdding] = useState(false);
   const snapshot = useWorkspaceStore((s) => s.snapshot);
 
@@ -167,6 +169,7 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
         <span className="team-label-note">Markdown · every member is told this</span>
       </div>
       <textarea
+        ref={charterRef}
         className="team-charter"
         spellCheck={false}
         readOnly={readOnly}

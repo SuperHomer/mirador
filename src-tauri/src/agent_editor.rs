@@ -120,22 +120,32 @@ pub fn agent_editor_used_by(
     Ok(cmux_core::roles::used_by(&catalog, kind, &name, &teams, &roles))
 }
 
+/// What a member is told: the layers, and the prompt they join into.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Told {
+    pub layers: Vec<PromptLayer>,
+    pub prompt: Option<String>,
+}
+
 /// What `member` of `team` is told when the team starts, as the layers it
-/// is made of — the very ones the launch joins.
+/// is made of — the very ones the launch joins — and joined as it joins
+/// them.
 #[tauri::command]
 pub fn agent_editor_told(
     state: State<'_, AppState>,
     pane_id: String,
     team: String,
     member: String,
-) -> Result<Vec<PromptLayer>, String> {
+) -> Result<Told, String> {
     let catalog = catalog(&state, &pane_id)?.catalog;
     let def = catalog.teams.iter().find(|t| t.name == team).ok_or_else(|| format!("no team `{team}`"))?;
     let seats = cmux_core::teams::seats(def);
     let seat = seats.iter().find(|s| s.name == member).ok_or_else(|| format!("no member `{member}` in team `{team}`"))?;
     let (_, mut layers) = cmux_core::roles::role_layers(&catalog, &seat.role)?;
     layers.extend(cmux_core::teams::seat_layers(&catalog, def, seat, &seats, &crate::teams::mira_for_prompt()));
-    Ok(layers)
+    let prompt = cmux_core::roles::join_layers(&layers);
+    Ok(Told { layers, prompt })
 }
 
 #[tauri::command]

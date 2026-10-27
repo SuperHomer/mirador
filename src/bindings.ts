@@ -843,9 +843,10 @@ export const agentEditorCatalog = (paneId: string) =>
 /** The teams and roles using the role or way `name`, running or not. */
 export const agentEditorUsedBy = (paneId: string, kind: CatalogKind, name: string) =>
   invoke<UsedBy[]>("agent_editor_used_by", { paneId, kind, name });
-/** What `member` of `team` is told when the team starts, layer by layer. */
+/** What `member` of `team` is told when the team starts, layer by layer,
+ *  and the prompt they join into, as the launch joins them. */
 export const agentEditorTold = (paneId: string, team: string, member: string) =>
-  invoke<PromptLayer[]>("agent_editor_told", { paneId, team, member });
+  invoke<{ layers: PromptLayer[]; prompt: string | null }>("agent_editor_told", { paneId, team, member });
 export const agentFileRead = (paneId: string, path: string) =>
   invoke<string>("agent_file_read", { paneId, path });
 /** Warnings for the text; rejects with why it cannot be saved. */
