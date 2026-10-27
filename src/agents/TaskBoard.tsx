@@ -74,7 +74,7 @@ function paneIds(node: Node): string[] {
 }
 
 /** "42s", "3m", "1h", "2d" — how long ago. */
-function age(ms: number, now: number): string {
+export function age(ms: number, now: number): string {
   const s = Math.max(0, Math.floor((now - ms) / 1000));
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m`;
@@ -1328,7 +1328,7 @@ function ActionDetailView({ pane, id }: { pane: string; id: string }) {
 }
 
 /** How long an action took, as `mira agent trail` says it. */
-function took(ms: number): string {
+export function took(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   return age(0, ms);
@@ -1414,7 +1414,7 @@ function historyKind(e: TaskHistoryEntry): HistoryKind {
   }
 }
 
-const COLUMN_NAME: Record<TaskColumn, string> = {
+export const COLUMN_NAME: Record<TaskColumn, string> = {
   todo: "To do",
   doing: "Doing",
   needsYou: "Needs you",

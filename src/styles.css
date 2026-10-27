@@ -1418,6 +1418,71 @@ body,
   background: var(--overlay);
 }
 
+.inbox-updates {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+}
+
+.inbox-update {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 8px 6px;
+  border: none;
+  border-bottom: 1px solid var(--tint-hover);
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+button.inbox-update {
+  cursor: pointer;
+}
+
+button.inbox-update:hover {
+  background: var(--tint-hover);
+}
+
+.inbox-update-icon.done {
+  color: var(--status-idle);
+}
+
+.inbox-update-icon.exited {
+  color: var(--muted);
+}
+
+.inbox-update-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.inbox-update-line b {
+  color: var(--text);
+}
+
+.inbox-update-line,
+.inbox-update-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-update-detail {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.inbox-update-time {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
 .notif-header {
   display: flex;
   justify-content: space-between;
@@ -1447,60 +1512,11 @@ body,
   color: var(--text);
 }
 
-.notif-list {
-  padding: 0 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.notif-item {
-  padding: 8px 10px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 40%, transparent);
-  cursor: pointer;
-  border-left: 2px solid transparent;
-}
-
-.notif-item:hover {
-  background: var(--surface);
-}
-
-.notif-item.unread {
-  border-left-color: var(--accent);
-}
-
-.notif-item-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.notif-time {
-  color: var(--muted);
-  font-weight: 400;
-  font-size: 10.5px;
-  flex-shrink: 0;
-}
-
-.notif-body {
-  font-size: 11.5px;
-  color: var(--subtext);
-  margin-top: 2px;
-  word-break: break-word;
-}
-
 .notif-empty {
   padding: 16px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
-}
-
-.notif-empty code {
-  color: var(--subtext);
 }
 
 /* ---------- Agent activity panel ---------- */

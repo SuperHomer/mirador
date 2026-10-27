@@ -450,6 +450,12 @@ export interface TaskHistoryEntry {
   /** A task given: who gave it (`you` for a person), and to whom. */
   from?: string;
   to?: string | null;
+  /** A task given: its card's title when one was given, and where its
+   *  agent was: the tab's id. */
+  title?: string;
+  tab?: string | null;
+  /** A task given, a turn ended or resumed: the agent's pane. */
+  pane?: string | null;
   /** A move: the column, and who made it. */
   column?: TaskColumn;
   by?: string;

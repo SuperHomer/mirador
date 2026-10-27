@@ -9,6 +9,10 @@ interface UiStore {
   /** The palette step to open on (e.g. "team"), when it was asked for. */
   paletteStep: string | null;
   notificationsOpen: boolean;
+  /** When the Inbox's updates were last cleared: it shows only later
+   *  ones. Not persisted. */
+  inboxClearedMs: number | null;
+  clearInbox: () => void;
   /** The agent pane whose activity panel is open. */
   activityPane: string | null;
   /** A frame's "+" menu is open on the board. */
@@ -38,6 +42,8 @@ export const useUiStore = create<UiStore>((set) => ({
   paletteOpen: false,
   paletteStep: null,
   notificationsOpen: false,
+  inboxClearedMs: null,
+  clearInbox: () => set({ inboxClearedMs: Date.now() }),
   activityPane: null,
   boardMenuOpen: false,
   pinned: {},
