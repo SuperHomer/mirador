@@ -221,24 +221,38 @@ export const AgentEditor = memo(function AgentEditor({
     wasFocused.current = focused;
   }, [focused, refresh]);
 
+  // What is open and unsaved now, for a read that returns later.
+  const latest = useRef({ path: sel?.path, dirty, saved, cat });
+  latest.current = { path: sel?.path, dirty, saved, cat };
+
   // After a refresh, the open file as it is now: taken as it is when
   // nothing is unsaved — the form and the text alike — else the edits
-  // stay and the header says the file changed. Runs on the render the
-  // new catalog arrives with, so it reads that render's state.
+  // stay and the header says the file changed. The answer is for the
+  // file open when it comes back, and is judged by what is unsaved then:
+  // another file opened meanwhile drops it, edits begun meanwhile keep.
   useEffect(() => {
     if (!sel?.path || isNew || sel.source === "config") return;
-    agentFileRead(paneId, sel.path)
+    const path = sel.path;
+    const item = sel;
+    let cancelled = false;
+    agentFileRead(paneId, path)
       .then((t) => {
-        if (t === saved) return;
-        if (dirty) {
+        const cur = latest.current;
+        if (cancelled || cur.path !== path || t === cur.saved) return;
+        if (cur.dirty) {
           setStale(true);
           return;
         }
         setText(t);
         setSaved(t);
-        resetForm(teamOf(cat, sel));
+        resetForm(teamOf(cur.cat, item));
       })
-      .catch((e: unknown) => setStatus(String(e)));
+      .catch((e: unknown) => {
+        if (!cancelled && latest.current.path === path) setStatus(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [refreshed]);
 
   // Checked as you type: why it cannot be saved, or what is ignored.
