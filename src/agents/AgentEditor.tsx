@@ -1,15 +1,18 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentFileKind,
+  AgentTeam,
   EditorCatalog,
   RoleSource,
   TabSnapshot,
+  TeamFields,
   agentEditorCatalog,
   agentEditorUsedBy,
   agentFileCheck,
   agentFileDelete,
   agentFileRead,
   agentFileSave,
+  agentFileSaveFields,
   agentFileTemplate,
   closePane,
   focusPane,
@@ -18,6 +21,7 @@ import {
   teamRestart,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { TeamPage } from "./TeamPage";
 
 type Props = {
   paneId: string;
@@ -108,6 +112,21 @@ function items(cat: EditorCatalog | null): Item[] {
   ];
 }
 
+/** A team as the form edits it. */
+const fieldsOf = (t: AgentTeam): TeamFields => ({
+  description: t.description,
+  way: t.way,
+  layout: t.layout,
+  members: t.members,
+  charter: t.prompt,
+});
+
+/** The team the catalog read from `item`'s file, if it is one in use. */
+const teamOf = (cat: EditorCatalog | null, item: Item) =>
+  item.kind === "team" && item.path && !item.shadowedBy
+    ? cat?.catalog.teams.find((t) => t.name === item.name && t.source === item.source)
+    : undefined;
+
 const same = (a: Item | null, b: Item | null) =>
   !!a && !!b && a.kind === b.kind && a.name === b.name && a.source === b.source;
 
@@ -167,8 +186,15 @@ export const AgentEditor = memo(function AgentEditor({
   const [pending, setPending] = useState<Item | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  // A team is edited as a form; its file as text only when asked for.
+  const [form, setForm] = useState<TeamFields | null>(null);
+  const [formSaved, setFormSaved] = useState("");
+  const [raw, setRaw] = useState(false);
+  const [pendingRaw, setPendingRaw] = useState<boolean | null>(null);
+  const [member, setMember] = useState<number | null>(null);
 
-  const dirty = text !== saved;
+  const formMode = form !== null && !raw;
+  const dirty = formMode ? JSON.stringify(form) !== formSaved : text !== saved;
   // mirador.json's entries are edited there; a built-in ships with the
   // app — both are read here, and a built-in can be copied to change it.
   const readOnly = sel?.source === "config" || sel?.source === "builtin";
@@ -204,13 +230,23 @@ export const AgentEditor = memo(function AgentEditor({
     return () => clearTimeout(t);
   }, [sel, text, readOnly]);
 
-  const open = (item: Item) => {
+  const resetForm = (team: AgentTeam | undefined) => {
+    const f = team ? fieldsOf(team) : null;
+    setForm(f);
+    setFormSaved(f ? JSON.stringify(f) : "");
+  };
+
+  const open = (item: Item, catalog = cat) => {
     setPending(null);
+    setPendingRaw(null);
     setConfirmDelete(false);
     setConfirm(null);
     setStatus(null);
     setIsNew(false);
     setSel(item);
+    setRaw(false);
+    setMember(null);
+    resetForm(teamOf(catalog, item));
     if (!item.path) {
       // An `agentRoles` entry, shown as the catalog has it — unless it is
       // shadowed, when the catalog has only the one used instead.
@@ -239,7 +275,7 @@ export const AgentEditor = memo(function AgentEditor({
       .then((next) => {
         setCat(next);
         const now = items(next).find((i) => same(i, copy));
-        if (now) open(now);
+        if (now) open(now, next);
         setStatus(`Copied to ${SOURCE_LABEL[to]}: edit away`);
       })
       .catch((e: unknown) => setStatus(String(e)));
@@ -254,6 +290,25 @@ export const AgentEditor = memo(function AgentEditor({
   /** Saves what is unsaved; whether there is nothing left unsaved. */
   const save = (): Promise<boolean> => {
     if (!sel || readOnly || !dirty) return Promise.resolve(true);
+    if (formMode && sel.path) {
+      const path = sel.path;
+      return agentFileSaveFields(paneId, sel.source, sel.name, path, { kind: "team", ...form! }, false)
+        .then((next) => {
+          setCat(next);
+          setFormSaved(JSON.stringify(form));
+          setStatus("Saved");
+          // The file as written, for its raw view.
+          return agentFileRead(paneId, path).then((t) => {
+            setText(t);
+            setSaved(t);
+            return true;
+          });
+        })
+        .catch((e: unknown) => {
+          setStatus(String(e));
+          return false;
+        });
+    }
     if (invalid) return Promise.resolve(false);
     return agentFileSave(paneId, sel.kind, sel.source, sel.name, text, isNew)
       .then((next) => {
@@ -270,6 +325,20 @@ export const AgentEditor = memo(function AgentEditor({
         return false;
       });
   };
+
+  // Between the form and the file's text: what is unsaved in the one is
+  // dropped (after asking) — the other starts from the file as saved.
+  const showRaw = (toRaw: boolean) => {
+    setPendingRaw(null);
+    if (toRaw) {
+      if (formSaved) setForm(JSON.parse(formSaved) as TeamFields);
+    } else {
+      setText(saved);
+      if (sel) resetForm(teamOf(cat, sel));
+    }
+    setRaw(toRaw);
+  };
+  const switchView = (toRaw: boolean) => (dirty ? setPendingRaw(toRaw) : showRaw(toRaw));
 
   const remove = () => {
     if (!sel?.path) return;
@@ -522,6 +591,13 @@ export const AgentEditor = memo(function AgentEditor({
               <button onClick={() => setPending(null)}>Keep editing</button>
             </div>
           )}
+          {pendingRaw !== null && (
+            <div className="editor-bar warn">
+              <span>Unsaved changes to {sel?.name}.</span>
+              <button onClick={() => showRaw(pendingRaw)}>Discard</button>
+              <button onClick={() => setPendingRaw(null)}>Keep editing</button>
+            </div>
+          )}
           {!sel ? (
             <p className="editor-empty">
               Pick a team, role or way of working on the left, or + to create
@@ -542,8 +618,23 @@ export const AgentEditor = memo(function AgentEditor({
                 {dirty && !readOnly && (
                   <span className="editor-unsaved">Unsaved</span>
                 )}
+                {form && (
+                  <button
+                    className="editor-link"
+                    title={raw ? "Back to the form" : "The file as text, frontmatter and all"}
+                    onClick={() => switchView(!raw)}
+                  >
+                    {raw ? "Edit as form" : "Edit raw file"}
+                  </button>
+                )}
                 {!readOnly && dirty && !isNew && (
-                  <button onClick={() => setText(saved)}>Revert</button>
+                  <button
+                    onClick={() =>
+                      formMode ? setForm(JSON.parse(formSaved) as TeamFields) : setText(saved)
+                    }
+                  >
+                    Revert
+                  </button>
                 )}
                 {sel.path && !readOnly && !confirmDelete && (
                   <button onClick={() => setConfirmDelete(true)}>Delete</button>
@@ -612,32 +703,59 @@ export const AgentEditor = memo(function AgentEditor({
                   </button>
                 </div>
               )}
-              {invalid && <div className="editor-bar error">{invalid}</div>}
+              {!formMode && invalid && <div className="editor-bar error">{invalid}</div>}
               {!invalid && sel.problem && !dirty && (
                 <div className="editor-bar warn">{sel.problem}</div>
               )}
-              {warnings.map((w) => (
-                <div key={w} className="editor-bar warn">
-                  {w}
+              {!formMode &&
+                warnings.map((w) => (
+                  <div key={w} className="editor-bar warn">
+                    {w}
+                  </div>
+                ))}
+              {formMode && cat ? (
+                <div
+                  className="editor-form"
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void save();
+                    }
+                  }}
+                >
+                  <TeamPage
+                    name={sel.name}
+                    fields={form!}
+                    onChange={(f) => {
+                      setForm(f);
+                      setStatus(null);
+                    }}
+                    catalog={cat.catalog}
+                    readOnly={readOnly}
+                    selected={member}
+                    onSelect={setMember}
+                  />
                 </div>
-              ))}
-              <textarea
-                className="editor-text"
-                spellCheck={false}
-                readOnly={readOnly}
-                value={text}
-                onChange={(e) => {
-                  setText(e.target.value);
-                  setStatus(null);
-                }}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    void save();
-                  }
-                }}
-              />
+              ) : (
+                <textarea
+                  className="editor-text"
+                  spellCheck={false}
+                  readOnly={readOnly}
+                  value={text}
+                  onChange={(e) => {
+                    setText(e.target.value);
+                    setStatus(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void save();
+                    }
+                  }}
+                />
+              )}
             </>
           )}
           {status && <div className="editor-status">{status}</div>}
