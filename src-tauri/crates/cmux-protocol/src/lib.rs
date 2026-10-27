@@ -1010,6 +1010,23 @@ pub struct TrailAction {
     pub exit_code: Option<i32>,
     /// The first lines of its result, shortened.
     pub output: String,
+    /// What sort of thing it did (`cmux_core::trail::action_kind`).
+    #[serde(default)]
+    pub kind: ActionKind,
+}
+
+/// What a trail action did, for counting a turn's reads and edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionKind {
+    /// Looked at files or the web: a read, a search, a fetch.
+    Read,
+    /// Changed files.
+    Edit,
+    /// Ran a command.
+    Run,
+    #[default]
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

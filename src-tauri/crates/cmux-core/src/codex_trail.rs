@@ -133,6 +133,7 @@ impl CodexTrail {
         let turn = &mut self.turns[t];
         turn.actions.push(TrailAction {
             summary: item_summary(&kind, item),
+            kind: crate::trail::action_kind(&kind),
             tool: kind,
             id,
             started_ms: started.or(ms),
@@ -156,6 +157,7 @@ impl CodexTrail {
         self.pending.insert(id.clone(), (t, turn.actions.len()));
         turn.actions.push(TrailAction {
             summary: call_summary(&tool, &input),
+            kind: crate::trail::action_kind(&tool),
             tool,
             id,
             started_ms: ms,
@@ -648,6 +650,18 @@ mod tests {
         let mut stats = CodexStats::default();
         lines.for_each(|line| stats.feed(line));
         stats.summary()
+    }
+
+    #[test]
+    fn a_codex_command_is_a_run_and_its_shell_call_too() {
+        let mut trail = CodexTrail::default();
+        ROLLOUT.lines().for_each(|l| trail.feed(l));
+        let kinds: Vec<(&str, cmux_protocol::ActionKind)> =
+            trail.turns()[0].actions.iter().map(|a| (a.tool.as_str(), a.kind)).collect();
+        assert_eq!(
+            kinds,
+            [("CommandExecution", cmux_protocol::ActionKind::Run), ("shell", cmux_protocol::ActionKind::Run)]
+        );
     }
 
     #[test]

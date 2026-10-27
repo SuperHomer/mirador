@@ -364,7 +364,12 @@ export interface TrailAction {
   exitCode: number | null;
   /** The first lines of its result. */
   output: string;
+  /** What sort of thing it did. */
+  kind: ActionKind;
 }
+
+/** What a trail action did (`cmux_protocol::ActionKind`). */
+export type ActionKind = "read" | "edit" | "run" | "other";
 
 /** One turn: a prompt and what the agent did for it. */
 export interface TrailTurn {

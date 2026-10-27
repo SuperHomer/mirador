@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::Path;
 
-use cmux_protocol::{ActionDetail, ActionStatus, TrailAction, TrailTurn};
+use cmux_protocol::{ActionDetail, ActionKind, ActionStatus, TrailAction, TrailTurn};
 use serde_json::Value;
 
 use crate::transcript::{parse_timestamp, text, Feed};
@@ -91,6 +91,7 @@ impl Trail {
             self.pending.insert(id.clone(), (t, actions.len()));
             actions.push(TrailAction {
                 summary: summarize(&tool, &block["input"]),
+                kind: action_kind(&tool),
                 id,
                 tool,
                 started_ms: ms,
@@ -159,6 +160,17 @@ pub(crate) fn turn(prompt: Option<&str>, ms: Option<u64>) -> TrailTurn {
 pub(crate) fn stamp(turn: &mut TrailTurn, ms: Option<u64>) {
     if ms.is_some() {
         turn.last_ms = ms;
+    }
+}
+
+/// What sort of thing a tool does, by its name: Claude Code's tools, and
+/// Codex's calls and items (`codex_trail`).
+pub fn action_kind(tool: &str) -> ActionKind {
+    match tool {
+        "Read" | "Grep" | "Glob" | "LS" | "WebFetch" | "WebSearch" | "ImageView" => ActionKind::Read,
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" | "apply_patch" | "FileChange" => ActionKind::Edit,
+        "Bash" | "shell" | "local_shell_call" | "exec_command" | "CommandExecution" => ActionKind::Run,
+        _ => ActionKind::Other,
     }
 }
 
@@ -362,6 +374,25 @@ mod tests {
             trail.feed(line);
         }
         trail.asking().map(|a| (a.tool, a.summary))
+    }
+
+    #[test]
+    fn sorts_tools_into_reads_edits_and_runs() {
+        for tool in ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "ImageView"] {
+            assert_eq!(action_kind(tool), ActionKind::Read, "{tool}");
+        }
+        for tool in ["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch", "FileChange"] {
+            assert_eq!(action_kind(tool), ActionKind::Edit, "{tool}");
+        }
+        for tool in ["Bash", "shell", "local_shell_call", "exec_command", "CommandExecution"] {
+            assert_eq!(action_kind(tool), ActionKind::Run, "{tool}");
+        }
+        for tool in ["Agent", "TodoWrite", "McpToolCall", "mcp__github__search", ""] {
+            assert_eq!(action_kind(tool), ActionKind::Other, "{tool}");
+        }
+        // As a trail reads them.
+        let turns = trail(&[&prompt("Go", "00"), &call("t1", "Edit", r#"{"file_path":"/a.rs"}"#, "01")]);
+        assert_eq!(turns[0].actions[0].kind, ActionKind::Edit);
     }
 
     #[test]
