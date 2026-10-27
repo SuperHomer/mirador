@@ -111,19 +111,25 @@ function items(cat: EditorCatalog | null): Item[] {
 const same = (a: Item | null, b: Item | null) =>
   !!a && !!b && a.kind === b.kind && a.name === b.name && a.source === b.source;
 
-/** The tabs running team `name`, each with its members that are not
- *  running — the ones `team restart` starts again — and those that are. */
-function teamRuns(tabs: TabSnapshot[], agentPanes: Set<string>, name: string) {
-  return tabs
-    .filter((t) => t.team?.name === name)
-    .map((t) => {
-      const members = t.team!.members;
-      return {
+/** Each team tab with members `concerned` — by its team's name and the
+ *  member's role — those of them that are not running, which `team
+ *  restart` starts again, and those that are. A tab with none is left out. */
+function teamRuns(
+  tabs: TabSnapshot[],
+  agentPanes: Set<string>,
+  concerned: (team: string, role: string) => boolean,
+) {
+  return tabs.flatMap((t) => {
+    const members = (t.team?.members ?? []).filter((m) => concerned(t.team!.name, m.role));
+    if (members.length === 0) return [];
+    return [
+      {
         tab: t,
         stopped: members.filter((m) => !agentPanes.has(m.pane)).map((m) => m.name),
         running: members.filter((m) => agentPanes.has(m.pane)).map((m) => m.name),
-      };
-    });
+      },
+    ];
+  });
 }
 
 /** A restart waiting for a yes in the header: what it would do. */
@@ -318,7 +324,7 @@ export const AgentEditor = memo(function AgentEditor({
         .then(() => setStatus(`Started ${sel.name}`))
         .catch(fail);
     } else if (sel.kind === "team") {
-      const runs = teamRuns(tabs, agentPanes, sel.name);
+      const runs = teamRuns(tabs, agentPanes, (team) => team === sel.name);
       if (runs.length === 0) {
         startTeam(sel.name, null, paneId)
           .then(() => setStatus(`Started team ${sel.name}`))
@@ -334,11 +340,16 @@ export const AgentEditor = memo(function AgentEditor({
         },
       );
       if (!users) return;
-      const runs = users
-        .filter((u) => u.kind === "team" && u.running)
-        .flatMap((u) => teamRuns(tabs, agentPanes, u.name));
-      // Agents started with a role that follows it, outside a team.
+      // Every member of a team that follows it, and any member whose role
+      // does, whatever its team's own way.
+      const teams = users.filter((u) => u.kind === "team").map((u) => u.name);
       const roles = users.filter((u) => u.kind === "role").map((u) => u.name);
+      const runs = teamRuns(
+        tabs,
+        agentPanes,
+        (team, role) => teams.includes(team) || roles.includes(role),
+      );
+      // Agents started with a role that follows it, outside a team.
       const alone = (snapshot?.agents ?? [])
         .filter((a) => !a.member && a.role && roles.includes(a.role))
         .map((a) => a.name ?? a.role!);
@@ -351,15 +362,15 @@ export const AgentEditor = memo(function AgentEditor({
     const runs = confirm.runs.filter((r) => r.stopped.length > 0);
     setConfirm(null);
     Promise.all(
-      // Any pane of the tab names its team; its focused one is still there.
-      runs.map((r) => teamRestart([], r.tab.focusedPane)),
+      // Those members by name, in their tab: any of its panes names the
+      // team, and its focused one is still there.
+      runs.map((r) => teamRestart(r.stopped, r.tab.focusedPane)),
     )
       .then((done) => {
-        const names = done
-          .flat()
-          .filter((d) => d.outcome === "restarted" || d.outcome === "reopened")
-          .map((d) => d.name);
-        setStatus(names.length ? `Restarted ${names.join(", ")}` : "Nothing restarted");
+        // Each member's outcome: one whose shell is running something
+        // else is "busy", and was not restarted.
+        const outcomes = done.flat().map((d) => `${d.name} ${d.outcome}`);
+        setStatus(outcomes.length ? outcomes.join(", ") : "Nothing restarted");
       })
       .catch((e: unknown) => setStatus(String(e)));
   };
