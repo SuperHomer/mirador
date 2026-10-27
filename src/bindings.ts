@@ -884,6 +884,18 @@ export const agentFileSaveFields = (
   create: boolean,
 ) =>
   invoke<EditorCatalog>("agent_file_save_fields", { paneId, source, name, from, fields, create });
+/** What `team restart` did for a member: "restarted", "reopened", or why
+ *  not ("running", "busy"). */
+export interface Restarted {
+  name: string;
+  pane: string;
+  outcome: string;
+}
+/** Starts again the members of `paneId`'s team (`members` by name, all
+ *  when empty) whose agent exited or whose pane was closed; a running
+ *  member is left alone. */
+export const teamRestart = (members: string[], paneId: string | null) =>
+  invoke<Restarted[]>("team_restart", { members, paneId });
 export const agentFileDelete = (paneId: string, path: string) =>
   invoke<EditorCatalog>("agent_file_delete", { paneId, path });
 

@@ -3,7 +3,9 @@ import {
   AgentFileKind,
   EditorCatalog,
   RoleSource,
+  TabSnapshot,
   agentEditorCatalog,
+  agentEditorUsedBy,
   agentFileCheck,
   agentFileDelete,
   agentFileRead,
@@ -13,7 +15,9 @@ import {
   focusPane,
   openAgent,
   startTeam,
+  teamRestart,
 } from "../bindings";
+import { useWorkspaceStore } from "../state/workspaceStore";
 
 type Props = {
   paneId: string;
@@ -30,12 +34,14 @@ interface Item {
   path: string | null;
   description: string | null;
   problem: string | null;
+  /** A file hidden by one of the same name that comes first. */
+  shadowedBy?: { source: RoleSource; path: string | null };
 }
 
 const SECTIONS: { kind: AgentFileKind; title: string }[] = [
+  { kind: "team", title: "Teams" },
   { kind: "role", title: "Roles" },
   { kind: "way", title: "Ways of working" },
-  { kind: "team", title: "Teams" },
 ];
 
 const SOURCE_LABEL: Record<RoleSource, string> = {
@@ -45,9 +51,22 @@ const SOURCE_LABEL: Record<RoleSource, string> = {
   builtin: "built-in",
 };
 
+/** What the primary action does after saving, by kind; for a file that
+ *  cannot be saved here, the same without the save. */
+const PRIMARY: Record<AgentFileKind, string> = {
+  team: "Save & restart team…",
+  role: "Save & start ▸",
+  way: "Save & restart users…",
+};
+const PRIMARY_READ_ONLY: Record<AgentFileKind, string> = {
+  team: "Restart team…",
+  role: "Start ▸",
+  way: "Restart users…",
+};
+
 function items(cat: EditorCatalog | null): Item[] {
   if (!cat) return [];
-  const { roles, ways, teams, problems } = cat.catalog;
+  const { roles, ways, teams, problems, shadowed } = cat.catalog;
   // A way has no problem of its own on the catalog; its file's line does.
   const problemOf = (path: string) =>
     problems.find((p) => p.startsWith(`${path}: `))?.slice(path.length + 2) ??
@@ -77,11 +96,43 @@ function items(cat: EditorCatalog | null): Item[] {
       description: t.description,
       problem: t.problem,
     })),
+    ...shadowed.map((f) => ({
+      kind: f.kind,
+      name: f.name,
+      source: f.source,
+      path: f.path,
+      description: null,
+      problem: null,
+      shadowedBy: { source: f.by, path: f.byPath },
+    })),
   ];
 }
 
 const same = (a: Item | null, b: Item | null) =>
   !!a && !!b && a.kind === b.kind && a.name === b.name && a.source === b.source;
+
+/** The tabs running team `name`, each with its members that are not
+ *  running — the ones `team restart` starts again — and those that are. */
+function teamRuns(tabs: TabSnapshot[], agentPanes: Set<string>, name: string) {
+  return tabs
+    .filter((t) => t.team?.name === name)
+    .map((t) => {
+      const members = t.team!.members;
+      return {
+        tab: t,
+        stopped: members.filter((m) => !agentPanes.has(m.pane)).map((m) => m.name),
+        running: members.filter((m) => agentPanes.has(m.pane)).map((m) => m.name),
+      };
+    });
+}
+
+/** A restart waiting for a yes in the header: what it would do. */
+interface Confirm {
+  /** Each team tab and the members `team restart` would start again. */
+  runs: ReturnType<typeof teamRuns>;
+  /** Running agents it cannot restart: no command restarts one. */
+  keep: string[];
+}
 
 /**
  * The role, way-of-working and team files the pane's directory sees —
@@ -109,6 +160,7 @@ export const AgentEditor = memo(function AgentEditor({
   } | null>(null);
   const [pending, setPending] = useState<Item | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
 
   const dirty = text !== saved;
   // mirador.json's entries are edited there; a built-in ships with the
@@ -149,11 +201,16 @@ export const AgentEditor = memo(function AgentEditor({
   const open = (item: Item) => {
     setPending(null);
     setConfirmDelete(false);
+    setConfirm(null);
     setStatus(null);
     setIsNew(false);
     setSel(item);
     if (!item.path) {
-      const role = cat?.catalog.roles.find((r) => r.name === item.name);
+      // An `agentRoles` entry, shown as the catalog has it — unless it is
+      // shadowed, when the catalog has only the one used instead.
+      const role = item.shadowedBy
+        ? undefined
+        : cat?.catalog.roles.find((r) => r.name === item.name);
       const body = role ? JSON.stringify(role, null, 2) : "";
       setText(body);
       setSaved(body);
@@ -188,9 +245,11 @@ export const AgentEditor = memo(function AgentEditor({
     else open(item);
   };
 
-  const save = () => {
-    if (!sel || readOnly || !dirty || invalid) return;
-    agentFileSave(paneId, sel.kind, sel.source, sel.name, text, isNew)
+  /** Saves what is unsaved; whether there is nothing left unsaved. */
+  const save = (): Promise<boolean> => {
+    if (!sel || readOnly || !dirty) return Promise.resolve(true);
+    if (invalid) return Promise.resolve(false);
+    return agentFileSave(paneId, sel.kind, sel.source, sel.name, text, isNew)
       .then((next) => {
         setCat(next);
         setSaved(text);
@@ -198,8 +257,12 @@ export const AgentEditor = memo(function AgentEditor({
         const now = items(next).find((i) => same(i, sel));
         if (now) setSel(now);
         setStatus("Saved");
+        return true;
       })
-      .catch((e: unknown) => setStatus(String(e)));
+      .catch((e: unknown) => {
+        setStatus(String(e));
+        return false;
+      });
   };
 
   const remove = () => {
@@ -241,14 +304,91 @@ export const AgentEditor = memo(function AgentEditor({
       .catch((e: unknown) => setStatus(String(e)));
   };
 
-  const start = () => {
-    if (!sel || dirty) return;
-    const run =
-      sel.kind === "role"
-        ? openAgent(sel.name, null, paneId, false)
-        : startTeam(sel.name, null, paneId);
-    run.then(() => setStatus(null)).catch((e: unknown) => setStatus(String(e)));
+  // Save, then what the page is for: start the role; start the team, or
+  // restart what of it can be; restart the teams following the way. A
+  // restart is confirmed in the header first.
+  const primary = async () => {
+    if (!sel || !(await save())) return;
+    const fail = (e: unknown) => setStatus(String(e));
+    const snapshot = useWorkspaceStore.getState().snapshot;
+    const tabs = snapshot?.tabs ?? [];
+    const agentPanes = new Set((snapshot?.agents ?? []).map((a) => a.paneId));
+    if (sel.kind === "role") {
+      openAgent(sel.name, null, paneId, false)
+        .then(() => setStatus(`Started ${sel.name}`))
+        .catch(fail);
+    } else if (sel.kind === "team") {
+      const runs = teamRuns(tabs, agentPanes, sel.name);
+      if (runs.length === 0) {
+        startTeam(sel.name, null, paneId)
+          .then(() => setStatus(`Started team ${sel.name}`))
+          .catch(fail);
+      } else {
+        setConfirm({ runs, keep: runs.flatMap((r) => r.running) });
+      }
+    } else {
+      const users = await agentEditorUsedBy(paneId, "way", sel.name).catch(
+        (e: unknown) => {
+          fail(e);
+          return null;
+        },
+      );
+      if (!users) return;
+      const runs = users
+        .filter((u) => u.kind === "team" && u.running)
+        .flatMap((u) => teamRuns(tabs, agentPanes, u.name));
+      // Agents started with a role that follows it, outside a team.
+      const roles = users.filter((u) => u.kind === "role").map((u) => u.name);
+      const alone = (snapshot?.agents ?? [])
+        .filter((a) => !a.member && a.role && roles.includes(a.role))
+        .map((a) => a.name ?? a.role!);
+      setConfirm({ runs, keep: [...runs.flatMap((r) => r.running), ...alone] });
+    }
   };
+
+  const restart = () => {
+    if (!confirm) return;
+    const runs = confirm.runs.filter((r) => r.stopped.length > 0);
+    setConfirm(null);
+    Promise.all(
+      // Any pane of the tab names its team; its focused one is still there.
+      runs.map((r) => teamRestart([], r.tab.focusedPane)),
+    )
+      .then((done) => {
+        const names = done
+          .flat()
+          .filter((d) => d.outcome === "restarted" || d.outcome === "reopened")
+          .map((d) => d.name);
+        setStatus(names.length ? `Restarted ${names.join(", ")}` : "Nothing restarted");
+      })
+      .catch((e: unknown) => setStatus(String(e)));
+  };
+
+  // What the header says under the title: where the file is, and whether
+  // it is shared, hides one of the same name, or is hidden by one.
+  const where = (s: Item) => {
+    const base =
+      s.source === "config"
+        ? "agentRoles in mirador.json — read only here"
+        : s.source === "builtin"
+          ? "ships with Mirador — copy it to change it; your copy replaces it"
+          : (s.path ?? `new ${s.kind}, in ${SOURCE_LABEL[s.source]}`);
+    if (s.shadowedBy) {
+      return `${base} · shadowed by ${SOURCE_LABEL[s.shadowedBy.source]}'s, which is used instead`;
+    }
+    const hides = (cat?.catalog.shadowed ?? [])
+      .filter((f) => f.kind === s.kind && f.name === s.name && f.by === s.source)
+      .map((f) => SOURCE_LABEL[f.source]);
+    return [
+      base,
+      s.source === "repo" && !isNew ? "shared through the repository" : null,
+      hides.length ? `shadows ${hides.join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+
+  const stopped = confirm?.runs.flatMap((r) => r.stopped) ?? [];
 
   return (
     <div
@@ -330,28 +470,38 @@ export const AgentEditor = memo(function AgentEditor({
                 .map((i) => (
                   <button
                     key={`${i.source}:${i.name}`}
-                    className={`editor-item${same(i, sel) ? " selected" : ""}`}
-                    title={i.problem ?? i.description ?? i.path ?? undefined}
+                    className={`editor-item${same(i, sel) ? " selected" : ""}${i.shadowedBy ? " shadowed" : ""}`}
+                    title={
+                      i.shadowedBy
+                        ? `Not used: ${SOURCE_LABEL[i.shadowedBy.source]}'s ${i.name} comes first${i.shadowedBy.path ? ` (${i.shadowedBy.path})` : ""}`
+                        : (i.description ?? i.path ?? undefined)
+                    }
                     onClick={() => choose(i)}
                   >
-                    <span className="editor-item-name">{i.name}</span>
-                    {i.problem && (
-                      <span className="editor-item-problem">⚠</span>
-                    )}
-                    <span className={`editor-source ${i.source}`}>
-                      {SOURCE_LABEL[i.source]}
+                    <span className="editor-item-row">
+                      <span className="editor-item-name">{i.name}</span>
+                      <span className={`editor-source ${i.source}`}>
+                        {SOURCE_LABEL[i.source]}
+                        {i.shadowedBy && " · shadowed"}
+                      </span>
                     </span>
+                    {i.problem && (
+                      <span className="editor-item-problem">{i.problem}</span>
+                    )}
                   </button>
                 ))}
             </section>
           ))}
-          {cat && (
-            <p className="editor-where">
-              repo: {cat.repoDir ?? "not in a repository"}
-              <br />
-              yours: {cat.globalDir}
-            </p>
-          )}
+          <p
+            className="editor-where"
+            title={
+              cat
+                ? `repo: ${cat.repoDir ?? "not in a repository"}\nyours: ${cat.globalDir}`
+                : undefined
+            }
+          >
+            Same name: repo › yours › config › built-in
+          </p>
         </nav>
         <div className="editor-main">
           {pending && (
@@ -363,61 +513,23 @@ export const AgentEditor = memo(function AgentEditor({
           )}
           {!sel ? (
             <p className="editor-empty">
-              Pick a role, way of working or team on the left, or + to create
+              Pick a team, role or way of working on the left, or + to create
               one.
             </p>
           ) : (
             <>
               <div className="editor-head">
-                <span className="editor-title">
-                  {sel.name}
-                  {dirty && " •"}
-                </span>
-                <span className="editor-path" title={sel.path ?? undefined}>
-                  {sel.source === "config"
-                    ? "agentRoles in mirador.json — read only here"
-                    : sel.source === "builtin"
-                      ? "ships with Mirador — copy it to change it; your copy replaces it"
-                      : (sel.path ??
-                        `new ${sel.kind}, in ${SOURCE_LABEL[sel.source]}`)}
-                </span>
-                {sel.source === "builtin" &&
-                  (["repo", "global"] as const).map((to) => (
-                    <button
-                      key={to}
-                      disabled={to === "repo" && !cat?.repoDir}
-                      title={
-                        to === "repo" && !cat?.repoDir
-                          ? "Not in a repository"
-                          : `A file of the same name, in ${SOURCE_LABEL[to]}, which replaces the built-in`
-                      }
-                      onClick={() => copyTo(to)}
-                    >
-                      Copy to {SOURCE_LABEL[to]}
-                    </button>
-                  ))}
-                {(sel.kind === "role" || sel.kind === "team") && !isNew && (
-                  <button
-                    disabled={dirty || !!sel.problem}
-                    title={
-                      dirty
-                        ? "Save first"
-                        : (sel.problem ?? `Start this ${sel.kind}`)
-                    }
-                    onClick={start}
-                  >
-                    Start
-                  </button>
-                )}
-                {!readOnly && (
-                  <button
-                    className="primary"
-                    disabled={!dirty || !!invalid}
-                    title={invalid ?? "Save (⌘S / Ctrl+S)"}
-                    onClick={save}
-                  >
-                    Save
-                  </button>
+                <div className="editor-head-text">
+                  <span className="editor-title">
+                    {sel.name}
+                    <span className="editor-kind">{sel.kind}</span>
+                  </span>
+                  <span className="editor-path" title={sel.path ?? undefined}>
+                    {where(sel)}
+                  </span>
+                </div>
+                {dirty && !readOnly && (
+                  <span className="editor-unsaved">Unsaved</span>
                 )}
                 {!readOnly && dirty && !isNew && (
                   <button onClick={() => setText(saved)}>Revert</button>
@@ -435,7 +547,60 @@ export const AgentEditor = memo(function AgentEditor({
                     </button>
                   </>
                 )}
+                {sel.source === "builtin" &&
+                  (["repo", "global"] as const).map((to) => (
+                    <button
+                      key={to}
+                      disabled={to === "repo" && !cat?.repoDir}
+                      title={
+                        to === "repo" && !cat?.repoDir
+                          ? "Not in a repository"
+                          : `A file of the same name, in ${SOURCE_LABEL[to]}, which replaces the built-in`
+                      }
+                      onClick={() => copyTo(to)}
+                    >
+                      Save a copy in {SOURCE_LABEL[to]}
+                    </button>
+                  ))}
+                {!readOnly && (
+                  <button
+                    disabled={!dirty || !!invalid}
+                    title={invalid ?? "Save (⌘S / Ctrl+S)"}
+                    onClick={() => void save()}
+                  >
+                    Save
+                  </button>
+                )}
+                {!sel.shadowedBy && (
+                  <button
+                    className="primary"
+                    disabled={!!invalid || (!dirty && !!sel.problem)}
+                    title={invalid ?? (!dirty ? sel.problem : null) ?? undefined}
+                    onClick={() => void primary()}
+                  >
+                    {(readOnly ? PRIMARY_READ_ONLY : PRIMARY)[sel.kind]}
+                  </button>
+                )}
               </div>
+              {confirm && (
+                <div className="editor-bar confirm">
+                  <span>
+                    {stopped.length > 0
+                      ? `Restart ${stopped.join(", ")}?`
+                      : "Nothing to restart."}
+                    {confirm.keep.length > 0 &&
+                      ` ${confirm.keep.join(", ")} ${confirm.keep.length === 1 ? "is" : "are"} running and keep${confirm.keep.length === 1 ? "s" : ""} the prompt ${confirm.keep.length === 1 ? "it" : "they"} started with: nothing restarts a running agent, so stop ${confirm.keep.length === 1 ? "it" : "them"} first.`}
+                  </span>
+                  {stopped.length > 0 && (
+                    <button className="primary" onClick={restart}>
+                      Restart
+                    </button>
+                  )}
+                  <button onClick={() => setConfirm(null)}>
+                    {stopped.length > 0 ? "Cancel" : "OK"}
+                  </button>
+                </div>
+              )}
               {invalid && <div className="editor-bar error">{invalid}</div>}
               {!invalid && sel.problem && !dirty && (
                 <div className="editor-bar warn">{sel.problem}</div>
@@ -458,7 +623,7 @@ export const AgentEditor = memo(function AgentEditor({
                   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
                     e.preventDefault();
                     e.stopPropagation();
-                    save();
+                    void save();
                   }
                 }}
               />

@@ -5142,8 +5142,10 @@ button.tb-line-row:hover {
 }
 
 .editor-list {
-  width: 220px;
+  width: 200px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   border-right: 1px solid var(--surface);
   background: var(--bg-alt);
@@ -5158,7 +5160,7 @@ button.tb-line-row:hover {
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -5196,18 +5198,26 @@ button.tb-line-row:hover {
   padding: 2px 4px;
 }
 
+/* Its name and source on a line, and under them what is wrong with it. */
 .editor-item {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 1px;
   width: 100%;
   border: none;
   background: transparent;
   color: var(--text);
   font-size: 12px;
   text-align: left;
-  padding: 4px 10px;
+  padding: 5px 10px;
   cursor: pointer;
+}
+
+.editor-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .editor-item:hover {
@@ -5216,7 +5226,20 @@ button.tb-line-row:hover {
 
 .editor-item.selected {
   background: var(--surface);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--text);
+}
+
+/* Hidden by a file of the same name that comes first: listed, not used. */
+.editor-item.shadowed {
+  color: var(--muted);
+}
+
+.editor-item.shadowed .editor-item-name {
+  text-decoration: line-through;
+}
+
+.editor-item.shadowed .editor-source {
+  color: var(--muted);
 }
 
 /* The name gives way, not the badge: a flex row's only shrinkable item
@@ -5230,8 +5253,9 @@ button.tb-line-row:hover {
 }
 
 .editor-item-problem {
-  flex-shrink: 0;
-  color: #fab387;
+  color: var(--status-needs-you);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
 }
 
 .editor-source {
@@ -5244,12 +5268,18 @@ button.tb-line-row:hover {
   color: var(--accent);
 }
 
+.editor-source.global {
+  color: var(--subtext);
+}
+
+/* At the list's foot however short it is. */
 .editor-where {
-  margin: 12px 10px 4px;
+  margin: auto 10px 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.5;
-  word-break: break-all;
 }
 
 .editor-main {
@@ -5263,27 +5293,54 @@ button.tb-line-row:hover {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--surface);
   flex-shrink: 0;
 }
 
-.editor-title {
-  flex-shrink: 0;
-  color: var(--text);
-  font-weight: 600;
+/* The title over its path: the column that gives way to the buttons. */
+.editor-head-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
+.editor-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.editor-kind {
+  padding: 0 6px;
+  border: 1px solid var(--surface);
+  border-radius: 4px;
+  color: var(--subtext);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.editor-unsaved {
+  flex-shrink: 0;
+  color: var(--warn);
+  font-size: 11px;
+}
+
+/* Not right-to-left to show a long path's end: what follows the path
+   (shared, shadows) would come out reordered. Its title has it whole. */
 .editor-path {
-  flex: 1;
   min-width: 0;
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
 }
 
 .editor-head button,
@@ -5328,6 +5385,22 @@ button.tb-line-row:hover {
 
 .editor-bar.error {
   color: #f38ba8;
+}
+
+/* A restart waiting for a yes. */
+.editor-bar.confirm {
+  border-bottom: 1px solid var(--surface);
+  color: var(--text);
+}
+
+.editor-bar.confirm span {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-bar button.primary {
+  background: var(--accent);
+  color: var(--bg);
 }
 
 .editor-text {
