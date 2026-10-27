@@ -387,7 +387,8 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             .clone()
             .or(imported.font_family)
             .unwrap_or_else(|| default_font_family().into()),
-        font_size: cfg.font_size.or(imported.font_size).unwrap_or(13.0),
+        // Outside 6–72 a terminal is unreadable or a few cells wide.
+        font_size: cfg.font_size.or(imported.font_size).unwrap_or(13.0).clamp(6.0, 72.0),
         scrollback: cfg.scrollback.unwrap_or(10_000),
         mac_option_is_meta: cfg.mac_option_is_meta.unwrap_or(false),
         colors,
@@ -672,6 +673,14 @@ mod tests {
         assert_eq!(resolved.colors.background, "#000000");
         assert_eq!(resolved.keybindings["mod+t"], "split_right");
         assert!(!resolved.keybindings.contains_key("mod+w"));
+    }
+
+    #[test]
+    fn font_size_is_kept_to_6_to_72() {
+        let size = |json: &str| resolve(&serde_json::from_str(json).unwrap()).font_size;
+        assert_eq!(size(r#"{ "fontSize": 73 }"#), 72.0);
+        assert_eq!(size(r#"{ "fontSize": 2 }"#), 6.0);
+        assert_eq!(size(r#"{ "fontSize": 12.5 }"#), 12.5);
     }
 
     #[test]

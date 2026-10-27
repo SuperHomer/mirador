@@ -31,15 +31,15 @@ pub fn settings() -> Vec<Setting> {
     use SettingKind::{Bool, Number, ReadOnly, Text};
     let shell = if cfg!(windows) { "PowerShell 7, Windows PowerShell or cmd.exe" } else { "$SHELL" };
     vec![
-        setting("themeSource", "Appearance", choice(&["auto", "ghostty", "wezterm", "builtin", "devaslife"]), "auto",
-            "Where colors come from: auto uses Ghostty's config when there is one."),
+        setting("themeSource", "Appearance", choice(&["auto", "ghostty", "wezterm", "builtin", "none", "devaslife"]), "auto",
+            "Where colors come from: auto uses Ghostty's config when there is one; builtin (or none) is Mirador's own colors."),
         setting("weztermScheme", "Appearance", Text, "none",
             "The wezterm scheme a wezterm theme source reads: a name in ~/.config/wezterm/colors, or a .toml path."),
         setting("fontFamily", "Appearance", Text, default_font_family(), "The terminal font, as a CSS font list."),
         setting("fontSize", "Appearance", Number { min: 6.0, max: 72.0 }, "13", "The terminal font size, in points."),
         setting("colors", "Appearance", ReadOnly, "the theme's",
             "Colors that override the theme's: background, foreground, cursor, selection, palette."),
-        setting("scrollback", "Terminal", Number { min: 0.0, max: 1_000_000.0 }, "10000", "Lines each terminal keeps above the screen."),
+        setting("scrollback", "Terminal", Number { min: 0.0, max: u32::MAX as f64 }, "10000", "Lines each terminal keeps above the screen."),
         setting("macOptionIsMeta", "Terminal", Bool, "false",
             "macOS only: Option+key sends Meta instead of typing its character, which non-US layouts need for [ ] { } |."),
         setting("shell", "Terminal", Text, shell, "The program panes run."),
@@ -193,9 +193,11 @@ mod tests {
         std::fs::write(&path, r#"{ "zeta": 1, "fontSize": 15, "themeSource": "auto", "somethingNew": { "a": [1, 2] } }"#).unwrap();
         set_config_value_in(&path, "fontSize", Some(json!(12.5))).unwrap();
         set_config_value_in(&path, "persistSessions", Some(json!(false))).unwrap();
+        // No cap on scrollback beyond what a u32 holds.
+        set_config_value_in(&path, "scrollback", Some(json!(2_000_000))).unwrap();
         let cfg = read(&path);
         let keys: Vec<&String> = cfg.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["zeta", "fontSize", "themeSource", "somethingNew", "persistSessions"]);
+        assert_eq!(keys, ["zeta", "fontSize", "themeSource", "somethingNew", "persistSessions", "scrollback"]);
         assert_eq!(cfg["fontSize"], 12.5);
         assert_eq!(cfg["somethingNew"], json!({ "a": [1, 2] }));
 
@@ -203,7 +205,7 @@ mod tests {
         set_config_value_in(&path, "fontSize", None).unwrap();
         let cfg = read(&path);
         let keys: Vec<&String> = cfg.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["zeta", "themeSource", "somethingNew", "persistSessions"]);
+        assert_eq!(keys, ["zeta", "themeSource", "somethingNew", "persistSessions", "scrollback"]);
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
@@ -215,9 +217,11 @@ mod tests {
         std::fs::write(&path, text).unwrap();
         for (key, value) in [
             ("themeSource", json!("solarized")), // not a choice
+            ("scrollback", json!(u64::from(u32::MAX) + 1)),
             ("agentsPerTab", json!(5)),
             ("agentsPerTab", json!("6")), // a choice of numbers
             ("fontSize", json!(200)),     // out of range
+            ("fontSize", json!(73)),
             ("scrollback", json!(1.5)),   // in range, but not a whole number
             ("persistSessions", json!("yes")), // wrong type
             ("shell", json!(7)),
