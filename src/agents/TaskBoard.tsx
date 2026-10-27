@@ -1448,8 +1448,11 @@ function historyText(e: TaskHistoryEntry): string {
 /** "TODAY", "YESTERDAY", or the date: the day a line is grouped under. */
 function dayLabel(ms: number, now: number): string {
   const today = startOfDay(now);
+  // A calendar day back, not 24 hours: a day with a DST change is not 24h.
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
   if (ms >= today) return "Today";
-  if (ms >= today - 86_400_000) return "Yesterday";
+  if (ms >= yesterday.getTime()) return "Yesterday";
   return new Date(ms).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
