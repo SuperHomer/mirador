@@ -133,7 +133,11 @@ impl CodexTrail {
         let turn = &mut self.turns[t];
         turn.actions.push(TrailAction {
             summary: item_summary(&kind, item),
-            kind: crate::trail::action_kind(&kind),
+            // An Extension says what it is in its own kind (`web_search`).
+            kind: crate::trail::action_kind(match kind.as_str() {
+                "Extension" => item["kind"].as_str().unwrap_or_default(),
+                k => k,
+            }),
             tool: kind,
             id,
             started_ms: started.or(ms),
@@ -764,6 +768,9 @@ mod tests {
         assert_eq!(a.actions[0].output, "error[E0425]\nmore");
         let b: Vec<(&str, &str)> = turns[1].actions.iter().map(|x| (x.tool.as_str(), x.summary.as_str())).collect();
         assert_eq!(b, [("CommandExecution", "cargo test"), ("ImageView", "/w/shot.png"), ("Extension", "rust lsof")]);
+        let kinds: Vec<cmux_protocol::ActionKind> = turns[1].actions.iter().map(|x| x.kind).collect();
+        use cmux_protocol::ActionKind::{Read, Run};
+        assert_eq!(kinds, [Run, Read, Read], "an image viewed and a web search are reads");
         assert_eq!(turns[1].prompt.as_deref(), Some("Now test"));
     }
 
@@ -798,6 +805,9 @@ mod tests {
             ]
         );
         assert_eq!(turns[0].prompt.as_deref(), Some("Patch it"));
+        use cmux_protocol::ActionKind::{Edit, Read, Run};
+        let kinds: Vec<cmux_protocol::ActionKind> = turns[0].actions.iter().map(|x| x.kind).collect();
+        assert_eq!(kinds, [Run, Edit, Run, Read], "view_image is a read");
         assert_eq!(turns[0].actions[0].output, "make: *** Error 2");
         assert_eq!(turns[0].actions[0].duration_ms, Some(5000));
     }

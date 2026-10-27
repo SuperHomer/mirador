@@ -164,12 +164,18 @@ pub(crate) fn stamp(turn: &mut TrailTurn, ms: Option<u64>) {
 }
 
 /// What sort of thing a tool does, by its name: Claude Code's tools, and
-/// Codex's calls and items (`codex_trail`).
+/// Codex's calls and items (`codex_trail`), and the kind an Extension item
+/// says it is (`web_search`).
 pub fn action_kind(tool: &str) -> ActionKind {
     match tool {
-        "Read" | "Grep" | "Glob" | "LS" | "WebFetch" | "WebSearch" | "ImageView" => ActionKind::Read,
-        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" | "apply_patch" | "FileChange" => ActionKind::Edit,
-        "Bash" | "shell" | "local_shell_call" | "exec_command" | "CommandExecution" => ActionKind::Run,
+        "Read" | "Grep" | "Glob" | "LS" | "WebFetch" | "WebSearch" | "ImageView" | "view_image" | "web_search"
+        | "image_view" => ActionKind::Read,
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" | "apply_patch" | "FileChange" | "file_change" => {
+            ActionKind::Edit
+        }
+        "Bash" | "shell" | "local_shell_call" | "exec_command" | "CommandExecution" | "command_execution" => {
+            ActionKind::Run
+        }
         _ => ActionKind::Other,
     }
 }
@@ -378,7 +384,7 @@ mod tests {
 
     #[test]
     fn sorts_tools_into_reads_edits_and_runs() {
-        for tool in ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "ImageView"] {
+        for tool in ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "ImageView", "view_image", "web_search"] {
             assert_eq!(action_kind(tool), ActionKind::Read, "{tool}");
         }
         for tool in ["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch", "FileChange"] {

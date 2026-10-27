@@ -4600,9 +4600,24 @@ button.tb-assignee:hover {
   flex-shrink: 0;
 }
 
+/* One line: the time and turn number stay whole, the rest is cut short. */
 .tb-turn-summary {
+  display: flex;
+  gap: 0.4em;
   min-width: 0;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.tb-turn-summary > span {
+  flex-shrink: 0;
+}
+
+.tb-turn-summary > .tb-turn-rest {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tb-turn-summary.failed {

@@ -1230,9 +1230,7 @@ function TurnSummary({
   const failed = turn.actions.filter((a) => a.status === "error").length;
   const end = state === "done" ? turn.lastMs : now;
   const lasted = turn.startedMs !== null && end !== null ? took(Math.max(0, end - turn.startedMs)) : null;
-  const parts = [
-    clock(turn.startedMs),
-    `Turn ${number}`,
+  const rest = [
     state,
     `${reads} ${reads === 1 ? "read" : "reads"}`,
     `${edits} ${edits === 1 ? "edit" : "edits"}`,
@@ -1240,7 +1238,11 @@ function TurnSummary({
     lasted,
   ];
   return (
-    <span className={`tb-turn-summary${failed > 0 ? " failed" : ""}`}>{parts.filter(Boolean).join(" · ")}</span>
+    <span className={`tb-turn-summary${failed > 0 ? " failed" : ""}`}>
+      <span>{clock(turn.startedMs)} ·</span>
+      <span>Turn {number} ·</span>
+      <span className="tb-turn-rest">{rest.filter(Boolean).join(" · ")}</span>
+    </span>
   );
 }
 
