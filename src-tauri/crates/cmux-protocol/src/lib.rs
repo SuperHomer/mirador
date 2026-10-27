@@ -1565,6 +1565,20 @@ pub struct ResolvedConfig {
     /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
     pub agents_per_tab: u8,
     pub agent_click: AgentClick,
+    /// Where the app opens the roles, ways and teams editor, a diff and
+    /// the commit graph: a tab of its own or a split of the focused pane.
+    pub editor_opens_in: OpensIn,
+    pub diff_opens_in: OpensIn,
+    pub graph_opens_in: OpensIn,
+}
+
+/// Where a pane the app opens goes: in a new tab, or split beside the
+/// focused pane — the values of a custom command's `target`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpensIn {
+    Tab,
+    Split,
 }
 
 /// What clicking an agent in the sidebar does: show its tab's wall in

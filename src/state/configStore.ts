@@ -12,6 +12,18 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   setConfig: (config) => set({ config }),
 }));
 
+/** Whether the app opens the editor, a diff or the graph in a tab of its
+ *  own, from mirador.json — before it is read, as its defaults do. */
+export function opensInTab(what: "editor" | "diff" | "graph"): boolean {
+  const config = useConfigStore.getState().config;
+  const where = config
+    ? { editor: config.editorOpensIn, diff: config.diffOpensIn, graph: config.graphOpensIn }[what]
+    : what === "editor"
+      ? "tab"
+      : "split";
+  return where === "tab";
+}
+
 const PALETTE_KEYS = [
   "black",
   "red",

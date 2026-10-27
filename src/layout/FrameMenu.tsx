@@ -12,6 +12,7 @@ import {
 } from "../bindings";
 import { useBoardStore } from "../state/boardStore";
 import { useUiStore } from "../state/uiStore";
+import { opensInTab } from "../state/configStore";
 
 /** The menu's width, to line its right edge up with the "+". */
 const WIDTH = 220;
@@ -131,8 +132,8 @@ export function FrameMenu({
             Browser
           </button>
           <button onClick={() => setAgents(true)}>Agent…</button>
-          <button onClick={run(() => openDiff(pane, false, null))}>Diff</button>
-          <button onClick={run(() => openGraph(pane, false))}>
+          <button onClick={run(() => openDiff(pane, opensInTab("diff"), null))}>Diff</button>
+          <button onClick={run(() => openGraph(pane, opensInTab("graph")))}>
             Commit graph
           </button>
         </>

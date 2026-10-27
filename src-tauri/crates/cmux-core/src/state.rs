@@ -450,6 +450,12 @@ impl Workspace {
         (0..n).map(|_| new_id()).collect()
     }
 
+    /// The first pane, in tab and layout order, that `wanted` picks: one
+    /// already showing what the app would otherwise open again.
+    pub fn find_pane(&self, wanted: impl Fn(&str) -> bool) -> Option<String> {
+        self.tabs.iter().flat_map(|t| layout::pane_ids(&t.root)).find(|p| wanted(p))
+    }
+
     /// The tab holding `pane`, for reading.
     pub fn tab_of_pane(&self, pane: &str) -> Option<&Tab> {
         self.tabs.iter().find(|t| layout::contains(&t.root, pane))
@@ -903,6 +909,18 @@ mod tests {
 
     fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
         crate::agents::RunningAgent { harness, pid: 42, args: args.into() }
+    }
+
+    #[test]
+    fn finds_the_first_pane_showing_something_in_tab_order() {
+        let mut ws = Workspace::default();
+        let (_, a) = ws.new_tab();
+        let (_, b) = ws.new_tab();
+        let c = ws.split_pane(&b, SplitDir::Row).unwrap();
+        assert_eq!(ws.find_pane(|p| p == c || p == b), Some(b.clone()));
+        assert_eq!(ws.find_pane(|p| p == c), Some(c));
+        assert_eq!(ws.find_pane(|p| p == a), Some(a));
+        assert_eq!(ws.find_pane(|_| false), None);
     }
 
     #[test]

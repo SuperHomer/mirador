@@ -1479,6 +1479,22 @@ pub fn open_graph(
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
     let repo = source_repo(&state, &source)?;
 
+    // In a tab of its own, a graph of this repository already open is
+    // shown again rather than opened twice. A split always opens one,
+    // beside the pane it was asked from.
+    if tab {
+        let mut ws = state.workspace.lock().unwrap();
+        let existing = {
+            let meta = state.meta.lock().unwrap();
+            ws.find_pane(|p| meta.get(p).and_then(|m| m.graph_repo.as_deref()) == Some(repo.as_str()))
+        };
+        if let Some(pane) = existing {
+            ws.focus_pane(&pane);
+            drop(ws);
+            emit_workspace(&app);
+            return Ok(pane);
+        }
+    }
     let new_pane = if tab {
         let (_, pane) = state.workspace.lock().unwrap().new_tab();
         pane

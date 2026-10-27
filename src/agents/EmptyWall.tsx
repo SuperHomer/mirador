@@ -1,5 +1,6 @@
 import { openAgent, openAgentEditor, startTeam, TabSnapshot, toggleAgentWall } from "../bindings";
 import { roleLine, useRoleCatalog } from "./AgentMenu";
+import { opensInTab } from "../state/configStore";
 
 /**
  * The wall of a tab with no agents yet (21d): the ways to start one — a
@@ -77,7 +78,7 @@ export function EmptyWall({ tab }: { tab: TabSnapshot }) {
           <button className="empty-wall-link" onClick={() => void toggleAgentWall(pane)}>
             Show Splits
           </button>
-          <button className="empty-wall-link" onClick={() => void openAgentEditor(pane, false)}>
+          <button className="empty-wall-link" onClick={() => void openAgentEditor(pane, opensInTab("editor"))}>
             No roles? Create one
           </button>
         </div>

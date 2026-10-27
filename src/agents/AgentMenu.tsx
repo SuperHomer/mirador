@@ -9,6 +9,7 @@ import {
   RoleCatalog,
 } from "../bindings";
 import { useUiStore } from "../state/uiStore";
+import { opensInTab } from "../state/configStore";
 
 /** "Claude Code · opus · high": what a role starts. */
 export function roleLine(r: AgentRole): string {
@@ -84,7 +85,7 @@ export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void
   const edit = () => {
     acted.current = true;
     onClose();
-    void openAgentEditor(pane, false);
+    void openAgentEditor(pane, opensInTab("editor"));
   };
   const roles = catalog?.roles ?? [];
 

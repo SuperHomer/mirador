@@ -624,10 +624,18 @@ export interface ResolvedConfig {
   /** How many agents a page of the wall's Grid layout holds: 4, 6 or 9. */
   agentsPerTab: number;
   agentClick: AgentClick;
+  /** Where the app opens the editor, a diff and the commit graph. */
+  editorOpensIn: OpensIn;
+  diffOpensIn: OpensIn;
+  graphOpensIn: OpensIn;
 }
 
 /** A sidebar agent's click: its tab's wall on it, or its pane alone. */
 export type AgentClick = "wall" | "pane";
+
+/** A pane the app opens: in a tab of its own, or split beside the
+ *  focused one (`cmux_protocol::OpensIn`). */
+export type OpensIn = "tab" | "split";
 
 export interface UpdateInfo {
   version: string;

@@ -33,6 +33,30 @@ pub fn open_agent_editor(
             m.and_then(|m| m.repo_root.clone()),
         )
     };
+    // In a tab of its own, an editor already open on the same files — the
+    // same repository, or outside one the same directory — is shown again
+    // rather than opened twice. A split always opens one.
+    if tab {
+        let mut ws = state.workspace.lock().unwrap();
+        let existing = {
+            let meta = state.meta.lock().unwrap();
+            ws.find_pane(|p| {
+                meta.get(p).is_some_and(|m| {
+                    m.agent_editor
+                        && match (&repo_root, &m.repo_root) {
+                            (Some(a), Some(b)) => a == b,
+                            _ => m.cwd == cwd,
+                        }
+                })
+            })
+        };
+        if let Some(pane) = existing {
+            ws.focus_pane(&pane);
+            drop(ws);
+            emit_workspace(&app);
+            return Ok(pane);
+        }
+    }
     let pane = if tab {
         state.workspace.lock().unwrap().new_tab().1
     } else {

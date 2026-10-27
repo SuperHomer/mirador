@@ -315,6 +315,24 @@ where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
 
+## Where the editor, diffs and the graph open
+
+Opened from the app — the palette, a frame's + menu, the wall — the roles,
+ways and teams editor gets a tab of its own, and a diff or the commit
+graph a split beside the focused pane. Three keys change that, each
+`"tab"` or `"split"`, the values of a custom command's `target`:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "editorOpensIn": "split", "diffOpensIn": "tab", "graphOpensIn": "tab" }
+```
+
+Any other value is ignored for the default (`editorOpensIn` `"tab"`, the
+other two `"split"`), and an edit applies at once. In a tab, the editor or
+a graph already open on the same repository is shown again instead of a
+second one; a diff always opens a new pane, and so does a split. The
+`mira` commands keep their own `--tab` flag and ignore these keys.
+
 ## Agent roles and the agent wall
 
 A role is a named way to start an agent — Claude Code or Codex, its own

@@ -9,7 +9,7 @@ pub mod wezterm;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentClick, AgentRole, CustomCommand, ResolvedColors, ResolvedConfig};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -64,6 +64,12 @@ pub struct Config {
     /// tab). Anything else is "wall". A string rather than `AgentClick`, so
     /// a bad value is ignored instead of failing the whole file.
     pub agent_click: Option<String>,
+    /// Where the app opens the roles, ways and teams editor ("tab", the
+    /// default, or "split"), a diff and the commit graph ("split", the
+    /// default, or "tab"). Strings for the same reason as `agent_click`.
+    pub editor_opens_in: Option<String>,
+    pub diff_opens_in: Option<String>,
+    pub graph_opens_in: Option<String>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
@@ -379,6 +385,18 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             Some("pane") => AgentClick::Pane,
             _ => AgentClick::Wall,
         },
+        editor_opens_in: opens_in(cfg.editor_opens_in.as_deref(), OpensIn::Tab),
+        diff_opens_in: opens_in(cfg.diff_opens_in.as_deref(), OpensIn::Split),
+        graph_opens_in: opens_in(cfg.graph_opens_in.as_deref(), OpensIn::Split),
+    }
+}
+
+/// "tab" or "split"; anything else, or nothing, is `default`.
+fn opens_in(value: Option<&str>, default: OpensIn) -> OpensIn {
+    match value {
+        Some("tab") => OpensIn::Tab,
+        Some("split") => OpensIn::Split,
+        _ => default,
     }
 }
 
@@ -567,6 +585,21 @@ mod tests {
         assert_eq!(per_tab(r#"{ "agentsPerTab": 5 }"#), 4);
         assert_eq!(per_tab(r#"{ "agentsPerTab": 0 }"#), 4);
         assert_eq!(per_tab("{}"), 4);
+    }
+
+    #[test]
+    fn the_editor_opens_in_a_tab_and_diffs_and_graphs_in_a_split_unless_set() {
+        let cfg = |json: &str| resolve(&serde_json::from_str(json).unwrap());
+        let defaults = cfg("{}");
+        assert_eq!(
+            (defaults.editor_opens_in, defaults.diff_opens_in, defaults.graph_opens_in),
+            (OpensIn::Tab, OpensIn::Split, OpensIn::Split)
+        );
+        let set = cfg(r#"{ "editorOpensIn": "split", "diffOpensIn": "tab", "graphOpensIn": "tab" }"#);
+        assert_eq!((set.editor_opens_in, set.diff_opens_in, set.graph_opens_in), (OpensIn::Split, OpensIn::Tab, OpensIn::Tab));
+        // A bad value is the default, not a broken config.
+        let bad = cfg(r#"{ "editorOpensIn": "window", "diffOpensIn": "Tab", "graphOpensIn": "pane" }"#);
+        assert_eq!((bad.editor_opens_in, bad.diff_opens_in, bad.graph_opens_in), (OpensIn::Tab, OpensIn::Split, OpensIn::Split));
     }
 
     #[test]

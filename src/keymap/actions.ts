@@ -27,6 +27,7 @@ import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
+import { opensInTab } from "../state/configStore";
 
 /** The palette's groups: what an action is about. */
 export type ActionGroup = "agents" | "git" | "pane" | "view" | "app" | "tabs";
@@ -179,7 +180,7 @@ export const actions: ActionDef[] = [
     run: () => {
       const { snapshot } = useWorkspaceStore.getState();
       const pane = activeTab(snapshot)?.focusedPane;
-      if (pane) void openGraph(pane, false);
+      if (pane) void openGraph(pane, opensInTab("graph"));
     },
   },
   {
@@ -205,7 +206,7 @@ export const actions: ActionDef[] = [
     group: "agents",
     // The role, way-of-working and team files the focused pane's
     // directory sees, beside it.
-    run: () => void openAgentEditor(focusedPane() ?? null, false),
+    run: () => void openAgentEditor(focusedPane() ?? null, opensInTab("editor")),
   },
   {
     id: "agent_activity",
@@ -337,7 +338,7 @@ export const actions: ActionDef[] = [
     hint: "uncommitted changes",
     run: () => {
       const pane = focusedPane();
-      if (pane) void openDiff(pane, false, null);
+      if (pane) void openDiff(pane, opensInTab("diff"), null);
     },
   },
   {
