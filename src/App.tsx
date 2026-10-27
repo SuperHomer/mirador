@@ -180,6 +180,7 @@ export default function App() {
               whatsNewPanes={snapshot.whatsNewPanes}
               graphPanes={snapshot.graphPanes}
               agentEditorPanes={snapshot.agentEditorPanes ?? []}
+              settingsPanes={snapshot.settingsPanes ?? []}
             />
           </TabLayer>
         ))}

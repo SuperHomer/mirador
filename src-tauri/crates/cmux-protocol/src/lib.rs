@@ -236,6 +236,9 @@ pub struct WorkspaceSnapshot {
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
+    /// Settings panes: at most one, showing mirador.json's settings.
+    #[serde(default)]
+    pub settings_panes: Vec<SettingsPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -455,6 +458,15 @@ pub enum Request {
     /// Opens the editor for the role, way and team files `pane_id`'s
     /// directory sees: a split of that pane, or a tab with `target` "tab".
     AgentEditor {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// Shows the settings pane, or opens one: a split of `pane_id`, or a
+    /// tab with `target` "tab"; without a target, where `editorOpensIn`
+    /// says.
+    Settings {
         #[serde(default)]
         pane_id: Option<String>,
         #[serde(default)]
@@ -1757,6 +1769,13 @@ pub struct GraphResult {
 pub struct AgentEditorPane {
     pub pane_id: String,
     pub cwd: Option<String>,
+}
+
+/// A pane showing mirador.json's settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsPane {
+    pub pane_id: String,
 }
 
 /// A pane showing a commit graph, and the repository it reads.

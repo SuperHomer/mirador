@@ -184,6 +184,49 @@ fn the_agent_editor_opens_and_comes_back() {
     assert!(listed(&sb).is_some(), "the editor comes back as an editor, not a shell");
 }
 
+/// mirador.json is one file, so there is one settings pane: asked for
+/// again, from another tab and whatever the flags, the open one is focused
+/// rather than a second opened. It comes back after a relaunch.
+#[test]
+fn there_is_one_settings_pane() {
+    e2e!();
+    let mut sb = Sandbox::new("settings");
+    sb.launch();
+    let first = sb.first_pane();
+    let (code, out, err) = sb.mira(Some(&first), &["settings", "--split"]);
+    assert_eq!(code, 0, "{err}");
+    let settings = out.trim().to_string();
+    let listed = |sb: &Sandbox| -> Vec<String> {
+        sb.snapshot()["settingsPanes"]
+            .as_array()
+            .map(|l| l.iter().filter_map(|s| s["paneId"].as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(listed(&sb), std::slice::from_ref(&settings));
+    assert_eq!(sb.panes(), [first.clone(), settings.clone()]);
+    // A render throw in the pane takes the whole tree down with it: the
+    // terminal beside it still answering says the page survived it.
+    sb.type_into(&first, "echo still-$((40+2))\r");
+    sb.wait_for("the terminal beside the settings", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
+    });
+
+    let (code, out, err) = sb.mira(None, &["new-tab"]);
+    assert_eq!(code, 0, "{err}");
+    let elsewhere = out.trim().to_string();
+    let (code, out, err) = sb.mira(Some(&elsewhere), &["settings", "--tab"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), settings, "the open settings pane again");
+    assert_eq!(listed(&sb), std::slice::from_ref(&settings));
+    let snap = sb.snapshot();
+    let active = snap["tabs"].as_array().unwrap().iter().find(|t| t["id"] == snap["activeTab"]).unwrap().clone();
+    assert_eq!(active["focusedPane"], settings.as_str(), "shown, in its own tab");
+
+    sb.quit();
+    sb.launch();
+    assert_eq!(listed(&sb), [settings], "it comes back as the settings pane, not a shell");
+}
+
 /// Opened in a tab, a graph or an editor already open on the same files is
 /// shown again rather than opened twice: one graph per repository, one
 /// editor per repository or, outside one, per directory — the second ask

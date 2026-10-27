@@ -10,7 +10,7 @@ use tauri::{AppHandle, State};
 use cmux_core::role_files::{Kind, Places};
 use cmux_protocol::{CatalogKind, FileFields, HarnessChoices, PromptLayer, RoleCatalog, RoleSource, SplitDir, UsedBy};
 
-use crate::commands::emit_workspace;
+use crate::commands::{emit_workspace, show_existing_pane};
 use crate::AppState;
 
 /// Opens an editor pane for the files `pane_id`'s directory sees (the
@@ -37,25 +37,16 @@ pub fn open_agent_editor(
     // same repository, or outside one the same directory — is shown again
     // rather than opened twice. A split always opens one.
     if tab {
-        let mut ws = state.workspace.lock().unwrap();
-        let existing = {
-            let meta = state.meta.lock().unwrap();
-            ws.find_pane(|p| {
-                meta.get(p).is_some_and(|m| {
-                    m.agent_editor
-                        && cmux_core::state::same_place(
-                            repo_root.as_deref(),
-                            cwd.as_deref(),
-                            m.repo_root.as_deref(),
-                            m.cwd.as_deref(),
-                        )
-                })
-            })
-        };
-        if let Some(pane) = existing {
-            ws.focus_pane(&pane);
-            drop(ws);
-            emit_workspace(&app);
+        let shown = show_existing_pane(&app, &state, |m| {
+            m.agent_editor
+                && cmux_core::state::same_place(
+                    repo_root.as_deref(),
+                    cwd.as_deref(),
+                    m.repo_root.as_deref(),
+                    m.cwd.as_deref(),
+                )
+        });
+        if let Some(pane) = shown {
             return Ok(pane);
         }
     }

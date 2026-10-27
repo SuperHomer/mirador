@@ -10,6 +10,7 @@ mod intel;
 mod notify;
 mod runs;
 mod server;
+mod settings;
 mod tasks;
 mod teams;
 mod update;
@@ -364,6 +365,8 @@ pub fn run() {
             agent_editor::agent_file_save,
             agent_editor::agent_file_save_fields,
             agent_editor::agent_file_delete,
+            settings::open_settings,
+            settings::settings_view,
             teams::start_team,
             teams::list_teams,
             teams::team_add,

@@ -123,6 +123,16 @@ enum Command {
         #[arg(long)]
         tab: bool,
     },
+    /// Show the settings pane, mirador.json's settings, or open it: where
+    /// `editorOpensIn` says, or as --tab or --split say.
+    Settings {
+        /// Open in a new tab.
+        #[arg(long, conflicts_with = "split")]
+        tab: bool,
+        /// Open as a split of this pane.
+        #[arg(long)]
+        split: bool,
+    },
     /// Agents: start a Claude Code one with a role; list and watch every
     /// agent, Codex, OpenCode and the rest included.
     Agent {
@@ -671,6 +681,14 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: Some(pane_id),
             }
         }
+        Command::Settings { tab, split } => Request::Settings {
+            pane_id: own_pane(),
+            target: if tab {
+                Some("tab".to_string())
+            } else {
+                split.then(|| "split".to_string())
+            },
+        },
         Command::Agent { action } => match action {
             AgentAction::New { role, harness, tab, title, task } => Request::AgentNew {
                 role,
