@@ -530,6 +530,31 @@ export interface RoleCatalog {
   ways: AgentWay[];
   teams: AgentTeam[];
   problems: string[];
+  /** Files hidden by one of the same name that comes first. */
+  shadowed: ShadowedFile[];
+}
+
+/** What the catalog holds (`cmux_protocol::CatalogKind`). */
+export type CatalogKind = "role" | "way" | "team";
+
+/** A role, way or team hidden by one of the same name — repo, then yours,
+ *  then mirador.json, then built-in — and so not used. */
+export interface ShadowedFile {
+  kind: CatalogKind;
+  name: string;
+  source: RoleSource;
+  /** Its file; null for an `agentRoles` entry. */
+  path: string | null;
+  /** Where the one used instead is defined, and its file. */
+  by: RoleSource;
+  byPath: string | null;
+}
+
+/** A team or role using a role or a way of working, and whether it runs. */
+export interface UsedBy {
+  kind: CatalogKind;
+  name: string;
+  running: boolean;
 }
 
 export interface RemotePaneInfo {
@@ -772,6 +797,9 @@ export const openAgentEditor = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_agent_editor", { paneId, tab });
 export const agentEditorCatalog = (paneId: string) =>
   invoke<EditorCatalog>("agent_editor_catalog", { paneId });
+/** The teams and roles using the role or way `name`, running or not. */
+export const agentEditorUsedBy = (paneId: string, kind: CatalogKind, name: string) =>
+  invoke<UsedBy[]>("agent_editor_used_by", { paneId, kind, name });
 export const agentFileRead = (paneId: string, path: string) =>
   invoke<string>("agent_file_read", { paneId, path });
 /** Warnings for the text; rejects with why it cannot be saved. */

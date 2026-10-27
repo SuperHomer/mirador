@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 
 use cmux_core::role_files::{Kind, Places};
-use cmux_protocol::{RoleCatalog, RoleSource, SplitDir};
+use cmux_protocol::{CatalogKind, RoleCatalog, RoleSource, SplitDir, UsedBy};
 
 use crate::commands::emit_workspace;
 use crate::AppState;
@@ -85,6 +85,35 @@ fn catalog(state: &AppState, pane_id: &str) -> Result<EditorCatalog, String> {
 #[tauri::command]
 pub fn agent_editor_catalog(state: State<'_, AppState>, pane_id: String) -> Result<EditorCatalog, String> {
     catalog(&state, &pane_id)
+}
+
+/// The teams and roles that use the role or way `name`, from what the
+/// editor's directory sees, each running or not: a team of that name
+/// running here, an agent started with that role.
+#[tauri::command]
+pub fn agent_editor_used_by(
+    state: State<'_, AppState>,
+    pane_id: String,
+    kind: CatalogKind,
+    name: String,
+) -> Result<Vec<UsedBy>, String> {
+    let catalog = catalog(&state, &pane_id)?.catalog;
+    let teams: Vec<String> = crate::teams::team_list(&state)
+        .into_iter()
+        .filter(|t| t.members.iter().any(|m| m.state == cmux_protocol::SeatState::Running))
+        .map(|t| t.name)
+        .collect();
+    let roles: Vec<String> = state
+        .meta
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|m| m.is_agent())
+        .filter_map(|m| m.agent_role.clone())
+        .collect();
+    let teams: Vec<&str> = teams.iter().map(String::as_str).collect();
+    let roles: Vec<&str> = roles.iter().map(String::as_str).collect();
+    Ok(cmux_core::roles::used_by(&catalog, kind, &name, &teams, &roles))
 }
 
 #[tauri::command]

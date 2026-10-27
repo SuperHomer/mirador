@@ -44,6 +44,7 @@ permissions = [
   "allow-agent-roles",
   "allow-open-agent-editor",
   "allow-agent-editor-catalog",
+  "allow-agent-editor-used-by",
   "allow-agent-file-read",
   "allow-agent-file-check",
   "allow-agent-file-template",

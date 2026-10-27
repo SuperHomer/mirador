@@ -1368,6 +1368,45 @@ pub struct RoleCatalog {
     pub teams: Vec<AgentTeam>,
     /// `<file>: <what is wrong>`, one per problem.
     pub problems: Vec<String>,
+    /// What a file of the same name that comes first hides: a role, way or
+    /// team that is defined, and not used.
+    #[serde(default)]
+    pub shadowed: Vec<ShadowedFile>,
+}
+
+/// What the catalog holds: a role, a way of working, or a team.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogKind {
+    Role,
+    Way,
+    Team,
+}
+
+/// A role, way or team hidden by one of the same name that comes first —
+/// repo, then yours, then mirador.json, then built-in — and so not used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowedFile {
+    pub kind: CatalogKind,
+    pub name: String,
+    pub source: RoleSource,
+    /// Its file; none for an `agentRoles` entry.
+    pub path: Option<String>,
+    /// Where the one used instead is defined, and its file.
+    pub by: RoleSource,
+    pub by_path: Option<String>,
+}
+
+/// A team or role that uses a role or a way of working: a team with the
+/// role as a member or the way as its own, a role following the way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsedBy {
+    pub kind: CatalogKind,
+    pub name: String,
+    /// A team of that name runs, or an agent runs with that role.
+    pub running: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

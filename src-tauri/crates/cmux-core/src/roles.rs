@@ -26,7 +26,9 @@
 
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentRole, AgentTeam, AgentWay, Harness, RoleCatalog, RoleSource, ToolRules};
+use cmux_protocol::{
+    AgentRole, AgentTeam, AgentWay, CatalogKind, Harness, RoleCatalog, RoleSource, ShadowedFile, ToolRules, UsedBy,
+};
 use serde::Deserialize;
 
 /// A prompt longer than this is not a prompt: refused, not read.
@@ -55,6 +57,8 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
     let mut roles: Vec<AgentRole> = Vec::new();
     let mut ways: Vec<AgentWay> = Vec::new();
     let mut teams: Vec<AgentTeam> = Vec::new();
+    // Each one a later definition replaced: kind, name, source, path.
+    let mut hidden: Vec<(CatalogKind, String, RoleSource, Option<String>)> = Vec::new();
     // What ships with Mirador first, so that anything of the same name —
     // an `agentRoles` entry, your file, the repository's — replaces it.
     for (path, name, text) in crate::builtin::of("ways") {
@@ -71,18 +75,21 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
         teams.push(team);
     }
     for role in config_roles {
-        replace(&mut roles, AgentRole { source: RoleSource::Config, path: None, ..role.clone() }, |r| &r.name);
+        if let Some(r) = replace(&mut roles, AgentRole { source: RoleSource::Config, path: None, ..role.clone() }, |r| &r.name) {
+            hidden.push((CatalogKind::Role, r.name, r.source, r.path));
+        }
     }
     let dirs = [(Some(global), RoleSource::Global), (repo, RoleSource::Repo)];
     for (dir, source) in dirs {
         let Some(dir) = dir else { continue };
         for (path, name, text) in read_dir(&dir.join("ways"), &mut problems) {
             match parse_way(&text) {
-                Ok((description, prompt)) => replace(
-                    &mut ways,
-                    AgentWay { name, prompt, description, source, path: display(&path) },
-                    |w| &w.name,
-                ),
+                Ok((description, prompt)) => {
+                    let way = AgentWay { name, prompt, description, source, path: display(&path) };
+                    if let Some(w) = replace(&mut ways, way, |w| &w.name) {
+                        hidden.push((CatalogKind::Way, w.name, w.source, Some(w.path)));
+                    }
+                }
                 Err(e) => problems.push(format!("{}: {e}", display(&path))),
             }
         }
@@ -92,7 +99,9 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
                     for field in ignored {
                         problems.push(format!("{}: `{field}` is not a team field; ignored", display(&path)));
                     }
-                    replace(&mut teams, team, |t| &t.name);
+                    if let Some(t) = replace(&mut teams, team, |t| &t.name) {
+                        hidden.push((CatalogKind::Team, t.name, t.source, Some(t.path)));
+                    }
                 }
                 Err(e) => problems.push(format!("{}: {e}", display(&path))),
             }
@@ -103,11 +112,10 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
                     for field in ignored {
                         problems.push(format!("{}: `{field}` is not a role field; ignored", display(&path)));
                     }
-                    replace(
-                        &mut roles,
-                        AgentRole { source, path: Some(display(&path)), ..role },
-                        |r| &r.name,
-                    );
+                    let role = AgentRole { source, path: Some(display(&path)), ..role };
+                    if let Some(r) = replace(&mut roles, role, |r| &r.name) {
+                        hidden.push((CatalogKind::Role, r.name, r.source, r.path));
+                    }
                 }
                 Err(e) => problems.push(format!("{}: {e}", display(&path))),
             }
@@ -132,7 +140,43 @@ pub fn catalog_in(repo: Option<&Path>, global: &Path, config_roles: &[AgentRole]
     roles.sort_by(|a, b| a.name.cmp(&b.name));
     ways.sort_by(|a, b| a.name.cmp(&b.name));
     teams.sort_by(|a, b| a.name.cmp(&b.name));
-    RoleCatalog { roles, ways, teams, problems }
+    // What is used instead of each hidden one: whichever came last.
+    let mut shadowed: Vec<ShadowedFile> = hidden
+        .into_iter()
+        .filter_map(|(kind, name, source, path)| {
+            let (by, by_path) = match kind {
+                CatalogKind::Role => roles.iter().find(|r| r.name == name).map(|r| (r.source, r.path.clone()))?,
+                CatalogKind::Way => ways.iter().find(|w| w.name == name).map(|w| (w.source, Some(w.path.clone())))?,
+                CatalogKind::Team => teams.iter().find(|t| t.name == name).map(|t| (t.source, Some(t.path.clone())))?,
+            };
+            Some(ShadowedFile { kind, name, source, path, by, by_path })
+        })
+        .collect();
+    shadowed.sort_by(|a, b| a.name.cmp(&b.name));
+    RoleCatalog { roles, ways, teams, problems, shadowed }
+}
+
+/// Who uses the role or way of working `name` (`kind`): for a role, the
+/// teams with it as a member; for a way, the teams that follow it as
+/// theirs, then the roles that do. Each says whether it runs, from the
+/// names of the teams running and of the roles agents run with.
+pub fn used_by(catalog: &RoleCatalog, kind: CatalogKind, name: &str, running_teams: &[&str], running_roles: &[&str]) -> Vec<UsedBy> {
+    let team = |t: &AgentTeam| UsedBy { kind: CatalogKind::Team, name: t.name.clone(), running: running_teams.contains(&t.name.as_str()) };
+    match kind {
+        CatalogKind::Role => catalog.teams.iter().filter(|t| t.members.iter().any(|m| m.role == name)).map(team).collect(),
+        CatalogKind::Way => catalog
+            .teams
+            .iter()
+            .filter(|t| t.way.as_deref() == Some(name))
+            .map(team)
+            .chain(catalog.roles.iter().filter(|r| r.way.as_deref() == Some(name)).map(|r| UsedBy {
+                kind: CatalogKind::Role,
+                name: r.name.clone(),
+                running: running_roles.contains(&r.name.as_str()),
+            }))
+            .collect(),
+        CatalogKind::Team => Vec::new(),
+    }
 }
 
 /// The harnesses a role knows how to start: the ones whose command line
@@ -163,11 +207,15 @@ pub fn resolve(catalog: &RoleCatalog, name: &str) -> Result<(AgentRole, Option<S
     Ok((role.clone(), (!prompt.is_empty()).then_some(prompt)))
 }
 
-/// Puts `item` in `list`, in place of one with the same name.
-fn replace<T>(list: &mut Vec<T>, item: T, name: impl Fn(&T) -> &String) {
+/// Puts `item` in `list`, in place of one with the same name, which it
+/// gives back.
+fn replace<T>(list: &mut Vec<T>, item: T, name: impl Fn(&T) -> &String) -> Option<T> {
     match list.iter().position(|x| name(x) == name(&item)) {
-        Some(i) => list[i] = item,
-        None => list.push(item),
+        Some(i) => Some(std::mem::replace(&mut list[i], item)),
+        None => {
+            list.push(item);
+            None
+        }
     }
 }
 
@@ -608,6 +656,71 @@ mod tests {
         let outside = catalog_in(None, &global, &[]);
         assert_eq!(resolve(&outside, "reviewer").unwrap().1.as_deref(), Some("Global reviewer."));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn lists_what_a_file_of_the_same_name_hides() {
+        let root = tree("shadowed");
+        let global = root.join("config");
+        let repo = root.join("repo/.mirador");
+        write(&global.join("roles/reviewer.md"), "Your reviewer.");
+        write(&repo.join("roles/reviewer.md"), "The repo's reviewer.");
+        write(&global.join("ways/our-way.md"), "Your way.");
+        write(&repo.join("ways/our-way.md"), "The repo's way.");
+        let config = [AgentRole { name: "reviewer".into(), ..Default::default() }];
+        let cat = catalog_in(Some(&repo), &global, &config);
+        let mine: Vec<_> = cat
+            .shadowed
+            .iter()
+            .filter(|f| f.source != RoleSource::Builtin)
+            .map(|f| (f.kind, f.name.as_str(), f.source, f.by))
+            .collect();
+        // Each hidden one names the one used, wherever it was hidden from.
+        assert_eq!(
+            mine,
+            [
+                (CatalogKind::Way, "our-way", RoleSource::Global, RoleSource::Repo),
+                (CatalogKind::Role, "reviewer", RoleSource::Config, RoleSource::Repo),
+                (CatalogKind::Role, "reviewer", RoleSource::Global, RoleSource::Repo),
+            ]
+        );
+        let yours = cat.shadowed.iter().find(|f| f.source == RoleSource::Global && f.kind == CatalogKind::Role).unwrap();
+        assert_eq!(yours.path.as_deref(), Some(global.join("roles/reviewer.md").to_string_lossy().as_ref()));
+        assert_eq!(yours.by_path.as_deref(), Some(repo.join("roles/reviewer.md").to_string_lossy().as_ref()));
+        assert_eq!(cat.shadowed.iter().find(|f| f.source == RoleSource::Config).unwrap().path, None);
+        // Nothing hidden outside the repository but the mirador.json entry.
+        let outside = catalog_in(None, &global, &[]);
+        assert!(outside.shadowed.iter().all(|f| f.source == RoleSource::Builtin));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn says_who_uses_a_role_or_a_way() {
+        let role = |name: &str, way: Option<&str>| AgentRole { name: name.into(), way: way.map(Into::into), ..Default::default() };
+        let member = |role: &str| cmux_protocol::TeamMember { role: role.into(), name: None, count: 1, lead: false };
+        let team = |name: &str, way: Option<&str>, members: &[&str]| AgentTeam {
+            name: name.into(),
+            way: way.map(Into::into),
+            members: members.iter().map(|m| member(m)).collect(),
+            ..Default::default()
+        };
+        let cat = RoleCatalog {
+            roles: vec![role("dev", Some("tdd")), role("reviewer", None), role("planner", Some("tdd"))],
+            teams: vec![team("squad", Some("tdd"), &["dev", "reviewer"]), team("pair", None, &["dev", "dev"])],
+            ..Default::default()
+        };
+        let names = |u: Vec<UsedBy>| u.into_iter().map(|u| (u.kind, u.name, u.running)).collect::<Vec<_>>();
+        use CatalogKind::*;
+        assert_eq!(
+            names(used_by(&cat, Way, "tdd", &["squad"], &["planner"])),
+            [(Team, "squad".into(), true), (Role, "dev".into(), false), (Role, "planner".into(), true)]
+        );
+        assert_eq!(
+            names(used_by(&cat, Role, "dev", &[], &[])),
+            [(Team, "squad".into(), false), (Team, "pair".into(), false)]
+        );
+        assert_eq!(names(used_by(&cat, Role, "reviewer", &["pair"], &[])), [(Team, "squad".into(), false)]);
+        assert!(used_by(&cat, Way, "nobody's", &[], &[]).is_empty());
     }
 
     #[test]
