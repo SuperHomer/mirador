@@ -292,6 +292,7 @@ function MiniTile({
 }) {
   const pane = agent.paneId;
   const { hostRef, shown } = useLentTerminal(pane, visible, { fit: false });
+  const fit = useMiniFit(hostRef);
   const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
   const session = activity?.session;
   const pct =
@@ -303,6 +304,9 @@ function MiniTile({
       className={`mini-tile${status ? ` ${status}` : ""}`}
       title={`Show ${agentLabel(agent)} large`}
       onClick={() => onPick(pane)}
+      // The scale and the terminal's height, measured: the values a class
+      // cannot hold.
+      style={fit.style}
     >
       <div className="mini-head">
         <StatusMark status={status} small />
@@ -311,7 +315,7 @@ function MiniTile({
           <span className={`mini-elapsed ${status}`}>{elapsed(agent.sinceMs, now)}</span>
         )}
       </div>
-      <div className="mini-body">
+      <div className="mini-body" ref={fit.bodyRef}>
         {/* The tile's own wrapper takes the scale; the terminal's element,
             appended into it by `lendTerminal`, is left untouched. */}
         <div className="mini-host" ref={hostRef} />
@@ -336,6 +340,45 @@ function MiniTile({
       </div>
     </div>
   );
+}
+
+/** The smallest a rail terminal is drawn, as before; never larger than
+ *  its own size. */
+const MINI_MIN_SCALE = 0.65;
+
+/**
+ * A rail tile's terminal scaled to the tile's width — as large as the
+ * width allows, never under MINI_MIN_SCALE nor over 1 — and the tile's
+ * body as tall as that scaled terminal, so a wide tile shows it larger
+ * and no tile is taller than what it shows. Both are only measured: the
+ * terminal, lent into `hostRef`, keeps its size and so does its PTY.
+ */
+function useMiniFit(hostRef: React.RefObject<HTMLDivElement | null>) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<{ scale: number; height: number } | null>(null);
+  useEffect(() => {
+    const body = bodyRef.current;
+    const host = hostRef.current;
+    if (!body || !host) return;
+    // The host wraps the lent terminal exactly, and its layout size is
+    // the terminal's own: the scale is a transform, which layout ignores.
+    const measure = () => {
+      const width = host.offsetWidth;
+      const height = host.offsetHeight;
+      if (width === 0 || height === 0) return;
+      const scale = Math.min(1, Math.max(MINI_MIN_SCALE, body.clientWidth / width));
+      setFit((f) => (f && f.scale === scale && f.height === height ? f : { scale, height }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [hostRef]);
+  const style = fit
+    ? ({ "--mini-scale": fit.scale, "--mini-term-h": `${fit.height}px` } as React.CSSProperties)
+    : undefined;
+  return { bodyRef, style };
 }
 
 /** An idle agent on the rail, in one line. Clicking it pins it large. */
