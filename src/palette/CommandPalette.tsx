@@ -99,7 +99,11 @@ export function CommandPalette() {
   const keybindings = useConfigStore((s) => s.config?.keybindings);
   const tabs = useWorkspaceStore((s) => s.snapshot?.tabs);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState(0);
+  // The selected row, by id: rows can arrive or go while the palette is
+  // open (roles read, a tab closed), and an index would then point at
+  // another command. Its index is kept for when the row itself goes.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const lastIndex = useRef(0);
   const [hosts, setHosts] = useState<string[]>([]);
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [teams, setTeams] = useState<AgentTeam[]>([]);
@@ -283,6 +287,13 @@ export function CommandPalette() {
   }, [entries, steps, step, query]);
   // The rows in the order shown, which the arrow keys walk.
   const filtered = useMemo(() => sections.flatMap((sec) => sec.rows), [sections]);
+  const found = filtered.findIndex((r) => rowId(r) === selectedId);
+  const selected = found >= 0 ? found : Math.min(lastIndex.current, filtered.length - 1);
+  lastIndex.current = Math.max(selected, 0);
+  const select = (i: number) => {
+    lastIndex.current = i;
+    setSelectedId(filtered[i] ? rowId(filtered[i]) : null);
+  };
 
   useEffect(() => {
     if (open) {
@@ -299,7 +310,8 @@ export function CommandPalette() {
           setTeams([]);
         });
       setQuery("");
-      setSelected(0);
+      lastIndex.current = 0;
+      setSelectedId(null);
       // Opened on a step (the wall's "Start a team…"), else the top level.
       // A step with no entries yet is shown once they are read.
       setStepId(useUiStore.getState().paletteStep);
@@ -314,7 +326,10 @@ export function CommandPalette() {
     }
   }, [open]);
 
-  useEffect(() => setSelected(0), [query, stepId]);
+  useEffect(() => {
+    lastIndex.current = 0;
+    setSelectedId(null);
+  }, [query, stepId]);
 
   // Keep the selected row in view as the arrows walk past the list's edge.
   const listRef = useRef<HTMLDivElement>(null);
@@ -376,10 +391,10 @@ export function CommandPalette() {
                 back();
               } else if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setSelected((s) => Math.min(s + 1, filtered.length - 1));
+                select(Math.min(selected + 1, filtered.length - 1));
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
-                setSelected((s) => Math.max(s - 1, 0));
+                select(Math.max(selected - 1, 0));
               } else if (e.key === "Enter") {
                 e.preventDefault();
                 choose(filtered[selected]);
@@ -404,7 +419,7 @@ export function CommandPalette() {
                     <div
                       key={rowId(row)}
                       className={`palette-item${i === selected ? " selected" : ""}`}
-                      onMouseEnter={() => setSelected(i)}
+                      onMouseEnter={() => select(i)}
                       onClick={() => choose(row)}
                     >
                       <span className="palette-title">{title}</span>
