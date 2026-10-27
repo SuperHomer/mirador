@@ -98,12 +98,12 @@ pub fn agent_editor_used_by(
     name: String,
 ) -> Result<Vec<UsedBy>, String> {
     let catalog = catalog(&state, &pane_id)?.catalog;
-    let teams: Vec<String> = crate::teams::team_list(&state)
-        .into_iter()
-        .filter(|t| t.members.iter().any(|m| m.state == cmux_protocol::SeatState::Running))
-        .map(|t| t.name)
-        .collect();
-    let roles: Vec<String> = state
+    let runs = crate::teams::team_list(&state);
+    let running = |m: &cmux_protocol::TeamMemberInfo| m.state == cmux_protocol::SeatState::Running;
+    let teams: Vec<String> = runs.iter().filter(|t| t.members.iter().any(running)).map(|t| t.name.clone()).collect();
+    // A standalone agent's pane names its role; a team member's names its
+    // seat (`reviewer-2`), so its role comes from the team it runs in.
+    let mut roles: Vec<String> = state
         .meta
         .lock()
         .unwrap()
@@ -111,6 +111,7 @@ pub fn agent_editor_used_by(
         .filter(|m| m.is_agent())
         .filter_map(|m| m.agent_role.clone())
         .collect();
+    roles.extend(runs.iter().flat_map(|t| t.members.iter().filter(|m| running(m)).map(|m| m.role.clone())));
     let teams: Vec<&str> = teams.iter().map(String::as_str).collect();
     let roles: Vec<&str> = roles.iter().map(String::as_str).collect();
     Ok(cmux_core::roles::used_by(&catalog, kind, &name, &teams, &roles))
