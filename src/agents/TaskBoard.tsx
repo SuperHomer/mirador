@@ -15,7 +15,10 @@ import {
   focusPane,
   getAgentTrail,
   getTrailDetail,
+  setTaskLayout,
   setWallView,
+  TabSnapshot,
+  TaskLayout,
   taskAdd,
   taskCards,
   taskHistory,
@@ -25,7 +28,8 @@ import { useWorkspaceStore } from "../state/workspaceStore";
 import { percent, useAgentActivity } from "./ActivityPanel";
 import { AskingLine } from "./AskingLine";
 import { showOnWall } from "./showOnWall";
-import { StatusMark } from "./StatusMark";
+import { STATUS_LABEL, StatusMark } from "./StatusMark";
+import { elapsed } from "./time";
 
 type Props = {
   /** The tab whose wall it is the Tasks side of, and whose cards it shows. */
@@ -192,6 +196,23 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
     setTrailOf({ pane: card.pane!, label: card.assignee ?? "its agent", at: card.createdMs });
     setView("trail");
   };
+  const layout: TaskLayout = shown?.taskLayout ?? "columns";
+  // One card, in a column or, compact, in a swimlane's cell.
+  const card = (c: TaskCard, compact: boolean) => (
+    <Card
+      key={c.id}
+      card={c}
+      agent={snapshot?.agents.find((a) => a.paneId === c.pane) ?? null}
+      tabAgents={(snapshot?.agents ?? NO_AGENTS).filter((a) => a.tabId === (c.tab ?? tabId))}
+      place={all && !compact ? ((c.tab && placeOf.get(c.tab)) ?? "closed tab") : null}
+      reachable={!!c.pane && panes.has(c.pane)}
+      live={live}
+      now={now}
+      compact={compact}
+      onGoTo={goTo}
+      onTrail={showTrail}
+    />
+  );
 
   return (
     <div className="task-board">
@@ -203,6 +224,8 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
         team={!!shown?.team}
         tabId={tabId}
         agents={tabAgents}
+        layout={layout}
+        onLayout={(l) => shown && void setTaskLayout(shown.focusedPane, l)}
       />
 
       {view === "trail" ? (
@@ -222,8 +245,17 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
             <HistoryLines entries={[...history].reverse()} now={now} />
           </div>
         )
-      ) : cards.length === 0 ? (
+      ) : cards.length === 0 && layout === "columns" ? (
         <Empty />
+      ) : layout === "swimlanes" ? (
+        <Swimlanes
+          tabs={all ? (snapshot?.tabs ?? []) : shown ? [shown] : []}
+          agents={snapshot?.agents ?? NO_AGENTS}
+          cards={cards}
+          grouped={all}
+          now={now}
+          card={card}
+        />
       ) : (
         <div className="tb-columns">
           {COLUMNS.map(([column, label]) => (
@@ -234,20 +266,7 @@ export const TaskBoard = memo(function TaskBoard({ tabId, visible }: Props) {
               cards={cards.filter((c) => c.column === column).sort((a, b) => b.updatedMs - a.updatedMs)}
               now={now}
             >
-              {(c) => (
-                <Card
-                  key={c.id}
-                  card={c}
-                  agent={snapshot?.agents.find((a) => a.paneId === c.pane) ?? null}
-                  tabAgents={tabAgents}
-                  place={all ? ((c.tab && placeOf.get(c.tab)) ?? "closed tab") : null}
-                  reachable={!!c.pane && panes.has(c.pane)}
-                  live={live}
-                  now={now}
-                  onGoTo={goTo}
-                  onTrail={showTrail}
-                />
-              )}
+              {(c) => card(c, false)}
             </Column>
           ))}
         </div>
@@ -268,6 +287,8 @@ function BoardToolbar({
   team,
   tabId,
   agents,
+  layout,
+  onLayout,
 }: {
   view: View;
   onView: (view: View) => void;
@@ -277,6 +298,8 @@ function BoardToolbar({
   team: boolean;
   tabId: string;
   agents: AgentInfo[];
+  layout: TaskLayout;
+  onLayout: (layout: TaskLayout) => void;
 }) {
   const [scopeOpen, setScopeOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -301,6 +324,19 @@ function BoardToolbar({
         </button>
       ))}
       <span className="tb-toolbar-spacer" />
+      {view === "cards" && (
+        <span className="wall-segments">
+          {(["columns", "swimlanes"] as TaskLayout[]).map((l) => (
+            <button
+              key={l}
+              className={layout === l ? "selected" : undefined}
+              onClick={() => layout !== l && onLayout(l)}
+            >
+              {l === "columns" ? "Columns" : "Swimlanes"}
+            </button>
+          ))}
+        </span>
+      )}
       <div className="tb-popover-anchor">
         <button className="tb-scope" onClick={() => setScopeOpen((o) => !o)}>
           Scope: {all ? "All agents" : mine} ▾
@@ -443,9 +479,42 @@ function Column({
   children: (card: TaskCard) => React.ReactNode;
 }) {
   const [everything, setEverything] = useState(false);
-  const done = column === "done";
+  const shown = column === "done" && !everything ? doneToday(cards, now) : cards;
+  return (
+    <section className={`tb-column ${column}`}>
+      <ColumnHead
+        column={column}
+        label={label}
+        count={cards.length}
+        everything={everything}
+        onEverything={setEverything}
+      />
+      <div className="tb-cards">{shown.map(children)}</div>
+    </section>
+  );
+}
+
+/** The cards of `cards` done today. */
+function doneToday(cards: TaskCard[], now: number): TaskCard[] {
   const today = startOfDay(now);
-  const shown = done && !everything ? cards.filter((c) => c.updatedMs >= today) : cards;
+  return cards.filter((c) => c.updatedMs >= today);
+}
+
+/** A column's head: its mark, name and count; Done's switch between
+ *  today's cards and all of them. */
+function ColumnHead({
+  column,
+  label,
+  count,
+  everything,
+  onEverything,
+}: {
+  column: TaskColumn;
+  label: string;
+  count: number;
+  everything: boolean;
+  onEverything: (everything: boolean) => void;
+}) {
   const mark =
     column === "needsYou" ? (
       <StatusMark status="needsYou" small />
@@ -457,19 +526,182 @@ function Column({
       <span className="tb-done-mark">✓</span>
     );
   return (
-    <section className={`tb-column ${column}`}>
-      <h3 className="tb-column-head">
-        {mark}
-        {label}
-        <span className="tb-count">{cards.length}</span>
-        {done && (
-          <button className="tb-done-toggle" onClick={() => setEverything((e) => !e)}>
-            {everything ? "all ▴" : "today ▾"}
-          </button>
-        )}
-      </h3>
-      <div className="tb-cards">{shown.map(children)}</div>
-    </section>
+    <h3 className={`tb-column-head ${column}`}>
+      {mark}
+      {label}
+      <span className="tb-count">{count}</span>
+      {column === "done" && (
+        <button className="tb-done-toggle" onClick={() => onEverything(!everything)}>
+          {everything ? "all ▴" : "today ▾"}
+        </button>
+      )}
+    </h3>
+  );
+}
+
+/** A lane: an agent of a tab, one whose cards outlived it, or no one. */
+type Lane = { key: string; pane: string | null; agent: AgentInfo | null; name: string };
+
+/**
+ * Swimlanes (9d): a row per agent, in its tab's urgency order (whoever
+ * needs you first), then one for the cards given to no one, each row
+ * across the same four columns. With every tab's cards, the lanes group
+ * under their tabs, and a lane with nothing open folds to one line.
+ */
+function Swimlanes({
+  tabs,
+  agents,
+  cards,
+  grouped,
+  now,
+  card,
+}: {
+  tabs: TabSnapshot[];
+  agents: AgentInfo[];
+  cards: TaskCard[];
+  grouped: boolean;
+  now: number;
+  card: (c: TaskCard, compact: boolean) => React.ReactNode;
+}) {
+  const [everything, setEverything] = useState(false);
+  const counts = (column: TaskColumn) => cards.filter((c) => c.column === column).length;
+  return (
+    <div className="tb-lanes">
+      <div className="tb-lane-grid tb-lane-heads">
+        <span />
+        {COLUMNS.map(([column, label]) => (
+          <ColumnHead
+            key={column}
+            column={column}
+            label={label}
+            count={counts(column)}
+            everything={everything}
+            onEverything={setEverything}
+          />
+        ))}
+      </div>
+      {tabs.map((tab) => {
+        const inTab = cards.filter((c) => c.tab === tab.id);
+        const lanes = lanesOf(tab, agents, inTab);
+        return (
+          <section key={tab.id} className="tb-lane-group">
+            {grouped && <h4 className="tb-lane-tab">{tab.team?.name ?? tab.title}</h4>}
+            {lanes.map((lane) => (
+              <LaneRow
+                key={lane.key}
+                lane={lane}
+                cards={inTab.filter((c) => c.pane === lane.pane)}
+                unassigned={inTab.filter((c) => !c.pane && c.column === "todo")}
+                collapsible={grouped}
+                everything={everything}
+                now={now}
+                card={card}
+              />
+            ))}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The lanes of `tab`: its agents by urgency, then any agent its cards name
+ *  that is no longer running, then no one. */
+function lanesOf(tab: TabSnapshot, agents: AgentInfo[], cards: TaskCard[]): Lane[] {
+  const running = tab.wallUrgency.flatMap((p) => agents.filter((a) => a.paneId === p));
+  const lanes: Lane[] = running.map((a) => ({ key: a.paneId, pane: a.paneId, agent: a, name: agentLabel(a) }));
+  for (const c of cards) {
+    if (c.pane && !lanes.some((l) => l.pane === c.pane)) {
+      lanes.push({ key: c.pane, pane: c.pane, agent: null, name: c.assignee ?? "its agent" });
+    }
+  }
+  lanes.push({ key: `none:${tab.id}`, pane: null, agent: null, name: "Unassigned" });
+  return lanes;
+}
+
+function LaneRow({
+  lane,
+  cards,
+  unassigned,
+  collapsible,
+  everything,
+  now,
+  card,
+}: {
+  lane: Lane;
+  cards: TaskCard[];
+  /** The tab's cards in To do given to no one: what an idle agent can take. */
+  unassigned: TaskCard[];
+  collapsible: boolean;
+  everything: boolean;
+  now: number;
+  card: (c: TaskCard, compact: boolean) => React.ReactNode;
+}) {
+  const open = cards.some((c) => c.column !== "done");
+  const a = lane.agent;
+  const head = (
+    <div className={`tb-lane-agent${a ? "" : " none"}`}>
+      <div className="tb-lane-name">
+        {a ? <StatusMark status={a.status} small /> : null}
+        <span>{lane.name}</span>
+      </div>
+      {a && (
+        <>
+          <div className="tb-lane-meta">
+            {[HARNESS_LABEL[a.harness], a.model].filter(Boolean).join(" · ")}
+          </div>
+          {a.status && (
+            <div className={`tb-lane-meta ${a.status}`}>
+              {STATUS_LABEL[a.status]}
+              {a.sinceMs ? ` · ${elapsed(a.sinceMs, now)}` : ""}
+            </div>
+          )}
+        </>
+      )}
+      {!a && lane.pane && <div className="tb-lane-meta">not running</div>}
+    </div>
+  );
+  if (collapsible && !open) {
+    return <div className="tb-lane-grid tb-lane collapsed">{head}</div>;
+  }
+  return (
+    <div className="tb-lane-grid tb-lane">
+      {head}
+      {COLUMNS.map(([column]) => {
+        const here = cards.filter((c) => c.column === column).sort((x, y) => y.updatedMs - x.updatedMs);
+        const shown = column === "done" && !everything ? doneToday(here, now) : here;
+        const idleTarget = column === "todo" && here.length === 0 && a?.status === "idle" && unassigned.length > 0;
+        return (
+          <div key={column} className={`tb-lane-cell ${column}`}>
+            {shown.map((c) => card(c, true))}
+            {idleTarget && <IdleTarget agent={a} cards={unassigned} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** An idle agent's empty To do: the tab's unassigned cards to send it. */
+function IdleTarget({ agent, cards }: { agent: AgentInfo; cards: TaskCard[] }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <div className="tb-popover-anchor tb-idle">
+      <button className="tb-idle-target" onClick={() => setOpen((o) => !o)}>
+        Idle: send it a card
+      </button>
+      {open && (
+        <PickList
+          items={cards.map((c) => ({ key: c.id, label: c.title }))}
+          empty="No cards for no one in To do."
+          error={error}
+          onPick={(key) => taskSend(key, agent.paneId).then(close, (e) => setError(String(e)))}
+          onClose={close}
+        />
+      )}
+    </div>
   );
 }
 
@@ -500,10 +732,14 @@ function Card({
   reachable,
   live,
   now,
+  compact = false,
   onGoTo,
   onTrail,
 }: {
   card: TaskCard;
+  /** In a swimlane's cell: one line of description, no "Asks" box or
+   *  progress — the lane says who and how. */
+  compact?: boolean;
   /** Its agent, while running. */
   agent: AgentInfo | null;
   tabAgents: AgentInfo[];
@@ -525,9 +761,9 @@ function Card({
   const asking = card.column === "needsYou";
   const unassigned = !card.pane;
   // Its agent's own task list, read only while it waits on a person.
-  const { activity } = useAgentActivity(card.pane, live && asking && !!agent?.hasActivity);
+  const { activity } = useAgentActivity(card.pane, live && asking && !compact && !!agent?.hasActivity);
   const tasks = activity?.session.tasks ?? null;
-  const variant = asking ? " needs-you" : unassigned ? " unassigned" : "";
+  const variant = (asking ? " needs-you" : unassigned ? " unassigned" : "") + (compact ? " compact" : "");
   return (
     <div className={`tb-card${variant}`}>
       <button
@@ -546,13 +782,13 @@ function Card({
           {card.description}
         </button>
       )}
-      {asking && agent && (agent.asking || agent.message) && (
+      {asking && !compact && agent && (agent.asking || agent.message) && (
         <div className="tb-asks">
           <span className="tb-asks-label">Asks:</span>
           <AskingLine agent={agent} className="tb-asks-line" />
         </div>
       )}
-      {asking && tasks && (
+      {asking && !compact && tasks && (
         <div className="tb-progress" title={tasks.current ?? "Its task list"}>
           <span style={{ "--fill": `${percent(tasks)}%` } as React.CSSProperties} />
         </div>
@@ -628,12 +864,16 @@ function AssignMenu({ card, agents }: { card: TaskCard; agents: AgentInfo[] }) {
         Assign ▾
       </button>
       {open && (
-        <AssignList
-          agents={sorted}
+        <PickList
+          items={sorted.map((a) => ({
+            key: a.paneId,
+            label: agentLabel(a),
+            mark: <StatusMark status={a.status} small />,
+            disabled: a.status === "needsYou" ? "It is waiting on a person: answer it first" : undefined,
+          }))}
+          empty="No agents in this tab."
           error={error}
-          onPick={(a) =>
-            taskSend(card.id, a.paneId).then(close, (e) => setError(String(e)))
-          }
+          onPick={(pane) => taskSend(card.id, pane).then(close, (e) => setError(String(e)))}
           onClose={close}
         />
       )}
@@ -641,36 +881,40 @@ function AssignMenu({ card, agents }: { card: TaskCard; agents: AgentInfo[] }) {
   );
 }
 
-function AssignList({
-  agents,
+/** One choice of a pick list; `disabled` says why it cannot be picked. */
+type PickItem = { key: string; label: string; mark?: React.ReactNode; disabled?: string };
+
+/** A small menu of choices — agents to send a card to, cards to send an
+ *  agent — that takes the keyboard as it opens. */
+function PickList({
+  items,
+  empty,
   error,
   onPick,
   onClose,
 }: {
-  agents: AgentInfo[];
+  items: PickItem[];
+  empty: string;
   error: string | null;
-  onPick: (agent: AgentInfo) => void;
+  onPick: (key: string) => void;
   onClose: () => void;
 }) {
   const { ref, onKeyDown } = usePopover(onClose);
   useMenuFocus(ref);
   return (
     <div className="tb-menu right" ref={ref} tabIndex={-1} onKeyDown={onKeyDown}>
-      {agents.length === 0 && <div className="tb-menu-note">No agents in this tab.</div>}
-      {agents.map((a) => {
-        const waiting = a.status === "needsYou";
-        return (
-          <button
-            key={a.paneId}
-            disabled={waiting}
-            title={waiting ? "It is waiting on a person: answer it first" : undefined}
-            onClick={() => onPick(a)}
-          >
-            <StatusMark status={a.status} small />
-            <span>{agentLabel(a)}</span>
-          </button>
-        );
-      })}
+      {items.length === 0 && <div className="tb-menu-note">{empty}</div>}
+      {items.map((item) => (
+        <button
+          key={item.key}
+          disabled={!!item.disabled}
+          title={item.disabled}
+          onClick={() => onPick(item.key)}
+        >
+          {item.mark}
+          <span className="tb-menu-label">{item.label}</span>
+        </button>
+      ))}
       {error && <div className="tb-popover-error">{error}</div>}
     </div>
   );

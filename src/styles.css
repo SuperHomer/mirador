@@ -4050,6 +4050,176 @@ body,
   cursor: pointer;
 }
 
+/* Swimlanes (9d): a row per agent across the same four columns; the whole
+   board scrolls, and each row is as tall as its cards. */
+.tb-lanes {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+}
+
+.tb-lane-grid {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tb-lane-heads {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-top: 6px;
+  background: var(--bg-alt);
+}
+
+.tb-lane-heads .tb-column-head {
+  padding: 4px 8px;
+}
+
+.tb-lane-heads .tb-column-head.needsYou {
+  color: var(--status-needs-you);
+}
+
+.tb-lane-heads .tb-column-head.doing {
+  color: var(--status-working);
+}
+
+.tb-lane-heads .tb-column-head.done {
+  color: var(--status-idle);
+}
+
+.tb-lane-heads .tb-column-head.todo {
+  color: var(--subtext);
+}
+
+.tb-lane-tab {
+  margin: 10px 0 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tb-lane {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--surface);
+}
+
+.tb-lane-agent {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* No agent of its own: the cards given to no one, or one now gone. */
+.tb-lane-agent.none .tb-lane-name {
+  color: var(--subtext);
+}
+
+/* Nothing open in it: its agent's line alone. */
+.tb-lane.collapsed .tb-lane-agent {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.tb-lane-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  min-width: 0;
+}
+
+.tb-lane-name > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tb-lane-meta {
+  font-size: 10.5px;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-lane-meta.working {
+  color: var(--status-working);
+}
+
+.tb-lane-meta.needsYou {
+  color: var(--status-needs-you);
+}
+
+.tb-lane-meta.idle {
+  color: var(--status-idle);
+}
+
+.tb-lane-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px;
+  border-radius: 5px;
+}
+
+.tb-lane-cell.needsYou {
+  background: var(--tint-needs-you-area);
+}
+
+/* An idle agent's empty To do: the way to send it a card. */
+.tb-idle-target {
+  width: 100%;
+  padding: 10px 8px;
+  border: 1px dashed var(--overlay);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tb-idle-target:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+
+.tb-menu-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-menu {
+  max-width: 300px;
+}
+
+/* A card in a swimlane's cell: the lane says who. */
+.tb-card.compact {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.tb-card.compact .tb-description {
+  -webkit-line-clamp: 1;
+}
+
+.tb-card.compact .tb-meta {
+  margin-top: 4px;
+}
+
 /* The title opens the card's history: a button that reads as text. */
 .tb-title {
   display: block;

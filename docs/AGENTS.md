@@ -507,7 +507,11 @@ and does nothing. The board's one row switches between Cards, History (newest fi
 Trail (below), its scope between this team and all agents, and its
 **+ Card** writes a card (a title, a description, and an agent it is for
 or no one; for an idle agent, *Add and send* sends it at once). Its
-columns read Needs you, To do, Doing, Done (today's, or all of them).
+columns read Needs you, To do, Doing, Done (today's, or all of them),
+and **Columns | Swimlanes** (kept per tab) turns them into a row per
+agent, in the wall's order of urgency, then one for cards given to no
+one; an idle agent's empty To do offers the tab's unassigned cards to
+send it, and with all agents the rows group under their tabs.
 A card's title opens its history, its description opens in full, its
 agent's name goes to its pane. A card waiting on a person says what its
 agent asks and **Open** shows the agent large on the wall; one written
