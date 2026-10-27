@@ -3,247 +3,166 @@
  * minutes after TeamsShowcase's handoff, on the same "add OAuth" task.
  *
  * Kept honest to the app (src/agents/TaskBoard.tsx and its rules in
- * styles.css): its chrome — the Tasks badge, the tab's name (its team's,
- * in a team's tab), the Cards | History | Trail and This team | All
- * agents switches — and its four columns, in order, each card newest
- * first. A card shows what the app's does: its title, ✎ for one written
- * with `mira task add` or ⇢ for one Mirador gave, its agent's name, its
- * age and ⋯ to the Trail; no harness mark, which the board does not draw.
- * The cards fold the log as cmux-core's tasks.rs does: the planner's
- * steps are written by hand and moved by it, so they never follow a turn,
- * while a task sent without a card gets one that does. One card is open
- * on its history, in `mira agent history`'s words. At phone width the
- * columns go two by two, as the app's do in a narrow split.
+ * styles.css): the one toolbar — Cards · History · Trail, Columns |
+ * Swimlanes, Scope ▾ and + Card — and its four columns in order, Needs you
+ * first and widest, each headed by its status mark. The cards are the
+ * app's variants: a title and a description; for one whose agent waits on
+ * you, what it asks and Open (there is no answering from the board); one
+ * written for no one, dashed, with Assign ▾; one in Doing with its
+ * failing steps and History and Trail; ⋯ to the Trail on the rest; and
+ * Done folded to today's. At phone width the columns go two by two, as
+ * the app's do in a narrow split.
  *
  * Under it, the Trail view on the worker, as TaskBoard.tsx's TrailView
- * draws it: the scope's agents with their status dot and harness, and
- * the picked one's turns newest first, each a prompt's first line (the
- * line `mira agent send` prefixes, so it opens to the rest) over its
- * actions — mark, tool, cmux-core's trail.rs one-line summary (a path
- * as the agent gave it, absolute), exit code and time — one opened on
- * its input and output, as the app reads them from the transcript.
- * At phone width the agents become a row over the turns, as in a
- * narrow split.
+ * draws it: the scope's agents with their status mark, the picked one's
+ * turns newest first, each summed up in a line — when, its number, how it
+ * stands, reads, edits, failures and how long — then its prompt and its
+ * actions, a failure's output shown inline, the older turn folded to its
+ * prompt; and the All / Failures / Edits chips. At phone width the agents
+ * become a row over the turns, as in a narrow split.
  */
+
+import { Mark, type Status } from "./MockAgents";
 
 type Card = {
   title: string;
-  manual: boolean;
-  agent: string;
+  description?: string;
+  /** Its agent; none for a card written for no one. */
+  agent?: string;
   age: string;
-  /** Its history, oldest first, when it is open. */
-  history?: { when: string; what: string; muted?: boolean }[];
+  /** What its agent waits on, in Needs you. */
+  asks?: string;
+  failing?: number;
 };
 
-/** The app's --wall-working, --wall-needs-you and --wall-idle. */
-const COLUMNS: { label: string; color: string; cards: Card[] }[] = [
+type Column = { key: "needsYou" | "todo" | "doing" | "done"; label: string; mark: Status | "done"; cards: Card[] };
+
+const COLUMNS: Column[] = [
   {
+    key: "needsYou",
     label: "Needs you",
-    color: "#fab387",
-    cards: [
-      { title: "APPROVE — rotation is atomic and the test pins reuse.", manual: false, agent: "planner", age: "40s" },
-    ],
+    mark: "needsYou",
+    cards: [{ title: "add OAuth", agent: "planner", age: "40s", asks: "Bash git push origin feat/oauth" }],
   },
   {
+    key: "todo",
     label: "To do",
-    color: "var(--muted)",
+    mark: null,
     cards: [
-      { title: "Step 5: document the refresh flow", manual: true, agent: "worker", age: "21m" },
-      { title: "Step 4: revoke tokens on logout", manual: true, agent: "worker", age: "21m" },
+      {
+        title: "Document the refresh flow",
+        description: "Where the tokens live, how long each lasts, and what logout revokes.",
+        age: "5m",
+      },
+      {
+        title: "Step 4: revoke tokens on logout",
+        description: "Delete the user's refresh tokens on logout; a test that one left behind fails.",
+        agent: "worker",
+        age: "21m",
+      },
     ],
   },
   {
+    key: "doing",
     label: "Doing",
-    color: "var(--accent)",
-    cards: [{ title: "Step 3: expire refresh tokens after 30 days", manual: true, agent: "worker", age: "1m" }],
+    mark: "working",
+    cards: [
+      {
+        title: "Step 3: expire refresh tokens after 30 days",
+        description: "Reject a refresh token older than 30 days with Expired, and test it.",
+        agent: "worker",
+        age: "1m",
+        failing: 1,
+      },
+    ],
   },
   {
+    key: "done",
     label: "Done",
-    color: "var(--green)",
+    mark: "done",
     cards: [
-      { title: "Step 2: rotate the refresh token on use", manual: true, agent: "worker", age: "2m" },
-      {
-        title: "Step 2 is done: review the diff",
-        manual: false,
-        agent: "reviewer",
-        age: "3m",
-        history: [
-          { when: "6m", what: "planner → reviewer  agent-send  Step 2 is done: review the diff" },
-          { when: "3m", what: "reviewer done after 3m", muted: true },
-        ],
-      },
-      { title: "Step 1: add the refresh_tokens table", manual: true, agent: "worker", age: "14m" },
-      { title: "add OAuth", manual: false, agent: "planner", age: "16m" },
+      { title: "Step 2: rotate the refresh token on use", agent: "worker", age: "12m" },
+      { title: "Step 1: add the refresh_tokens table", agent: "worker", age: "26m" },
     ],
   },
 ];
 
-const SWITCH_BUTTON = { padding: "2px 8px", whiteSpace: "nowrap" as const };
-
-function Switch({ labels, on }: { labels: string[]; on: number }) {
+/** The board's one toolbar, on one of its three views. */
+function Toolbar({ view }: { view: "cards" | "history" | "trail" }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexShrink: 0,
-        border: "1px solid var(--surface)",
-        borderRadius: 4,
-        overflow: "hidden",
-        fontSize: 11,
-      }}
-    >
-      {labels.map((l, i) => (
-        <span
-          key={l}
-          style={{
-            ...SWITCH_BUTTON,
-            background: i === on ? "var(--surface)" : "transparent",
-            color: i === on ? "var(--text)" : "var(--subtext)",
-          }}
-        >
-          {l}
+    <div className="tk-toolbar">
+      {(["cards", "history", "trail"] as const).map((v) => (
+        <span key={v} className={`tk-tab${view === v ? " selected" : ""}`}>
+          {v[0].toUpperCase() + v.slice(1)}
         </span>
       ))}
-    </div>
-  );
-}
-
-function TaskCard({ card, color }: { card: Card; color: string }) {
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        padding: "5px 7px",
-        border: "1px solid var(--surface)",
-        borderLeft: `3px solid ${color}`,
-        borderRadius: 4,
-        background: "var(--bg-alt)",
-        fontSize: 12,
-      }}
-    >
-      <div style={{ color: "var(--text)", lineHeight: 1.35, overflowWrap: "anywhere" }}>{card.title}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, fontSize: 11, color: "var(--muted)", minWidth: 0 }}>
-        <span style={{ flexShrink: 0, color: "var(--subtext)" }}>{card.manual ? "✎" : "⇢"}</span>
-        <span style={{ color: "var(--subtext)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {card.agent}
+      <span className="tk-spacer" />
+      {view === "cards" && (
+        <span className="ms-segmented tk-layout">
+          <span className="selected">Columns</span>
+          <span>Swimlanes</span>
         </span>
-        <span style={{ flexShrink: 0, marginLeft: "auto" }}>{card.age}</span>
-        <span style={{ flexShrink: 0, padding: "0 2px", lineHeight: 1 }}>⋯</span>
-      </div>
-      {card.history && (
-        <ol
-          style={{
-            listStyle: "none",
-            marginTop: 5,
-            paddingTop: 4,
-            borderTop: "1px solid var(--surface)",
-            fontSize: 11,
-            lineHeight: 1.5,
-          }}
-        >
-          {card.history.map((h) => (
-            <li
-              key={h.what}
-              style={{ color: h.muted ? "var(--muted)" : "var(--subtext)", overflowWrap: "anywhere" }}
-            >
-              <span style={{ display: "inline-block", minWidth: "3.2em", marginRight: 6, color: "var(--muted)" }}>
-                {h.when}
-              </span>
-              {h.what}
-            </li>
-          ))}
-        </ol>
       )}
+      <span className="tk-outline">Scope: omakase ▾</span>
+      <span className="tk-outline">+ Card</span>
     </div>
   );
 }
 
-/** The pane's header, as the app draws it, on one of its three views. */
-function Chrome({ view }: { view: number }) {
+function TaskCard({ card, column }: { card: Card; column: Column["key"] }) {
+  const variant = card.asks ? " needs-you" : !card.agent ? " unassigned" : "";
   return (
-    <div
-      className="tasks-chrome"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "4px 6px",
-        borderBottom: "1px solid var(--surface)",
-        minHeight: 30,
-      }}
-    >
-      <span
-        style={{
-          flexShrink: 0,
-          background: "var(--accent)",
-          color: "var(--bg)",
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: ".04em",
-          textTransform: "uppercase",
-          padding: "2px 6px",
-          borderRadius: 4,
-        }}
-      >
-        Tasks
-      </span>
-      <span style={{ fontSize: 12, fontWeight: 600, marginRight: "auto" }}>omakase</span>
-      <Switch labels={["Cards", "History", "Trail"]} on={view} />
-      <Switch labels={["This team", "All agents"]} on={0} />
-      <span style={{ fontSize: 14, color: "var(--subtext)" }}>✕</span>
+    <div className={`tk-card${variant}`}>
+      <div className="tk-title">{card.title}</div>
+      {card.description && <div className="tk-description">{card.description}</div>}
+      {card.asks && (
+        <div className="tk-asks">
+          <span>Asks:</span> <span className="tk-asks-line">{card.asks}</span>
+        </div>
+      )}
+      <div className="tk-meta">
+        <span className="tk-assignee">{card.agent ?? "Unassigned"}</span>
+        <span>· {card.age}</span>
+        {card.failing ? (
+          <span className="tk-failing">
+            {card.failing} failing {card.failing === 1 ? "step" : "steps"}
+          </span>
+        ) : null}
+        <span className="tk-actions">
+          {card.asks ? (
+            <span className="tk-open">Open</span>
+          ) : !card.agent ? (
+            <span className="tk-outline">Assign ▾</span>
+          ) : column === "doing" ? (
+            <>
+              <span className="tk-outline">History</span>
+              <span className="tk-outline">Trail</span>
+            </>
+          ) : (
+            <span className="tk-more">⋯</span>
+          )}
+        </span>
+      </div>
     </div>
   );
 }
 
 function TaskBoardMockup() {
   return (
-    <div
-      style={{
-        maxWidth: 940,
-        margin: "44px auto 0",
-        border: "1px solid var(--surface)",
-        borderRadius: 12,
-        overflow: "hidden",
-        background: "var(--bg-alt)",
-        boxShadow: "0 24px 60px rgba(0,0,0,.5)",
-        textAlign: "left",
-      }}
-    >
-      <Chrome view={0} />
-      <div
-        className="tasks-columns"
-        style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6, padding: 6, minHeight: 330 }}
-      >
+    <div className="tk-mock">
+      <Toolbar view="cards" />
+      <div className="tk-columns tasks-columns">
         {COLUMNS.map((col) => (
-          <section
-            key={col.label}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              minWidth: 0,
-              border: "1px solid var(--surface)",
-              borderRadius: 5,
-              background: "var(--bg)",
-            }}
-          >
-            <h3
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "4px 8px",
-                fontSize: 11,
-                fontWeight: 600,
-                color: col.color,
-                borderBottom: "1px solid var(--surface)",
-              }}
-            >
+          <section key={col.key} className={`tk-column ${col.key}`}>
+            <h3 className="tk-column-head">
+              {col.mark === "done" ? <span className="tk-done-mark">✓</span> : <Mark status={col.mark} small />}
               {col.label}
-              <span style={{ color: "var(--muted)", fontWeight: 400 }}>{col.cards.length}</span>
+              <span className="tk-count">{col.cards.length}</span>
+              {col.key === "done" && <span className="tk-done-toggle">today ▾</span>}
             </h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 4 }}>
+            <div className="tk-cards">
               {col.cards.map((c) => (
-                <TaskCard key={c.title} card={c} color={col.color} />
+                <TaskCard key={c.title} card={c} column={col.key} />
               ))}
             </div>
           </section>
@@ -253,186 +172,136 @@ function TaskBoardMockup() {
   );
 }
 
-/** The Trail view's marks, and the app's colors for them. */
-const MARKS = {
-  ok: { text: "✓", color: "var(--green)" },
-  error: { text: "✗", color: "var(--red)" },
-  running: { text: "…", color: "var(--accent)" },
-} as const;
-
 type Action = {
-  status: keyof typeof MARKS;
+  status: "ok" | "error" | "running";
   tool: string;
   summary: string;
+  /** Its exit code, shown in place of how long it took. */
   exit?: number;
   took?: string;
-  /** Its input and output, when it is open. */
-  detail?: { input: string; output: string };
+  /** A failure's output, shown under it without opening it. */
+  error?: string;
+  kind?: "read" | "edit";
 };
+
+const MARKS = { ok: "✓", error: "✗", running: "●" } as const;
 
 const REFRESH = "/Users/me/api/src/auth/refresh.rs";
 const FROM_PLANNER = "[message from planner, via mira agent send]";
 
-const FAILED_TEST = `Exit code 101
-   Compiling api v0.4.0 (/Users/me/api)
-    Finished \`test\` profile [unoptimized + debuginfo] target(s) in 4.12s
-     Running unittests src/main.rs (target/debug/deps/api-3f9c2a1e)
-test auth::refresh::expires_after_30_days ... FAILED
-
----- auth::refresh::expires_after_30_days stdout ----
-thread 'auth::refresh::expires_after_30_days' panicked at src/auth/refresh.rs:212:9:
+const FAILED_TEST = `test auth::refresh::expires_after_30_days ... FAILED
 assertion \`left == right\` failed
   left: Ok(Refreshed)
  right: Err(Expired)
+test result: FAILED. 43 passed; 1 failed`;
 
-test result: FAILED. 43 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
-error: test failed, to rerun pass \`-p api --bin api\``;
-
-/** The worker's turns, newest first. */
-const TURNS: { when: string; actions: Action[] }[] = [
+/** The worker's turns, newest first: the latest open, the other folded. */
+const TURNS: { when: string; number: number; state: string; took: string; prompt: string; actions: Action[] }[] = [
   {
-    when: "1m",
+    when: "14:05",
+    number: 4,
+    state: "running",
+    took: "52s",
+    prompt: FROM_PLANNER,
     actions: [
-      { status: "ok", tool: "Read", summary: REFRESH, took: "9ms" },
-      { status: "ok", tool: "Grep", summary: "issued_at", took: "41ms" },
-      { status: "ok", tool: "Edit", summary: REFRESH, took: "22ms" },
-      {
-        status: "error",
-        tool: "Bash",
-        summary: "cargo test -p api",
-        exit: 101,
-        took: "9.8s",
-        detail: {
-          input: `{\n  "command": "cargo test -p api",\n  "description": "Run the api tests"\n}`,
-          output: FAILED_TEST,
-        },
-      },
-      { status: "ok", tool: "Edit", summary: REFRESH, took: "18ms" },
+      { status: "ok", tool: "Read", summary: REFRESH, took: "9ms", kind: "read" },
+      { status: "ok", tool: "Grep", summary: "issued_at", took: "41ms", kind: "read" },
+      { status: "ok", tool: "Edit", summary: REFRESH, took: "22ms", kind: "edit" },
+      { status: "error", tool: "Bash", summary: "cargo test -p api", exit: 101, error: FAILED_TEST },
+      { status: "ok", tool: "Edit", summary: REFRESH, took: "18ms", kind: "edit" },
       { status: "ok", tool: "Bash", summary: "cargo test -p api", took: "7.2s" },
       { status: "running", tool: "Bash", summary: "cargo clippy -p api -- -D warnings" },
     ],
   },
   {
-    when: "6m",
-    actions: [
-      { status: "ok", tool: "Edit", summary: REFRESH, took: "25ms" },
-      { status: "ok", tool: "Bash", summary: "cargo test -p api", took: "6.9s" },
-    ],
+    when: "13:59",
+    number: 3,
+    state: "done",
+    took: "3m",
+    prompt: FROM_PLANNER,
+    actions: [],
   },
 ];
 
 /** The team's agents, as the Trail view lists them, the worker picked. */
-const AGENTS = [
-  { name: "planner", harness: "Claude Code", dot: "#fab387" },
-  { name: "worker", harness: "Claude Code", dot: "var(--accent)", on: true },
-  { name: "reviewer", harness: "Codex", dot: "var(--green)" },
+const AGENTS: { name: string; status: Status; meta: string; on?: boolean }[] = [
+  { name: "planner", status: "needsYou", meta: "Claude Code" },
+  { name: "worker", status: "working", meta: "4 turns", on: true },
+  { name: "reviewer", status: null, meta: "Codex" },
 ];
 
-const DETAIL_HEAD = {
-  fontSize: 10,
-  color: "var(--muted)",
-  textTransform: "uppercase" as const,
-  letterSpacing: ".04em",
-  marginTop: 4,
-};
-
-const DETAIL_TEXT = {
-  marginTop: 2,
-  maxHeight: 240,
-  overflow: "auto",
-  padding: "5px 7px",
-  background: "var(--bg)",
-  borderRadius: 4,
-  color: "var(--text)",
-  fontSize: 11,
-  whiteSpace: "pre-wrap" as const,
-  overflowWrap: "anywhere" as const,
-};
-
-function ActionLine({ action }: { action: Action }) {
+function TurnSummary({ turn }: { turn: (typeof TURNS)[number] }) {
+  const reads = turn.actions.filter((a) => a.kind === "read").length;
+  const edits = turn.actions.filter((a) => a.kind === "edit").length;
+  const failed = turn.actions.filter((a) => a.status === "error").length;
   return (
-    <li>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "1px 0", fontSize: 11, lineHeight: 1.5, color: "var(--subtext)" }}>
-        <span style={{ flexShrink: 0, width: "1em", color: MARKS[action.status].color }}>{MARKS[action.status].text}</span>
-        <span style={{ flexShrink: 0, color: "var(--text)" }}>{action.tool}</span>
-        <span className="mono" style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {action.summary}
-        </span>
-        {action.exit !== undefined && <span style={{ flexShrink: 0, color: "var(--red)" }}>exit {action.exit}</span>}
-        <span style={{ flexShrink: 0, color: "var(--muted)" }}>{action.took ?? ""}</span>
-      </div>
-      {action.detail && (
-        <div style={{ margin: "2px 0 6px 1.6em" }}>
-          <div style={DETAIL_HEAD}>input</div>
-          <pre className="mono" style={DETAIL_TEXT}>{action.detail.input}</pre>
-          <div style={DETAIL_HEAD}>output (error)</div>
-          <pre className="mono" style={DETAIL_TEXT}>{action.detail.output}</pre>
-        </div>
-      )}
-    </li>
+    <span className={`tk-turn-summary${failed > 0 ? " failed" : ""}`}>
+      ▾ {turn.when} · Turn {turn.number} · {turn.state} · {reads} reads · {edits} edits · {failed} failed · {turn.took}
+    </span>
   );
 }
 
 function TrailMockup() {
+  const all = TURNS.flatMap((t) => t.actions);
+  const failures = all.filter((a) => a.status === "error").length;
+  const edits = all.filter((a) => a.kind === "edit").length;
   return (
-    <div
-      style={{
-        maxWidth: 940,
-        margin: "18px auto 0",
-        border: "1px solid var(--surface)",
-        borderRadius: 12,
-        overflow: "hidden",
-        background: "var(--bg-alt)",
-        boxShadow: "0 24px 60px rgba(0,0,0,.5)",
-        textAlign: "left",
-      }}
-    >
-      <Chrome view={2} />
-      <div className="tasks-trail" style={{ display: "grid", gridTemplateColumns: "minmax(110px, 180px) minmax(0, 1fr)" }}>
-        <ul className="tasks-agents" style={{ listStyle: "none", padding: 4, borderRight: "1px solid var(--surface)" }}>
+    <div className="tk-mock trail">
+      <Toolbar view="trail" />
+      <div className="tk-trail tasks-trail">
+        <ul className="tk-agents tasks-agents">
           {AGENTS.map((a) => (
-            <li
-              key={a.name}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "4px 6px",
-                borderRadius: 4,
-                background: a.on ? "var(--surface)" : "none",
-                color: a.on ? "var(--text)" : "var(--subtext)",
-                fontSize: 12,
-                whiteSpace: "nowrap",
-              }}
-            >
-              <span style={{ flexShrink: 0, width: 7, height: 7, borderRadius: "50%", background: a.dot }} />
+            <li key={a.name} className={`tk-agent${a.on ? " on" : ""}`}>
+              <Mark status={a.status} small />
               <span>{a.name}</span>
-              <span className="tasks-agent-meta" style={{ flexShrink: 0, marginLeft: "auto", fontSize: 10, color: "var(--muted)" }}>
-                {a.harness}
-              </span>
+              <span className="tk-agent-meta tasks-agent-meta">{a.meta}</span>
             </li>
           ))}
         </ul>
-        <ol style={{ listStyle: "none", padding: "6px 10px" }}>
-          {TURNS.map((turn) => (
-            <li key={turn.when} style={{ marginBottom: 10 }}>
-              {/* Its prompt is more than its first line, so it opens. */}
-              <details style={{ fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-                <summary>
-                  <span style={{ display: "inline-block", minWidth: "3.2em", marginRight: 6, color: "var(--muted)" }}>
-                    {turn.when}
-                  </span>
-                  <span style={{ color: "var(--text)" }}>{FROM_PLANNER}</span>
-                </summary>
-              </details>
-              <ol style={{ listStyle: "none", marginLeft: "3.8em" }}>
-                {turn.actions.map((a, i) => (
-                  <ActionLine key={i} action={a} />
-                ))}
-              </ol>
-            </li>
-          ))}
-        </ol>
+        <div className="tk-timeline">
+          <div className="tk-trail-head">
+            <span className="tk-trail-name">worker</span>
+            <span className="tk-trail-status">working</span>
+            <span className="tk-trail-card">Card: Step 3: expire refresh tokens after 30 days</span>
+            <span className="tk-spacer" />
+            <span className="tk-chip selected">All</span>
+            <span className="tk-chip">Failures {failures}</span>
+            <span className="tk-chip">Edits {edits}</span>
+          </div>
+          <ol className="tk-turns">
+            {TURNS.map((turn) =>
+              turn.actions.length > 0 ? (
+                <li key={turn.number} className="tk-turn">
+                  <TurnSummary turn={turn} />
+                  <div className="tk-prompt">{turn.prompt}</div>
+                  <ol className="tk-action-list">
+                    {turn.actions.map((a, i) => (
+                      <li key={i} className={`tk-action ${a.status}`}>
+                        <div className="tk-action-line">
+                          <span className="tk-action-mark">{MARKS[a.status]}</span>
+                          <span className="tk-action-tool">{a.tool}</span>
+                          <span className="tk-action-summary mono">{a.summary}</span>
+                          <span className="tk-action-took">{a.exit !== undefined ? `exit ${a.exit}` : (a.took ?? "")}</span>
+                        </div>
+                        {a.error && (
+                          <div className="tk-action-error">
+                            <div className="tk-detail-head">output (error)</div>
+                            <pre className="tk-detail-text mono">{a.error}</pre>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </li>
+              ) : (
+                <li key={turn.number} className="tk-turn folded">
+                  <span className="tk-fold">▸</span> <span className="tk-when">{turn.when}</span>{" "}
+                  <span className="tk-prompt">{turn.prompt}</span>
+                </li>
+              ),
+            )}
+          </ol>
+        </div>
       </div>
     </div>
   );
