@@ -893,8 +893,10 @@ mod tests {
             ]
         );
         let yours = cat.shadowed.iter().find(|f| f.source == RoleSource::Global && f.kind == CatalogKind::Role).unwrap();
-        assert_eq!(yours.path.as_deref(), Some(global.join("roles/reviewer.md").to_string_lossy().as_ref()));
-        assert_eq!(yours.by_path.as_deref(), Some(repo.join("roles/reviewer.md").to_string_lossy().as_ref()));
+        // As paths, joined a component at a time as the catalog joins them:
+        // "roles/reviewer.md" in one string keeps its "/" on Windows.
+        assert_eq!(yours.path.as_deref().map(Path::new), Some(global.join("roles").join("reviewer.md").as_path()));
+        assert_eq!(yours.by_path.as_deref().map(Path::new), Some(repo.join("roles").join("reviewer.md").as_path()));
         assert_eq!(cat.shadowed.iter().find(|f| f.source == RoleSource::Config).unwrap().path, None);
         // Nothing hidden outside the repository but the mirador.json entry.
         let outside = catalog_in(None, &global, &[]);
