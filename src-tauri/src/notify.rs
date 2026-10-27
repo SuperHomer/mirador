@@ -148,8 +148,14 @@ pub fn decorate_snapshot(
     let list = state.notifications.lock().unwrap();
     let unread: Vec<&NotificationDto> = list.iter().filter(|n| !n.read).collect();
 
-    snapshot.unread_panes = unread.iter().map(|n| n.pane_id.clone()).collect();
-    snapshot.unread_panes.dedup();
+    // Once each, in the order first raised: a pane's notifications need not
+    // be adjacent, so `dedup` alone left duplicates.
+    let mut seen = std::collections::HashSet::new();
+    snapshot.unread_panes = unread
+        .iter()
+        .filter(|n| seen.insert(n.pane_id.as_str()))
+        .map(|n| n.pane_id.clone())
+        .collect();
 
     for tab in &mut snapshot.tabs {
         let panes = cmux_core::layout::pane_ids(&tab.root);
