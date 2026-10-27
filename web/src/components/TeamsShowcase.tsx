@@ -229,7 +229,10 @@ export default function TeamsShowcase() {
           teammate reports back with its own{" "}
           <span className="mono" style={{ color: "var(--text)" }}>mira agent send</span>.
           Mirador keeps track of the team across restarts: list it, bring
-          back the members that stopped, add one. One team ships with Mirador:{" "}
+          back the members that stopped, add one. In the editor a team is a page —
+          its members as cards, the selected one’s role and settings beside them, and
+          what it is told, layer by layer, down to the part Mirador writes. One team
+          ships with Mirador:{" "}
           <span className="mono" style={{ color: "var(--text)" }}>omakase</span>, a planner,
           a worker and a reviewer.
         </p>

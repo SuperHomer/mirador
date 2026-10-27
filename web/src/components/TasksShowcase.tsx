@@ -459,18 +459,19 @@ export default function TasksShowcase() {
           Who was given what, and where it stands
         </h2>
         <p style={{ color: "var(--subtext)", fontSize: 15, lineHeight: 1.65, marginTop: 16 }}>
-          The task board is the agent wall’s other side — one switch, Splits | Agents | Tasks —
-          and shows what each agent was given, for one team or every tab.
-          Mirador adds a card each time it hands an agent a task, and moves it as the
-          agent’s turns end — Doing, Needs you, Done — or to Done once the agent is
-          given a newer one. Agents write cards of their own
+          The task board is the wall’s Tasks side and shows what each agent was
+          given, for one team or every tab: Needs you, To do, Doing and Done, or
+          swimlanes, a row per agent. Mirador adds a card each time it hands an agent
+          a task, and moves it as the agent’s turns end. Write one yourself with a
+          title and a description, assign it to an agent, or send an idle agent its
+          next card; agents add their own
           with <span className="mono" style={{ color: "var(--text)" }}>mira task add</span> —
-          the omakase planner puts up its steps that way and moves them as they go.
-          Open a card for its history: who sent what, how each turn ended, and how long
-          it took. The Trail shows what each agent actually did, turn by turn: its
-          prompt, then every command, edit, read and search with how it ended, each
-          opening to its full input and output — read from Claude Code’s and Codex’s
-          own session files, never copied.
+          the omakase planner puts up its steps that way. History lists every task
+          given, card moved and turn ended, by day; open a card for its own. The Trail
+          shows what each agent actually did, turn by turn: its prompt, then every
+          command, edit, read and search with how it ended, each opening to its full
+          input and output — read from Claude Code’s and Codex’s own session files,
+          never copied.
         </p>
         <div
           style={{
@@ -491,7 +492,7 @@ export default function TasksShowcase() {
             · mira task add · mira agent history · mira agent trail
           </span>
           <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
-            or the agent wall’s Splits | Agents | Tasks switch, or the palette’s Agents: Task Board
+            or Tasks in the sidebar’s switch, or the palette’s Agents: Task Board
           </span>
         </div>
       </div>

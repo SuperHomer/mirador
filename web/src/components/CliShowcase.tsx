@@ -3,6 +3,7 @@ import CopyButton from "./CopyButton";
 const COMMANDS = [
   'mira run --wait npm test',
   'mira agent new --role reviewer',
+  'mira agent wall --grid',
   'mira team start squad "add OAuth"',
   'mira agent board',
   'mira agent trail worker',
@@ -50,6 +51,7 @@ export default function CliShowcase() {
         <div className="mono" style={{ background: "var(--crust)", border: "1px solid var(--surface)", borderRadius: 12, padding: "22px 24px", fontSize: 13, lineHeight: 2, boxShadow: "0 16px 40px rgba(0,0,0,.4)" }}>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira run --wait npm test<span style={{ color: "var(--muted)" }}>      # observable, exit code</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent new --role <span style={{ color: "var(--mauve)" }}>reviewer</span><span style={{ color: "var(--muted)" }}> # .mirador/roles/reviewer.md</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira agent wall --grid<span style={{ color: "var(--muted)" }}>      # its agents, in pages</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> <span style={{ color: "var(--green)" }}>"add OAuth"</span><span style={{ color: "var(--muted)" }}> # a tab of agents</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent board<span style={{ color: "var(--muted)" }}>           # who is doing what</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent trail <span style={{ color: "var(--mauve)" }}>worker</span><span style={{ color: "var(--muted)" }}>    # what it ran</span></div>

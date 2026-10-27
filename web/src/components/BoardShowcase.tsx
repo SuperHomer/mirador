@@ -136,8 +136,10 @@ export default function BoardShowcase() {
         </h2>
         <p style={{ color: "var(--subtext)", fontSize: 15, lineHeight: 1.65, marginTop: 16 }}>
           Every tab becomes a frame and every pane a card — or, for a tab showing its
-          agent wall, its frame shows the wall: its agents’ live tiles, or its task
-          board. Drag the empty board to pan,
+          wall, its frame shows the wall: its agents’ live tiles, or its task board.
+          Each frame’s title carries its agents’ status and its view; a frame where
+          someone waits on you has a peach edge, and the corner counts them and flies
+          you to each in turn. Drag the empty board to pan,
           pinch to zoom, and double-click a card’s header to fly to it at 100%. A
           frame’s + adds a pane to it; New frame adds a tab. Where a card sits on the board and how its tab
           is split are two separate layouts. From 50% up the pointer reaches into the
@@ -172,7 +174,7 @@ export default function BoardShowcase() {
           <span>or</span>
           <BothKeys mac="⌘⇧O" other="Ctrl+Shift+O" />
           <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
-            or the sidebar’s Tabs | Board switch
+            or Board in the sidebar’s switch
           </span>
         </div>
       </div>

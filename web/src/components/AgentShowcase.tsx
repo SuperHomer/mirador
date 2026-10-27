@@ -29,17 +29,18 @@ export default function AgentShowcase() {
         <p style={{ color: "var(--subtext)", fontSize: 15, lineHeight: 1.65, marginTop: 16 }}>
           Give each Claude Code agent a role, with its own model and its own brief, and
           watch a tab’s agents at once — Codex, OpenCode, Pi, Gemini CLI and the rest
-          count too, the moment they start in a pane. The tiles are the agents’ live terminals, not
-          previews: each says what its agent is doing (working, idle, or waiting on
-          you) and takes your keystrokes, so you answer a permission prompt without
-          leaving the wall. The wall is a view of the tab itself, in place of its
-          splits: the same key switches back, and each tab remembers which it showed
-          when Mirador comes back, and on the board its frame shows the wall too. Its
-          Splits | Agents | Tasks switch turns the wall over to the
-          tab’s task board. Each goes by its Claude Code session’s name, and beside its
-          terminal sit the subagents it started, with how far each has got; right-click
-          one for the full list. In the sidebar, each tab lists its agents below the
-          tabs, and a click shows one alone.
+          count too, the moment they start in a pane. The tiles are the agents’ live
+          terminals, not previews: each says what its agent is doing — working, idle,
+          or waiting on you, and what for — and takes your keystrokes, so you answer a
+          permission prompt without leaving the wall. In Focus the agent that needs
+          you is drawn large, the rest in a rail beside it, and the wall moves on to
+          whoever needs you next unless you pin one; in Grid they come in pages of 4,
+          6 or 9. Each agent’s status bar gives its model, effort and how full its
+          context is, and opens a sheet of the subagents it started. The wall is a
+          view of the tab itself, in place of its splits, and each tab remembers which
+          it showed. The sidebar’s switch — Splits, Wall, Tasks, Board — picks the
+          view, each tab’s agents listed under it with what they are doing, and a
+          click on one shows it large on its wall.
         </p>
         <div
           style={{
