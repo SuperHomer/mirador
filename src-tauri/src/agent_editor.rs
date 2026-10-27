@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 
 use cmux_core::role_files::{Kind, Places};
-use cmux_protocol::{CatalogKind, RoleCatalog, RoleSource, SplitDir, UsedBy};
+use cmux_protocol::{CatalogKind, PromptLayer, RoleCatalog, RoleSource, SplitDir, UsedBy};
 
 use crate::commands::emit_workspace;
 use crate::AppState;
@@ -114,6 +114,24 @@ pub fn agent_editor_used_by(
     let teams: Vec<&str> = teams.iter().map(String::as_str).collect();
     let roles: Vec<&str> = roles.iter().map(String::as_str).collect();
     Ok(cmux_core::roles::used_by(&catalog, kind, &name, &teams, &roles))
+}
+
+/// What `member` of `team` is told when the team starts, as the layers it
+/// is made of — the very ones the launch joins.
+#[tauri::command]
+pub fn agent_editor_told(
+    state: State<'_, AppState>,
+    pane_id: String,
+    team: String,
+    member: String,
+) -> Result<Vec<PromptLayer>, String> {
+    let catalog = catalog(&state, &pane_id)?.catalog;
+    let def = catalog.teams.iter().find(|t| t.name == team).ok_or_else(|| format!("no team `{team}`"))?;
+    let seats = cmux_core::teams::seats(def);
+    let seat = seats.iter().find(|s| s.name == member).ok_or_else(|| format!("no member `{member}` in team `{team}`"))?;
+    let (_, mut layers) = cmux_core::roles::role_layers(&catalog, &seat.role)?;
+    layers.extend(cmux_core::teams::seat_layers(&catalog, def, seat, &seats, &crate::teams::mira_for_prompt()));
+    Ok(layers)
 }
 
 #[tauri::command]

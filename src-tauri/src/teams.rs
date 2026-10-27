@@ -26,7 +26,7 @@ fn cwd_of(state: &AppState, pane_id: Option<&str>) -> Option<String> {
 
 /// How `mira` is called in a member's prompt: by its absolute path, since
 /// the agent's shell may not have it on its PATH.
-fn mira_for_prompt() -> String {
+pub(crate) fn mira_for_prompt() -> String {
     crate::commands::mira_binary()
         .map(|p| cmux_core::pty::shell::quote_arg(&p.to_string_lossy()))
         .unwrap_or_else(|| "mira".into())
@@ -73,9 +73,9 @@ pub fn start_team_from(
     let mira = mira_for_prompt();
     let mut launches = Vec::new();
     for seat in &seats {
-        let roster = cmux_core::teams::member_prompt(def, seat, &seats, team_way(&catalog, def, &seat.role), &mira);
+        let roster = cmux_core::teams::seat_layers(&catalog, def, seat, &seats, &mira);
         let task = task.as_deref().filter(|_| seat.lead);
-        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), task)
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task)
             .map_err(|e| format!("team `{team}`, member `{}`: {e}", seat.name))?;
         launches.push(launch);
     }
@@ -160,14 +160,14 @@ fn team_here(state: &AppState, pane_id: Option<&str>) -> Result<(String, TeamRun
     Ok((tab.id.clone(), run))
 }
 
-/// The roster a member is given now: the team as it stands, `with` the
-/// member being started.
+/// What a member is told of its team now: the team as it stands, `with`
+/// the member being started.
 fn roster_now(
     run: &TeamRun,
     catalog: &cmux_protocol::RoleCatalog,
     seat: &cmux_core::teams::Seat,
     extra: Option<&cmux_core::teams::Seat>,
-) -> String {
+) -> Vec<cmux_protocol::PromptLayer> {
     let mut seats: Vec<cmux_core::teams::Seat> = run
         .members
         .iter()
@@ -181,18 +181,7 @@ fn roster_now(
     let def = catalog.teams.iter().find(|t| t.name == run.name).cloned().unwrap_or_else(|| {
         cmux_protocol::AgentTeam { name: run.name.clone(), ..Default::default() }
     });
-    cmux_core::teams::member_prompt(&def, seat, &seats, team_way(catalog, &def, &seat.role), &mira_for_prompt())
-}
-
-/// The team's way of working, for a member of `role` — none when the role
-/// already follows the same one, which its prompt then has already.
-fn team_way<'a>(catalog: &'a cmux_protocol::RoleCatalog, team: &cmux_protocol::AgentTeam, role: &str) -> Option<&'a str> {
-    let way = team.way.as_ref()?;
-    let role_way = catalog.roles.iter().find(|r| r.name == role).and_then(|r| r.way.as_ref());
-    if role_way == Some(way) {
-        return None;
-    }
-    catalog.ways.iter().find(|w| &w.name == way).map(|w| w.prompt.as_str())
+    cmux_core::teams::seat_layers(catalog, &def, seat, &seats, &mira_for_prompt())
 }
 
 /// Adds a `role` member to the team of `pane_id`'s tab, split from that
@@ -219,7 +208,7 @@ pub fn team_add(
     let cwd = cwd_of(&state, Some(&source));
     let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
     let roster = roster_now(&run, &catalog, &seat, Some(&seat));
-    let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), None)?;
+    let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), None)?;
 
     let pane = {
         let mut ws = state.workspace.lock().unwrap();
@@ -303,7 +292,7 @@ pub fn team_restart(
         }
         let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
         let roster = roster_now(&run, &catalog, &me, None);
-        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), Some(&roster), Some(&seat.name), None)
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), None)
             .map_err(|e| format!("member `{}`: {e}", seat.name))?;
 
         match seat_state {

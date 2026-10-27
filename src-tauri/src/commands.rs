@@ -1636,7 +1636,7 @@ pub fn open_agent_from(
         .get(&source)
         .and_then(|m| m.cwd.clone())
         .or_else(cmux_core::config::default_cwd);
-    let launch = prepare_launch(role.as_deref(), plain, None, cwd.as_deref(), None, None, task.as_deref())?;
+    let launch = prepare_launch(role.as_deref(), plain, None, cwd.as_deref(), &[], None, task.as_deref())?;
 
     let new_pane = if tab {
         state.workspace.lock().unwrap().new_tab().1
@@ -1672,19 +1672,20 @@ pub(crate) struct Launch {
 /// Works out how to start an agent in `cwd`: plain Claude Code, or `role`
 /// (looked up in `catalog`, else in what `cwd` sees) with its prompt and
 /// limits; without a role, `plain` (`agents::plain_harness`). `extra`
-/// follows the role's prompt — a team member's roster —
-/// and `name` is the session's name instead of the role's. Every file it
+/// follows the role's prompt — a team member's own layers
+/// (`teams::seat_layers`) — and `name` is the session's name instead of
+/// the role's. Every file it
 /// needs is written; nothing is opened, so a refusal changes nothing.
 pub(crate) fn prepare_launch(
     role: Option<&str>,
     plain: cmux_protocol::Harness,
     catalog: Option<&cmux_protocol::RoleCatalog>,
     cwd: Option<&str>,
-    extra: Option<&str>,
+    extra: &[cmux_protocol::PromptLayer],
     name: Option<&str>,
     task: Option<&str>,
 ) -> Result<Launch, String> {
-    let (role, prompt) = match role.map(str::trim).filter(|r| !r.is_empty()) {
+    let (role, mut layers) = match role.map(str::trim).filter(|r| !r.is_empty()) {
         Some(role) => {
             let read;
             let catalog = match catalog {
@@ -1694,19 +1695,13 @@ pub(crate) fn prepare_launch(
                     &read
                 }
             };
-            let (role, prompt) = cmux_core::roles::resolve(catalog, role)?;
-            (Some(role), prompt)
+            let (role, layers) = cmux_core::roles::role_layers(catalog, role)?;
+            (Some(role), layers)
         }
-        None => (None, None),
+        None => (None, Vec::new()),
     };
-    let prompt = [prompt.as_deref(), extra]
-        .into_iter()
-        .flatten()
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let prompt = (!prompt.is_empty()).then_some(prompt);
+    layers.extend_from_slice(extra);
+    let prompt = cmux_core::roles::join_layers(&layers);
     // What a Claude Code role may use: its MCP servers, plugins, skills and
     // tools, as a settings file. A list of skills or plugins to keep needs
     // every name there is, which only Claude Code knows — asked in the

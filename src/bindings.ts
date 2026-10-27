@@ -550,6 +550,14 @@ export interface ShadowedFile {
   byPath: string | null;
 }
 
+/** One part of what a team member is told, in order (`cmux_protocol::PromptLayer`). */
+export interface PromptLayer {
+  kind: "role" | "roleWay" | "team" | "charter" | "teamWay";
+  /** The file it comes from, or "written by Mirador". */
+  source: string;
+  text: string;
+}
+
 /** A team or role using a role or a way of working, and whether it runs. */
 export interface UsedBy {
   kind: CatalogKind;
@@ -800,6 +808,9 @@ export const agentEditorCatalog = (paneId: string) =>
 /** The teams and roles using the role or way `name`, running or not. */
 export const agentEditorUsedBy = (paneId: string, kind: CatalogKind, name: string) =>
   invoke<UsedBy[]>("agent_editor_used_by", { paneId, kind, name });
+/** What `member` of `team` is told when the team starts, layer by layer. */
+export const agentEditorTold = (paneId: string, team: string, member: string) =>
+  invoke<PromptLayer[]>("agent_editor_told", { paneId, team, member });
 export const agentFileRead = (paneId: string, path: string) =>
   invoke<string>("agent_file_read", { paneId, path });
 /** Warnings for the text; rejects with why it cannot be saved. */

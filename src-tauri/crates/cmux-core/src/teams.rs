@@ -24,7 +24,9 @@
 
 use std::path::Path;
 
-use cmux_protocol::{AgentRole, AgentTeam, AgentWay, Node, RoleSource, SplitDir, TeamMember};
+use cmux_protocol::{
+    AgentRole, AgentTeam, AgentWay, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SplitDir, TeamMember,
+};
 use serde::Deserialize;
 
 /// More agents than this in one tab is not a team, it is a mistake.
@@ -183,6 +185,17 @@ pub fn problem_of(team: &AgentTeam, roles: &[AgentRole], ways: &[AgentWay]) -> O
 /// charter, the team's way of working, and its teammates. `mira` is the
 /// path to the CLI, which the agent's shell may not have on its PATH.
 pub fn member_prompt(team: &AgentTeam, seat: &Seat, all: &[Seat], way: Option<&str>, mira: &str) -> String {
+    let way = way.map(|w| AgentWay { prompt: w.to_string(), ..Default::default() });
+    member_layers(team, seat, all, way.as_ref(), mira).into_iter().map(|l| l.text).collect()
+}
+
+/// The source of the layer Mirador writes itself.
+pub const WRITTEN_BY_MIRADOR: &str = "written by Mirador";
+
+/// [`member_prompt`] as the layers it is made of, each as it is told —
+/// they follow each other as they are: who the member is and its
+/// teammates, the charter, then the team's way of working.
+pub fn member_layers(team: &AgentTeam, seat: &Seat, all: &[Seat], way: Option<&AgentWay>, mira: &str) -> Vec<PromptLayer> {
     let mut out = format!("# Your team: {}\n\n", team.name);
     let role_of = if seat.name == seat.role { String::new() } else { format!(", a {}", seat.role) };
     let leads = if seat.lead { " You lead it: the team's task comes to you." } else { "" };
@@ -202,13 +215,39 @@ pub fn member_prompt(team: &AgentTeam, seat: &Seat, all: &[Seat], way: Option<&s
              pane and what it is doing, and `{mira} read-screen --pane <pane>` its screen.\n"
         ));
     }
+    let mut layers = vec![PromptLayer { kind: PromptLayerKind::Team, source: WRITTEN_BY_MIRADOR.into(), text: out }];
     if let Some(charter) = &team.prompt {
-        out.push_str(&format!("\n## The team's charter\n\n{charter}\n"));
+        layers.push(PromptLayer {
+            kind: PromptLayerKind::Charter,
+            source: team.path.clone(),
+            text: format!("\n## The team's charter\n\n{charter}\n"),
+        });
     }
     if let Some(way) = way {
-        out.push_str(&format!("\n## The team's way of working\n\n{}\n", way.trim()));
+        layers.push(PromptLayer {
+            kind: PromptLayerKind::TeamWay,
+            source: way.path.clone(),
+            text: format!("\n## The team's way of working\n\n{}\n", way.prompt.trim()),
+        });
     }
-    out
+    layers
+}
+
+/// A member's own layers, from the catalog: [`member_layers`] with the
+/// team's way of working unless its role already follows that way.
+pub fn seat_layers(catalog: &RoleCatalog, team: &AgentTeam, seat: &Seat, all: &[Seat], mira: &str) -> Vec<PromptLayer> {
+    member_layers(team, seat, all, team_way(catalog, team, &seat.role), mira)
+}
+
+/// The team's way of working, for a member of `role` — none when the role
+/// already follows the same one, which its prompt then has already.
+pub fn team_way<'a>(catalog: &'a RoleCatalog, team: &AgentTeam, role: &str) -> Option<&'a AgentWay> {
+    let way = team.way.as_ref()?;
+    let role_way = catalog.roles.iter().find(|r| r.name == role).and_then(|r| r.way.as_ref());
+    if role_way == Some(way) {
+        return None;
+    }
+    catalog.ways.iter().find(|w| &w.name == way)
 }
 
 /// The tab a team fills: its panes, `layout` "columns" side by side, "rows"
@@ -317,6 +356,83 @@ mod tests {
         let lead = member_prompt(&t, &all[1], &all, None, "mira");
         assert!(lead.contains("You lead it"));
         assert!(!lead.contains("way of working"));
+    }
+
+    /// What the launch gave a member before its prompt came in layers:
+    /// the role's resolved prompt, then the roster, joined as
+    /// `prepare_launch` joined them.
+    fn as_launched(catalog: &RoleCatalog, t: &AgentTeam, seat: &Seat, all: &[Seat]) -> Option<String> {
+        let (_, role_prompt) = crate::roles::resolve(catalog, &seat.role).unwrap();
+        let way = team_way(catalog, t, &seat.role).map(|w| w.prompt.as_str());
+        let roster = member_prompt(t, seat, all, way, "mira");
+        let prompt = [role_prompt.as_deref(), Some(roster.as_str())]
+            .into_iter()
+            .flatten()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        (!prompt.is_empty()).then_some(prompt)
+    }
+
+    fn told(catalog: &RoleCatalog, t: &AgentTeam, seat: &Seat, all: &[Seat]) -> Vec<PromptLayer> {
+        let (_, mut layers) = crate::roles::role_layers(catalog, &seat.role).unwrap();
+        layers.extend(seat_layers(catalog, t, seat, all, "mira"));
+        layers
+    }
+
+    #[test]
+    fn a_members_layers_join_into_what_it_is_told() {
+        let way = |name: &str, prompt: &str| AgentWay {
+            name: name.into(),
+            prompt: prompt.into(),
+            path: format!("/r/.mirador/ways/{name}.md"),
+            ..Default::default()
+        };
+        let catalog = RoleCatalog {
+            roles: vec![
+                AgentRole {
+                    prompt: Some("  You review.\n".into()),
+                    way: Some("careful".into()),
+                    path: Some("/r/.mirador/roles/reviewer.md".into()),
+                    ..role("reviewer")
+                },
+                role("dev"),
+                role("planner"),
+            ],
+            ways: vec![way("careful", "Read twice.\n"), way("our-way", "Tests first.")],
+            ..Default::default()
+        };
+        let t = team(SQUAD);
+        let all = seats(&t);
+
+        // gate: its role's prompt and way, the roster, the charter, the team's way.
+        let layers = told(&catalog, &t, &all[3], &all);
+        let kinds: Vec<_> = layers.iter().map(|l| l.kind).collect();
+        use PromptLayerKind::*;
+        assert_eq!(kinds, [Role, RoleWay, Team, Charter, TeamWay]);
+        let sources: Vec<_> = layers.iter().map(|l| l.source.as_str()).collect();
+        assert_eq!(
+            sources,
+            [
+                "/r/.mirador/roles/reviewer.md",
+                "/r/.mirador/ways/careful.md",
+                WRITTEN_BY_MIRADOR,
+                "/r/.mirador/teams/squad.md",
+                "/r/.mirador/ways/our-way.md"
+            ]
+        );
+        assert_eq!(crate::roles::join_layers(&layers), as_launched(&catalog, &t, &all[3], &all));
+
+        // A team with no charter or way, a role with no prompt or way: the
+        // roster alone.
+        let bare = team("---\nmembers: [{role: dev}, {role: planner}]\n---\n");
+        let all = seats(&bare);
+        let layers = told(&catalog, &bare, &all[0], &all);
+        assert_eq!(layers.iter().map(|l| l.kind).collect::<Vec<_>>(), [Team]);
+        let joined = crate::roles::join_layers(&layers);
+        assert_eq!(joined, as_launched(&catalog, &bare, &all[0], &all));
+        assert!(joined.unwrap().starts_with("# Your team: squad\n\nYou are `dev`, in team `squad`."));
     }
 
     #[test]

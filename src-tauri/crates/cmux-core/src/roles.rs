@@ -27,7 +27,8 @@
 use std::path::{Path, PathBuf};
 
 use cmux_protocol::{
-    AgentRole, AgentTeam, AgentWay, CatalogKind, Harness, RoleCatalog, RoleSource, ShadowedFile, ToolRules, UsedBy,
+    AgentRole, AgentTeam, AgentWay, CatalogKind, Harness, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource,
+    ShadowedFile, ToolRules, UsedBy,
 };
 use serde::Deserialize;
 
@@ -188,6 +189,13 @@ pub fn can_start(harness: Harness) -> bool {
 /// A role ready to start: the role, and its whole prompt — its own, then
 /// its way of working's.
 pub fn resolve(catalog: &RoleCatalog, name: &str) -> Result<(AgentRole, Option<String>), String> {
+    let (role, layers) = role_layers(catalog, name)?;
+    Ok((role, join_layers(&layers)))
+}
+
+/// A role ready to start, and its prompt as the layers it is made of: its
+/// own, then its way of working's, each with the file it comes from.
+pub fn role_layers(catalog: &RoleCatalog, name: &str) -> Result<(AgentRole, Vec<PromptLayer>), String> {
     let role = catalog
         .roles
         .iter()
@@ -196,15 +204,34 @@ pub fn resolve(catalog: &RoleCatalog, name: &str) -> Result<(AgentRole, Option<S
     if let Some(problem) = &role.problem {
         return Err(format!("role `{name}`: {problem}"));
     }
-    let way = role.way.as_ref().and_then(|way| catalog.ways.iter().find(|w| &w.name == way));
-    let prompt = [role.prompt.as_deref(), way.map(|w| w.prompt.as_str())]
-        .into_iter()
-        .flatten()
+    let mut layers = Vec::new();
+    if let Some(prompt) = &role.prompt {
+        let source = role.path.clone().unwrap_or_else(|| "agentRoles in mirador.json".into());
+        layers.push(PromptLayer { kind: PromptLayerKind::Role, source, text: prompt.clone() });
+    }
+    if let Some(way) = role.way.as_ref().and_then(|way| catalog.ways.iter().find(|w| &w.name == way)) {
+        layers.push(PromptLayer { kind: PromptLayerKind::RoleWay, source: way.path.clone(), text: way.prompt.clone() });
+    }
+    Ok((role.clone(), layers))
+}
+
+/// The prompt an agent is given, from its layers: the role's and its
+/// way's each trimmed, then a team member's own layers as one — they are
+/// written to follow each other — with a blank line between, and nothing
+/// for what is empty.
+pub fn join_layers(layers: &[PromptLayer]) -> Option<String> {
+    let is_role = |l: &&PromptLayer| matches!(l.kind, PromptLayerKind::Role | PromptLayerKind::RoleWay);
+    let team: String = layers.iter().filter(|l| !is_role(l)).map(|l| l.text.as_str()).collect();
+    let prompt = layers
+        .iter()
+        .filter(is_role)
+        .map(|l| l.text.as_str())
+        .chain([team.as_str()])
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
-    Ok((role.clone(), (!prompt.is_empty()).then_some(prompt)))
+    (!prompt.is_empty()).then_some(prompt)
 }
 
 /// Puts `item` in `list`, in place of one with the same name, which it

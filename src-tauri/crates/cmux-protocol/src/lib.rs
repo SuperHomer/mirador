@@ -1398,6 +1398,32 @@ pub struct ShadowedFile {
     pub by_path: Option<String>,
 }
 
+/// One part of what an agent is told, in the order it is told:
+/// `roles::role_layers`, then for a team member `teams::member_layers`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptLayer {
+    pub kind: PromptLayerKind,
+    /// The file it comes from, or "written by Mirador".
+    pub source: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PromptLayerKind {
+    /// The role's own prompt.
+    Role,
+    /// The way of working the role follows.
+    RoleWay,
+    /// Who the member is in its team, and its teammates.
+    Team,
+    /// The team file's body.
+    Charter,
+    /// The team's way of working, when the role does not follow it already.
+    TeamWay,
+}
+
 /// A team or role that uses a role or a way of working: a team with the
 /// role as a member or the way as its own, a role following the way.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -357,6 +357,7 @@ pub fn run() {
             agent_editor::open_agent_editor,
             agent_editor::agent_editor_catalog,
             agent_editor::agent_editor_used_by,
+            agent_editor::agent_editor_told,
             agent_editor::agent_file_read,
             agent_editor::agent_file_check,
             agent_editor::agent_file_template,
