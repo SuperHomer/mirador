@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use cmux_protocol::{AgentRole, AgentStatus, Harness};
+use cmux_protocol::{AgentInfo, AgentRole, AgentStatus, Harness};
 
 /// One row of the process table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -396,6 +396,29 @@ pub fn title_topic(title: &str, harness: Harness, shown: &[Option<&str>]) -> Opt
         return None;
     }
     Some(topic.to_string())
+}
+
+/// What an agent is called in the sidebar and on the wall — its team
+/// name, its session's name, its role, else its harness — as `agentLabel`
+/// in `bindings.ts` has it.
+pub fn label(agent: &AgentInfo) -> &str {
+    agent
+        .member
+        .as_deref()
+        .or(agent.name.as_deref())
+        .or(agent.role.as_deref())
+        .unwrap_or(agent.harness.label())
+}
+
+/// The title a notification from a pane is shown with. An agent's names
+/// the agent and its tab (`reviewer · api`): Claude Code titles every one
+/// of its alerts just "Claude Code", which says nothing about which of
+/// several agents wants you. Any other pane keeps the title it sent.
+pub fn notification_title(agent: Option<&AgentInfo>, tab: &str, sent: Option<String>) -> Option<String> {
+    match agent {
+        Some(agent) => Some(format!("{} · {tab}", label(agent))),
+        None => sent,
+    }
 }
 
 /// The model an agent's command line asks for: `--model x`,
@@ -1277,5 +1300,56 @@ mod tests {
         assert_eq!(title_topic("codex", Harness::Codex, &[]), None);
         // Another agent's name is not this one's role, and is kept.
         assert_eq!(title_topic("✳ planner", claude, &[Some("reviewer")]).as_deref(), Some("planner"));
+    }
+
+    fn agent() -> AgentInfo {
+        AgentInfo {
+            pane_id: "p".into(),
+            tab_id: "t".into(),
+            harness: Harness::Claude,
+            role: None,
+            member: None,
+            has_activity: false,
+            name: None,
+            model: None,
+            effort: None,
+            status: None,
+            message: None,
+            asking: None,
+            topic: None,
+            since_ms: None,
+            cwd: None,
+            branch: None,
+        }
+    }
+
+    #[test]
+    fn an_agent_is_labelled_by_member_then_session_then_role_then_harness() {
+        let mut a = agent();
+        assert_eq!(label(&a), "Claude Code");
+        a.role = Some("dev".into());
+        assert_eq!(label(&a), "dev");
+        a.name = Some("fix-login".into());
+        assert_eq!(label(&a), "fix-login");
+        a.member = Some("reviewer".into());
+        assert_eq!(label(&a), "reviewer");
+    }
+
+    #[test]
+    fn an_agents_notification_names_the_agent_and_its_tab() {
+        let mut a = agent();
+        a.member = Some("reviewer".into());
+        // Claude Code's own alerts, titled with nothing but its name.
+        assert_eq!(
+            notification_title(Some(&a), "api", Some("Claude Code".into())).as_deref(),
+            Some("reviewer · api")
+        );
+        assert_eq!(notification_title(Some(&agent()), "docs", None).as_deref(), Some("Claude Code · docs"));
+    }
+
+    #[test]
+    fn any_other_panes_notification_keeps_its_title() {
+        assert_eq!(notification_title(None, "api", Some("Build done".into())).as_deref(), Some("Build done"));
+        assert_eq!(notification_title(None, "api", None), None);
     }
 }

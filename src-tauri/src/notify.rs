@@ -62,6 +62,14 @@ pub fn handle_notification(
         tab.focused == pane_id
     };
 
+    let agent = crate::commands::agent_infos(&state).into_iter().find(|a| a.pane_id == pane_id);
+    let tab = {
+        let ws = state.workspace.lock().unwrap();
+        let meta = state.meta.lock().unwrap();
+        ws.tab_of_pane(pane_id).map(|t| t.resolved_title(&meta)).unwrap_or_default()
+    };
+    let title = cmux_core::agents::notification_title(agent.as_ref(), &tab, title);
+
     let dto = NotificationDto {
         id: uuid::Uuid::new_v4().to_string(),
         pane_id: pane_id.to_string(),

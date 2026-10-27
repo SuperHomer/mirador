@@ -341,6 +341,21 @@ impl Tab {
     pub fn frame_rect(&self) -> BoardRect {
         board::frame_rect(self.frame, &self.cards)
     }
+
+    /// The name the sidebar shows: an explicit rename, else the focused
+    /// pane's OSC title, else the basename of its cwd, else "shell".
+    pub fn resolved_title(&self, meta: &HashMap<String, PaneMeta>) -> String {
+        let pane_meta = meta.get(&self.focused);
+        self.title
+            .clone()
+            .or_else(|| pane_meta.and_then(|m| m.title.clone()))
+            .unwrap_or_else(|| {
+                pane_meta
+                    .and_then(|m| m.cwd.as_deref())
+                    .map(display_dir)
+                    .unwrap_or_else(|| "shell".to_string())
+            })
+    }
 }
 
 #[derive(Debug)]
@@ -767,21 +782,10 @@ impl Workspace {
                 .tabs
                 .iter()
                 .map(|t| {
-                    let pane_meta = meta.get(&t.focused);
-                    let cwd = pane_meta.and_then(|m| m.cwd.clone());
-                    let osc_title = pane_meta.and_then(|m| m.title.clone());
-                    let title = t
-                        .title
-                        .clone()
-                        .or(osc_title)
-                        .unwrap_or_else(|| {
-                            cwd.as_deref()
-                                .map(display_dir)
-                                .unwrap_or_else(|| "shell".to_string())
-                        });
+                    let cwd = meta.get(&t.focused).and_then(|m| m.cwd.clone());
                     TabSnapshot {
                         id: t.id.clone(),
-                        title,
+                        title: t.resolved_title(meta),
                         cwd: cwd.clone().map(|c| abbreviate_home(&c)),
                         root: t.root.clone(),
                         focused_pane: t.focused.clone(),
