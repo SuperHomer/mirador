@@ -870,12 +870,16 @@ function Card({
 
 /** A card's description as the card shows it. A title made from a task's
  *  first words (cut short with "…") is how its description begins, so the
- *  card shows only what follows, after "…" — nothing when that is all. */
+ *  card shows only what follows, after "…" — nothing when that is all. The
+ *  title must end where a word does: "Auth" is not how "Authentication"
+ *  begins. */
 function shownDescription(title: string, description: string | null): string | null {
   if (!description) return null;
   const head = title.replace(/…$/, "").trim();
   const text = description.trim();
   if (!head || !text.startsWith(head)) return description;
+  const next = text.charAt(head.length);
+  if (next !== "" && !/\s/.test(next)) return description;
   const rest = text.slice(head.length).trimStart();
   return rest ? `…${rest}` : null;
 }
