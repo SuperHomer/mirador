@@ -88,6 +88,8 @@ fn a_role_pane_comes_back_resumed_with_its_model_and_limits() {
 
     let pane = sb.call(Request::AgentNew {
         role: Some("reviewer".into()),
+        harness: None,
+        title: None,
         task: Some("look at main".into()),
         target: None,
         pane_id: Some(first.clone()),
@@ -182,6 +184,78 @@ fn the_agent_editor_opens_and_comes_back() {
     assert!(listed(&sb).is_some(), "the editor comes back as an editor, not a shell");
 }
 
+/// Opened in a tab, a graph or an editor already open on the same files is
+/// shown again rather than opened twice: one graph per repository, one
+/// editor per repository or, outside one, per directory — the second ask
+/// focusing the first. Another repository gets its own.
+#[test]
+fn a_graph_or_editor_opened_in_a_tab_is_shown_again_for_the_same_files() {
+    e2e!();
+    let mut sb = Sandbox::new("reuse");
+    let other = sb.home.join("other");
+    let plain = sb.home.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    for dir in [&sb.project, &other] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("notes.txt"), "one\n").unwrap();
+        for args in [&["init", "-q"][..], &["add", "."], &["commit", "-qm", "init"]] {
+            let ok = std::process::Command::new("git")
+                .args(["-c", "user.name=e2e", "-c", "user.email=e2e@example.com"])
+                .args(args)
+                .current_dir(dir)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?} in {}", dir.display());
+        }
+    }
+    sb.launch();
+    let first = sb.first_pane();
+    // A pane in each of the other two directories, each in a tab of its own.
+    let pane_in = |dir: &std::path::Path| -> String {
+        let (code, out, err) = sb.mira(None, &["new-tab"]);
+        assert_eq!(code, 0, "{err}");
+        let pane = out.trim().to_string();
+        sb.type_into(&pane, &format!("cd {}\r", dir.display()));
+        let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        sb.wait_for("the shell's directory", LONG, || {
+            let snap = sb.snapshot();
+            let tab = snap["tabs"].as_array()?.iter().find(|t| t["focusedPane"] == pane.as_str())?.clone();
+            tab["cwd"].as_str()?.ends_with(&name).then_some(())
+        });
+        pane
+    };
+    let in_other = pane_in(&other);
+    let in_plain = pane_in(&plain);
+
+    let open = |pane: &str, args: &[&str]| -> String {
+        // Somewhere else focused first, so a reuse has to bring it back.
+        sb.call(Request::FocusPane { pane_id: first.clone() });
+        let (code, out, err) = sb.mira(Some(pane), args);
+        assert_eq!(code, 0, "{args:?}: {err}");
+        let opened = out.trim().to_string();
+        let snap = sb.snapshot();
+        let active = snap["tabs"].as_array().unwrap().iter().find(|t| t["id"] == snap["activeTab"]).unwrap().clone();
+        assert_eq!(active["focusedPane"], opened.as_str(), "{args:?} shows what it opened");
+        opened
+    };
+    let count = |list: &str| sb.snapshot()[list].as_array().map_or(0, Vec::len);
+
+    let graph = open(&first, &["graph", "--tab"]);
+    assert_eq!(open(&first, &["graph", "--tab"]), graph, "the same repository's graph again");
+    assert_eq!(count("graphPanes"), 1);
+    assert_ne!(open(&in_other, &["graph", "--tab"]), graph, "another repository's");
+    assert_eq!(count("graphPanes"), 2);
+
+    let editor = open(&first, &["agent", "edit", "--tab"]);
+    assert_eq!(open(&first, &["agent", "edit", "--tab"]), editor, "the same repository's editor again");
+    assert_eq!(count("agentEditorPanes"), 1);
+    assert_ne!(open(&in_other, &["agent", "edit", "--tab"]), editor);
+    let outside = open(&in_plain, &["agent", "edit", "--tab"]);
+    assert_eq!(open(&in_plain, &["agent", "edit", "--tab"]), outside, "outside a repository, by its directory");
+    assert_eq!(count("agentEditorPanes"), 3);
+}
+
 /// `mira agent wall` shows the tab's agents in place of its splits, in the
 /// same tab, and again shows the splits. While the wall is up the agent's
 /// pane is still in its tab and its terminal, lent to its tile, still
@@ -194,7 +268,7 @@ fn the_wall_is_a_view_of_its_tab_and_comes_back() {
     sb.launch();
     let first = sb.first_pane();
     sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
-    let agent = sb.call(Request::AgentNew { role: None, task: None, target: None, pane_id: Some(first.clone()) })
+    let agent = sb.call(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()) })
         ["paneId"]
         .as_str()
         .unwrap()

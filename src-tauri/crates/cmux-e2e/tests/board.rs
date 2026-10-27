@@ -261,7 +261,7 @@ fn a_walled_tab_on_the_board_draws_its_wall() {
     sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
     let agents: Vec<String> = (0..2)
         .map(|_| {
-            let agent = sb.call(Request::AgentNew { role: None, task: None, target: None, pane_id: Some(first.clone()) })
+            let agent = sb.call(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()) })
                 ["paneId"]
                 .as_str()
                 .unwrap()
@@ -286,10 +286,11 @@ fn a_walled_tab_on_the_board_draws_its_wall() {
         agent_pty(&sb, sized).filter(|&(rows, cols)| rows <= 12 && cols <= 40)
     });
 
-    // The wall on: the frame shows it, and the terminal is the tile's, half
-    // the frame across and most of it down.
-    let (code, out, err) = sb.mira(Some(sized), &["agent", "wall"]);
-    assert_eq!((code, out.trim()), (0, "wall on"), "{err}");
+    // The wall on, in Grid, where every tile fits its terminal: the frame
+    // shows it, and the terminal is the tile's, half the frame across and
+    // half of it down.
+    let (code, out, err) = sb.mira(Some(sized), &["agent", "wall", "--grid"]);
+    assert_eq!((code, out.trim()), (0, "wall on: grid"), "{err}");
     let snap = sb.snapshot();
     assert_eq!(snap["view"], "board");
     assert!(snap["tabs"][0]["wall"].as_bool().unwrap(), "{snap}");

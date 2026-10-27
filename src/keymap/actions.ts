@@ -21,22 +21,24 @@ import {
   installUpdate,
   quitEndingSessions,
 } from "../bindings";
-import {
-  useWorkspaceStore,
-  activeTab,
-  sidebarEntries,
-  isCurrentEntry,
-  SidebarEntry,
-} from "../state/workspaceStore";
+import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
+import { opensInTab } from "../state/configStore";
+
+/** The palette's groups: what an action is about. */
+export type ActionGroup = "agents" | "git" | "pane" | "view" | "app" | "tabs";
 
 export interface ActionDef {
   id: string;
+  /** "Area: Verb", as the palette lists it. */
   title: string;
+  group: ActionGroup;
+  /** What it acts on, shown after the title: "uncommitted changes". */
+  hint?: string;
   run: () => void;
 }
 
@@ -45,25 +47,21 @@ function focusedPane(): string | undefined {
   return activeTab(snapshot)?.focusedPane;
 }
 
-/** Shows a sidebar row: a whole tab, or an agent's pane alone. */
-export function openEntry(entry: SidebarEntry) {
-  if (entry.kind === "tab") void setActiveTab(entry.tab.id);
-  else void zoomPane(entry.agent.paneId, true);
-}
-
+/** Moves `offset` tabs along the sidebar's order, wrapping around. */
 function cycleTab(offset: number) {
-  const { snapshot, currentTab } = useWorkspaceStore.getState();
-  const entries = sidebarEntries(snapshot, currentTab);
-  if (!snapshot || entries.length < 2) return;
-  const idx = entries.findIndex((e) => isCurrentEntry(snapshot, e));
-  openEntry(entries[(idx + offset + entries.length) % entries.length]);
+  const { snapshot } = useWorkspaceStore.getState();
+  if (!snapshot || snapshot.tabs.length < 2) return;
+  const tabs = snapshot.tabs;
+  const idx = tabs.findIndex((t) => t.id === snapshot.activeTab);
+  void setActiveTab(tabs[(idx + offset + tabs.length) % tabs.length].id);
 }
 
 export const actions: ActionDef[] = [
-  { id: "new_tab", title: "New Tab", run: () => void newTab() },
+  { id: "new_tab", title: "Tab: New", group: "tabs", run: () => void newTab() },
   {
     id: "close_pane",
-    title: "Close Pane",
+    title: "Pane: Close",
+    group: "pane",
     run: () => {
       const pane = focusedPane();
       if (pane) void closePane(pane);
@@ -71,7 +69,8 @@ export const actions: ActionDef[] = [
   },
   {
     id: "close_tab",
-    title: "Close Tab",
+    title: "Tab: Close",
+    group: "tabs",
     run: () => {
       const { snapshot } = useWorkspaceStore.getState();
       if (snapshot) void closeTab(snapshot.activeTab);
@@ -79,7 +78,8 @@ export const actions: ActionDef[] = [
   },
   {
     id: "split_right",
-    title: "Split Right",
+    title: "Pane: Split Right…",
+    group: "pane",
     run: () => {
       const pane = focusedPane();
       if (pane) void splitPane(pane, "row");
@@ -87,7 +87,8 @@ export const actions: ActionDef[] = [
   },
   {
     id: "split_down",
-    title: "Split Down",
+    title: "Pane: Split Down…",
+    group: "pane",
     run: () => {
       const pane = focusedPane();
       if (pane) void splitPane(pane, "column");
@@ -95,39 +96,46 @@ export const actions: ActionDef[] = [
   },
   {
     id: "focus_left",
-    title: "Focus Pane Left",
+    title: "Pane: Focus Left",
+    group: "pane",
     run: () => void focusDirection("left"),
   },
   {
     id: "focus_right",
-    title: "Focus Pane Right",
+    title: "Pane: Focus Right",
+    group: "pane",
     run: () => void focusDirection("right"),
   },
   {
     id: "focus_up",
-    title: "Focus Pane Up",
+    title: "Pane: Focus Up",
+    group: "pane",
     run: () => void focusDirection("up"),
   },
   {
     id: "focus_down",
-    title: "Focus Pane Down",
+    title: "Pane: Focus Down",
+    group: "pane",
     run: () => void focusDirection("down"),
   },
-  { id: "next_tab", title: "Next Tab", run: () => cycleTab(1) },
-  { id: "prev_tab", title: "Previous Tab", run: () => cycleTab(-1) },
+  { id: "next_tab", title: "Tab: Next", group: "tabs", run: () => cycleTab(1) },
+  { id: "prev_tab", title: "Tab: Previous", group: "tabs", run: () => cycleTab(-1) },
   {
     id: "toggle_sidebar",
-    title: "Toggle Sidebar",
+    title: "View: Toggle Sidebar",
+    group: "view",
     run: () => useWorkspaceStore.getState().toggleSidebar(),
   },
   {
     id: "command_palette",
-    title: "Command Palette",
+    title: "App: Command Palette",
+    group: "app",
     run: () => useUiStore.getState().togglePalette(),
   },
   {
     id: "notifications",
-    title: "Notifications Panel",
+    title: "Agents: Open Inbox",
+    group: "agents",
     run: () => useUiStore.getState().toggleNotifications(),
   },
   // Windows/Linux have no app menu supplying Edit roles, so the terminal
@@ -135,7 +143,8 @@ export const actions: ActionDef[] = [
   // with the program in the pane.
   {
     id: "copy",
-    title: "Copy Selection",
+    title: "Pane: Copy Selection",
+    group: "pane",
     run: () => {
       // The terminal with keyboard focus first: in the agent wall that is
       // a tile's, which need not be the workspace's focused pane.
@@ -148,7 +157,8 @@ export const actions: ActionDef[] = [
   },
   {
     id: "paste",
-    title: "Paste",
+    title: "Pane: Paste",
+    group: "pane",
     run: () => {
       const pane = focusedPane();
       const term =
@@ -166,15 +176,18 @@ export const actions: ActionDef[] = [
   {
     id: "commit_graph",
     title: "Git: Commit Graph",
+    group: "git",
     run: () => {
       const { snapshot } = useWorkspaceStore.getState();
       const pane = activeTab(snapshot)?.focusedPane;
-      if (pane) void openGraph(pane, false);
+      if (pane) void openGraph(pane, opensInTab("graph"));
     },
   },
   {
     id: "agent_wall",
-    title: "Toggle Agent Wall",
+    title: "Agents: Show Wall",
+    group: "agents",
+    hint: "again for the splits",
     // The tab's agents' terminals in one grid in place of its splits,
     // or its splits again.
     run: () => void toggleAgentWall(focusedPane() ?? null),
@@ -182,22 +195,26 @@ export const actions: ActionDef[] = [
   {
     id: "task_board",
     title: "Agents: Task Board",
+    group: "agents",
     // The cards of the tasks the focused tab's agents were given: its
     // wall, on the Tasks side.
     run: () => void setWallView(focusedPane() ?? null, "tasks"),
   },
   {
     id: "agent_editor",
-    title: "Edit Roles, Ways & Teams",
+    title: "Agents: Edit Roles, Ways & Teams",
+    group: "agents",
     // The role, way-of-working and team files the focused pane's
     // directory sees, beside it.
-    run: () => void openAgentEditor(focusedPane() ?? null, false),
+    run: () => void openAgentEditor(focusedPane() ?? null, opensInTab("editor")),
   },
   {
     id: "agent_activity",
-    title: "Agent Activity",
-    // The focused agent's task progress and its subagents, in a drawer —
-    // the same as right-clicking the agent in the sidebar.
+    title: "Agents: Show Activity",
+    group: "agents",
+    hint: "the focused agent",
+    // The focused agent's task progress and its subagents, in a drawer:
+    // the whole of what its status bar sums up.
     run: () => {
       const pane = focusedPane();
       const agent = useWorkspaceStore
@@ -208,7 +225,9 @@ export const actions: ActionDef[] = [
   },
   {
     id: "toggle_board",
-    title: "Toggle Board View",
+    title: "View: Board",
+    group: "view",
+    hint: "again for the tabs",
     // Every pane of every tab as a card on one board, or back to tabs.
     run: () => {
       const view = useWorkspaceStore.getState().snapshot?.view;
@@ -217,21 +236,26 @@ export const actions: ActionDef[] = [
   },
   {
     id: "board_fit",
-    title: "Board: Show Everything",
+    title: "View: Show Everything",
+    group: "view",
+    hint: "on the board",
     run: () => {
       if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
     },
   },
   {
     id: "board_arrange",
-    title: "Board: Arrange Frames",
+    title: "View: Arrange Frames",
+    group: "view",
+    hint: "on the board",
     run: () => {
       if (useWorkspaceStore.getState().snapshot?.view === "board") arrangeBoard();
     },
   },
   {
     id: "toggle_zoom",
-    title: "Toggle Pane Zoom",
+    title: "Pane: Toggle Zoom",
+    group: "pane",
     // The focused pane alone, filling its tab — or the whole tab again.
     run: () => {
       const pane = focusedPane();
@@ -240,34 +264,40 @@ export const actions: ActionDef[] = [
   },
   {
     id: "new_agent",
-    title: "New Agent (Claude Code)",
+    title: "Agents: New Agent",
+    group: "agents",
+    hint: "Claude Code",
     // Beside the focused pane, in the tab you are working in.
     run: () => void openAgent(null, null, focusedPane() ?? null, false),
   },
   {
     id: "setup_claude_integration",
-    title: "Set Up Claude Code Integration",
+    title: "App: Set Up Claude Code Integration",
+    group: "app",
     // Hooks that light up tabs, /mira-diff, and mira on PATH. The answer
     // shows at the foot of the sidebar, where the first-launch offer was.
     run: () => void useClaudeStore.getState().run(),
   },
   {
     id: "quit_ending_sessions",
-    title: "Quit and End All Sessions",
+    title: "App: Quit and End All Sessions",
+    group: "app",
     // With persistSessions on, Cmd+Q leaves every terminal running for the
     // next launch; this ends them first. Without it, it is a plain quit.
     run: () => void quitEndingSessions(),
   },
   {
     id: "whats_new",
-    title: "What's New",
+    title: "App: What's New",
+    group: "app",
     // Opens the release notes for the running version — the same pane the
     // app shows itself once after an update, for reading again later.
     run: () => void openWhatsNew(),
   },
   {
     id: "check_for_updates",
-    title: "Check for Updates",
+    title: "App: Check for Updates…",
+    group: "app",
     run: () => {
       // A background check is allowed to find nothing in silence. This one
       // was asked for, so it answers either way — "up to date" is a result,
@@ -289,7 +319,8 @@ export const actions: ActionDef[] = [
   },
   {
     id: "install_update",
-    title: "Install Update and Restart",
+    title: "App: Install Update and Restart",
+    group: "app",
     run: () => {
       // Only offered when a check already found something; the banner is the
       // discoverable route and this is the keyboard one.
@@ -302,15 +333,18 @@ export const actions: ActionDef[] = [
   },
   {
     id: "new_diff_pane",
-    title: "Git: New Diff Pane (uncommitted changes)",
+    title: "Git: New Diff Pane",
+    group: "git",
+    hint: "uncommitted changes",
     run: () => {
       const pane = focusedPane();
-      if (pane) void openDiff(pane, false, null);
+      if (pane) void openDiff(pane, opensInTab("diff"), null);
     },
   },
   {
     id: "new_browser_pane",
-    title: "New Browser Pane",
+    title: "Pane: New Browser Pane",
+    group: "pane",
     run: () => {
       const pane = focusedPane();
       if (pane) void openBrowser(pane, false, "about:blank");
@@ -324,12 +358,12 @@ export function runAction(id: string): boolean {
     def.run();
     return true;
   }
-  // tab_1 .. tab_9
+  // tab_1 .. tab_9: tabs only, by the number beside each in the sidebar.
   const tabJump = id.match(/^tab_([1-9])$/);
   if (tabJump) {
-    const { snapshot, currentTab } = useWorkspaceStore.getState();
-    const target = sidebarEntries(snapshot, currentTab)[Number(tabJump[1]) - 1];
-    if (target) openEntry(target);
+    const { snapshot } = useWorkspaceStore.getState();
+    const target = snapshot?.tabs[Number(tabJump[1]) - 1];
+    if (target) void setActiveTab(target.id);
     return true;
   }
   return false;

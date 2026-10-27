@@ -30,7 +30,7 @@ export function tokens(n: number): string {
 }
 
 /** m:ss, or h:mm:ss past the hour. */
-function duration(fromMs: number | null, toMs: number | null): string {
+export function duration(fromMs: number | null, toMs: number | null): string {
   if (fromMs == null || toMs == null) return "–";
   const s = Math.max(0, Math.floor((toMs - fromMs) / 1000));
   const mm = Math.floor((s % 3600) / 60);
@@ -40,7 +40,7 @@ function duration(fromMs: number | null, toMs: number | null): string {
 }
 
 /** `claude-opus-5-5` → `Opus 5.5`; anything else as it is. */
-function modelName(model: string | null): string | null {
+export function modelName(model: string | null): string | null {
   if (!model) return null;
   const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(model);
   if (!m) return model;
@@ -101,8 +101,8 @@ export function useAgentActivity(pane: string | null, enabled = true) {
 }
 
 /**
- * A Claude Code agent's activity, opened by right-clicking it in the
- * sidebar or on the wall: its own task list, and every subagent it started
+ * An agent's activity, opened from the palette's Agents: Show Activity for the
+ * focused agent: its own task list, and every subagent it started
  * with what each is on, how far through, and what it used. All of it is
  * read from the transcripts (`cmux_core::transcript`), so it says only
  * what they record — no cost, which would be an estimate.
@@ -163,9 +163,10 @@ export function ActivityPanel() {
           <div className="notif-empty">This agent has exited.</div>
         ) : !agent.hasActivity ? (
           <div className="notif-empty">
-            Only a Claude Code agent has activity to show, once its hooks have
-            reported its transcript (the palette's Set Up Claude Code
-            Integration installs them).
+            Only Claude Code and Codex agents have activity to show: Claude
+            Code once its hooks have reported its transcript (the palette's App:
+            Set Up Claude Code Integration installs them), Codex once its
+            session file is found.
           </div>
         ) : !session ? (
           <div className="notif-empty">{error ?? "Reading its transcripts…"}</div>
@@ -182,7 +183,9 @@ export function ActivityPanel() {
             <SubagentList activity={activity} now={now} />
             {subagents.length === 0 && (
               <div className="notif-empty">
-                No subagents yet. They appear here as soon as it starts one.
+                {agent.harness === "codex"
+                  ? "Codex reports no tasks or subagents."
+                  : "No subagents yet. They appear here as soon as it starts one."}
               </div>
             )}
           </>
@@ -201,21 +204,9 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * The agent's own task progress, then its subagents, running ones first:
- * the panel's list, and the side of each agent's tile on the wall
- * (`compact`, which is narrower and keeps finished ones folded away while
- * any are running).
- */
-export function SubagentList({
-  activity,
-  now,
-  compact = false,
-}: {
-  activity: AgentActivity;
-  now: number;
-  compact?: boolean;
-}) {
+/** The agent's own task progress, then its subagents, running ones
+ *  first: the panel's list. */
+export function SubagentList({ activity, now }: { activity: AgentActivity; now: number }) {
   const tasks = activity.session.tasks;
   const running = activity.subagents.filter((s) => s.state === "running");
   const finished = activity.subagents.filter((s) => s.state !== "running");
@@ -227,42 +218,21 @@ export function SubagentList({
           {tasks.current && <div className="activity-current">{tasks.current}</div>}
         </div>
       )}
-      <Section title="Running" items={running} now={now} compact={compact} />
-      <Section
-        title="Finished"
-        items={finished}
-        now={now}
-        compact={compact}
-        defaultOpen={!compact || running.length === 0}
-      />
+      <Section title="Running" items={running} now={now} />
+      <Section title="Finished" items={finished} now={now} />
     </>
   );
 }
 
-function Section({
-  title,
-  items,
-  now,
-  compact,
-  defaultOpen = true,
-}: {
-  title: string;
-  items: SubagentInfo[];
-  now: number;
-  compact: boolean;
-  defaultOpen?: boolean;
-}) {
-  // Follows `defaultOpen` (finished ones fold away while others run, and
-  // unfold once none do) until the section is clicked; then it is yours.
-  const [toggled, setToggled] = useState<boolean | null>(null);
-  const open = toggled ?? defaultOpen;
+function Section({ title, items, now }: { title: string; items: SubagentInfo[]; now: number }) {
+  const [open, setOpen] = useState(true);
   if (items.length === 0) return null;
   return (
     <div className="activity-section">
-      <div className="activity-section-head" onClick={() => setToggled(!open)}>
+      <div className="activity-section-head" onClick={() => setOpen(!open)}>
         {open ? "▾" : "▸"} {title} · {items.length}
       </div>
-      {open && items.map((s) => <SubagentRow key={s.id} agent={s} now={now} compact={compact} />)}
+      {open && items.map((s) => <SubagentRow key={s.id} agent={s} now={now} compact={false} />)}
     </div>
   );
 }
@@ -273,7 +243,7 @@ const STATE_MARK: Record<SubagentState, string> = {
   stopped: "■",
 };
 
-function SubagentRow({
+export function SubagentRow({
   agent,
   now,
   compact,

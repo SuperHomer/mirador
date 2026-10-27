@@ -17,7 +17,7 @@ const MACOS: Step[] = [
   {
     text: "No Claude Code, or said Not now? Put the mira CLI on your PATH.",
     code: "/Applications/Mirador.app/Contents/MacOS/mira install",
-    note: "Installs to ~/.local/bin/mira. The palette's “Set Up Claude Code Integration” does the rest later.",
+    note: "Installs to ~/.local/bin/mira. The palette's “App: Set Up Claude Code Integration” does the rest later.",
   },
 ];
 
@@ -33,7 +33,7 @@ const WINDOWS: Step[] = [
   {
     text: "No Claude Code, or said Not now? Put mira.exe on your PATH.",
     code: '& "$env:LOCALAPPDATA\\Mirador\\mira.exe" install',
-    note: "This edits your user PATH, so open a new terminal afterwards. The palette's “Set Up Claude Code Integration” does the rest later.",
+    note: "This edits your user PATH, so open a new terminal afterwards. The palette's “App: Set Up Claude Code Integration” does the rest later.",
   },
 ];
 

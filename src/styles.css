@@ -12,6 +12,24 @@
   --subtext: #a6adc8;
   --muted: #6c7086;
   --accent: #89b4fa;
+  --overlay: #45475a;
+  --status-working: #89b4fa;
+  --status-needs-you: #fab387;
+  --status-idle: #a6e3a1;
+  --danger: #f38ba8;
+  --warn: #f9e2af;
+  --merged: #cba6f7;
+  /* Needs-you tints, by where they sit: sidebar rows and "Asks" boxes;
+     tile heads and the tab strip's tab; the Needs-you column, inbox cards
+     and swimlane cells; the Trail's waiting turn and "It's asking". */
+  --tint-needs-you-row: #3a2f2c;
+  --tint-needs-you-head: #2c2630;
+  --tint-needs-you-area: #2a2430;
+  --tint-needs-you-panel: #211f2a;
+  --tint-hover: #262637;
+  --tint-info: #1e2433;
+  --tint-warn: #2e2c25;
+  --tint-error-row: #3b2a33;
 }
 
 /* Scrollbars. WebKit on macOS draws these as overlays that fade out, so
@@ -68,7 +86,7 @@ body,
 /* ---------- Sidebar ---------- */
 
 .sidebar {
-  width: 220px;
+  width: 248px;
   flex-shrink: 0;
   background: var(--bg-alt);
   border-right: 1px solid var(--surface);
@@ -85,60 +103,11 @@ body,
   gap: 2px;
 }
 
-/* Heads the tabs running agents. Auto top margin pushes it, and the agent
-   tabs after it, to the foot of the list; when the list overflows it is
-   simply the boundary between the two groups. */
-.sidebar-section {
+/* A tab's row, and the tree of its agents under it when it is current. */
+.sidebar-tab {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding: 10px 8px 4px;
-  border-top: 1px solid var(--surface);
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-
-/* Opens the agent wall for the current tab, beside the Agents heading. */
-.sidebar-wall {
-  border: 1px solid var(--surface);
-  background: transparent;
-  color: var(--subtext);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-  padding: 1px 7px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.sidebar-wall:hover,
-.sidebar-wall.selected {
-  background: var(--surface);
-  color: var(--text);
-}
-
-/* How many agents a tab holds. */
-.tab-agents {
-  flex-shrink: 0;
-  font-size: 10.5px;
-  color: #d97757;
-  border: 1px solid color-mix(in srgb, #d97757 40%, transparent);
-  border-radius: 8px;
-  padding: 0 6px;
-  line-height: 16px;
-  white-space: nowrap;
-}
-
-.tab-agents.attention {
-  background: #d97757;
-  color: var(--bg-alt);
-  font-weight: 700;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tab-row {
@@ -152,7 +121,7 @@ body,
 }
 
 .tab-row:hover {
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  background: var(--tint-hover);
 }
 
 .tab-row.active {
@@ -175,12 +144,44 @@ body,
   gap: 1px;
 }
 
+/* The title, then a team's name in small print. The team takes at most
+   half the line, so neither can squeeze the other out to nothing. */
+.tab-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
 .tab-title {
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tab-team {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 50%;
+  flex-shrink: 0;
+}
+
+/* Another tab's agents, a pip each, wrapping onto a second row. */
+.tab-pips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: center;
+  gap: 3px;
+  max-width: 70px;
+  flex-shrink: 0;
 }
 
 .tab-cwd {
@@ -193,50 +194,119 @@ body,
   text-align: left;
 }
 
-/* An agent's row: a single line, so it does not keep the two-line height. */
-.tab-row.agent {
-  min-height: 0;
+/* The current tab's agents, indented under its row. */
+.agent-tree {
+  margin-left: 22px;
+  padding-left: 8px;
+  border-left: 1px solid var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
-/* One width for every mark, so titles line up whatever their harness. */
+.agent-row {
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: default;
+  min-width: 0;
+}
+
+.agent-row:hover {
+  background: var(--tint-hover);
+}
+
+.agent-row.active {
+  background: var(--surface);
+}
+
+.agent-row.needs-you {
+  background: var(--tint-needs-you-row);
+}
+
+/* The agent the tab's wall shows large. */
+.agent-row.pinned {
+  box-shadow: inset 2px 0 0 #cdd6f4;
+}
+
+.agent-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agent-mark {
+  width: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.agent-row.idle .agent-name {
+  color: var(--subtext);
+}
+
+.agent-row.needs-you .agent-name {
+  font-weight: 600;
+}
+
+.agent-name.has-unread {
+  color: var(--accent);
+}
+
+/* The harness, neutral, so no colour competes with the status. */
 .tab-harness {
   flex-shrink: 0;
-  width: 14px;
-  text-align: center;
   color: var(--subtext);
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
-}
-
-/* Claude Code keeps its own color; the others take the row's. */
-.tab-harness.claude {
-  color: #d97757;
 }
 
 .tab-harness svg {
   display: block;
-  width: 11px;
-  height: 11px;
-  margin: 0 auto;
+  width: 10px;
+  height: 10px;
 }
 
-/* A team's tab: a mark before its title, the members in its tooltip. */
-.tab-team {
-  color: var(--accent);
-  margin-right: 5px;
-  font-size: 11px;
-}
-
-.tab-row.agent .tab-title {
-  flex: 1;
-  min-width: 0;
-}
-
-.tab-agent-needs {
+.agent-status {
+  margin-left: auto;
+  padding-left: 6px;
   flex-shrink: 0;
   font-size: 10px;
-  color: #fab387;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-status.working {
+  color: var(--status-working);
+}
+
+.agent-status.needsYou {
+  color: var(--status-needs-you);
+}
+
+.agent-status.idle {
+  color: var(--status-idle);
+}
+
+/* What a waiting agent asks, under its name. */
+.agent-prompt {
+  margin-top: 2px;
+  padding-left: 21px;
+  font-size: 10.5px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tab-title.has-unread {
@@ -358,11 +428,17 @@ body,
   color: var(--text);
 }
 
+/* The footer's one shrinkable item: on Windows "Ctrl+Shift+K" leaves it
+   little room, and it ellipsizes rather than pushing the buttons out. */
 .sidebar-new-tab {
-  margin: 6px;
-  padding: 7px;
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 4px;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--subtext);
   font-size: 12px;
@@ -371,33 +447,69 @@ body,
 }
 
 .sidebar-new-tab:hover {
-  background: var(--surface);
+  color: var(--text);
 }
 
 .sidebar-footer {
   display: flex;
   align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--surface);
 }
 
-.sidebar-footer .sidebar-new-tab {
-  flex: 1;
-}
-
-/* Tabs | Board: the view shown, and the way to the other. */
-.view-switch {
+/* Inbox and Commands. */
+.sidebar-button {
   display: flex;
-  margin-right: 6px;
+  align-items: baseline;
+  gap: 5px;
+  flex-shrink: 0;
   border: 1px solid var(--surface);
-  border-radius: 6px;
-  overflow: hidden;
+  border-radius: 5px;
+  padding: 3px 8px;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sidebar-button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* An agent is waiting on you. */
+.sidebar-button.waiting {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
+}
+
+.sidebar-accel {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+/* Splits · Wall · Tasks · Board: what the current tab shows, and the way to
+   each other view of it. */
+.view-switch {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  margin: 6px;
+  padding: 2px;
+  border: 1px solid var(--surface);
+  border-radius: 7px;
+  flex-shrink: 0;
 }
 
 .view-switch button {
   border: none;
+  border-radius: 5px;
   background: transparent;
   color: var(--subtext);
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 4px 0;
   cursor: pointer;
 }
 
@@ -473,6 +585,11 @@ body,
   border-color: var(--muted);
 }
 
+/* An agent in it waits on you: that wins over being the current one. */
+.tabs-host.board .tab-layer.needs-you {
+  border-color: var(--status-needs-you);
+}
+
 /* The frame's title bar: its label, and the handle that moves it. */
 .frame-label {
   position: absolute;
@@ -494,12 +611,29 @@ body,
   cursor: move;
 }
 
+/* The title gives way first; its pips and view keep their room, and the
+   buttons sit at the far end. */
 .frame-title {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.frame-label .tab-pips {
+  margin-left: 6px;
+  max-width: none;
+  flex-wrap: nowrap;
+}
+
+.frame-view {
+  flex-shrink: 0;
+  margin: 0 auto 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .frame-button,
@@ -716,10 +850,62 @@ body,
   pointer-events: none;
 }
 
-.board-controls {
+/* The board's bottom row: the banner at the left, the zoom controls at the
+   right. The row itself takes no pointer; only its two boxes do. */
+.board-overlay {
   position: absolute;
+  left: 12px;
   right: 12px;
   bottom: 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.board-overlay > * {
+  pointer-events: auto;
+}
+
+/* The only thing in the row that gives way, cut short before the
+   controls. */
+.board-banner {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--subtext);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.board-banner-count {
+  color: var(--status-needs-you);
+  font-weight: 600;
+}
+
+.board-banner-fly {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.board-banner-fly:hover {
+  color: #b4befe;
+}
+
+/* Their own width always, at the row's right end with or without a
+   banner. */
+.board-controls {
+  flex: none;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -823,6 +1009,32 @@ body,
 
 .pane {
   position: relative;
+}
+
+/* The terminal, and an agent's subagent sheet over it. Fills the pane, as
+   the terminal did before it had a parent. */
+.pane-main {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* An agent's pane in the splits: its status bar takes the foot, edge to
+   edge, and the terminal the rest — refit by its ResizeObserver whenever
+   the bar comes, goes or wraps. */
+.pane.with-bar {
+  display: flex;
+  flex-direction: column;
+}
+
+.pane.with-bar .pane-main {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.pane.with-bar .agent-bar {
+  margin: 3px -3px -3px;
 }
 
 .pane-term {
@@ -972,21 +1184,21 @@ body,
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(10, 10, 18, 0.55);
   z-index: 100;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-top: 12vh;
+  padding-top: 70px;
 }
 
 .palette {
-  width: 480px;
-  max-width: 90vw;
+  width: 540px;
+  max-width: calc(100vw - 32px);
   background: var(--bg-alt);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--overlay);
   border-radius: 10px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
   overflow: hidden;
 }
 
@@ -1020,10 +1232,19 @@ body,
   outline: none;
 }
 
+/* Tall enough for a few groups at once; never past the window's foot. */
 .palette-list {
-  max-height: 320px;
+  max-height: min(440px, calc(100vh - 200px));
   overflow-y: auto;
   padding: 4px;
+}
+
+.palette-group {
+  padding: 9px 10px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
 }
 
 .palette-item {
@@ -1052,12 +1273,17 @@ body,
   flex: 1 1 auto;
   min-width: 0;
   text-align: right;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
-  font-family: Menlo, monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A custom command's hint is the shell command it runs. */
+.palette-hint.command {
+  font-family: Menlo, monospace;
+  font-size: 11px;
 }
 
 .palette-accel {
@@ -1073,13 +1299,6 @@ body,
   white-space: nowrap;
 }
 
-/* A step: it opens a list rather than running. */
-.palette-more {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--muted);
-}
-
 .palette-item.selected .palette-accel {
   color: var(--text);
   border-color: var(--muted);
@@ -1092,21 +1311,268 @@ body,
   text-align: center;
 }
 
-/* ---------- Notification panel ---------- */
+.palette-foot {
+  padding: 8px 12px;
+  border-top: 1px solid var(--surface);
+  font-size: 10.5px;
+  color: var(--muted);
+}
 
-.notif-panel {
+.palette-foot span {
+  color: var(--subtext);
+}
+
+/* ---------- Inbox ---------- */
+
+.inbox {
   position: fixed;
   top: 10px;
   right: 10px;
   bottom: 10px;
-  width: 320px;
+  width: 370px;
+  max-width: calc(100vw - 20px);
   background: var(--bg-alt);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--overlay);
   border-radius: 10px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
   z-index: 90;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+/* It takes focus on opening, for Esc; no ring for that. */
+.inbox:focus {
+  outline: none;
+}
+
+.inbox-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px 9px;
+  border-bottom: 1px solid var(--surface);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.inbox-count {
+  color: var(--status-needs-you);
+}
+
+.inbox-close {
+  border: none;
+  background: none;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.inbox-close:hover {
+  color: var(--text);
+}
+
+.inbox-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+
+.inbox-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 12px 2px;
+}
+
+.inbox-chip {
+  padding: 2px 9px;
+  border: 1px solid var(--surface);
+  border-radius: 10px;
+  background: none;
+  color: var(--subtext);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.inbox-chip.selected {
+  border-color: var(--surface);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.inbox-section {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.inbox-section.waiting {
+  color: var(--status-needs-you);
+}
+
+.inbox-section-action {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--subtext);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.inbox-section-action:hover {
+  color: var(--text);
+}
+
+.inbox-nobody {
+  padding: 4px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inbox-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.inbox-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--status-needs-you);
+  border-radius: 7px;
+  background: var(--tint-needs-you-area);
+}
+
+.inbox-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.inbox-card-name,
+.inbox-card-tab {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The agent's name keeps its room; the tab's gives way first. */
+.inbox-card-name {
+  flex-shrink: 0;
+  max-width: 60%;
+}
+
+.inbox-card-tab {
+  color: var(--muted);
+}
+
+.inbox-card-since {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--status-needs-you);
+  font-size: 10.5px;
+}
+
+.inbox-card-asking {
+  font-size: 11.5px;
+}
+
+.inbox-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.inbox-open {
+  padding: 2px 9px;
+  border: none;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.inbox-open:hover {
+  background: var(--overlay);
+}
+
+.inbox-updates {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+}
+
+.inbox-update {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 8px 6px;
+  border: none;
+  border-bottom: 1px solid var(--tint-hover);
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+button.inbox-update {
+  cursor: pointer;
+}
+
+button.inbox-update:hover {
+  background: var(--tint-hover);
+}
+
+.inbox-update-icon.done {
+  color: var(--status-idle);
+}
+
+.inbox-update-icon.exited {
+  color: var(--muted);
+}
+
+.inbox-update-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.inbox-update-line b {
+  color: var(--text);
+}
+
+.inbox-update-line,
+.inbox-update-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-update-detail {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.inbox-update-time {
+  font-size: 10.5px;
+  color: var(--muted);
 }
 
 .notif-header {
@@ -1138,53 +1604,6 @@ body,
   color: var(--text);
 }
 
-.notif-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.notif-item {
-  padding: 8px 10px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 40%, transparent);
-  cursor: pointer;
-  border-left: 2px solid transparent;
-}
-
-.notif-item:hover {
-  background: var(--surface);
-}
-
-.notif-item.unread {
-  border-left-color: var(--accent);
-}
-
-.notif-item-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.notif-time {
-  color: var(--muted);
-  font-weight: 400;
-  font-size: 10.5px;
-  flex-shrink: 0;
-}
-
-.notif-body {
-  font-size: 11.5px;
-  color: var(--subtext);
-  margin-top: 2px;
-  word-break: break-word;
-}
-
 .notif-empty {
   padding: 16px;
   color: var(--muted);
@@ -1192,13 +1611,9 @@ body,
   line-height: 1.5;
 }
 
-.notif-empty code {
-  color: var(--subtext);
-}
-
 /* ---------- Agent activity panel ---------- */
 
-/* The notification panel's drawer, a little wider: a subagent's numbers
+/* A drawer on the Inbox's edge, wide enough that a subagent's numbers
    share one line with its progress. */
 .activity-panel {
   position: fixed;
@@ -2284,66 +2699,98 @@ body,
   --wall-idle: #a6e3a1;
 }
 
-.wall-chrome {
+/* The Agents side's one row of controls: status filters, then Focus's pin
+   or Grid's page size, Focus | Grid, and + Agent. */
+.wall-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 4px 6px;
+  gap: 6px 8px;
+  padding: 6px 8px;
   background: var(--bg-alt);
   border-bottom: 1px solid var(--surface);
+  font-size: 11px;
+  color: var(--subtext);
   flex-shrink: 0;
-  min-height: 30px;
 }
 
-.wall-badge {
-  flex-shrink: 0;
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 4px;
+.wall-toolbar-spacer {
+  flex: 1;
 }
 
-.wall-counts {
-  display: flex;
-  gap: 10px;
-  min-width: 0;
+.wall-toolbar-note {
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.wall-toolbar-label {
+  white-space: nowrap;
+}
+
+.wall-filter,
+.wall-pill {
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--surface);
+  background: transparent;
+  color: var(--subtext);
   font-size: 11px;
   white-space: nowrap;
-  overflow: hidden;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
 }
 
-.wall-count.needs-you {
-  color: var(--wall-needs-you);
-  font-weight: 600;
+.wall-filter.needsYou {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
 }
 
-.wall-count.working {
-  color: var(--wall-working);
+.wall-filter.working {
+  border-color: var(--status-working);
+  color: var(--status-working);
 }
 
-/* The tab the wall shows. */
-.wall-tab {
+.wall-filter.idle {
+  border-color: var(--status-idle);
+  color: var(--status-idle);
+}
+
+.wall-filter.selected,
+.wall-pill.selected {
+  background: var(--surface);
+}
+
+.wall-pill:hover {
   color: var(--text);
-  font-weight: 600;
-  font-size: 12px;
-  white-space: nowrap;
+}
+
+/* Focus | Grid, and 4 | 6 | 9. */
+.wall-segments {
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 3em;
+}
+
+.wall-segments button {
+  border: none;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.wall-segments button.selected {
+  background: var(--surface);
+  color: var(--text);
+  cursor: default;
 }
 
 .wall-new {
   position: relative;
   flex-shrink: 0;
-}
-
-.wall-new {
-  margin-left: auto;
 }
 
 .wall-new-button {
@@ -2361,63 +2808,238 @@ body,
   color: var(--text);
 }
 
-.wall-menu {
+.wall-new-button.open {
+  border-color: var(--accent);
+  background: var(--tint-hover);
+  color: var(--text);
+}
+
+/* + Agent (21c): a first message, then a role or a plain harness. */
+.agent-menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
   z-index: 20;
-  min-width: 220px;
-  max-width: 320px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
   display: flex;
   flex-direction: column;
-  padding: 4px;
+  gap: 4px;
+  padding: 10px 12px;
   background: var(--bg);
-  border: 1px solid var(--surface);
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-}
-
-.wall-menu button {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  border: none;
-  background: transparent;
-  color: var(--text);
+  border: 1px solid var(--overlay);
+  border-radius: 9px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   font-size: 12px;
-  text-align: left;
+  color: var(--text);
+}
+
+.agent-menu-label,
+.empty-wall-label {
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.agent-menu-label:first-child {
+  margin-top: 0;
+}
+
+.agent-menu-input {
   padding: 5px 8px;
-  border-radius: 4px;
-  cursor: pointer;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg-alt);
+  color: var(--text);
+  font: inherit;
+  outline: none;
 }
 
-.wall-menu button:hover {
-  background: var(--surface);
+.agent-menu-input:focus {
+  border-color: var(--accent);
 }
 
-.wall-menu-model {
+.agent-menu-hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.agent-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  min-width: 0;
+}
+
+.agent-menu-name {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.agent-menu-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
-  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* A role that cannot start: listed, with why in its title. */
-.wall-menu button:disabled {
-  opacity: 0.5;
+/* A role that cannot start: listed, greyed, with why in peach. */
+.agent-menu-row.problem .agent-menu-name {
+  color: var(--muted);
+}
+
+.agent-menu-row.problem .agent-menu-meta {
+  color: var(--status-needs-you);
+}
+
+.agent-menu-start,
+.empty-wall-start {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.empty-wall-start:disabled {
+  background: var(--surface);
+  color: var(--muted);
   cursor: default;
 }
 
-.wall-menu button:disabled:hover {
-  background: transparent;
+.agent-menu-link,
+.empty-wall-link {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
 }
 
-.wall-menu-hint {
-  color: var(--muted);
+.agent-menu-link:hover,
+.empty-wall-link:hover {
+  color: #b4befe;
+}
+
+.agent-menu-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface);
+}
+
+.agent-menu-joins {
+  margin-left: auto;
   font-size: 11px;
-  padding: 6px 8px 4px;
-  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* A wall with no agents yet (21d): the ways to start one. */
+.empty-wall {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 48px 16px;
+}
+
+.empty-wall-column {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty-wall-title {
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.empty-wall-body {
+  font-size: 13px;
+  color: var(--subtext);
+  line-height: 1.5;
+}
+
+.empty-wall-roles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.empty-wall-role {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.empty-wall-role-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.empty-wall-role-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty-wall-role.problem .empty-wall-role-meta {
+  color: var(--status-needs-you);
+}
+
+.empty-wall-role .empty-wall-start {
+  margin-top: 4px;
+}
+
+.empty-wall-team {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.empty-wall-team .empty-wall-role-meta {
+  flex: 1;
+}
+
+.empty-wall-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
 }
 
 .wall-empty {
@@ -2439,77 +3061,584 @@ body,
   line-height: 1.5;
 }
 
-.wall-grid {
+/* Grid (20a–20c): the tab's agents in pages of agentsPerTab, every
+   terminal live and full size. */
+.grid-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The pages' tabs, once there is more than one page. */
+.grid-strip {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--overlay);
+  flex-shrink: 0;
+}
+
+.grid-page {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.grid-page.active {
+  background: var(--bg);
+  border-color: var(--overlay);
+  margin-bottom: -1px;
+  color: var(--text);
+  cursor: default;
+}
+
+.grid-page.asking {
+  background: var(--tint-needs-you-head);
+}
+
+.grid-page-asking {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--status-needs-you);
+}
+
+/* A page: fixed columns and rows for its size, so a tile keeps its size
+   as agents come and go. */
+.grid-page-tiles {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-auto-rows: minmax(0, 1fr);
   gap: 6px;
   padding: 6px;
 }
 
-.wall-tile {
+.grid-page-tiles.per-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.grid-page-tiles.per-6 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.grid-page-tiles.per-9 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+/* The last page's free cells. */
+.grid-space {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border: 1px dashed var(--surface);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.grid-space.cols-1 {
+  grid-column: span 1;
+}
+
+.grid-space.cols-2 {
+  grid-column: span 2;
+}
+
+.grid-space.rows-1,
+.grid-space.rows-2,
+.grid-space.rows-all {
+  grid-column: 1 / -1;
+}
+
+.grid-space.rows-2 {
+  grid-row: span 2;
+}
+
+.grid-space.rows-all {
+  grid-row: 1 / -1;
+}
+
+.grid-tile {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  /* Its width decides whether the subagent column fits (see .wall-side). */
-  container-type: inline-size;
   border: 1px solid var(--surface);
-  border-radius: 5px;
-  overflow: hidden;
+  border-radius: 6px;
   background: var(--term-bg, var(--bg));
-  --wall-status: var(--muted);
+  overflow: hidden;
 }
 
-.wall-tile.working {
-  --wall-status: var(--wall-working);
-}
-
-.wall-tile.needsYou {
-  --wall-status: var(--wall-needs-you);
-  border-color: var(--wall-needs-you);
-}
-
-.wall-tile.idle {
-  --wall-status: var(--wall-idle);
+.grid-tile.needsYou {
+  border: 1.5px solid var(--status-needs-you);
 }
 
 /* The same attention ring a pane gets: an agent here said something. */
-.wall-tile.unread {
+.grid-tile.unread {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(137, 180, 250, 0.35);
 }
 
-.wall-tile-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
+.grid-tile-head {
+  padding: 6px 10px;
   background: var(--bg-alt);
   border-bottom: 1px solid var(--surface);
-  font-size: 11px;
   flex-shrink: 0;
-  cursor: pointer;
-  /* Every item but the location keeps its size; the location is the one
-     that may give way, and it has a floor so it never collapses to "…". */
   min-width: 0;
 }
 
-.wall-tile-head:hover {
-  background: var(--surface);
+.grid-tile.needsYou .grid-tile-head {
+  background: var(--tint-needs-you-head);
 }
 
-.wall-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--wall-status);
+.grid-tile-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.grid-tile-name {
+  min-width: 0;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-tile-status {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-tile-status.working {
+  color: var(--status-working);
+}
+
+.grid-tile-status.needsYou {
+  color: var(--status-needs-you);
+}
+
+.grid-tile-status.idle {
+  color: var(--status-idle);
+}
+
+.grid-tile-focus {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.grid-tile-focus:hover {
+  color: var(--text);
+}
+
+.grid-tile-ask,
+.grid-tile-task {
+  margin-top: 3px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-tile-task {
+  color: var(--subtext);
+}
+
+/* Its terminal, and its subagent sheet over it when open. */
+.grid-tile-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.grid-tile-term {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 3px;
+}
+
+.grid-tile-host {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Focus (18a): one agent large, the rest down a rail by status. */
+.focus-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
+  gap: 6px;
+  padding: 6px;
+}
+
+.focus-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1.5px solid var(--surface);
+  border-radius: 6px;
+  background: var(--term-bg, var(--bg));
+  overflow: hidden;
+}
+
+.focus-tile.needsYou {
+  border-color: var(--status-needs-you);
+}
+
+.focus-head {
+  padding: 7px 10px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--overlay);
   flex-shrink: 0;
 }
 
-.wall-tile.working .wall-dot {
-  animation: wall-pulse 1.4s ease-in-out infinite;
+.focus-tile.needsYou .focus-head {
+  background: var(--tint-needs-you-head);
+}
+
+.focus-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.focus-name {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 0;
+  max-width: 40%;
+}
+
+.focus-status {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-status.working,
+.mini-elapsed.working {
+  color: var(--status-working);
+}
+
+.focus-status.needsYou,
+.mini-elapsed.needsYou {
+  color: var(--status-needs-you);
+}
+
+.focus-status.idle,
+.mini-elapsed.idle {
+  color: var(--status-idle);
+}
+
+.focus-task {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-waiting {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--status-needs-you);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.focus-message,
+.focus-note {
+  margin-top: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-note {
+  color: var(--subtext);
+}
+
+/* Its terminal, and its subagent sheet over it when open. */
+.focus-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.focus-term {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px;
+}
+
+.focus-term-host {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.focus-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+/* The working take whatever height the others leave. */
+.rail-section.working {
+  flex: 1 0 auto;
+}
+
+.rail-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rail-section.needs-you .rail-label {
+  color: var(--status-needs-you);
+}
+
+.rail-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(110px, 1fr);
+  gap: 6px;
+}
+
+.rail-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rail-empty {
+  padding: 12px;
+  border: 1px dashed var(--surface);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* An agent on the rail: its live terminal, shrunk to fit, never resized. */
+.mini-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  background: var(--term-bg, var(--bg));
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.rail-section.needs-you .mini-tile {
+  height: 110px;
+}
+
+.mini-tile.needsYou {
+  border-color: var(--status-needs-you);
+}
+
+.mini-tile:hover {
+  border-color: var(--muted);
+}
+
+.mini-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: var(--bg-alt);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.mini-tile.needsYou .mini-head {
+  background: var(--tint-needs-you-head);
+}
+
+.mini-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mini-elapsed {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A thumbnail: a click picks the tile, it never reaches the terminal. */
+.mini-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* The terminal at a fixed scale, its bottom-left corner pinned to the
+   tile's, so the latest lines and any prompt show and the rest is cropped.
+   Scaled to fit, a wide terminal came out a third of its size and could
+   not be read: readable text beats seeing the whole screen. The wrapper
+   is the terminal's own height, so it stays pinned as that changes. */
+.mini-host {
+  --mini-scale: 0.65;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  transform: scale(var(--mini-scale));
+  transform-origin: 0 100%;
+}
+
+.mini-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  background: var(--bg-alt);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.agent-bar-meter.mini-meter {
+  width: 40px;
+  height: 5px;
+  flex-shrink: 0;
+}
+
+.mini-pct {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--status-idle);
+}
+
+.mini-pct.mid {
+  color: var(--warn);
+}
+
+.mini-pct.high {
+  color: var(--danger);
+}
+
+.mini-task {
+  margin-left: auto;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idle-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  font-size: 11px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.idle-line:hover {
+  border-color: var(--muted);
+}
+
+.idle-name {
+  flex-shrink: 0;
+  max-width: 45%;
+  color: var(--subtext);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idle-task {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idle-elapsed {
+  flex-shrink: 0;
+  color: var(--status-idle);
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes wall-pulse {
@@ -2518,132 +3647,127 @@ body,
   }
 }
 
-.wall-role {
-  color: var(--text);
-  font-weight: 600;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.wall-model {
-  color: var(--subtext);
-  background: var(--surface);
-  border-radius: 4px;
-  padding: 0 5px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.wall-where {
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 3em;
-  flex: 1 1 auto;
-}
-
-.wall-status {
-  color: var(--wall-status);
-  white-space: nowrap;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-/* The agent's own task list, beside its status. */
-.wall-tasks {
-  color: var(--subtext);
-  white-space: nowrap;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.wall-message {
-  padding: 3px 8px;
-  font-size: 11px;
-  color: var(--wall-needs-you);
-  background: color-mix(in srgb, var(--wall-needs-you) 12%, var(--bg-alt));
-  border-bottom: 1px solid var(--surface);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
-}
-
-/* The terminal, and beside it the agent's subagents. */
-.wall-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-/* The activity panel's list, narrower, down the tile's right side. The
-   terminal is the row's only shrinkable item; the column keeps its width
-   and scrolls on its own. */
-.wall-side {
-  flex: 0 0 230px;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px 8px 8px;
-  border-left: 1px solid var(--surface);
-  background: var(--bg-alt);
-}
-
-.wall-side-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--subtext);
-  padding-bottom: 2px;
-}
-
-.wall-side-head button {
+/* Send next task…: a link, dimmed once sent until the agent is seen at
+   work; a refusal says why in its place for a moment. */
+.send-next {
   flex-shrink: 0;
   border: none;
+  padding: 0;
   background: none;
-  color: var(--muted);
+  color: var(--accent);
+  font: inherit;
   cursor: pointer;
-  font-size: 12px;
 }
 
-.wall-side-head button:hover {
-  color: var(--text);
+.send-next:hover {
+  color: #b4befe;
 }
 
-.wall-side .activity-section {
-  margin-top: 6px;
+.send-next.sent {
+  opacity: 0.5;
+  cursor: default;
 }
 
-/* A narrow tile — two agents side by side in an ordinary window — has no
-   width to spare beside its terminal, so the list goes under it instead,
-   taking at most part of the height and scrolling past that. */
-@container (max-width: 560px) {
-  .wall-body {
-    flex-direction: column;
-  }
-
-  .wall-side {
-    flex: 0 1 auto;
-    max-height: 40%;
-    border-left: none;
-    border-top: 1px solid var(--surface);
-  }
-}
-
-.wall-term {
-  position: relative;
-  flex: 1;
+.send-next-error {
+  flex-shrink: 1;
   min-width: 0;
-  min-height: 0;
-  padding: 3px;
+  color: var(--danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.wall-term-host {
-  width: 100%;
-  height: 100%;
+/* What a waiting agent asks for, on one line wherever it shows: the
+   tool, then its command or path in monospace, cut off with an ellipsis. */
+.asking-line {
+  min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.asking-tool {
+  font-weight: 600;
+}
+
+.asking-summary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* An agent's status, the same everywhere it is shown: needs you is a
+   square with a "!", so it reads without colour; working a pulsing dot;
+   idle a ring. A pip is the 7px form, for rows that list several. */
+.status-mark,
+.status-pip {
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+}
+
+.status-mark {
+  width: 8px;
+  height: 8px;
+}
+
+.status-mark.small {
+  width: 7px;
+  height: 7px;
+}
+
+.status-mark.needs-you {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 4px;
+  background: var(--status-needs-you);
+  color: #181825;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.status-mark.needs-you.small {
+  width: 12px;
+  height: 12px;
+  font-size: 9px;
+}
+
+.status-mark.working {
+  border: none;
+  background: var(--status-working);
+  animation: wall-pulse 1.4s ease-in-out infinite;
+}
+
+.status-mark.idle,
+.status-pip.idle {
+  border-color: var(--status-idle);
+}
+
+.status-pip {
+  width: 7px;
+  height: 7px;
+}
+
+.status-pip.needs-you {
+  border: none;
+  border-radius: 2px;
+  background: var(--status-needs-you);
+}
+
+.status-pip.working {
+  border: none;
+  background: var(--status-working);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-header.working .card-dot,
+  .status-mark.working {
+    animation: none;
+  }
 }
 
 .wall-term-missing {
@@ -2654,6 +3778,184 @@ body,
   justify-content: center;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* An agent's status bar, at the foot of its tile: harness, model and
+   effort, its context, what it used, and the way to its subagents. */
+.agent-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--surface);
+  background: var(--bg-alt);
+  font-size: 11px;
+  color: var(--subtext);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A grid tile's footer: model, context and subagents. */
+.agent-bar.compact {
+  padding: 4px 10px;
+  font-size: 10.5px;
+  gap: 4px 8px;
+}
+
+.agent-bar-model {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.agent-bar.compact .agent-bar-meter {
+  width: 50px;
+}
+
+.agent-bar-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.agent-bar-chip {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.agent-bar-chip.outline {
+  background: transparent;
+  color: var(--subtext);
+  box-shadow: inset 0 0 0 1px var(--surface);
+}
+
+.agent-bar-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.agent-bar-meter {
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.agent-bar-meter > span {
+  display: block;
+  height: 100%;
+  width: var(--fill);
+  border-radius: 3px;
+  background: var(--status-idle);
+}
+
+.agent-bar-meter.mid > span {
+  background: var(--warn);
+}
+
+.agent-bar-meter.high > span {
+  background: var(--danger);
+}
+
+.agent-bar-pct {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agent-bar-usage {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.agent-bar-subagents {
+  margin-left: auto;
+  padding: 1px 9px;
+  border: 1px solid var(--surface);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.agent-bar-subagents:hover {
+  color: var(--text);
+}
+
+.agent-bar-subagents.open {
+  background: var(--overlay);
+  color: var(--text);
+}
+
+/* An agent's subagents, slid over the right of its terminal. */
+.subagent-sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  background: var(--bg-alt);
+  border-left: 1px solid var(--overlay);
+  box-shadow: -12px 0 28px rgba(0, 0, 0, 0.45);
+  z-index: 1;
+}
+
+.subagent-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.subagent-sheet-head button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.subagent-sheet-head button:hover {
+  color: var(--text);
+}
+
+.subagent-sheet-chips {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.subagent-sheet-chip {
+  padding: 1px 9px;
+  border: 1px solid var(--surface);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.subagent-sheet-chip.selected {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.subagent-sheet-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Task board: the task log's cards in four columns, the Tasks side of a
@@ -2668,45 +3970,209 @@ body,
   container-type: inline-size;
 }
 
-.tb-switch {
+/* The board's one row: Cards · History · Trail, then the scope and + Card. */
+.tb-toolbar {
   display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--surface);
+  font-size: 11px;
   flex-shrink: 0;
-  margin-left: auto;
-  border: 1px solid var(--surface);
-  border-radius: 4px;
-  overflow: hidden;
 }
 
-.tb-switch + .tb-switch {
-  margin-left: 0;
-}
-
-/* The wall's Agents | Tasks keeps + New agent and Splits beside it. */
-.tb-switch + .wall-new {
-  margin-left: 0;
-}
-
-.tb-switch button {
+.tb-tab {
   border: none;
+  border-bottom: 2px solid transparent;
+  padding: 2px 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tb-tab.selected {
+  border-bottom-color: var(--text);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tb-toolbar-spacer {
+  flex: 1;
+}
+
+.tb-popover-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tb-scope,
+.tb-add,
+.tb-outline {
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  padding: 2px 8px;
   background: transparent;
   color: var(--subtext);
-  font: inherit;
   font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
   white-space: nowrap;
+  cursor: pointer;
 }
 
-.tb-switch button.on {
-  background: var(--surface);
+.tb-scope:hover,
+.tb-add:hover,
+.tb-outline:hover {
   color: var(--text);
 }
 
+.tb-add.open {
+  border-color: var(--accent);
+  background: var(--tint-hover);
+  color: var(--text);
+}
+
+/* The scope's choices, and an unassigned card's agents. */
+.tb-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--overlay);
+  border-radius: 9px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.tb-menu:focus {
+  outline: none;
+}
+
+.tb-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-menu button:hover,
+.tb-menu button.selected {
+  background: var(--surface);
+}
+
+.tb-menu button:disabled {
+  color: var(--muted);
+  background: transparent;
+  cursor: default;
+}
+
+.tb-menu-note {
+  padding: 5px 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* + Card: like + Agent's popover. */
+.tb-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--overlay);
+  border-radius: 9px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+}
+
+.tb-popover-label {
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tb-popover-label:first-child {
+  margin-top: 0;
+}
+
+.tb-popover-input {
+  padding: 5px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg-alt);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  resize: vertical;
+}
+
+.tb-popover-input:focus {
+  border-color: var(--accent);
+}
+
+.tb-popover-error {
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.tb-popover-foot {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tb-popover-primary,
+.tb-popover-secondary {
+  padding: 3px 12px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tb-popover-primary {
+  border: none;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.tb-popover-secondary {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
+
+.tb-popover-primary:disabled,
+.tb-popover-secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Needs you · To do · Doing · Done, each scrolling on its own. */
 .tb-columns {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding: 6px;
 }
@@ -2719,28 +4185,29 @@ body,
   }
 }
 
-/* Each column scrolls on its own. */
 .tb-column {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--surface);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--bg);
-  --tb-status: var(--muted);
-}
-
-.tb-column.doing {
-  --tb-status: var(--wall-working);
+  --tb-status: var(--subtext);
 }
 
 .tb-column.needsYou {
-  --tb-status: var(--wall-needs-you);
+  --tb-status: var(--status-needs-you);
+  border-color: var(--status-needs-you);
+  background: var(--tint-needs-you-area);
+}
+
+.tb-column.doing {
+  --tb-status: var(--status-working);
 }
 
 .tb-column.done {
-  --tb-status: var(--wall-idle);
+  --tb-status: var(--status-idle);
 }
 
 .tb-column-head {
@@ -2748,17 +4215,31 @@ body,
   align-items: center;
   gap: 6px;
   margin: 0;
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 6px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
   color: var(--tb-status);
-  border-bottom: 1px solid var(--surface);
   flex-shrink: 0;
 }
 
 .tb-count {
-  color: var(--muted);
+  color: var(--subtext);
   font-weight: 400;
+}
+
+.tb-done-mark {
+  font-size: 11px;
+}
+
+.tb-done-toggle {
+  margin-left: auto;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11px;
+  font-weight: 400;
+  cursor: pointer;
 }
 
 .tb-cards {
@@ -2767,18 +4248,289 @@ body,
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 4px;
+  gap: 6px;
+  padding: 0 6px 6px;
 }
 
 .tb-card {
   flex-shrink: 0;
-  padding: 5px 7px;
+  padding: 9px 10px;
   border: 1px solid var(--surface);
-  border-left: 3px solid var(--tb-status);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--bg-alt);
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.tb-card.needs-you {
+  border-color: var(--overlay);
+  background: var(--bg);
+}
+
+.tb-card.needs-you .tb-title {
+  font-weight: 600;
+}
+
+/* Written for no one yet. */
+.tb-card.unassigned {
+  border-style: dashed;
+  border-color: var(--overlay);
+  background: transparent;
+}
+
+/* Two lines of it, all of it once clicked. */
+.tb-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  width: 100%;
+  margin-top: 3px;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11.5px;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.tb-description.full {
+  display: block;
+}
+
+/* What a waiting agent asks for. */
+.tb-asks {
+  display: flex;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: var(--tint-needs-you-row);
+  color: var(--status-needs-you);
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.tb-asks-label {
+  flex-shrink: 0;
+}
+
+.tb-progress {
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.tb-progress > span {
+  display: block;
+  height: 100%;
+  width: var(--fill);
+  background: var(--accent);
+}
+
+.tb-failing {
+  flex-shrink: 0;
+  color: var(--danger);
+}
+
+.tb-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.tb-open {
+  border: none;
+  border-radius: 5px;
+  padding: 2px 10px;
+  background: var(--status-needs-you);
+  color: #181825;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Swimlanes (9d): a row per agent across the same four columns; the whole
+   board scrolls, and each row is as tall as its cards. */
+.tb-lanes {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+}
+
+.tb-lane-grid {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tb-lane-heads {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-top: 6px;
+  background: var(--bg-alt);
+}
+
+.tb-lane-heads .tb-column-head {
+  padding: 4px 8px;
+}
+
+.tb-lane-heads .tb-column-head.needsYou {
+  color: var(--status-needs-you);
+}
+
+.tb-lane-heads .tb-column-head.doing {
+  color: var(--status-working);
+}
+
+.tb-lane-heads .tb-column-head.done {
+  color: var(--status-idle);
+}
+
+.tb-lane-heads .tb-column-head.todo {
+  color: var(--subtext);
+}
+
+.tb-lane-tab {
+  margin: 10px 0 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tb-lane {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--surface);
+}
+
+.tb-lane-agent {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* No agent of its own: the cards given to no one, or one now gone. */
+.tb-lane-agent.none .tb-lane-name {
+  color: var(--subtext);
+}
+
+/* Nothing open in it: its agent's line alone. */
+.tb-lane.collapsed .tb-lane-agent {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.tb-lane-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  min-width: 0;
+}
+
+.tb-lane-name > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tb-lane-meta {
+  font-size: 10.5px;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-lane-meta.working {
+  color: var(--status-working);
+}
+
+.tb-lane-meta.needsYou {
+  color: var(--status-needs-you);
+}
+
+.tb-lane-meta.idle {
+  color: var(--status-idle);
+}
+
+.tb-lane-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px;
+  border-radius: 5px;
+}
+
+.tb-lane-cell.needsYou {
+  background: var(--tint-needs-you-area);
+}
+
+/* An idle agent's empty To do: the way to send it a card. */
+.tb-idle-target {
+  width: 100%;
+  padding: 10px 8px;
+  border: 1px dashed var(--overlay);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tb-idle-target:hover {
+  border-color: var(--muted);
+  color: var(--text);
+}
+
+.tb-menu-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-menu {
+  max-width: 300px;
+}
+
+/* A card in a swimlane's cell: the lane says who. */
+.tb-card.compact {
+  padding: 6px 8px;
   font-size: 12px;
+}
+
+.tb-card.compact .tb-description {
+  -webkit-line-clamp: 1;
+}
+
+.tb-asks-compact {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--status-needs-you);
+}
+
+.tb-card.compact .tb-meta {
+  margin-top: 4px;
 }
 
 /* The title opens the card's history: a button that reads as text. */
@@ -2804,20 +4556,15 @@ body,
 .tb-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 3px;
+  gap: 5px;
+  margin-top: 6px;
   font-size: 11px;
   color: var(--muted);
   min-width: 0;
 }
 
-.tb-mark {
-  flex-shrink: 0;
-  color: var(--subtext);
-}
-
 .tb-assignee {
-  color: var(--subtext);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2851,28 +4598,174 @@ button.tb-assignee:hover {
   padding: 6px 10px;
 }
 
+/* The History view's chips, agent picker and search. */
+.tb-history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tb-chip.needs-you {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
+}
+
+.tb-history-search {
+  margin-left: auto;
+  width: 160px;
+  min-width: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+
+.tb-history-search:focus {
+  border-color: var(--accent);
+}
+
+.tb-history-day {
+  margin: 10px 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tb-history-foot {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tb-history-older {
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tb-history-older:hover {
+  color: #b4befe;
+}
+
 .tb-lines {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.5;
 }
 
 .tb-line {
-  display: block;
-  color: var(--subtext);
-  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
-.tb-line summary {
+/* Time, who to whom, kind, what. */
+.tb-line-row {
+  display: grid;
+  grid-template-columns: 52px 150px 92px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  text-align: left;
+  min-width: 0;
+}
+
+button.tb-line-row {
   cursor: pointer;
 }
 
-.tb-line.turnEnded,
-.tb-line.resumed,
-.tb-line.moved {
+button.tb-line-row:hover {
+  background: var(--tint-hover);
+}
+
+/* A card's narrow history: the time, then the rest wrapping under it. */
+.tb-lines.compact .tb-line-row {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.tb-lines.compact .tb-line-who,
+.tb-lines.compact .tb-kind,
+.tb-lines.compact .tb-line-text {
+  grid-column: 2;
+}
+
+.tb-lines.compact .tb-kind {
+  justify-self: start;
+}
+
+.tb-line-time {
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-line-who,
+.tb-line-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-line-who {
+  color: var(--text);
+}
+
+.tb-kind {
+  justify-self: start;
+  padding: 0 7px;
+  border: 1px solid var(--muted);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.tb-kind.message {
+  border-color: var(--status-working);
+  color: var(--status-working);
+}
+
+.tb-kind.needs-you {
+  border-color: var(--status-needs-you);
+  color: var(--status-needs-you);
+}
+
+.tb-kind.moved {
+  border-color: var(--subtext);
+  color: var(--subtext);
+}
+
+.tb-kind.resumed {
+  border-color: var(--status-idle);
+  color: var(--status-idle);
+}
+
+/* A message's whole text, under its line. */
+.tb-line-full {
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tb-when {
@@ -2902,7 +4795,6 @@ button.tb-assignee:hover {
 
 .tb-age {
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 /* A card's way to its agent's trail, beside its age. */
@@ -2926,7 +4818,7 @@ button.tb-assignee:hover {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
 }
 
 .tb-agents {
@@ -2960,26 +4852,6 @@ button.tb-assignee:hover {
 .tb-agent.on {
   background: var(--surface);
   color: var(--text);
-}
-
-.tb-agent-dot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-.tb-agent-dot.working {
-  background: var(--wall-working);
-}
-
-.tb-agent-dot.needsYou {
-  background: var(--wall-needs-you);
-}
-
-.tb-agent-dot.idle {
-  background: var(--wall-idle);
 }
 
 .tb-agent-name {
@@ -3065,11 +4937,148 @@ button.tb-assignee:hover {
   padding: 0;
 }
 
+/* The picked agent: its name, how it stands, its card, and the chips that
+   narrow what is shown. */
+.tb-trail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.tb-trail-name {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.tb-trail-status {
+  font-size: 11px;
+}
+
+.tb-trail-status.working {
+  color: var(--status-working);
+}
+
+.tb-trail-status.needsYou {
+  color: var(--status-needs-you);
+}
+
+.tb-trail-status.idle {
+  color: var(--status-idle);
+}
+
+.tb-trail-card {
+  min-width: 0;
+  max-width: 40%;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.tb-trail-card:hover {
+  color: #b4befe;
+}
+
+.tb-trail-card-history {
+  margin: 0 0 8px;
+}
+
+.tb-chip {
+  padding: 1px 9px;
+  border: 1px solid var(--surface);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-chip.failures {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.tb-chip.selected {
+  background: var(--surface);
+}
+
+/* A turn: a bordered block, summed up in its first line. */
 .tb-turn {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 7px;
+  min-width: 0;
+}
+
+/* The turn waiting on you. */
+.tb-turn.waiting {
+  border-color: var(--status-needs-you);
+  background: var(--tint-needs-you-panel);
+}
+
+.tb-turn-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--subtext);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.tb-turn-line.folded .tb-prompt {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-turn-fold {
+  flex-shrink: 0;
+}
+
+/* One line: the time and turn number stay whole, the rest is cut short. */
+.tb-turn-summary {
+  display: flex;
+  gap: 0.4em;
+  min-width: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tb-turn-summary > span {
+  flex-shrink: 0;
+}
+
+.tb-turn-summary > .tb-turn-rest {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-turn-summary.failed {
+  color: var(--danger);
 }
 
 .tb-turn-head {
+  margin: 4px 0;
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -3083,25 +5092,37 @@ button.tb-assignee:hover {
   color: var(--text);
 }
 
-/* Actions under their prompt, past its time. */
-.tb-actions {
-  margin-left: 3.8em;
-}
-
 .tb-action {
   --tb-action: var(--muted);
+  border-radius: 4px;
 }
 
 .tb-action.ok {
-  --tb-action: var(--wall-idle);
+  --tb-action: var(--status-idle);
 }
 
 .tb-action.error {
-  --tb-action: #f38ba8;
+  --tb-action: var(--danger);
+  background: var(--tint-error-row);
 }
 
 .tb-action.running {
-  --tb-action: var(--wall-working);
+  --tb-action: var(--status-working);
+}
+
+/* The call a waiting agent asks permission for. */
+.tb-action.asking {
+  --tb-action: var(--status-needs-you);
+}
+
+/* A failed action's output, under it without opening it. */
+.tb-action-error {
+  padding: 0 6px 5px 1.9em;
+}
+
+.tb-action-error .tb-detail-text {
+  background: var(--bg-alt);
+  max-height: 120px;
 }
 
 .tb-action-line {
@@ -3114,10 +5135,12 @@ button.tb-assignee:hover {
   background: none;
   color: var(--subtext);
   font: inherit;
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.5;
   text-align: left;
   cursor: pointer;
+  padding: 1px 6px;
+  min-width: 0;
 }
 
 .tb-action-line:hover .tb-action-summary {
@@ -3142,11 +5165,6 @@ button.tb-assignee:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.tb-action-exit {
-  flex-shrink: 0;
-  color: #f38ba8;
 }
 
 .tb-action-took {
@@ -3198,8 +5216,10 @@ button.tb-assignee:hover {
 }
 
 .editor-list {
-  width: 220px;
+  width: 200px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   border-right: 1px solid var(--surface);
   background: var(--bg-alt);
@@ -3214,7 +5234,7 @@ button.tb-assignee:hover {
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -3252,18 +5272,26 @@ button.tb-assignee:hover {
   padding: 2px 4px;
 }
 
+/* Its name and source on a line, and under them what is wrong with it. */
 .editor-item {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 1px;
   width: 100%;
   border: none;
   background: transparent;
   color: var(--text);
   font-size: 12px;
   text-align: left;
-  padding: 4px 10px;
+  padding: 5px 10px;
   cursor: pointer;
+}
+
+.editor-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .editor-item:hover {
@@ -3272,7 +5300,20 @@ button.tb-assignee:hover {
 
 .editor-item.selected {
   background: var(--surface);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--text);
+}
+
+/* Hidden by a file of the same name that comes first: listed, not used. */
+.editor-item.shadowed {
+  color: var(--muted);
+}
+
+.editor-item.shadowed .editor-item-name {
+  text-decoration: line-through;
+}
+
+.editor-item.shadowed .editor-source {
+  color: var(--muted);
 }
 
 /* The name gives way, not the badge: a flex row's only shrinkable item
@@ -3286,8 +5327,9 @@ button.tb-assignee:hover {
 }
 
 .editor-item-problem {
-  flex-shrink: 0;
-  color: #fab387;
+  color: var(--status-needs-you);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
 }
 
 .editor-source {
@@ -3300,12 +5342,18 @@ button.tb-assignee:hover {
   color: var(--accent);
 }
 
+.editor-source.global {
+  color: var(--subtext);
+}
+
+/* At the list's foot however short it is. */
 .editor-where {
-  margin: 12px 10px 4px;
+  margin: auto 10px 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1.5;
-  word-break: break-all;
 }
 
 .editor-main {
@@ -3319,27 +5367,54 @@ button.tb-assignee:hover {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--surface);
   flex-shrink: 0;
 }
 
-.editor-title {
-  flex-shrink: 0;
-  color: var(--text);
-  font-weight: 600;
+/* The title over its path: the column that gives way to the buttons. */
+.editor-head-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
+.editor-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.editor-kind {
+  padding: 0 6px;
+  border: 1px solid var(--surface);
+  border-radius: 4px;
+  color: var(--subtext);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.editor-unsaved {
+  flex-shrink: 0;
+  color: var(--warn);
+  font-size: 11px;
+}
+
+/* Not right-to-left to show a long path's end: what follows the path
+   (shared, shadows) would come out reordered. Its title has it whole. */
 .editor-path {
-  flex: 1;
   min-width: 0;
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl;
-  text-align: left;
 }
 
 .editor-head button,
@@ -3386,6 +5461,22 @@ button.tb-assignee:hover {
   color: #f38ba8;
 }
 
+/* A restart waiting for a yes. */
+.editor-bar.confirm {
+  border-bottom: 1px solid var(--surface);
+  color: var(--text);
+}
+
+.editor-bar.confirm span {
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-bar button.primary {
+  background: var(--accent);
+  color: var(--bg);
+}
+
 .editor-text {
   flex: 1;
   min-height: 0;
@@ -3404,6 +5495,656 @@ button.tb-assignee:hover {
 .editor-empty {
   margin: 24px;
   color: var(--muted);
+}
+
+/* A link-like button in the editor's header: the raw file, or the form. */
+.editor-head button.editor-link {
+  background: none;
+  color: var(--accent);
+  padding: 2px 4px;
+}
+
+.editor-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Team page (17a): members, fields, then the charter filling the rest. */
+.team-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+
+.team-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.team-label-note {
+  margin-left: auto;
+  color: var(--subtext);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.team-members {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.team-member {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--surface);
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.team-member.lead {
+  border-color: var(--accent);
+}
+
+.team-member.problem {
+  border-color: var(--status-needs-you);
+}
+
+.team-member.selected {
+  background: var(--tint-hover);
+  box-shadow: 0 0 0 1px var(--text);
+}
+
+.team-member-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The name gives way before the pill and the status. */
+.team-member-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.team-member-count {
+  color: var(--subtext);
+  font-weight: 500;
+}
+
+.team-lead {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.team-member-status {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.team-member-status.working {
+  color: var(--status-working);
+}
+
+.team-member-status.needsYou {
+  color: var(--status-needs-you);
+}
+
+.team-member-status.idle {
+  color: var(--status-idle);
+}
+
+.team-member-role {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.team-member-role.problem {
+  color: var(--status-needs-you);
+}
+
+.team-add {
+  padding: 6px;
+  border: 1px dashed var(--overlay);
+  border-radius: 8px;
+  background: none;
+  color: var(--subtext);
+  font-size: 11.5px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.team-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 10px;
+}
+
+.team-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.team-fields select,
+.team-fields input {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.team-charter {
+  flex: 1;
+  min-height: 120px;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.team-charter:focus {
+  border-color: var(--muted);
+}
+
+/* The header's ⋯: Revert and Delete, out of the way of Save. */
+.editor-menu-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.editor-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px;
+  border: 1px solid var(--overlay);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.editor-head .editor-menu button {
+  background: none;
+  text-align: left;
+  padding: 4px 8px;
+}
+
+.editor-head .editor-menu button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.editor-head .editor-menu button.danger {
+  background: none;
+  color: var(--danger);
+}
+
+/* A way's text in full width, who uses it beside (17d). */
+.way-page {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.way-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.way-users {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-left: 1px solid var(--surface);
+  background: var(--bg-alt);
+  overflow-y: auto;
+}
+
+.way-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  background: none;
+  color: var(--subtext);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.way-user.running {
+  color: var(--text);
+}
+
+.way-user:hover {
+  background: var(--tint-hover);
+}
+
+.way-user-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.way-user-kind {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.way-user-state {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.way-user.running .way-user-state {
+  color: var(--status-working);
+}
+
+/* A role's fields beside its prompt. */
+.role-page {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.role-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--surface);
+  overflow-y: auto;
+}
+
+.role-fields fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.role-prompt {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.inspector-chip.link {
+  border: none;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+/* The team page beside the selected member's inspector (17b). */
+.team-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+}
+
+.inspector {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--surface);
+  background: var(--bg-alt);
+}
+
+.inspector.empty {
+  justify-content: center;
+  padding: 16px;
+}
+
+.inspector-head {
+  padding: 12px 14px 8px;
+  color: var(--subtext);
+  font-size: 12px;
+}
+
+.inspector-head b {
+  color: var(--text);
+}
+
+.inspector-tabs {
+  display: flex;
+  gap: 14px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--surface);
+}
+
+.inspector-tabs button {
+  padding: 0 0 7px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--subtext);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.inspector-tabs button.selected {
+  border-bottom-color: var(--text);
+  color: var(--text);
+}
+
+.inspector-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+
+.inspector-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.inspector-field input,
+.inspector-field select {
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.inspector-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--subtext);
+  font-size: 12px;
+}
+
+.inspector-remove {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Effort, one segment per level the harness takes. */
+.inspector-segments {
+  display: flex;
+  border: 1px solid var(--surface);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.inspector-segments button {
+  flex: 1;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  color: var(--subtext);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.inspector-segments button.selected {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.inspector-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.inspector-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 8px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.inspector-chip button {
+  border: none;
+  background: none;
+  color: var(--subtext);
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.inspector-chips input {
+  flex: 1;
+  min-width: 100px;
+}
+
+/* A role shared with another team: saving it changes that one too. */
+.inspector-warning {
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--tint-warn);
+  color: var(--warn);
+  font-size: 11.5px;
+}
+
+.inspector-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.inspector-note.problem {
+  color: var(--status-needs-you);
+}
+
+.inspector-prompt {
+  flex: 1;
+  min-height: 200px;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.inspector-prompt:focus {
+  border-color: var(--muted);
+}
+
+/* What it's told: a card per layer, in the order it is told. */
+.told-layer {
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.told-layer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--surface);
+  font-size: 11px;
+}
+
+.told-layer-number {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.told-layer-source {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--subtext);
+}
+
+.told-layer-edit {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.told-layer-text {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--subtext);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.told-foot {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.told-foot button {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.inspector-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--surface);
+}
+
+.inspector-status {
+  flex: 1;
+  min-width: 0;
+  color: var(--subtext);
+  font-size: 11px;
+}
+
+.inspector-foot button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.inspector-foot button.primary {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.inspector-foot button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .editor-status {

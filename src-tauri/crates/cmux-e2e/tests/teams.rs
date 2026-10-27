@@ -29,7 +29,7 @@ fn a_team_starts_is_tracked_and_comes_back() {
     sb.launch();
     let first = sb.first_pane();
 
-    let tab = sb.call(Request::TeamStart {
+    let tab = sb.call(Request::TeamStart { title: None,
         team: "squad".into(),
         task: Some("plan the chart".into()),
         pane_id: Some(first.clone()),
@@ -125,7 +125,7 @@ fn the_built_in_omakase_team_starts_out_of_the_box() {
     let mut sb = Sandbox::new("omakase");
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart {
+    sb.call(Request::TeamStart { title: None,
         team: "omakase".into(),
         task: Some("add a health check".into()),
         pane_id: Some(first),

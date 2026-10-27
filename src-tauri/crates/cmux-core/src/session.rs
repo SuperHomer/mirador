@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{BoardPoint, BoardRect, Camera, Node, View, WallView};
+use cmux_protocol::{BoardPoint, BoardRect, Camera, Node, TaskLayout, View, WallMode, WallView};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{PaneMeta, Tab, Workspace};
@@ -25,6 +25,10 @@ pub struct SessionTab {
     pub wall: bool,
     #[serde(default, skip_serializing_if = "WallView::is_agents")]
     pub wall_view: WallView,
+    #[serde(default, skip_serializing_if = "WallMode::is_focus")]
+    pub wall_mode: WallMode,
+    #[serde(default, skip_serializing_if = "TaskLayout::is_columns")]
+    pub task_layout: TaskLayout,
     /// Absent from sessions saved before the board: the tab gets a frame
     /// and cards from its splits when it is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -145,6 +149,8 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
             team: t.team.clone(),
             wall: t.wall,
             wall_view: t.wall_view,
+            wall_mode: t.wall_mode,
+            task_layout: t.task_layout,
             frame: Some(t.frame),
             cards: t.cards.clone(),
         })
@@ -234,6 +240,8 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
             team: t.team,
             wall: t.wall,
             wall_view: t.wall_view,
+            wall_mode: t.wall_mode,
+            task_layout: t.task_layout,
             frame: t.frame.unwrap_or_default(),
             cards,
         });
@@ -381,6 +389,38 @@ mod tests {
         assert_eq!(back.tab_of_pane(&plain).unwrap().wall_view, WallView::Agents);
         // The Agents side, the default, is not written.
         assert_eq!(json.matches(r#""wall_view":"#).count(), 1);
+    }
+
+    #[test]
+    fn a_walls_layouts_come_back_with_its_tab() {
+        let mut ws = Workspace::default();
+        let laid_out = ws.focused_pane();
+        let (_, plain) = ws.new_tab();
+        ws.set_wall_mode(&laid_out, WallMode::Grid);
+        ws.set_task_layout(&laid_out, TaskLayout::Swimlanes);
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        let tab = back.tab_of_pane(&laid_out).unwrap();
+        assert_eq!(tab.wall_mode, WallMode::Grid);
+        assert_eq!(tab.task_layout, TaskLayout::Swimlanes);
+        let tab = back.tab_of_pane(&plain).unwrap();
+        assert_eq!(tab.wall_mode, WallMode::Focus);
+        assert_eq!(tab.task_layout, TaskLayout::Columns);
+        // The defaults are not written.
+        assert_eq!(json.matches(r#""wall_mode":"#).count(), 1);
+        assert_eq!(json.matches(r#""task_layout":"#).count(), 1);
+
+        // A session saved before the layouts existed gets the defaults.
+        let mut old: serde_json::Value = serde_json::from_str(&json).unwrap();
+        for tab in old["tabs"].as_array_mut().unwrap() {
+            let tab = tab.as_object_mut().unwrap();
+            tab.remove("wall_mode");
+            tab.remove("task_layout");
+        }
+        let (back, _) = restore(serde_json::from_value(old).unwrap()).unwrap();
+        let tab = back.tab_of_pane(&laid_out).unwrap();
+        assert_eq!(tab.wall_mode, WallMode::Focus);
+        assert_eq!(tab.task_layout, TaskLayout::Columns);
     }
 
     #[test]

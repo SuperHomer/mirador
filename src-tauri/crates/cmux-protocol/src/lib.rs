@@ -74,6 +74,20 @@ pub struct TabSnapshot {
     /// The side of the wall it shows, or will when the wall is next on.
     #[serde(default)]
     pub wall_view: WallView,
+    /// How the Agents side lays its agents out.
+    #[serde(default)]
+    pub wall_mode: WallMode,
+    /// How the Tasks side lays its board out.
+    #[serde(default)]
+    pub task_layout: TaskLayout,
+    /// Its agents' panes by urgency — needs you, working, idle, then the
+    /// rest, ties in team order: who Focus shows when none is pinned.
+    #[serde(default)]
+    pub wall_urgency: Vec<String>,
+    /// Its agents' panes in team order, cut into the Grid's pages of
+    /// `agentsPerTab`; none without agents.
+    #[serde(default)]
+    pub wall_pages: Vec<Vec<String>>,
     /// Where the tab's frame sits on the board, and its size (derived from
     /// its cards). Card positions are relative to the frame's `x`, `y`.
     #[serde(default)]
@@ -106,6 +120,38 @@ pub enum WallView {
 impl WallView {
     pub fn is_agents(&self) -> bool {
         *self == WallView::Agents
+    }
+}
+
+/// How the Agents side of a wall lays its agents out: one large with the
+/// rest in a strip beside it, or all of them in an even grid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WallMode {
+    #[default]
+    Focus,
+    Grid,
+}
+
+impl WallMode {
+    pub fn is_focus(&self) -> bool {
+        *self == WallMode::Focus
+    }
+}
+
+/// How the Tasks side of a wall lays its board out: a column per status,
+/// or a row per agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskLayout {
+    #[default]
+    Columns,
+    Swimlanes,
+}
+
+impl TaskLayout {
+    pub fn is_columns(&self) -> bool {
+        *self == TaskLayout::Columns
     }
 }
 
@@ -361,9 +407,15 @@ pub enum Request {
     /// tab): plain Claude Code, or a role's harness, model and prompt.
     AgentNew {
         /// A role the calling pane's directory sees (`RoleCatalog`); none
-        /// starts plain `claude`.
+        /// starts plain `claude`, or `harness`.
         #[serde(default)]
         role: Option<String>,
+        /// Without a role, what to start: Claude Code (default) or Codex.
+        #[serde(default)]
+        harness: Option<Harness>,
+        /// The title of the task's card, instead of one made from `task`.
+        #[serde(default)]
+        title: Option<String>,
         /// The first prompt, typed in as Claude's initial message.
         #[serde(default)]
         task: Option<String>,
@@ -384,11 +436,14 @@ pub enum Request {
         pane_id: Option<String>,
     },
     /// Shows the tab of `pane_id` (the focused pane when absent) as the
-    /// wall of its agents, or its splits again when it already is.
-    /// Answers `{"wall": bool}`, the new state.
+    /// wall of its agents, or its splits again when it already is. With a
+    /// `mode`, shows the wall's agents in that layout instead, turning it
+    /// on if it is off. Answers `{"wall": bool, "wallMode": …}`.
     AgentWall {
         #[serde(default)]
         pane_id: Option<String>,
+        #[serde(default)]
+        mode: Option<WallMode>,
     },
     /// Shows the tab of `pane_id` (the focused pane's when absent) as its
     /// wall, on the Tasks side: its task board. Answers `{"wall": true,
@@ -421,6 +476,9 @@ pub enum Request {
         /// one: it is logged on that card rather than on one of its own.
         #[serde(default)]
         card: Option<String>,
+        /// The title of the message's card, instead of one made from it.
+        #[serde(default)]
+        title: Option<String>,
     },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {
@@ -437,6 +495,9 @@ pub enum Request {
         task: Option<String>,
         #[serde(default)]
         pane_id: Option<String>,
+        /// The title of the task's card, instead of one made from `task`.
+        #[serde(default)]
+        title: Option<String>,
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,
@@ -455,6 +516,9 @@ pub enum Request {
         to: Option<String>,
         #[serde(default)]
         pane_id: Option<String>,
+        /// More about it than the title says.
+        #[serde(default)]
+        description: Option<String>,
     },
     /// Puts a card written by hand in `column`; `card` is its id, or a
     /// prefix of one card's only.
@@ -774,7 +838,8 @@ pub struct AgentInfo {
     pub member: Option<String>,
     /// Whether it has activity to show (`agent activity`, the panel, the
     /// wall's list): a Claude Code agent whose hooks said where its
-    /// transcript is. The one place that rule lives.
+    /// transcript is, or a Codex agent whose rollout Mirador has found.
+    /// The one place that rule lives (`PaneMeta::has_activity`).
     #[serde(default)]
     pub has_activity: bool,
     /// The session's name, as `claude agents` lists it: one given with
@@ -784,12 +849,20 @@ pub struct AgentInfo {
     /// The role's model, or the `--model` (`-m`) its process was started
     /// with; absent when it runs the harness's default.
     pub model: Option<String>,
+    /// Its role's effort ("high", "max"); absent without a role, or when
+    /// the role sets none.
+    #[serde(default)]
+    pub effort: Option<String>,
     /// What its hooks last said, or else what Claude Code's session file
     /// says (busy or idle); always absent for a harness other than Claude
     /// Code.
     pub status: Option<AgentStatus>,
     /// The last Notification message, e.g. what it needs permission for.
     pub message: Option<String>,
+    /// The tool call a Claude Code agent waits on a permission for, read
+    /// from its transcript when it started waiting; absent otherwise.
+    #[serde(default)]
+    pub asking: Option<Asking>,
     /// What its own terminal title says it is on — the session's name or a
     /// task summary — when that adds to the role (`agents::title_topic`).
     #[serde(default)]
@@ -824,6 +897,15 @@ pub enum SubagentState {
     Stopped,
 }
 
+/// A tool call an agent asks permission for: its tool, and what it is
+/// about in a line, as its trail sums it up (a command, a path).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asking {
+    pub tool: String,
+    pub summary: String,
+}
+
 /// What one transcript adds up to: the model, the tokens, the tasks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -835,6 +917,10 @@ pub struct TranscriptSummary {
     pub tokens: u64,
     /// The size of its context at the last reply.
     pub context: u64,
+    /// How large that context can grow, for its model, when known
+    /// (`cmux_core::transcript::context_window`).
+    #[serde(default)]
+    pub context_window: Option<u64>,
     pub tool_calls: u32,
     /// Absent when it keeps no task list.
     pub tasks: Option<TaskProgress>,
@@ -924,6 +1010,23 @@ pub struct TrailAction {
     pub exit_code: Option<i32>,
     /// The first lines of its result, shortened.
     pub output: String,
+    /// What sort of thing it did (`cmux_core::trail::action_kind`).
+    #[serde(default)]
+    pub kind: ActionKind,
+}
+
+/// What a trail action did, for counting a turn's reads and edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionKind {
+    /// Looked at files or the web: a read, a search, a fetch.
+    Read,
+    /// Changed files.
+    Edit,
+    /// Ran a command.
+    Run,
+    #[default]
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1169,6 +1272,13 @@ pub enum TaskEventKind {
         team: Option<String>,
         tab: Option<String>,
         text: String,
+        /// The card's title when one was given (`--title`, a card written
+        /// by hand); else it comes from `text`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// More about a card written by hand (`task add --description`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
     },
     /// A card put in a column by hand.
     Moved {
@@ -1207,8 +1317,12 @@ pub struct TaskHistoryEntry {
 #[serde(rename_all = "camelCase")]
 pub struct TaskCard {
     pub id: String,
-    /// The first line of the task's text.
+    /// The title it was given, or else the first line of the task's text,
+    /// cut short (`cmux_core::tasks::split_title`).
     pub title: String,
+    /// The rest: the whole task when it says more than the title.
+    #[serde(default)]
+    pub description: Option<String>,
     pub source: TaskSource,
     pub from: String,
     pub assignee: Option<String>,
@@ -1220,6 +1334,10 @@ pub struct TaskCard {
     pub updated_ms: u64,
     /// The events that touched it, oldest first.
     pub history: Vec<TaskEvent>,
+    /// For a card in Doing: the failed actions in its agent's latest turn,
+    /// from its trail; 0 when that is not known.
+    #[serde(default)]
+    pub failing: u32,
 }
 
 /// Where a role or a way of working was defined. A repository's wins over
@@ -1250,6 +1368,127 @@ pub struct RoleCatalog {
     pub teams: Vec<AgentTeam>,
     /// `<file>: <what is wrong>`, one per problem.
     pub problems: Vec<String>,
+    /// What a file of the same name that comes first hides: a role, way or
+    /// team that is defined, and not used.
+    #[serde(default)]
+    pub shadowed: Vec<ShadowedFile>,
+}
+
+/// What the catalog holds: a role, a way of working, or a team.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogKind {
+    Role,
+    Way,
+    Team,
+}
+
+/// A role, way or team hidden by one of the same name that comes first —
+/// repo, then yours, then mirador.json, then built-in — and so not used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShadowedFile {
+    pub kind: CatalogKind,
+    pub name: String,
+    pub source: RoleSource,
+    /// Its file; none for an `agentRoles` entry.
+    pub path: Option<String>,
+    /// Where the one used instead is defined, and its file.
+    pub by: RoleSource,
+    pub by_path: Option<String>,
+}
+
+/// What the editor's team form sets in a team file: `teams::set_team_fields`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamFields {
+    pub description: Option<String>,
+    pub way: Option<String>,
+    pub layout: Option<String>,
+    pub members: Vec<TeamMember>,
+    /// The body.
+    pub charter: Option<String>,
+}
+
+/// What the editor's role form sets in a role file: `roles::set_role_fields`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleFields {
+    pub harness: Harness,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub way: Option<String>,
+    pub description: Option<String>,
+    /// `tools.deny`: the permission rules it may not use.
+    pub deny: Vec<String>,
+    /// The body.
+    pub prompt: Option<String>,
+}
+
+/// What the editor's way page sets in a way file: `roles::set_way_fields`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WayFields {
+    pub description: Option<String>,
+    /// The body.
+    pub prompt: String,
+}
+
+/// A form's fields, saved into the file of their kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FileFields {
+    Team(TeamFields),
+    Role(RoleFields),
+    Way(WayFields),
+}
+
+/// What a role form's pickers offer for a harness a role can start: the
+/// models and efforts the launch passes on. A file's own value is offered
+/// besides, so one not listed still round-trips.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessChoices {
+    pub harness: Harness,
+    pub models: Vec<String>,
+    pub efforts: Vec<String>,
+}
+
+/// One part of what an agent is told, in the order it is told:
+/// `roles::role_layers`, then for a team member `teams::member_layers`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptLayer {
+    pub kind: PromptLayerKind,
+    /// The file it comes from, or "written by Mirador".
+    pub source: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PromptLayerKind {
+    /// The role's own prompt.
+    Role,
+    /// The way of working the role follows.
+    RoleWay,
+    /// Who the member is in its team, and its teammates.
+    Team,
+    /// The team file's body.
+    Charter,
+    /// The team's way of working, when the role does not follow it already.
+    TeamWay,
+}
+
+/// A team or role that uses a role or a way of working: a team with the
+/// role as a member or the way as its own, a role following the way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsedBy {
+    pub kind: CatalogKind,
+    pub name: String,
+    /// A team of that name runs, or an agent runs with that role.
+    pub running: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1323,6 +1562,33 @@ pub struct ResolvedConfig {
     pub keybindings: std::collections::HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     pub agent_roles: Vec<AgentRole>,
+    /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
+    pub agents_per_tab: u8,
+    pub agent_click: AgentClick,
+    /// Where the app opens the roles, ways and teams editor, a diff and
+    /// the commit graph: a tab of its own or a split of the focused pane.
+    pub editor_opens_in: OpensIn,
+    pub diff_opens_in: OpensIn,
+    pub graph_opens_in: OpensIn,
+}
+
+/// Where a pane the app opens goes: in a new tab, or split beside the
+/// focused pane — the values of a custom command's `target`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpensIn {
+    Tab,
+    Split,
+}
+
+/// What clicking an agent in the sidebar does: show its tab's wall in
+/// Focus with that agent pinned, or show its pane alone, filling its tab.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentClick {
+    #[default]
+    Wall,
+    Pane,
 }
 
 /// One line of a diff hunk.

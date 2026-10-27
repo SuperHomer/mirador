@@ -9,7 +9,7 @@ pub mod wezterm;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentRole, CustomCommand, ResolvedColors, ResolvedConfig};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -56,6 +56,20 @@ pub struct Config {
     /// the next launch. On unless set to `false`; read when a pane opens,
     /// so changing it applies to new panes.
     pub persist_sessions: Option<bool>,
+    /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
+    /// Anything else is 4.
+    pub agents_per_tab: Option<u32>,
+    /// What clicking an agent in the sidebar does: "wall" (its tab's wall,
+    /// in Focus on that agent) or "pane" (the agent alone, filling its
+    /// tab). Anything else is "wall". A string rather than `AgentClick`, so
+    /// a bad value is ignored instead of failing the whole file.
+    pub agent_click: Option<String>,
+    /// Where the app opens the roles, ways and teams editor ("tab", the
+    /// default, or "split"), a diff and the commit graph ("split", the
+    /// default, or "tab"). Strings for the same reason as `agent_click`.
+    pub editor_opens_in: Option<String>,
+    pub diff_opens_in: Option<String>,
+    pub graph_opens_in: Option<String>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
@@ -168,6 +182,34 @@ pub fn load() -> (Config, Option<String>) {
         },
         Err(_) => (Config::default(), None),
     }
+}
+
+/// Sets `agentsPerTab` in mirador.json, from the wall's own control.
+pub fn set_agents_per_tab(n: u8) -> Result<(), String> {
+    set_agents_per_tab_in(&config_path(), n)
+}
+
+/// Sets `agentsPerTab` to `n` (4, 6 or 9) in the file at `path`, creating
+/// it if absent. Only that key changes: the file is edited as JSON, not
+/// read into [`Config`] and written back, which would drop keys Config
+/// does not know and every value it reads loosely. A file that does not
+/// parse is left alone, not replaced.
+fn set_agents_per_tab_in(path: &Path, n: u8) -> Result<(), String> {
+    if ![4, 6, 9].contains(&n) {
+        return Err(format!("agentsPerTab is 4, 6 or 9, not {n}"));
+    }
+    let mut cfg = match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str::<serde_json::Value>(&text).map_err(|e| format!("mirador.json: {e}"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(e) => return Err(format!("mirador.json: {e}")),
+    };
+    let obj = cfg.as_object_mut().ok_or("mirador.json is not a JSON object")?;
+    obj.insert("agentsPerTab".into(), n.into());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(path, text + "\n").map_err(|e| e.to_string())
 }
 
 /// Writes a starter config if none exists, so users can discover options.
@@ -335,6 +377,26 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         keybindings,
         custom_commands: cfg.custom_commands.clone(),
         agent_roles: agent_roles_in(cfg),
+        agents_per_tab: match cfg.agents_per_tab {
+            Some(n @ (4 | 6 | 9)) => n as u8,
+            _ => 4,
+        },
+        agent_click: match cfg.agent_click.as_deref() {
+            Some("pane") => AgentClick::Pane,
+            _ => AgentClick::Wall,
+        },
+        editor_opens_in: opens_in(cfg.editor_opens_in.as_deref(), OpensIn::Tab),
+        diff_opens_in: opens_in(cfg.diff_opens_in.as_deref(), OpensIn::Split),
+        graph_opens_in: opens_in(cfg.graph_opens_in.as_deref(), OpensIn::Split),
+    }
+}
+
+/// "tab" or "split"; anything else, or nothing, is `default`.
+fn opens_in(value: Option<&str>, default: OpensIn) -> OpensIn {
+    match value {
+        Some("tab") => OpensIn::Tab,
+        Some("split") => OpensIn::Split,
+        _ => default,
     }
 }
 
@@ -483,6 +545,74 @@ mod tests {
         assert!(persist_sessions_in(&on));
         let off: Config = serde_json::from_str(r#"{ "persistSessions": false }"#).unwrap();
         assert!(!persist_sessions_in(&off));
+    }
+
+    #[test]
+    fn setting_agents_per_tab_changes_only_that_key() {
+        let dir = std::env::temp_dir().join(format!("mirador-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("mirador").join("mirador.json");
+
+        // No file yet: it is made, with the one key.
+        set_agents_per_tab_in(&path, 6).unwrap();
+        let read = || serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(read(), serde_json::json!({ "agentsPerTab": 6 }));
+
+        // Every other key stays as it was, in its place, unknown ones too.
+        std::fs::write(&path, r#"{ "zeta": 1, "fontSize": 15, "agentsPerTab": 4, "somethingNew": { "a": [1, 2] } }"#).unwrap();
+        set_agents_per_tab_in(&path, 9).unwrap();
+        let cfg = read();
+        assert_eq!(cfg, serde_json::json!({ "zeta": 1, "fontSize": 15, "agentsPerTab": 9, "somethingNew": { "a": [1, 2] } }));
+        let keys: Vec<&String> = cfg.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["zeta", "fontSize", "agentsPerTab", "somethingNew"]);
+
+        // Anything but 4, 6 or 9 is refused, and the file is left alone.
+        assert!(set_agents_per_tab_in(&path, 5).is_err());
+        assert!(set_agents_per_tab_in(&path, 0).is_err());
+        assert_eq!(read()["agentsPerTab"], 9);
+        // So is a file that does not parse.
+        std::fs::write(&path, "{ broken").unwrap();
+        assert!(set_agents_per_tab_in(&path, 4).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agents_per_tab_is_4_6_or_9() {
+        let per_tab = |json: &str| resolve(&serde_json::from_str(json).unwrap()).agents_per_tab;
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 6 }"#), 6);
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 9 }"#), 9);
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 5 }"#), 4);
+        assert_eq!(per_tab(r#"{ "agentsPerTab": 0 }"#), 4);
+        assert_eq!(per_tab("{}"), 4);
+    }
+
+    #[test]
+    fn the_editor_opens_in_a_tab_and_diffs_and_graphs_in_a_split_unless_set() {
+        let cfg = |json: &str| resolve(&serde_json::from_str(json).unwrap());
+        let defaults = cfg("{}");
+        assert_eq!(
+            (defaults.editor_opens_in, defaults.diff_opens_in, defaults.graph_opens_in),
+            (OpensIn::Tab, OpensIn::Split, OpensIn::Split)
+        );
+        let set = cfg(r#"{ "editorOpensIn": "split", "diffOpensIn": "tab", "graphOpensIn": "tab" }"#);
+        assert_eq!((set.editor_opens_in, set.diff_opens_in, set.graph_opens_in), (OpensIn::Split, OpensIn::Tab, OpensIn::Tab));
+        // A bad value is the default, not a broken config.
+        let bad = cfg(r#"{ "editorOpensIn": "window", "diffOpensIn": "Tab", "graphOpensIn": "pane" }"#);
+        assert_eq!((bad.editor_opens_in, bad.diff_opens_in, bad.graph_opens_in), (OpensIn::Tab, OpensIn::Split, OpensIn::Split));
+    }
+
+    #[test]
+    fn agent_click_is_the_wall_unless_set_to_pane() {
+        let click = |json: &str| resolve(&serde_json::from_str(json).unwrap()).agent_click;
+        assert_eq!(click(r#"{ "agentClick": "pane" }"#), AgentClick::Pane);
+        assert_eq!(click(r#"{ "agentClick": "wall" }"#), AgentClick::Wall);
+        assert_eq!(click("{}"), AgentClick::Wall);
+        assert_eq!(click(r#"{ "agentClick": "zoom" }"#), AgentClick::Wall);
+        // A bad value costs only itself, not the rest of the file.
+        let cfg: Config =
+            serde_json::from_str(r#"{ "agentClick": "zoom", "fontSize": 15 }"#).unwrap();
+        assert_eq!(resolve(&cfg).font_size, 15.0);
     }
 
     #[test]

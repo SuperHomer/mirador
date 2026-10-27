@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use cmux_protocol::{AgentRole, AgentStatus, Harness};
+use cmux_protocol::{AgentInfo, AgentRole, AgentStatus, Harness};
 
 /// One row of the process table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -398,6 +398,29 @@ pub fn title_topic(title: &str, harness: Harness, shown: &[Option<&str>]) -> Opt
     Some(topic.to_string())
 }
 
+/// What an agent is called in the sidebar and on the wall — its team
+/// name, its session's name, its role, else its harness — as `agentLabel`
+/// in `bindings.ts` has it.
+pub fn label(agent: &AgentInfo) -> &str {
+    agent
+        .member
+        .as_deref()
+        .or(agent.name.as_deref())
+        .or(agent.role.as_deref())
+        .unwrap_or(agent.harness.label())
+}
+
+/// The title a notification from a pane is shown with. An agent's names
+/// the agent and its tab (`reviewer · api`): Claude Code titles every one
+/// of its alerts just "Claude Code", which says nothing about which of
+/// several agents wants you. Any other pane keeps the title it sent.
+pub fn notification_title(agent: Option<&AgentInfo>, tab: &str, sent: Option<String>) -> Option<String> {
+    match agent {
+        Some(agent) => Some(format!("{} · {tab}", label(agent))),
+        None => sent,
+    }
+}
+
 /// The model an agent's command line asks for: `--model x`,
 /// `--model=x`, or `-m x` (Codex, Gemini CLI, OpenCode). Only the words
 /// after the program are read, so `python -m aider` names no model.
@@ -440,9 +463,20 @@ pub fn hook_status(
     }
 }
 
+/// The harness an agent started without a role runs: Claude Code unless
+/// asked for another, which must be one Mirador knows how to start plain —
+/// Codex. A role names its own.
+pub fn plain_harness(harness: Option<Harness>) -> Result<Harness, String> {
+    match harness.unwrap_or(Harness::Claude) {
+        h @ (Harness::Claude | Harness::Codex) => Ok(h),
+        h => Err(format!("an agent without a role is Claude Code or Codex, not {}", h.label())),
+    }
+}
+
 /// The command line that starts an agent in a shell pane: Claude Code, or
 /// the role's harness, with the role's model and prompt, and the task as
-/// its first message. `quote` quotes one argument for the pane's shell.
+/// its first message; without a role, `plain` ([`plain_harness`]). `quote`
+/// quotes one argument for the pane's shell.
 ///
 /// The prompt is the role's whole prompt (its own, then its way of
 /// working's). Claude Code reads it from `prompt_file` when there is one —
@@ -461,8 +495,10 @@ pub fn hook_status(
 /// It is typed in, so every argument is put on one line and loses its
 /// control characters: a newline would submit the line half-quoted, and a
 /// stray `^C` would be read as a keystroke before the shell ever saw quotes.
+#[allow(clippy::too_many_arguments)]
 pub fn launch_command(
     role: Option<&AgentRole>,
+    plain: Harness,
     prompt: Option<&str>,
     prompt_file: Option<&std::path::Path>,
     settings_file: Option<&std::path::Path>,
@@ -470,7 +506,7 @@ pub fn launch_command(
     socket: Option<(&str, &std::path::Path)>,
     quote: impl Fn(&str) -> String,
 ) -> String {
-    let harness = role.map_or(Harness::Claude, |r| r.harness);
+    let harness = role.map_or(plain, |r| r.harness);
     let mut line = String::from(match harness {
         Harness::Codex => "codex",
         _ => "claude",
@@ -502,16 +538,6 @@ pub fn launch_command(
                 if let Some(prompt) = prompt {
                     arg("-c", &format!("developer_instructions={}", toml_string(prompt)));
                 }
-                if let Some((base, socket)) = socket {
-                    arg("-c", "default_permissions=\"mirador\"");
-                    arg("-c", &format!("permissions.mirador.extends={}", toml_string(base)));
-                    let socket = toml_string(&socket.to_string_lossy());
-                    arg("-c", &format!("permissions.mirador.network.unix_sockets={{{socket}=\"allow\"}}"));
-                    // Network on, but only through the proxy: it lets out
-                    // the domains the base allows, and the socket above.
-                    arg("-c", "permissions.mirador.network.enabled=true");
-                    arg("-c", "features.network_proxy=true");
-                }
             }
             _ => {
                 match (prompt, prompt_file) {
@@ -525,6 +551,17 @@ pub fn launch_command(
                 arg("--name", &role.name);
             }
         }
+    }
+    // Any Codex, a role's or plain, may reach the app.
+    if let (Harness::Codex, Some((base, socket))) = (harness, socket) {
+        arg("-c", "default_permissions=\"mirador\"");
+        arg("-c", &format!("permissions.mirador.extends={}", toml_string(base)));
+        let socket = toml_string(&socket.to_string_lossy());
+        arg("-c", &format!("permissions.mirador.network.unix_sockets={{{socket}=\"allow\"}}"));
+        // Network on, but only through the proxy: it lets out the domains
+        // the base allows, and the socket above.
+        arg("-c", "permissions.mirador.network.enabled=true");
+        arg("-c", "features.network_proxy=true");
     }
     arg("", task.unwrap_or(""));
     line
@@ -587,6 +624,11 @@ fn toml_string(text: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// The program `harness` runs, which is also how a role file names it.
+pub fn program_of(harness: Harness) -> &'static str {
+    HARNESSES.iter().find(|(_, h)| *h == harness).map(|(p, _)| *p).expect("every harness has a program")
 }
 
 /// The harness a role names, by its program (`codex`, `cursor-agent`) or
@@ -1048,8 +1090,8 @@ mod tests {
     #[test]
     fn builds_the_launch_command() {
         let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
-        assert_eq!(launch_command(None, None, None, None, None, None, q), "claude");
-        assert_eq!(launch_command(None, None, None, None, Some("fix the flaky test"), None, q), "claude 'fix the flaky test'");
+        assert_eq!(launch_command(None, Harness::Claude, None, None, None, None, None, q), "claude");
+        assert_eq!(launch_command(None, Harness::Claude, None, None, None, Some("fix the flaky test"), None, q), "claude 'fix the flaky test'");
         let role = AgentRole {
             name: "reviewer".into(),
             model: Some("opus".into()),
@@ -1059,27 +1101,43 @@ mod tests {
         // A prompt file is what Claude Code gets, when there is one.
         let file = std::path::Path::new("/data/prompts/p1.md");
         assert_eq!(
-            launch_command(Some(&role), Some(prompt), Some(file), None, Some("look at\r\nmain\u{3}"), None, q),
+            launch_command(Some(&role), Harness::Claude, Some(prompt), Some(file), None, Some("look at\r\nmain\u{3}"), None, q),
             r"claude --model 'opus' --append-system-prompt-file '/data/prompts/p1.md' --name 'reviewer' 'look at main'"
         );
         assert_eq!(
-            launch_command(Some(&role), Some(prompt), None, None, None, None, q),
+            launch_command(Some(&role), Harness::Claude, Some(prompt), None, None, None, None, q),
             r"claude --model 'opus' --append-system-prompt 'You review. Never edit files; it'\''s read-only.' --name 'reviewer'"
         );
         // A role that limits its tools says where its settings are.
         let settings = std::path::Path::new("/data/prompts/reviewer-2.settings.json");
         assert_eq!(
-            launch_command(Some(&role), None, None, Some(settings), None, None, q),
+            launch_command(Some(&role), Harness::Claude, None, None, Some(settings), None, None, q),
             r"claude --model 'opus' --settings '/data/prompts/reviewer-2.settings.json' --name 'reviewer'"
         );
         let bare = AgentRole { name: "plain".into(), ..Default::default() };
-        assert_eq!(launch_command(Some(&bare), Some("  "), Some(file), None, Some("  "), None, q), "claude --name 'plain'");
+        assert_eq!(launch_command(Some(&bare), Harness::Claude, Some("  "), Some(file), None, Some("  "), None, q), "claude --name 'plain'");
         // Its effort comes right after its model.
         let deep = AgentRole { effort: Some("max".into()), ..role.clone() };
         assert_eq!(
-            launch_command(Some(&deep), None, None, None, Some("go"), None, q),
+            launch_command(Some(&deep), Harness::Claude, None, None, None, Some("go"), None, q),
             "claude --model 'opus' --effort 'max' --name 'reviewer' 'go'"
         );
+    }
+
+    #[test]
+    fn starts_plain_codex_when_asked_and_refuses_harnesses_it_cannot_start() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        assert_eq!(plain_harness(None), Ok(Harness::Claude));
+        assert_eq!(plain_harness(Some(Harness::Codex)), Ok(Harness::Codex));
+        assert!(plain_harness(Some(Harness::OpenCode)).is_err());
+        assert_eq!(launch_command(None, Harness::Codex, None, None, None, Some("go"), None, q), "codex 'go'");
+        // It may reach the app as a Codex role may.
+        let socket = Some((":read-only", std::path::Path::new("/tmp/mira.sock")));
+        assert!(launch_command(None, Harness::Codex, None, None, None, None, socket, q)
+            .starts_with("codex -c 'default_permissions=\"mirador\"'"));
+        // A role's harness wins over the plain one.
+        let claude = AgentRole { name: "reviewer".into(), ..Default::default() };
+        assert_eq!(launch_command(Some(&claude), Harness::Codex, None, None, None, None, None, q), "claude --name 'reviewer'");
     }
 
     #[test]
@@ -1088,21 +1146,21 @@ mod tests {
         let role = AgentRole { name: "dev".into(), harness: Harness::Codex, model: Some("gpt-5".into()), ..Default::default() };
         let file = std::path::Path::new("/data/prompts/p1.md");
         assert_eq!(
-            launch_command(Some(&role), Some("Line \"one\"\r\n\tC:\\path"), Some(file), None, Some("go"), None, q),
+            launch_command(Some(&role), Harness::Claude, Some("Line \"one\"\r\n\tC:\\path"), Some(file), None, Some("go"), None, q),
             r#"codex --model 'gpt-5' -c 'developer_instructions="Line \"one\"\n\tC:\\path"' 'go'"#
         );
         // The escapes are TOML's: the value reads back as the prompt.
         let value: toml::Value = toml::from_str(&format!("v = {}", toml_string("a \"b\"\nc\\d\u{7}"))).unwrap();
         assert_eq!(value["v"].as_str(), Some("a \"b\"\nc\\d\u{7}"));
-        assert_eq!(launch_command(Some(&role), None, None, None, None, None, q), "codex --model 'gpt-5'");
+        assert_eq!(launch_command(Some(&role), Harness::Claude, None, None, None, None, None, q), "codex --model 'gpt-5'");
         let deep = AgentRole { effort: Some("xhigh".into()), ..role.clone() };
         assert_eq!(
-            launch_command(Some(&deep), Some("You build."), None, None, None, None, q),
+            launch_command(Some(&deep), Harness::Claude, Some("You build."), None, None, None, None, q),
             r#"codex --model 'gpt-5' -c 'model_reasoning_effort="xhigh"' -c 'developer_instructions="You build."'"#
         );
         // Its profile is the person's own, named as it is.
         let yolo = AgentRole { profile: Some("gpt-6".into()), ..role.clone() };
-        assert_eq!(launch_command(Some(&yolo), None, None, None, Some("go"), None, q), "codex --model 'gpt-5' --profile 'gpt-6' 'go'");
+        assert_eq!(launch_command(Some(&yolo), Harness::Claude, None, None, None, Some("go"), None, q), "codex --model 'gpt-5' --profile 'gpt-6' 'go'");
     }
 
     #[test]
@@ -1112,7 +1170,7 @@ mod tests {
         let socket = Some((":read-only", std::path::Path::new("/var/folders/x/T/mira-501.sock")));
         // The base is what the person's Codex would run on, made no looser.
         assert_eq!(
-            launch_command(Some(&role), Some("You review."), None, None, None, socket, q),
+            launch_command(Some(&role), Harness::Claude, Some("You review."), None, None, None, socket, q),
             "codex --model 'gpt-5' -c 'developer_instructions=\"You review.\"' \
              -c 'default_permissions=\"mirador\"' -c 'permissions.mirador.extends=\":read-only\"' \
              -c 'permissions.mirador.network.unix_sockets={\"/var/folders/x/T/mira-501.sock\"=\"allow\"}' \
@@ -1120,7 +1178,7 @@ mod tests {
         );
         // Claude Code is started as before.
         let claude = AgentRole { name: "reviewer".into(), ..Default::default() };
-        assert_eq!(launch_command(Some(&claude), None, None, None, None, socket, q), "claude --name 'reviewer'");
+        assert_eq!(launch_command(Some(&claude), Harness::Claude, None, None, None, None, socket, q), "claude --name 'reviewer'");
     }
 
     #[test]
@@ -1247,5 +1305,56 @@ mod tests {
         assert_eq!(title_topic("codex", Harness::Codex, &[]), None);
         // Another agent's name is not this one's role, and is kept.
         assert_eq!(title_topic("✳ planner", claude, &[Some("reviewer")]).as_deref(), Some("planner"));
+    }
+
+    fn agent() -> AgentInfo {
+        AgentInfo {
+            pane_id: "p".into(),
+            tab_id: "t".into(),
+            harness: Harness::Claude,
+            role: None,
+            member: None,
+            has_activity: false,
+            name: None,
+            model: None,
+            effort: None,
+            status: None,
+            message: None,
+            asking: None,
+            topic: None,
+            since_ms: None,
+            cwd: None,
+            branch: None,
+        }
+    }
+
+    #[test]
+    fn an_agent_is_labelled_by_member_then_session_then_role_then_harness() {
+        let mut a = agent();
+        assert_eq!(label(&a), "Claude Code");
+        a.role = Some("dev".into());
+        assert_eq!(label(&a), "dev");
+        a.name = Some("fix-login".into());
+        assert_eq!(label(&a), "fix-login");
+        a.member = Some("reviewer".into());
+        assert_eq!(label(&a), "reviewer");
+    }
+
+    #[test]
+    fn an_agents_notification_names_the_agent_and_its_tab() {
+        let mut a = agent();
+        a.member = Some("reviewer".into());
+        // Claude Code's own alerts, titled with nothing but its name.
+        assert_eq!(
+            notification_title(Some(&a), "api", Some("Claude Code".into())).as_deref(),
+            Some("reviewer · api")
+        );
+        assert_eq!(notification_title(Some(&agent()), "docs", None).as_deref(), Some("Claude Code · docs"));
+    }
+
+    #[test]
+    fn any_other_panes_notification_keeps_its_title() {
+        assert_eq!(notification_title(None, "api", Some("Build done".into())).as_deref(), Some("Build done"));
+        assert_eq!(notification_title(None, "api", None), None);
     }
 }

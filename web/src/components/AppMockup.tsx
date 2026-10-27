@@ -33,7 +33,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import BoardCanvas, { FRAME_GAP, FRAME_W, layout, type Card, type Frame } from "./BoardCanvas";
-import { MARK, MEMBERS } from "./TeamsShowcase";
+import { API_AGENT, MARK, MEMBERS, TEAM_AGENTS } from "./TeamsShowcase";
+import { FocusWall, MockSidebar, StatusBar, type MockAgent, type View } from "./MockAgents";
 import TermLines, { type Line } from "./TermLines";
 
 type Pane = {
@@ -42,6 +43,8 @@ type Pane = {
   browser?: string;
   attention?: boolean;
   agent?: (typeof MEMBERS)[number];
+  /** The agent in it, for its status bar. */
+  mock?: MockAgent;
   /** Its card's title on the board, when not the agent's or the tab's. */
   title?: string;
   status?: Card["status"];
@@ -55,7 +58,8 @@ type Tab = {
   branch: string;
   pr?: { number: number; checks: "pass" | "pending" };
   port?: number;
-  agents?: number;
+  /** Its agents, as the sidebar nests them and its wall shows them. */
+  agents: MockAgent[];
   panes: Pane[];
   /** The pane focused when the page loads. */
   focus: number;
@@ -67,10 +71,6 @@ type Tab = {
     worker sent its step, or as the teams section shows it. */
 type Team = "absent" | "started" | "sent" | "full";
 
-const PR = {
-  pass: { mark: " ✓", color: "var(--green)", bg: "rgba(166,227,161,.25)" },
-  pending: { mark: " ●", color: "var(--yellow)", bg: "rgba(249,226,175,.25)" },
-};
 
 const TABS: Tab[] = [
   {
@@ -80,7 +80,7 @@ const TABS: Tab[] = [
     branch: "feat/auth",
     pr: { number: 42, checks: "pass" },
     port: 3000,
-    agents: 1,
+    agents: [API_AGENT],
     focus: 1,
     slot: 0,
     panes: [
@@ -88,16 +88,8 @@ const TABS: Tab[] = [
         attention: true,
         title: "claude",
         status: "needsYou",
-        lines: [
-          { text: "> wire up the refresh flow", color: "var(--text)" },
-          { text: "⏺ Read(src/auth/refresh.ts)" },
-          { text: "⏺ Update(src/auth/refresh.ts)" },
-          { text: "  ⎿ Added 18 lines, removed 3", color: "var(--muted)" },
-          { text: "⏺ Bash(npm run migrate)" },
-          { text: "Do you want to proceed?", color: "var(--text)" },
-          { text: "❯ 1. Yes", color: "var(--accent)" },
-          { text: "  2. No, and tell Claude what to do differently" },
-        ],
+        mock: API_AGENT,
+        lines: API_AGENT.lines,
       },
       {
         lines: [
@@ -117,11 +109,11 @@ const TABS: Tab[] = [
     team: true,
     cwd: "~/work/api",
     branch: "feat/oauth",
-    agents: MEMBERS.length,
+    agents: TEAM_AGENTS,
     focus: 0,
     // Started last, so its frame went right of the others.
     slot: 2,
-    panes: MEMBERS.map((m, i) => ({ lines: m.lines, agent: m, status: i === 0 ? "working" : "idle" })),
+    panes: MEMBERS.map((m, i) => ({ lines: m.lines, agent: m, mock: TEAM_AGENTS[i], status: TEAM_AGENTS[i].status ?? undefined })),
   },
   {
     title: "web",
@@ -129,6 +121,7 @@ const TABS: Tab[] = [
     branch: "main",
     pr: { number: 17, checks: "pending" },
     port: 5173,
+    agents: [],
     focus: 1,
     slot: 1,
     panes: [
@@ -181,7 +174,7 @@ export default function AppMockup() {
   const [focus, setFocus] = useState(TABS.map((t) => t.focus));
   // The one pane with an attention ring loses it once it is focused.
   const [attended, setAttended] = useState(false);
-  const [view, setView] = useState<"tabs" | "board">("tabs");
+  const [view, setView] = useState<View>("splits");
   // The demo starts before the team does; without it, the team is there.
   const [team, setTeam] = useState<Team>(reduced ? "full" : "absent");
   const tab = TABS[current];
@@ -199,13 +192,13 @@ export default function AppMockup() {
     },
     { command: `mira agent send worker "${STEP}" --wait`, run: () => setTeam("sent") },
     { command: "mira view board", run: () => setView("board") },
-    { command: "mira view tabs", run: () => setView("tabs") },
+    { command: "mira view tabs", run: () => setView("splits") },
   ];
   const reset = () => {
     setCurrent(0);
     setFocus(TABS.map((t) => t.focus));
     setAttended(false);
-    setView("tabs");
+    setView("splits");
     setTeam("absent");
     setAnnounced("");
   };
@@ -273,7 +266,7 @@ export default function AppMockup() {
     setDemo(null);
     setTeam("sent");
     if ((e.target as Element).closest(".mock-tab, .mock-view-switch, .mock-pane, .board-frame, .board-mock-controls button")) return;
-    setView("tabs");
+    setView("splits");
     setCurrent(TEAM);
     setFocus((f) => f.map((p, i) => (i === TEAM ? 0 : p)));
   };
@@ -285,7 +278,7 @@ export default function AppMockup() {
       setFocus((f) => f.map((p, i) => (i === t ? pane : p)));
       if (TABS[t].panes[pane].attention) setAttended(true);
     }
-    setView("tabs");
+    setView("splits");
   };
 
   const frames: Frame[] = shown.map((ti) => {
@@ -338,119 +331,31 @@ export default function AppMockup() {
           </span>
         </div>
         <div className="mock-body" style={{ display: "flex", height: 396 }}>
-          <div
+          <MockSidebar
             className="mock-sidebar"
-            style={{
-              width: 216,
-              flexShrink: 0,
-              background: "var(--bg-alt)",
-              borderRight: "1px solid var(--surface)",
-              display: "flex",
-              flexDirection: "column",
-              padding: 6,
-              gap: 2,
-            }}
-          >
-            {shown.map((i, n) => {
-              const t = TABS[i];
-              const unread = !!t.notification && !attended;
-              return (
-                <button
-                  key={t.title}
-                  className="mock-tab"
-                  aria-pressed={i === current}
-                  onClick={() => setCurrent(i)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 8px",
-                    borderRadius: 6,
-                    minHeight: 40,
-                    border: "none",
-                    textAlign: "left",
-                    color: "var(--text)",
-                    background: i === current ? "var(--surface)" : "transparent",
-                  }}
-                >
-                  <span className="mock-tab-index" style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>{n + 1}</span>
-                  <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: unread ? "var(--accent)" : undefined }}>
-                      {t.team && <span style={{ color: "var(--accent)", marginRight: 5, fontSize: 11 }}>⚑</span>}
-                      {t.title}
-                    </span>
-                    <span
-                      className="mock-tab-detail"
-                      style={{ fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: unread ? "var(--accent)" : "var(--muted)" }}
-                    >
-                      {unread ? t.notification : t.cwd}
-                    </span>
-                    <span className="mock-tab-detail" style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 2 }}>
-                      <span style={{ fontSize: 10, color: "var(--subtext)", whiteSpace: "nowrap" }}>⎇ {t.branch}</span>
-                      {t.pr && (
-                        <span style={chip(PR[t.pr.checks].bg, PR[t.pr.checks].color)}>
-                          #{t.pr.number}
-                          {PR[t.pr.checks].mark}
-                        </span>
-                      )}
-                      {t.port && <span style={chip("var(--surface)", "var(--accent)")}>:{t.port}</span>}
-                    </span>
-                  </span>
-                  {t.agents && (
-                    <span
-                      className="mock-tab-detail"
-                      style={{
-                        fontSize: 10.5,
-                        lineHeight: "16px",
-                        padding: "0 6px",
-                        borderRadius: 8,
-                        whiteSpace: "nowrap",
-                        border: "1px solid rgba(217,119,87,.4)",
-                        ...(unread
-                          ? { background: "#d97757", color: "var(--bg-alt)", fontWeight: 700 }
-                          : { color: "#d97757" }),
-                      }}
-                    >
-                      ✳ {t.agents}
-                    </span>
-                  )}
-                  {unread && (
-                    <span style={{ background: "var(--accent)", color: "var(--bg-alt)", fontSize: 10, fontWeight: 700, borderRadius: 8, minWidth: 16, height: 16, lineHeight: "16px", textAlign: "center" }}>
-                      1
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-            <div className="mock-sidebar-footer" style={{ marginTop: "auto", display: "flex", alignItems: "center" }}>
-              <span className="mock-new-tab" style={{ flex: 1, padding: "7px 8px", fontSize: 12, color: "var(--subtext)" }}>
-                + New Tab
-              </span>
-              <div style={{ display: "flex", border: "1px solid var(--surface)", borderRadius: 6, overflow: "hidden" }}>
-                {(["tabs", "board"] as const).map((v) => (
-                  <button
-                    key={v}
-                    className="mock-view-switch"
-                    aria-pressed={view === v}
-                    onClick={() => setView(v)}
-                    style={{
-                      border: "none",
-                      fontSize: 11,
-                      padding: "3px 8px",
-                      background: view === v ? "var(--surface)" : "transparent",
-                      color: view === v ? "var(--text)" : "var(--subtext)",
-                    }}
-                  >
-                    {v === "tabs" ? "Tabs" : "Board"}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+            tabs={shown.map((i) => ({
+              ...TABS[i],
+              unread: !!TABS[i].notification && !attended,
+            }))}
+            current={shown.indexOf(current)}
+            view={view}
+            views={["splits", "wall", "board"]}
+            onView={setView}
+            onTab={(i) => setCurrent(shown[i])}
+          />
           {/* keyed by the view, so each switch replays the view's entrance */}
           <div key={view} className="mock-view" style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
             {view === "board" ? (
-              <BoardView frames={frames} onCard={(f, c) => fly(shown[f], c)} onTabs={() => setView("tabs")} />
+              <BoardView frames={frames} onCard={(f, c) => fly(shown[f], c)} onTabs={() => setView("splits")} />
+            ) : view === "wall" ? (
+              tab.agents.length > 0 ? (
+                <FocusWall
+                  agents={tab.agents}
+                  large={Math.max(0, tab.agents.findIndex((a) => a.status === "needsYou"))}
+                />
+              ) : (
+                <div className="ms-empty-wall">No agents in this tab yet: its wall shows them once one starts.</div>
+              )
             ) : (
             <>
               {tab.team && (
@@ -517,9 +422,12 @@ export default function AppMockup() {
                       {pane.browser ? (
                         <BrowserPane url={pane.browser} />
                       ) : (
-                        <div className="mono" style={{ padding: "8px 10px", fontSize: 11, lineHeight: 1.6 }}>
-                          <TermLines lines={tab.team ? teamLines(team, i) : (pane.lines ?? [])} cursor={focused} />
-                        </div>
+                        <>
+                          <div className="mono" style={{ flex: 1, minHeight: 0, overflow: "hidden", padding: "8px 10px", fontSize: 11, lineHeight: 1.6 }}>
+                            <TermLines lines={tab.team ? teamLines(team, i) : (pane.lines ?? [])} cursor={focused} />
+                          </div>
+                          {pane.mock && <StatusBar agent={pane.mock} compact={tab.team} />}
+                        </>
                       )}
                     </div>
                   );
@@ -545,7 +453,7 @@ export default function AppMockup() {
           </span>
         ) : (
           <>
-            {view === "tabs" ? "↑ click a tab or a pane, or flip to Board" : "↑ click a card to fly back to it"}
+            {view === "board" ? "↑ click a card to fly back to it" : "↑ click a tab, a pane, or Splits · Wall · Board"}
             {" · "}
             <button
               className="mock-replay"
@@ -630,15 +538,6 @@ function BoardView({ frames, onCard, onTabs }: { frames: Frame[]; onCard: (frame
   );
 }
 
-const chip = (bg: string, color: string): React.CSSProperties => ({
-  fontSize: 9.5,
-  fontWeight: 600,
-  borderRadius: 4,
-  padding: "1px 5px",
-  whiteSpace: "nowrap",
-  background: bg,
-  color,
-});
 
 /** A browser pane on the dev server's page. The page is someone's app, not
     Mirador, so it keeps its own light colors rather than the theme's. */

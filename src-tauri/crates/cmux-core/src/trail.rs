@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::Path;
 
-use cmux_protocol::{ActionDetail, ActionStatus, TrailAction, TrailTurn};
+use cmux_protocol::{ActionDetail, ActionKind, ActionStatus, TrailAction, TrailTurn};
 use serde_json::Value;
 
 use crate::transcript::{parse_timestamp, text, Feed};
@@ -66,6 +66,18 @@ impl Trail {
         &self.turns
     }
 
+    /// The call the agent is waiting on: its latest one still without a
+    /// result. What a permission prompt is about, since Claude Code asks
+    /// before it runs the call and writes the result after.
+    pub fn asking(&self) -> Option<cmux_protocol::Asking> {
+        let action = self
+            .turns
+            .iter()
+            .flat_map(|t| &t.actions)
+            .rfind(|a| a.status == ActionStatus::Running)?;
+        Some(cmux_protocol::Asking { tool: action.tool.clone(), summary: action.summary.clone() })
+    }
+
     fn assistant(&mut self, message: &Value, ms: Option<u64>) {
         let blocks = message["content"].as_array().map(Vec::as_slice).unwrap_or(&[]);
         for block in blocks.iter().filter(|b| b["type"] == "tool_use") {
@@ -79,6 +91,7 @@ impl Trail {
             self.pending.insert(id.clone(), (t, actions.len()));
             actions.push(TrailAction {
                 summary: summarize(&tool, &block["input"]),
+                kind: action_kind(&tool),
                 id,
                 tool,
                 started_ms: ms,
@@ -147,6 +160,23 @@ pub(crate) fn turn(prompt: Option<&str>, ms: Option<u64>) -> TrailTurn {
 pub(crate) fn stamp(turn: &mut TrailTurn, ms: Option<u64>) {
     if ms.is_some() {
         turn.last_ms = ms;
+    }
+}
+
+/// What sort of thing a tool does, by its name: Claude Code's tools, and
+/// Codex's calls and items (`codex_trail`), and the kind an Extension item
+/// says it is (`web_search`).
+pub fn action_kind(tool: &str) -> ActionKind {
+    match tool {
+        "Read" | "Grep" | "Glob" | "LS" | "WebFetch" | "WebSearch" | "ImageView" | "view_image" | "web_search"
+        | "image_view" => ActionKind::Read,
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" | "apply_patch" | "FileChange" | "file_change" => {
+            ActionKind::Edit
+        }
+        "Bash" | "shell" | "local_shell_call" | "exec_command" | "CommandExecution" | "command_execution" => {
+            ActionKind::Run
+        }
+        _ => ActionKind::Other,
     }
 }
 
@@ -278,6 +308,12 @@ pub fn version(path: &Path, consumed: u64, limit: Option<u32>, since_ms: Option<
 
 /// One call's full input and output, read from the transcript at `path`:
 /// absent when the transcript is gone or holds no call `id`.
+/// How many actions failed in the latest of `turns`: what a card in Doing
+/// says about the turn its agent is in.
+pub fn failing(turns: &[TrailTurn]) -> u32 {
+    turns.last().map_or(0, |t| t.actions.iter().filter(|a| a.status == ActionStatus::Error).count() as u32)
+}
+
 pub fn action_detail(path: &Path, id: &str) -> Option<ActionDetail> {
     let file = std::fs::File::open(path).ok()?;
     let mut detail: Option<ActionDetail> = None;
@@ -336,6 +372,72 @@ mod tests {
 
     fn result(id: &str, content: &str, error: bool, at: &str) -> String {
         format!(r#"{{"type":"user","timestamp":"2026-10-25T09:00:{at}.000Z","message":{{"role":"user","content":[{{"tool_use_id":"{id}","type":"tool_result","content":{content},"is_error":{error}}}]}},"toolUseResult":{{}}}}"#)
+    }
+
+    fn asking(lines: &[&str]) -> Option<(String, String)> {
+        let mut trail = Trail::default();
+        for line in lines {
+            trail.feed(line);
+        }
+        trail.asking().map(|a| (a.tool, a.summary))
+    }
+
+    #[test]
+    fn sorts_tools_into_reads_edits_and_runs() {
+        for tool in ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch", "ImageView", "view_image", "web_search"] {
+            assert_eq!(action_kind(tool), ActionKind::Read, "{tool}");
+        }
+        for tool in ["Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch", "FileChange"] {
+            assert_eq!(action_kind(tool), ActionKind::Edit, "{tool}");
+        }
+        for tool in ["Bash", "shell", "local_shell_call", "exec_command", "CommandExecution"] {
+            assert_eq!(action_kind(tool), ActionKind::Run, "{tool}");
+        }
+        for tool in ["Agent", "TodoWrite", "McpToolCall", "mcp__github__search", ""] {
+            assert_eq!(action_kind(tool), ActionKind::Other, "{tool}");
+        }
+        // As a trail reads them.
+        let turns = trail(&[&prompt("Go", "00"), &call("t1", "Edit", r#"{"file_path":"/a.rs"}"#, "01")]);
+        assert_eq!(turns[0].actions[0].kind, ActionKind::Edit);
+    }
+
+    #[test]
+    fn counts_the_failures_of_the_latest_turn_only() {
+        let failed = |id: &str, at: &str| result(id, r#""Exit code 1""#, true, at);
+        let turns = trail(&[
+            &prompt("First", "00"),
+            &call("a", "Bash", r#"{"command":"false"}"#, "01"),
+            &failed("a", "02"),
+            &prompt("Second", "03"),
+            &call("b", "Bash", r#"{"command":"false"}"#, "04"),
+            &failed("b", "05"),
+            &call("c", "Bash", r#"{"command":"true"}"#, "06"),
+            &result("c", r#""ok""#, false, "07"),
+            &call("d", "Bash", r#"{"command":"false"}"#, "08"),
+            &failed("d", "09"),
+        ]);
+        assert_eq!(failing(&turns), 2);
+        assert_eq!(failing(&[]), 0);
+    }
+
+    #[test]
+    fn asks_about_the_latest_call_without_a_result() {
+        let ask = |tool: &str, summary: &str| Some((tool.to_string(), summary.to_string()));
+        // A command waiting to run.
+        let bash = call("t1", "Bash", r#"{"command":"rm -rf build","description":"Clean"}"#, "01");
+        assert_eq!(asking(&[&prompt("Clean up", "00"), &bash]), ask("Bash", "rm -rf build"));
+        // An edit waiting to be made: its file.
+        let edit = call("t2", "Edit", r#"{"file_path":"/src/app.rs","old_string":"a","new_string":"b"}"#, "02");
+        assert_eq!(asking(&[&prompt("Fix it", "00"), &edit]), ask("Edit", "/src/app.rs"));
+        // Answered already: nothing is waiting.
+        assert_eq!(asking(&[&prompt("Clean up", "00"), &bash, &result("t1", r#""ok""#, false, "03")]), None);
+        assert_eq!(asking(&[&prompt("Hello", "00")]), None);
+        // Several calls in one message, one of them unanswered: that one.
+        let both = r#"{"type":"assistant","timestamp":"2026-10-25T09:00:04.000Z","message":{"id":"m-x","role":"assistant","content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"/a.md"}},{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"/b.md","content":"x"}}]}}"#;
+        assert_eq!(
+            asking(&[&prompt("Copy it", "00"), both, &result("r1", r#""text""#, false, "05")]),
+            ask("Write", "/b.md")
+        );
     }
 
     #[test]

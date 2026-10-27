@@ -96,17 +96,24 @@ export function isLentTo(paneId: string, host: HTMLElement): boolean {
  * narrowing one leaves rewrapped fragments and reprinted banners behind.
  * Returning every agent whenever the wall hid resized all of them twice
  * per visit, which is what made tiles fill with debris.
+ *
+ * `fit: false` lends it at the size it has: a wall's mini tile scales the
+ * terminal down to fit instead. Focus moves between agents often, and
+ * resizing the PTY each time would reflow the agent's screen into a
+ * thumbnail's few columns and back. Giving it back still fits it to its
+ * own pane, where it is drawn at full size again.
  */
 export function lendTerminal(
   paneId: string,
   host: HTMLElement,
+  { fit = true }: { fit?: boolean } = {},
 ): (() => void) | null {
   const entry = terminals.get(paneId);
   const element = entry?.term.element;
   if (!entry || !element || entry.borrower) return null;
   entry.borrower = host;
   host.appendChild(element);
-  entry.fit.fit();
+  if (fit) entry.fit.fit();
   changed(paneId);
   return () => {
     // The pane may have closed, or remounted with a new terminal, since.

@@ -12,6 +12,7 @@ import {
 } from "../bindings";
 import { useBoardStore } from "../state/boardStore";
 import { useUiStore } from "../state/uiStore";
+import { opensInTab } from "../state/configStore";
 
 /** The menu's width, to line its right edge up with the "+". */
 const WIDTH = 220;
@@ -75,8 +76,8 @@ export function FrameMenu({
     };
   }, []);
 
-  // The roles of the frame's focused pane's directory, as "New Agent…" in
-  // the palette lists them.
+  // The roles of the frame's focused pane's directory, as the palette's
+  // "Agents: New Agent…" lists them.
   useEffect(() => {
     if (!agents) return;
     let live = true;
@@ -125,14 +126,14 @@ export function FrameMenu({
       ) : (
         <>
           <button onClick={run(() => splitPane(pane, "row"))}>Terminal</button>
-          {/* As the palette's "New Browser Pane": a blank page, its URL
+          {/* As the palette's "Pane: New Browser Pane": a blank page, its URL
               typed in the pane's own bar. */}
           <button onClick={run(() => openBrowser(pane, false, "about:blank"))}>
             Browser
           </button>
           <button onClick={() => setAgents(true)}>Agent…</button>
-          <button onClick={run(() => openDiff(pane, false, null))}>Diff</button>
-          <button onClick={run(() => openGraph(pane, false))}>
+          <button onClick={run(() => openDiff(pane, opensInTab("diff"), null))}>Diff</button>
+          <button onClick={run(() => openGraph(pane, opensInTab("graph")))}>
             Commit graph
           </button>
         </>

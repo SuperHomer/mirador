@@ -144,10 +144,13 @@ sandbox would be working on your live state, not a copy.
 talks to the *real* instance — and `send-input` there types into whatever
 pane id you named, possibly the session running you. Use the debug CLI with
 the sandbox's variables (a function, not a `$VAR` — zsh does not word-split
-an unquoted variable):
+an unquoted variable). Drop `MIRA_PANE` too: inside a Mirador pane it
+names that pane, and `mira` takes it as the pane a command is about, so
+from there every sandbox command names a pane the sandbox does not have —
+cards filed with `task add` came out belonging to no tab.
 
 ```bash
-smira() { XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx ./src-tauri/target/debug/mira "$@"; }
+smira() { env -u MIRA_PANE XDG_RUNTIME_DIR=/tmp/msbx XDG_CONFIG_HOME=$SBX/.config-sbx ./src-tauri/target/debug/mira "$@"; }
 ```
 
 **`target/debug/mira` can be an old build.** The app crate bundles `mira`

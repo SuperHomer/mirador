@@ -157,7 +157,7 @@ export default function PersistShowcase() {
         >
           <span>To end them all:</span>
           <BothKeys mac="⌘K" other="Ctrl+Shift+K" />
-          <span style={{ color: "var(--muted)", fontSize: 12.5 }}>→ “Quit and End All Sessions”</span>
+          <span style={{ color: "var(--muted)", fontSize: 12.5 }}>→ “App: Quit and End All Sessions”</span>
           <span>or</span>
           <span className="mono" style={{ color: "var(--text)" }}>
             mira quit --end-sessions

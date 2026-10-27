@@ -24,7 +24,10 @@
 
 use std::path::Path;
 
-use cmux_protocol::{AgentRole, AgentTeam, AgentWay, Node, RoleSource, SplitDir, TeamMember};
+use cmux_protocol::{
+    AgentRole, AgentTeam, AgentWay, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SplitDir, TeamFields,
+    TeamMember,
+};
 use serde::Deserialize;
 
 /// More agents than this in one tab is not a team, it is a mistake.
@@ -75,6 +78,53 @@ pub fn parse_team(name: &str, path: &Path, source: RoleSource, text: &str) -> Re
         },
         front.other.into_keys().collect(),
     ))
+}
+
+/// `text`, a team file, with the team form's `fields`: description, way,
+/// layout and members set in its frontmatter (a key removed when empty),
+/// the charter as its body. A member says only what differs from the
+/// default — no `count: 1`, no `lead: false`, no `name` but its own — so
+/// the file reads as if written by hand. Every key Mirador does not know
+/// stays, where it was, a member's own included: it keeps those of the
+/// member it was (same role and name, else same place and role). The frontmatter is rewritten, so comments in it
+/// are lost.
+pub fn set_team_fields(text: &str, fields: &TeamFields) -> Result<String, String> {
+    use crate::roles::{set_key, text_value};
+    use serde_yaml_ng::{Mapping, Value};
+    let (mut map, _) = crate::roles::front_and_body(text)?;
+    set_key(&mut map, "description", text_value(&fields.description));
+    set_key(&mut map, "way", text_value(&fields.way));
+    set_key(&mut map, "layout", text_value(&fields.layout));
+    // The members as the file has them, for the keys another tool may have
+    // put on one: each member written keeps those of the one it was.
+    let originals: Vec<Mapping> = match map.get("members") {
+        Some(Value::Sequence(list)) => list.iter().filter_map(|m| m.as_mapping().cloned()).collect(),
+        _ => Vec::new(),
+    };
+    let field = |m: &Mapping, key: &str| m.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+    let members: Vec<Value> = fields
+        .members
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let role = m.role.trim();
+            let name = m.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+            // The same role and name, else the same place if its role
+            // matches; a member added is a new one.
+            let was = originals
+                .iter()
+                .find(|o| field(o, "role").as_deref() == Some(role) && field(o, "name").as_deref() == name)
+                .or_else(|| originals.get(i).filter(|o| field(o, "role").as_deref() == Some(role)));
+            let mut entry = was.cloned().unwrap_or_default();
+            set_key(&mut entry, "role", Some(role.into()));
+            set_key(&mut entry, "name", name.map(Into::into));
+            set_key(&mut entry, "count", (m.count != 1).then(|| m.count.into()));
+            set_key(&mut entry, "lead", m.lead.then_some(true.into()));
+            Value::Mapping(entry)
+        })
+        .collect();
+    set_key(&mut map, "members", (!members.is_empty()).then_some(Value::Sequence(members)));
+    crate::roles::write_file(&map, fields.charter.as_deref())
 }
 
 /// One seat of a team about to start: what the member is called, which
@@ -183,6 +233,17 @@ pub fn problem_of(team: &AgentTeam, roles: &[AgentRole], ways: &[AgentWay]) -> O
 /// charter, the team's way of working, and its teammates. `mira` is the
 /// path to the CLI, which the agent's shell may not have on its PATH.
 pub fn member_prompt(team: &AgentTeam, seat: &Seat, all: &[Seat], way: Option<&str>, mira: &str) -> String {
+    let way = way.map(|w| AgentWay { prompt: w.to_string(), ..Default::default() });
+    member_layers(team, seat, all, way.as_ref(), mira).into_iter().map(|l| l.text).collect()
+}
+
+/// The source of the layer Mirador writes itself.
+pub const WRITTEN_BY_MIRADOR: &str = "written by Mirador";
+
+/// [`member_prompt`] as the layers it is made of, each as it is told —
+/// they follow each other as they are: who the member is and its
+/// teammates, the charter, then the team's way of working.
+pub fn member_layers(team: &AgentTeam, seat: &Seat, all: &[Seat], way: Option<&AgentWay>, mira: &str) -> Vec<PromptLayer> {
     let mut out = format!("# Your team: {}\n\n", team.name);
     let role_of = if seat.name == seat.role { String::new() } else { format!(", a {}", seat.role) };
     let leads = if seat.lead { " You lead it: the team's task comes to you." } else { "" };
@@ -202,13 +263,39 @@ pub fn member_prompt(team: &AgentTeam, seat: &Seat, all: &[Seat], way: Option<&s
              pane and what it is doing, and `{mira} read-screen --pane <pane>` its screen.\n"
         ));
     }
+    let mut layers = vec![PromptLayer { kind: PromptLayerKind::Team, source: WRITTEN_BY_MIRADOR.into(), text: out }];
     if let Some(charter) = &team.prompt {
-        out.push_str(&format!("\n## The team's charter\n\n{charter}\n"));
+        layers.push(PromptLayer {
+            kind: PromptLayerKind::Charter,
+            source: team.path.clone(),
+            text: format!("\n## The team's charter\n\n{charter}\n"),
+        });
     }
     if let Some(way) = way {
-        out.push_str(&format!("\n## The team's way of working\n\n{}\n", way.trim()));
+        layers.push(PromptLayer {
+            kind: PromptLayerKind::TeamWay,
+            source: way.path.clone(),
+            text: format!("\n## The team's way of working\n\n{}\n", way.prompt.trim()),
+        });
     }
-    out
+    layers
+}
+
+/// A member's own layers, from the catalog: [`member_layers`] with the
+/// team's way of working unless its role already follows that way.
+pub fn seat_layers(catalog: &RoleCatalog, team: &AgentTeam, seat: &Seat, all: &[Seat], mira: &str) -> Vec<PromptLayer> {
+    member_layers(team, seat, all, team_way(catalog, team, &seat.role), mira)
+}
+
+/// The team's way of working, for a member of `role` — none when the role
+/// already follows the same one, which its prompt then has already.
+pub fn team_way<'a>(catalog: &'a RoleCatalog, team: &AgentTeam, role: &str) -> Option<&'a AgentWay> {
+    let way = team.way.as_ref()?;
+    let role_way = catalog.roles.iter().find(|r| r.name == role).and_then(|r| r.way.as_ref());
+    if role_way == Some(way) {
+        return None;
+    }
+    catalog.ways.iter().find(|w| &w.name == way)
 }
 
 /// The tab a team fills: its panes, `layout` "columns" side by side, "rows"
@@ -317,6 +404,150 @@ mod tests {
         let lead = member_prompt(&t, &all[1], &all, None, "mira");
         assert!(lead.contains("You lead it"));
         assert!(!lead.contains("way of working"));
+    }
+
+    /// What the launch gave a member before its prompt came in layers:
+    /// the role's resolved prompt, then the roster, joined as
+    /// `prepare_launch` joined them.
+    fn as_launched(catalog: &RoleCatalog, t: &AgentTeam, seat: &Seat, all: &[Seat]) -> Option<String> {
+        let (_, role_prompt) = crate::roles::resolve(catalog, &seat.role).unwrap();
+        let way = team_way(catalog, t, &seat.role).map(|w| w.prompt.as_str());
+        let roster = member_prompt(t, seat, all, way, "mira");
+        let prompt = [role_prompt.as_deref(), Some(roster.as_str())]
+            .into_iter()
+            .flatten()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        (!prompt.is_empty()).then_some(prompt)
+    }
+
+    fn told(catalog: &RoleCatalog, t: &AgentTeam, seat: &Seat, all: &[Seat]) -> Vec<PromptLayer> {
+        let (_, mut layers) = crate::roles::role_layers(catalog, &seat.role).unwrap();
+        layers.extend(seat_layers(catalog, t, seat, all, "mira"));
+        layers
+    }
+
+    #[test]
+    fn a_members_layers_join_into_what_it_is_told() {
+        let way = |name: &str, prompt: &str| AgentWay {
+            name: name.into(),
+            prompt: prompt.into(),
+            path: format!("/r/.mirador/ways/{name}.md"),
+            ..Default::default()
+        };
+        let catalog = RoleCatalog {
+            roles: vec![
+                AgentRole {
+                    prompt: Some("  You review.\n".into()),
+                    way: Some("careful".into()),
+                    path: Some("/r/.mirador/roles/reviewer.md".into()),
+                    ..role("reviewer")
+                },
+                role("dev"),
+                role("planner"),
+            ],
+            ways: vec![way("careful", "Read twice.\n"), way("our-way", "Tests first.")],
+            ..Default::default()
+        };
+        let t = team(SQUAD);
+        let all = seats(&t);
+
+        // gate: its role's prompt and way, the roster, the charter, the team's way.
+        let layers = told(&catalog, &t, &all[3], &all);
+        let kinds: Vec<_> = layers.iter().map(|l| l.kind).collect();
+        use PromptLayerKind::*;
+        assert_eq!(kinds, [Role, RoleWay, Team, Charter, TeamWay]);
+        let sources: Vec<_> = layers.iter().map(|l| l.source.as_str()).collect();
+        assert_eq!(
+            sources,
+            [
+                "/r/.mirador/roles/reviewer.md",
+                "/r/.mirador/ways/careful.md",
+                WRITTEN_BY_MIRADOR,
+                "/r/.mirador/teams/squad.md",
+                "/r/.mirador/ways/our-way.md"
+            ]
+        );
+        assert_eq!(crate::roles::join_layers(&layers), as_launched(&catalog, &t, &all[3], &all));
+
+        // A team with no charter or way, a role with no prompt or way: the
+        // roster alone.
+        let bare = team("---\nmembers: [{role: dev}, {role: planner}]\n---\n");
+        let all = seats(&bare);
+        let layers = told(&catalog, &bare, &all[0], &all);
+        assert_eq!(layers.iter().map(|l| l.kind).collect::<Vec<_>>(), [Team]);
+        let joined = crate::roles::join_layers(&layers);
+        assert_eq!(joined, as_launched(&catalog, &bare, &all[0], &all));
+        assert!(joined.unwrap().starts_with("# Your team: squad\n\nYou are `dev`, in team `squad`."));
+    }
+
+    fn fields_of(t: &AgentTeam) -> TeamFields {
+        TeamFields {
+            description: t.description.clone(),
+            way: t.way.clone(),
+            layout: t.layout.clone(),
+            members: t.members.clone(),
+            charter: t.prompt.clone(),
+        }
+    }
+
+    #[test]
+    fn saves_the_forms_fields_into_a_team_file() {
+        // A key Mirador does not know, between its own, and a comment.
+        let text = "---\ndescription: Plan, build\ncolor: red # mine\nway: our-way\nmembers:\n  - role: planner\n  - role: dev\n    count: 2\n    lead: true\n---\nShip small.\n";
+        let t = team(text);
+        let same = set_team_fields(text, &fields_of(&t)).unwrap();
+        assert_eq!(team(&same), t);
+        // Its key and value survive, in their place; the comment does not.
+        assert!(same.starts_with("---\ndescription: Plan, build\ncolor: red\nway: our-way\nmembers:\n"), "{same}");
+        assert!(same.ends_with("---\nShip small.\n"));
+
+        // Defaults and blanks are left out.
+        let lean = TeamFields {
+            description: Some("  ".into()),
+            members: vec![TeamMember { role: "dev".into(), name: Some("".into()), count: 1, lead: false }],
+            ..Default::default()
+        };
+        let out = set_team_fields(text, &lean).unwrap();
+        assert_eq!(out, "---\ncolor: red\nmembers:\n- role: dev\n---\n");
+        let t = team(&out);
+        assert_eq!((t.description, t.way, t.prompt), (None, None, None));
+
+        // A file with no frontmatter gets one.
+        let fresh = set_team_fields("", &TeamFields { members: vec![TeamMember { role: "dev".into(), name: Some("ana".into()), count: 3, lead: true }], ..Default::default() }).unwrap();
+        assert_eq!(fresh, "---\nmembers:\n- role: dev\n  name: ana\n  count: 3\n  lead: true\n---\n");
+    }
+
+    #[test]
+    fn a_members_own_keys_stay_with_it() {
+        let text = "---\nmembers:\n  - role: planner\n    color: blue\n  - role: dev\n    name: ana\n    seat: 3\n---\n";
+        let t = team(text);
+        let same = set_team_fields(text, &fields_of(&t)).unwrap();
+        assert_eq!(same, "---\nmembers:\n- role: planner\n  color: blue\n- role: dev\n  name: ana\n  seat: 3\n---\n");
+        // ana counted twice and moved first: her key goes with her.
+        let mut f = fields_of(&t);
+        f.members.swap(0, 1);
+        f.members[0].count = 2;
+        let out = set_team_fields(text, &f).unwrap();
+        assert_eq!(out, "---\nmembers:\n- role: dev\n  name: ana\n  seat: 3\n  count: 2\n- role: planner\n  color: blue\n---\n");
+        // The planner removed, and a reviewer added: its keys go, the new
+        // one has none.
+        let mut f = fields_of(&t);
+        f.members[0] = TeamMember { role: "reviewer".into(), name: None, count: 1, lead: false };
+        let out = set_team_fields(text, &f).unwrap();
+        assert_eq!(out, "---\nmembers:\n- role: reviewer\n- role: dev\n  name: ana\n  seat: 3\n---\n");
+    }
+
+    #[test]
+    fn a_built_in_team_survives_a_save_unchanged() {
+        for (path, name, text) in crate::builtin::of("teams") {
+            let parse = |text: &str| parse_team(&name, Path::new(&path), RoleSource::Builtin, text).unwrap();
+            let (t, ignored) = parse(text);
+            let saved = set_team_fields(text, &fields_of(&t)).unwrap();
+            assert_eq!(parse(&saved), (t, ignored), "{name}");
+        }
     }
 
     #[test]

@@ -29,16 +29,17 @@ downloads, the feature tour and the keybinding reference.
   OpenCode, Pi, Gemini CLI, Amp, Aider and more, found by their process —
   each with its role, model and (Claude Code) whether it is working, idle,
   or waiting on you; type into any of them from there. The same key
-  switches back, and each tab remembers its view across restarts. Its
-  **Splits | Agents | Tasks** switch turns it over to the tab's task board.
+  switches back, and each tab remembers its view across restarts. The
+  sidebar's **Splits · Wall · Tasks · Board** switch turns it over to the
+  tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
   start Claude Code or Codex with their own model, prompt and shared way of
   working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
-- **Task board**, the agent wall's Tasks side (its **Splits | Agents | Tasks**
-  switch, the palette's *Agents: Task Board*, or `mira agent board`): what
-  each agent was given and where it stands, in To do, Doing, Needs you and Done, for this team or every
+- **Task board**, the agent wall's Tasks side (**Tasks** in the sidebar's
+  view switch, the palette's *Agents: Task Board*, or `mira agent board`): what
+  each agent was given and where it stands, in Needs you, To do, Doing and Done, for this team or every
   tab. Mirador adds a card whenever it gives an agent a task (`team start`,
   `agent new`, `mira agent send`) and, for Claude Code and Codex, moves it
   as the agent's turns end; agents write their own with `mira task add` and
@@ -50,8 +51,8 @@ downloads, the feature tour and the keybinding reference.
   it called, each opening to its full input and output — read from Claude
   Code's transcript or Codex's session file, never copied
   (`mira agent trail`; docs/AGENTS.md)
-- **Board** (`mira view board`, `mod+shift+O`, or the Tabs | Board switch
-  in the sidebar): every tab as a frame and every pane as a card on one
+- **Board** (`mira view board`, `mod+shift+O`, or **Board** in the
+  sidebar's view switch): every tab as a frame and every pane as a card on one
   canvas — a tab showing its agent wall shows the wall in its frame instead,
   its agents' live tiles or its task board. Scroll over the focused card to scroll its content, at any zoom
   (a browser card pans away from 100%, where its page is not drawn);
@@ -95,7 +96,7 @@ downloads, the feature tour and the keybinding reference.
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself
-  once with that release's notes (`What's New` in the palette reopens it)
+  once with that release's notes (`App: What's New` in the palette reopens it)
 
 ## Install (macOS)
 
@@ -277,7 +278,7 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |
-| ⌘I | Ctrl+Shift+I | notifications panel |
+| ⌘I | Ctrl+Shift+I | Inbox |
 | ⌘B | Ctrl+Shift+B | toggle sidebar |
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
 
@@ -313,6 +314,28 @@ you split, which is almost always what you want. `defaultCwd` fills in only
 where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
+
+## Where the editor, diffs and the graph open
+
+Opened from the app — the palette, a frame's + menu, the wall — the roles,
+ways and teams editor gets a tab of its own, and a diff or the commit
+graph a split beside the focused pane. Three keys change that, each
+`"tab"` or `"split"`, the values of a custom command's `target`:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "editorOpensIn": "split", "diffOpensIn": "tab", "graphOpensIn": "tab" }
+```
+
+Any other value is ignored for the default (`editorOpensIn` `"tab"`, the
+other two `"split"`), and an edit applies at once. In a tab, the editor or
+a graph already open on the same repository (for the editor outside a
+repository, the same directory) is shown again instead of a second one; a
+diff always opens a new pane, and so does a split. The `mira` commands
+ignore these keys and keep their own `--tab` flag — which reuses the same
+way: `mira graph --tab` and `mira agent edit --tab` focus the graph or
+editor already open on that repository and print its pane, and open one
+only when there is none.
 
 ## Agent roles and the agent wall
 
@@ -405,8 +428,9 @@ it shows before a project's own settings apply. Put `allow` in a role of
 your own. Codex roles cannot be limited yet: a Codex role with any of
 these fields does not start.
 
-**Edit them in the app:** *Edit Roles, Ways & Teams* in the palette (or
-`mira agent edit`) opens a pane beside the one you are in, listing every
+**Edit them in the app:** *Agents: Edit Roles, Ways & Teams* in the palette (or
+`mira agent edit`) opens a pane — from the app in a tab of its own (see
+`editorOpensIn`), from `mira agent edit` beside the pane it ran in — listing every
 role, way of working and team its directory sees — marked `repo`, `yours`
 or `mirador.json` — with what is wrong with any of them. Pick one to edit
 its file; `+` starts a new one from a template, in the repository or in
@@ -432,12 +456,12 @@ what the current directory sees and where each came from, and warns about
 anything it could not use: a file that does not parse, a field that is not
 one, a way nobody wrote.
 
-Each role is an entry under the palette's *New Agent…* — Enter on it
+Each role is an entry under the palette's *Agents: New Agent…* — Enter on it
 lists plain Claude Code and the roles, to search in turn (Esc or
 Backspace goes back; typing a role's name at the top finds it too, below
-the commands) — an entry in the wall's **+ New agent** menu, and a `mira
+the commands) — an entry in the wall's **+ Agent** menu, and a `mira
 agent new --role <role> [task…]` target — the roles of the directory you
-are in. Teams (*Start Team…*) and `~/.ssh/config` hosts (*SSH…*) are
+are in. Teams (*Agents: Start Team…*) and `~/.ssh/config` hosts (*Pane: SSH…*) are
 listed the same way. The agent opens in a pane
 beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
@@ -476,7 +500,7 @@ The planner splits the work into tasks; devs build; nothing merges
 until gate has read the diff.
 ```
 
-`mira team start squad "add OAuth"` (or the palette's *Start Team…* ›
+`mira team start squad "add OAuth"` (or the palette's *Agents: Start Team…* ›
 *squad*) opens the tab with every member in an even grid, its `⚑` mark in
 the sidebar. Each member gets its role's prompt, then the charter, the
 team's way of working, and its teammates by name with the commands that
@@ -491,7 +515,7 @@ the Rails doctrine's taste: the codebase's conventions, the simplest thing
 that works, small steps that ship with their tests, nothing pushed. The
 planner splits the task, puts each step on the task board, and hands the
 worker one step at a time (`--wait`), then asks the reviewer, who answers
-it with APPROVE or CHANGES; the planner's edit tools are off. Start it with the palette's *Start Team…* ›
+it with APPROVE or CHANGES; the planner's edit tools are off. Start it with the palette's *Agents: Start Team…* ›
 *omakase*, or `mira team start omakase "…"`. Its roles
 (`omakase-planner`, `-worker`, `-reviewer`), its way of working and the
 team are *built-in*: the same for everyone, read-only, and replaced by any
@@ -544,49 +568,84 @@ tab's agents in a grid — roles, and any agent you started by hand:
 `claude`, `codex`, `opencode`, `pi`, `gemini`, `amp`, `cursor-agent`,
 `copilot`, `aider`, `goose`, `qwen`, `crush` or `droid`, found in the
 pane's process table (macOS and Linux; on Windows only Claude Code's hooks
-make an agent). `mod+shift+A`, the palette's *Toggle Agent Wall*, the
-**▦ Wall** button beside the sidebar's Agents heading (lit while the tab
-is a wall) and `mira agent wall` (which prints `wall on` or `wall off`)
-each switch the current tab between the two, and so does **Splits** in
-the wall's header. Each tab keeps its view across restarts, and the
+make an agent). `mod+shift+A`, the palette's *Agents: Show Wall*
+and `mira agent wall` (which prints `wall on` or `wall off`)
+each switch the current tab between the two, and so does the sidebar's
+**Splits · Wall · Tasks · Board** switch, at its top. Each tab keeps its view across restarts, and the
 board draws a walled tab's wall in its frame, in place of its cards. The tiles are the
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
 the keyboard goes to the focused agent's tile when the wall comes up. A
-new agent from the wall's **+ New agent** splits the tab under the wall and
-gets a tile. Each tile shows the role, the model, and what the agent is
+new agent from the wall's **+ Agent** — a role of the repository, or
+plain Claude Code or Codex, with an optional first message that also
+becomes its card — splits the tab under the wall and gets a tile. A tab
+with no agents yet shows its roles and teams there instead, ready to
+start. The wall's toolbar shows all its agents or only those that
+need you, are working or are idle, and switches between **Focus** and
+**Grid**. In Grid it sets how many agents a page holds (4, 6 or 9: the
+`agentsPerTab` key), and in Focus it pins the agent shown large or lets
+it follow whoever needs you. Focus shows that agent's terminal large and
+the others down a rail: those that need you and those at work as live
+thumbnails (drawn smaller, never resized), the idle one line each; click
+one to pin it. Following moves only once nobody has typed into the large
+one for two seconds. Grid shows every agent's terminal at full size, a
+page of 4, 6 or 9 at a time, with a tab per page once there are more
+than one (each with a pip per agent, and a count when one needs you);
+each tile's **Focus ›** shows it large. Switching between the two keeps
+the keyboard on the agent that had it. Tiles stand in the team's order,
+never reshuffled by status. Each tile shows the role, the model, and what the agent is
 doing: **working**, **needs you** (with what for), or **idle**. Click a
 tile's header to see that agent alone in its tab, which leaves the wall.
-The header's **Splits | Agents | Tasks** switch leaves the wall, or turns
-it over to the tab's task board in place of the tiles, and back; the wall comes up again on
-the side it was left on, across restarts too.
+The sidebar's switch turns the wall over to the tab's task board in
+place of the tiles, and back; the wall comes up again on the side it was
+left on, across restarts too.
 
-**Right-click an agent** (its sidebar row, or a wall tile's header; the
-palette's *Agent Activity* for the focused one) to open its activity: the
-tokens, context and time its Claude Code session has used, how far it is
-through its own task list, and every subagent it started, each with its
-type, model, tasks done (as `n/m` and a percentage), tokens and run time,
-running ones first. The wall shows the same list in every Claude Code
-tile, beside its terminal (under it, when the tile is narrow), with the
-task progress in the tile's header; its ⤢ opens the full panel. It is read from Claude Code's transcripts, which the
+Every agent ends in a **status bar** — its tile on the wall, and its
+pane in the splits: its harness, model and effort, how full its context
+is (a meter against the model's window, when that is known), the tokens
+and time it has used, and, for Claude Code, a **Subagents** button that
+slides its subagents over the right of its terminal, which stays live
+beside it: each with its type, model, tasks done (as `n/m` and a
+percentage), tokens and run time. On the wall the agent's own task
+progress is in the tile's header. The palette's *Agents: Show Activity* opens
+all of it for the focused agent in a panel. It is read from Claude Code's transcripts, which the
 hooks point Mirador to, so it needs the integration set up; the CLI
-equivalent is `mira agent activity`. There is no cost figure: tokens are
-what the transcripts record, and a price would be an estimate.
+equivalent is `mira agent activity`. A Codex agent's activity is its
+model, tokens, context and time, read from the session file Codex
+writes; it has no task list or subagents to show. There is no cost
+figure: tokens are what the transcripts record, and a price would be an
+estimate.
 
-In the sidebar, every tab is listed as usual, and below them, under an
-**Agents** heading, the agents running in the tab you are on, each on one
-line: ✳ and its name — the Claude Code session's, as `claude agents`
-lists it (given with `--name` or `/rename`, or made up by Claude Code),
-else its role, else the harness.
+In the sidebar, every tab is listed as usual, and directly under the tab
+you are on, the agents running in it, each with its status (a "!" square
+when it needs you, with what it asks on a second line; a pulsing dot while
+it works; a ring when idle), how long it has been so, and its name — the
+Claude Code session's, as `claude agents` lists it (given with `--name` or
+`/rename`, or made up by Claude Code), else its role, else the harness.
 Clicking a tab shows the whole tab — Claude beside your dev server, say;
-clicking an agent shows that agent's pane alone, filling its tab, while
-the other panes keep running untouched. Click the tab again for the split.
-Each tab's agents are its own: switch tabs and the section switches with
-you, and every tab shows how many agents it holds (✳ 2), filled in when
-one of them needs you. The tab shortcuts number rows in the order shown.
+clicking an agent shows the tab's wall with that agent large (or, with
+`agentClick` set to `"pane"`, the agent's pane alone, filling its tab).
+Each tab's agents are its own: switch tabs and the tree moves with you,
+and every other tab shows a pip per agent with its status. The tab
+shortcuts (`mod+1…9`, next and previous tab) go over tabs only, by the
+number beside each. At the sidebar's foot, **Inbox** counts the agents that need you,
+across every tab, and opens the notifications; **Commands** opens the
+palette.
 
-Any pane can be shown alone that way: *Toggle Pane Zoom* in the palette,
+Any pane can be shown alone that way: *Pane: Toggle Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).
+
+Two keys in `mirador.json` shape the wall. `agentClick` is what clicking
+an agent in the sidebar does: `"wall"` (the default) shows its tab's wall
+in Focus, with that agent large, and `"pane"` shows the agent's pane
+alone, filling its tab. `agentsPerTab` is how many agents a page of the
+wall's Grid layout holds: `4` (the default), `6` or `9`. Any other value
+of either is ignored for its default.
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "agentClick": "pane", "agentsPerTab": 6 }
+```
 
 
 Status comes from the Claude Code hooks, so it needs the integration set up
@@ -599,7 +658,7 @@ agents keep going, and the next launch reattaches to them — the same
 processes, with what they printed while Mirador was closed.
 
 - **Closing a pane** ends it and everything in it, as before.
-- **Quit and End All Sessions** in the palette (or `mira quit --end-sessions`)
+- **App: Quit and End All Sessions** in the palette (or `mira quit --end-sessions`)
   ends every session, then quits. Cmd+Q keeps them.
 - **Notifications** raised while Mirador was closed arrive as one when it
   reopens.
@@ -625,7 +684,7 @@ stranded. Design:
 When the running version differs from the one last launched, Mirador opens a
 read-only pane with that release's notes, in a tab of its own that does
 *not* steal focus — the pane you were typing in keeps the cursor. The
-palette's **What's New** reopens it any time.
+palette's **App: What's New** reopens it any time.
 
 Notes are the GitHub release body for the running tag, fetched once and
 cached under the app's data directory, so reopening works offline. A fresh

@@ -10,9 +10,17 @@
  * apart, so no two overlap, and cards stack down their frame, so no two in
  * a frame do. The controls sit on screen, unscaled, as the app's do, so
  * the parent must be positioned.
+ *
+ * A frame's title is the app's: its tab's name, a pip per agent and the
+ * view it shows ("Splits", "Wall · Focus"); a frame where an agent waits
+ * on you has a peach edge, the current one a muted edge. A walled tab's
+ * frame holds its wall rather than cards. And while anyone waits, the
+ * board's bottom row starts with the banner that counts them, the zoom
+ * controls at its other end, as BoardHost draws them.
  */
 
 import TermLines, { type Line } from "./TermLines";
+import { FocusWall, Pip, type MockAgent, type Status } from "./MockAgents";
 
 const FRAME_HEADER = 36;
 const FRAME_PADDING = 16;
@@ -40,10 +48,18 @@ export type Frame = {
       in order. */
   x?: number;
   cards: Card[];
+  /** A walled tab: its wall in Focus, this tall, in place of its cards. */
+  wall?: { agents: MockAgent[]; large: number; h: number };
 };
+
+/** A frame's agents' statuses, in order: its wall's, or its cards'. */
+function statuses(frame: Frame): Status[] {
+  return frame.wall ? frame.wall.agents.map((a) => a.status) : frame.cards.filter((c) => c.status).map((c) => c.status!);
+}
 
 /** Cards stacked down their frame, CARD_GAP apart, as the board lays them. */
 export function layout(frame: Frame) {
+  if (frame.wall) return { cards: [], h: FRAME_HEADER + frame.wall.h + FRAME_PADDING };
   let y = FRAME_HEADER;
   const cards = frame.cards.map((card) => {
     const at = { x: FRAME_PADDING, y, w: CARD_W, h: card.h };
@@ -152,6 +168,9 @@ export default function BoardCanvas({
 }) {
   const placed = frames.map((frame, i) => ({ frame, x: frame.x ?? i * (FRAME_W + FRAME_GAP), ...layout(frame) }));
   const view = { w: screen.w / zoom, h: screen.h / zoom };
+  // Who waits on you, and in how many frames: the banner's two numbers.
+  const waiting = frames.reduce((n, f) => n + statuses(f).filter((st) => st === "needsYou").length, 0);
+  const waitingFrames = frames.filter((f) => statuses(f).includes("needsYou")).length;
   return (
     <>
       <svg
@@ -180,61 +199,86 @@ export default function BoardCanvas({
               height={h}
               rx={10}
               fill="color-mix(in srgb, var(--bg) 55%, transparent)"
-              stroke={frame.current ? "var(--muted)" : "var(--surface)"}
+              stroke={statuses(frame).includes("needsYou") ? "var(--peach)" : frame.current ? "var(--muted)" : "var(--surface)"}
+              strokeWidth={statuses(frame).includes("needsYou") ? 1.5 : 1}
             />
-            {/* the frame's title bar: its name, "+" and × */}
-            <text x={16} y={23} fontSize={14} fontWeight={600} fill={frame.current ? "var(--text)" : "var(--subtext)"}>
-              {frame.title}
-            </text>
+            {/* the frame's title bar: its name, its agents, its view, "+" and × */}
+            <foreignObject x={16} y={0} width={FRAME_W - 76} height={FRAME_HEADER}>
+              <div className={`board-frame-title${frame.current ? " current" : ""}`}>
+                <span className="board-frame-name">{frame.title}</span>
+                {statuses(frame).length > 0 && (
+                  <span className="ms-pips">
+                    {statuses(frame).map((st, i) => (
+                      <Pip key={i} status={st} />
+                    ))}
+                  </span>
+                )}
+                <span className="board-frame-view">{frame.wall ? "Wall · Focus" : "Splits"}</span>
+              </div>
+            </foreignObject>
             <text x={FRAME_W - 46} y={24} fontSize={16} fill="var(--subtext)" textAnchor="middle">
               +
             </text>
             <text x={FRAME_W - 20} y={24} fontSize={16} fill="var(--subtext)" textAnchor="middle">
               ×
             </text>
+            {frame.wall && (
+              <foreignObject x={FRAME_PADDING} y={FRAME_HEADER} width={CARD_W} height={frame.wall.h}>
+                <div className="board-frame-wall">
+                  <FocusWall agents={frame.wall.agents} large={frame.wall.large} />
+                </div>
+              </foreignObject>
+            )}
             {cards.map((c, ci) => (
               <CardView key={ci} {...c} onClick={onCard && (() => onCard(fi, ci))} />
             ))}
           </g>
         ))}
       </svg>
-      <div
-        className="board-mock-controls"
-        style={{
-          position: "absolute",
-          right: 12,
-          bottom: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "4px 6px 4px 10px",
-          borderRadius: 8,
-          background: "var(--surface)",
-          color: "var(--subtext)",
-          fontSize: 12,
-        }}
-      >
-        <span>{Math.round(zoom * 100)}%</span>
-        {["Tabs", "New frame", "Fit"].map((name) => {
-          const style = {
-            border: "none",
-            borderRadius: 5,
-            background: "var(--bg)",
-            color: "var(--text)",
-            padding: "3px 10px",
+      <div className="board-mock-overlay">
+        {waiting > 0 && (
+          <div className="board-mock-banner">
+            <span className="board-mock-count">
+              {waiting} {waiting === 1 ? "agent needs" : "agents need"} you
+            </span>{" "}
+            in {waitingFrames} {waitingFrames === 1 ? "frame" : "frames"} · <span className="board-mock-fly">Fly to next</span>
+          </div>
+        )}
+        <div
+          className="board-mock-controls"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "4px 6px 4px 10px",
+            borderRadius: 8,
+            background: "var(--surface)",
+            color: "var(--subtext)",
             fontSize: 12,
-            whiteSpace: "nowrap" as const,
-          };
-          return name === "Tabs" && onTabs ? (
-            <button key={name} onClick={onTabs} style={style}>
-              {name}
-            </button>
-          ) : (
-            <span key={name} style={style}>
-              {name}
-            </span>
-          );
-        })}
+          }}
+        >
+          <span>{Math.round(zoom * 100)}%</span>
+          {["Tabs", "New frame", "Fit"].map((name) => {
+            const style = {
+              border: "none",
+              borderRadius: 5,
+              background: "var(--bg)",
+              color: "var(--text)",
+              padding: "3px 10px",
+              fontSize: 12,
+              whiteSpace: "nowrap" as const,
+            };
+            return name === "Tabs" && onTabs ? (
+              <button key={name} onClick={onTabs} style={style}>
+                {name}
+              </button>
+            ) : (
+              <span key={name} style={style}>
+                {name}
+              </span>
+            );
+          })}
+        </div>
       </div>
     </>
   );

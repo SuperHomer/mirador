@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use cmux_protocol::{
-    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, View,
-    WallView, WorkspaceSnapshot,
+    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, TaskLayout,
+    View, WallMode, WallView, WorkspaceSnapshot,
 };
 
 use crate::{board, layout};
@@ -80,11 +80,16 @@ pub struct PaneMeta {
     pub agent_session_status: Option<cmux_protocol::AgentStatus>,
     /// The `--model` the poller saw the pane's agent started with.
     pub agent_model: Option<String>,
+    /// Its role's effort, when the role sets one.
+    pub agent_effort: Option<String>,
     /// What the agent's hooks last said it is doing (not persisted: a
     /// restarted app has not heard from it yet).
     pub agent_status: Option<cmux_protocol::AgentStatus>,
     /// The last Notification message from the agent's hooks.
     pub agent_message: Option<String>,
+    /// The tool call it waits on a permission for, read from its
+    /// transcript when the prompt came; gone once it stops waiting.
+    pub agent_asking: Option<cmux_protocol::Asking>,
     /// Unix millis of the last `agent_status` change.
     pub agent_since_ms: Option<u64>,
     /// Agent-editor pane: the role, way and team files its directory sees,
@@ -142,8 +147,10 @@ impl PaneMeta {
         self.agent_name = None;
         self.agent_session_status = None;
         self.agent_model = None;
+        self.agent_effort = None;
         self.agent_status = None;
         self.agent_message = None;
+        self.agent_asking = None;
         self.agent_since_ms = None;
     }
 
@@ -249,9 +256,15 @@ impl PaneMeta {
     }
 
     /// Whether its activity can be read: a Claude Code agent whose hooks
-    /// reported its transcript.
-    pub fn has_activity(&self) -> bool {
-        self.harness() == Some(cmux_protocol::Harness::Claude) && self.agent_transcript.is_some()
+    /// reported its transcript, or a Codex one whose rollout is known.
+    /// The app finds a rollout (`lsof`), not the pane, so it says whether
+    /// it has: `rollout_known`.
+    pub fn has_activity(&self, rollout_known: bool) -> bool {
+        match self.harness() {
+            Some(cmux_protocol::Harness::Claude) => self.agent_transcript.is_some(),
+            Some(cmux_protocol::Harness::Codex) => rollout_known,
+            _ => false,
+        }
     }
 
     /// What the agent is doing: what its hooks said, else what Claude
@@ -281,6 +294,12 @@ pub struct Tab {
     /// The side of the wall it shows. Kept while the wall is off, so the
     /// wall comes back on the side last shown. Persisted.
     pub wall_view: WallView,
+    /// How the wall's Agents side lays its agents out. Kept while the wall
+    /// is off, like `wall_view`. Persisted.
+    pub wall_mode: WallMode,
+    /// How the wall's Tasks side lays its board out. Kept while the wall is
+    /// off, like `wall_view`. Persisted.
+    pub task_layout: TaskLayout,
     /// Where the tab's frame sits on the board.
     pub frame: BoardPoint,
     /// Each pane's card on the board, relative to `frame`. Kept for every
@@ -312,6 +331,8 @@ impl Tab {
             team: None,
             wall: false,
             wall_view: WallView::default(),
+            wall_mode: WallMode::default(),
+            task_layout: TaskLayout::default(),
             frame: BoardPoint::default(),
         }
     }
@@ -319,6 +340,21 @@ impl Tab {
     /// The tab's frame on the board.
     pub fn frame_rect(&self) -> BoardRect {
         board::frame_rect(self.frame, &self.cards)
+    }
+
+    /// The name the sidebar shows: an explicit rename, else the focused
+    /// pane's OSC title, else the basename of its cwd, else "shell".
+    pub fn resolved_title(&self, meta: &HashMap<String, PaneMeta>) -> String {
+        let pane_meta = meta.get(&self.focused);
+        self.title
+            .clone()
+            .or_else(|| pane_meta.and_then(|m| m.title.clone()))
+            .unwrap_or_else(|| {
+                pane_meta
+                    .and_then(|m| m.cwd.as_deref())
+                    .map(display_dir)
+                    .unwrap_or_else(|| "shell".to_string())
+            })
     }
 }
 
@@ -412,6 +448,12 @@ impl Workspace {
     /// New pane ids, for a layout built before its tab exists.
     pub fn fresh_pane_ids(n: usize) -> Vec<String> {
         (0..n).map(|_| new_id()).collect()
+    }
+
+    /// The first pane, in tab and layout order, that `wanted` picks: one
+    /// already showing what the app would otherwise open again.
+    pub fn find_pane(&self, wanted: impl Fn(&str) -> bool) -> Option<String> {
+        self.tabs.iter().flat_map(|t| layout::pane_ids(&t.root)).find(|p| wanted(p))
     }
 
     /// The tab holding `pane`, for reading.
@@ -600,6 +642,33 @@ impl Workspace {
         true
     }
 
+    /// Shows the tab holding `pane` as its wall's agents, laid out as
+    /// `mode`; false when no tab holds `pane`. Unlike `toggle_wall`, it
+    /// never turns the wall off.
+    pub fn show_wall_in(&mut self, pane: &str, mode: WallMode) -> bool {
+        self.set_wall_mode(pane, mode) && self.show_wall(pane, WallView::Agents)
+    }
+
+    /// Lays the Agents side of the wall of the tab holding `pane` out as
+    /// `mode`; false when no tab holds `pane`. It does not turn the wall on.
+    pub fn set_wall_mode(&mut self, pane: &str, mode: WallMode) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        tab.wall_mode = mode;
+        true
+    }
+
+    /// Lays the Tasks side of the wall of the tab holding `pane` out as
+    /// `layout`; false when no tab holds `pane`. It does not turn the wall on.
+    pub fn set_task_layout(&mut self, pane: &str, layout: TaskLayout) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        tab.task_layout = layout;
+        true
+    }
+
     /// Shows the whole of the tab holding `pane` again.
     pub fn unzoom(&mut self, pane: &str) -> bool {
         match self.tab_of_pane_mut(pane) {
@@ -719,21 +788,10 @@ impl Workspace {
                 .tabs
                 .iter()
                 .map(|t| {
-                    let pane_meta = meta.get(&t.focused);
-                    let cwd = pane_meta.and_then(|m| m.cwd.clone());
-                    let osc_title = pane_meta.and_then(|m| m.title.clone());
-                    let title = t
-                        .title
-                        .clone()
-                        .or(osc_title)
-                        .unwrap_or_else(|| {
-                            cwd.as_deref()
-                                .map(display_dir)
-                                .unwrap_or_else(|| "shell".to_string())
-                        });
+                    let cwd = meta.get(&t.focused).and_then(|m| m.cwd.clone());
                     TabSnapshot {
                         id: t.id.clone(),
-                        title,
+                        title: t.resolved_title(meta),
                         cwd: cwd.clone().map(|c| abbreviate_home(&c)),
                         root: t.root.clone(),
                         focused_pane: t.focused.clone(),
@@ -755,6 +813,12 @@ impl Workspace {
                         zoomed_pane: t.zoomed.clone(),
                         wall: t.wall,
                         wall_view: t.wall_view,
+                        wall_mode: t.wall_mode,
+                        task_layout: t.task_layout,
+                        // Filled from the agents, which the app adds
+                        // (`wall::fill`).
+                        wall_urgency: Vec::new(),
+                        wall_pages: Vec::new(),
                         frame: t.frame_rect(),
                         cards: layout::pane_ids(&t.root)
                             .into_iter()
@@ -839,12 +903,62 @@ fn abbreviate_home(path: &str) -> String {
     path.to_string()
 }
 
+/// Whether two panes show the same files — what decides whether an open
+/// graph or editor is shown again rather than another opened: the same
+/// repository when both are in one, compared after resolving the paths so
+/// that two spellings of one directory agree; the same directory when
+/// neither is in one; and never when only one is, whatever its directory.
+pub fn same_place(a_root: Option<&str>, a_cwd: Option<&str>, b_root: Option<&str>, b_cwd: Option<&str>) -> bool {
+    let real = |p: &str| std::fs::canonicalize(p).unwrap_or_else(|_| std::path::PathBuf::from(p));
+    match (a_root, b_root) {
+        (Some(a), Some(b)) => real(a) == real(b),
+        (None, None) => matches!((a_cwd, b_cwd), (Some(a), Some(b)) if real(a) == real(b)),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
         crate::agents::RunningAgent { harness, pid: 42, args: args.into() }
+    }
+
+    #[test]
+    fn panes_show_the_same_files_by_repository_else_by_directory() {
+        let root = std::env::temp_dir().join(format!("mira-same-place-{}", std::process::id()));
+        let (repo, other, plain) = (root.join("repo"), root.join("other"), root.join("plain"));
+        for d in [&repo, &other, &plain] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        let spelled = s(&repo.join("..").join("repo").join("."));
+        // One repository, spelled two ways; another one.
+        assert!(same_place(Some(&s(&repo)), None, Some(&spelled), None));
+        assert!(!same_place(Some(&s(&repo)), None, Some(&s(&other)), None));
+        // Only one side in a repository: not the same, even in one directory.
+        assert!(!same_place(Some(&s(&repo)), Some(&s(&repo)), None, Some(&s(&repo))));
+        assert!(!same_place(None, Some(&s(&repo)), Some(&s(&repo)), Some(&s(&repo))));
+        // Neither in one: the directory decides; none known is not the same.
+        assert!(same_place(None, Some(&s(&plain)), None, Some(&s(&plain.join(".")))));
+        assert!(!same_place(None, Some(&s(&plain)), None, Some(&s(&other))));
+        assert!(!same_place(None, None, None, None));
+        // A path that cannot be resolved is compared as written.
+        assert!(same_place(Some("/no/such/repo"), None, Some("/no/such/repo"), None));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn finds_the_first_pane_showing_something_in_tab_order() {
+        let mut ws = Workspace::default();
+        let (_, a) = ws.new_tab();
+        let (_, b) = ws.new_tab();
+        let c = ws.split_pane(&b, SplitDir::Row).unwrap();
+        assert_eq!(ws.find_pane(|p| p == c || p == b), Some(b.clone()));
+        assert_eq!(ws.find_pane(|p| p == c), Some(c));
+        assert_eq!(ws.find_pane(|p| p == a), Some(a));
+        assert_eq!(ws.find_pane(|_| false), None);
     }
 
     #[test]
@@ -928,6 +1042,7 @@ mod tests {
             agent_session: Some("claude-fg:s1".into()),
             agent_role: Some("reviewer".into()),
             agent_model: Some("opus".into()),
+            agent_effort: Some("high".into()),
             agent_status: Some(cmux_protocol::AgentStatus::Idle),
             ..Default::default()
         };
@@ -937,6 +1052,7 @@ mod tests {
         assert_eq!(m.agent_session, None);
         assert_eq!(m.agent_role, None);
         assert_eq!(m.agent_model, None);
+        assert_eq!(m.agent_effort, None);
         assert_eq!(m.agent_status, None);
     }
 
@@ -1072,6 +1188,48 @@ mod tests {
         assert_eq!(side(&ws), WallView::Tasks);
         assert!(ws.show_wall(&claude, WallView::Agents));
         assert_eq!(side(&ws), WallView::Agents);
+    }
+
+    #[test]
+    fn a_walls_layouts_are_its_tabs_own() {
+        let mut ws = Workspace::default();
+        let first = ws.focused_pane();
+        ws.new_tab();
+        let tab = |ws: &Workspace, i: usize| ws.snapshot(&HashMap::new()).tabs[i].clone();
+        assert_eq!(tab(&ws, 0).wall_mode, WallMode::Focus);
+        assert_eq!(tab(&ws, 0).task_layout, TaskLayout::Columns);
+
+        // Set through one pane, only that pane's tab changes, and the wall
+        // stays off.
+        assert!(ws.set_wall_mode(&first, WallMode::Grid));
+        assert!(ws.set_task_layout(&first, TaskLayout::Swimlanes));
+        assert_eq!(tab(&ws, 0).wall_mode, WallMode::Grid);
+        assert_eq!(tab(&ws, 0).task_layout, TaskLayout::Swimlanes);
+        assert!(!tab(&ws, 0).wall);
+        assert_eq!(tab(&ws, 1).wall_mode, WallMode::Focus);
+        assert_eq!(tab(&ws, 1).task_layout, TaskLayout::Columns);
+
+        assert!(!ws.set_wall_mode("nope", WallMode::Grid));
+        assert!(!ws.set_task_layout("nope", TaskLayout::Swimlanes));
+    }
+
+    #[test]
+    fn showing_the_wall_in_a_layout_turns_it_on_and_never_off() {
+        let mut ws = Workspace::default();
+        let pane = ws.focused_pane();
+        // Off, on its Tasks side: shown, on the Agents side, in Grid.
+        ws.show_wall(&pane, WallView::Tasks);
+        ws.toggle_wall(&pane);
+        assert!(ws.show_wall_in(&pane, WallMode::Grid));
+        let tab = &ws.snapshot(&HashMap::new()).tabs[0];
+        assert!(tab.wall);
+        assert_eq!((tab.wall_view, tab.wall_mode), (WallView::Agents, WallMode::Grid));
+        // Again, in Focus: still on.
+        assert!(ws.show_wall_in(&pane, WallMode::Focus));
+        let tab = &ws.snapshot(&HashMap::new()).tabs[0];
+        assert!(tab.wall);
+        assert_eq!(tab.wall_mode, WallMode::Focus);
+        assert!(!ws.show_wall_in("nope", WallMode::Grid));
     }
 
     #[test]

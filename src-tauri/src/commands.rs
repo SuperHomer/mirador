@@ -112,6 +112,8 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .collect()
     };
     snapshot.agents = agent_infos(state);
+    let per_tab = state.config.lock().unwrap().agents_per_tab;
+    cmux_core::wall::fill(&mut snapshot, per_tab);
     snapshot.remote_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -148,6 +150,15 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
             })
             .collect()
     };
+    // Before `meta`: `trail_file` takes these two locks the other way round.
+    let rollouts: std::collections::HashSet<String> = state
+        .trail_files
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, file)| matches!(file, TrailFile::Codex(_)))
+        .map(|(pane, _)| pane.clone())
+        .collect();
     let meta = state.meta.lock().unwrap();
     panes
         .into_iter()
@@ -160,10 +171,12 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 member,
                 role: m.agent_role.clone(),
                 name: m.agent_name.clone(),
-                has_activity: m.has_activity(),
+                has_activity: m.has_activity(rollouts.contains(&pane)),
                 model: m.agent_model.clone(),
+                effort: m.agent_effort.clone(),
                 status: m.status(),
                 message: m.agent_message.clone(),
+                asking: m.agent_asking.clone().filter(|_| m.status() == Some(cmux_protocol::AgentStatus::NeedsYou)),
                 topic: m.title.as_deref().and_then(|t| {
                     cmux_core::agents::title_topic(t, harness, &[m.agent_role.as_deref(), m.agent_name.as_deref()])
                 }),
@@ -178,16 +191,34 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
 
 /// A Claude Code agent's progress and its subagents', read from its
 /// transcripts. Its hooks say where the session's transcript is; until one
-/// has, there is nothing to read.
+/// has, there is nothing to read. A Codex agent's, from the rollout it
+/// holds open: its model and counts, and no tasks or subagents.
 pub fn agent_activity(
     state: &AppState,
     pane_id: &str,
 ) -> Result<cmux_protocol::AgentActivity, String> {
+    let harness = {
+        let meta = state.meta.lock().unwrap();
+        meta.get(pane_id).filter(|m| m.is_agent()).ok_or("not an agent pane")?.harness()
+    };
+    if harness == Some(cmux_protocol::Harness::Codex) {
+        let TrailFile::Codex(known) = trail_file(state, pane_id)? else {
+            return Err("no Codex session found".into());
+        };
+        let session = state
+            .codex_stats
+            .lock()
+            .unwrap()
+            .read(&known.path)
+            .map(cmux_core::codex_trail::CodexStats::summary)
+            .ok_or("its Codex session file cannot be read")?;
+        return Ok(cmux_protocol::AgentActivity { pane_id: pane_id.to_string(), session, subagents: Vec::new() });
+    }
     let (transcript, live) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(pane_id).filter(|m| m.is_agent()).ok_or("not an agent pane")?;
         if m.harness() != Some(cmux_protocol::Harness::Claude) {
-            return Err("only Claude Code agents report their subagents".into());
+            return Err("only Claude Code and Codex agents report their activity".into());
         }
         let transcript = m.agent_transcript.clone().ok_or(
             "no transcript yet: Claude Code reports it with its hooks \
@@ -393,7 +424,7 @@ pub fn emit_workspace(app: &AppHandle) {
 
 /// Sends a fresh snapshot without scheduling a session save: for changes
 /// the session file doesn't hold, like derived pane titles.
-fn broadcast_workspace(app: &AppHandle) {
+pub(crate) fn broadcast_workspace(app: &AppHandle) {
     let state = app.state::<AppState>();
     let snapshot = build_snapshot(&state);
     let _ = app.emit("workspace-changed", snapshot);
@@ -1084,10 +1115,12 @@ fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<Str
         return;
     }
     let last = last.unwrap_or_default();
+    // Said in the body too: an agent's notification is titled with the
+    // agent and its tab, and that title replaces this one.
     let body = if count == 1 {
-        last
+        format!("While Mirador was closed: {last}")
     } else {
-        format!("{count} notifications — the last: {last}")
+        format!("While Mirador was closed: {count} notifications — the last: {last}")
     };
     notify::handle_notification(app, pane_id, Some("While Mirador was closed".into()), body);
 }
@@ -1446,6 +1479,25 @@ pub fn open_graph(
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
     let repo = source_repo(&state, &source)?;
 
+    // In a tab of its own, a graph of this repository already open is
+    // shown again rather than opened twice. A split always opens one,
+    // beside the pane it was asked from.
+    if tab {
+        let mut ws = state.workspace.lock().unwrap();
+        let existing = {
+            let meta = state.meta.lock().unwrap();
+            ws.find_pane(|p| {
+                let graph = meta.get(p).and_then(|m| m.graph_repo.as_deref());
+                graph.is_some_and(|g| cmux_core::state::same_place(Some(&repo), None, Some(g), None))
+            })
+        };
+        if let Some(pane) = existing {
+            ws.focus_pane(&pane);
+            drop(ws);
+            emit_workspace(&app);
+            return Ok(pane);
+        }
+    }
     let new_pane = if tab {
         let (_, pane) = state.workspace.lock().unwrap().new_tab();
         pane
@@ -1566,12 +1618,16 @@ pub fn open_agent(
     task: Option<String>,
     pane_id: Option<String>,
     tab: bool,
+    harness: Option<cmux_protocol::Harness>,
 ) -> Result<String, String> {
-    open_agent_from(app, state, role, task, pane_id, tab, "you".into())
+    open_agent_from(app, state, role, task, pane_id, tab, harness, None, "you".into())
 }
 
 /// [`open_agent`], its task logged as given by `from`: a person, from the
-/// app; whoever ran `mira agent new`, from the socket.
+/// app; whoever ran `mira agent new`, from the socket. `harness` is for an
+/// agent without a role: Claude Code, else Codex. `title` is the task's
+/// card's, instead of one made from the task.
+#[allow(clippy::too_many_arguments)]
 pub fn open_agent_from(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1579,8 +1635,14 @@ pub fn open_agent_from(
     task: Option<String>,
     pane_id: Option<String>,
     tab: bool,
+    harness: Option<cmux_protocol::Harness>,
+    title: Option<String>,
     from: String,
 ) -> Result<String, String> {
+    if role.is_some() && harness.is_some() {
+        return Err("a role names its own harness: give a role or a harness, not both".into());
+    }
+    let plain = cmux_core::agents::plain_harness(harness)?;
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
@@ -1593,7 +1655,7 @@ pub fn open_agent_from(
         .get(&source)
         .and_then(|m| m.cwd.clone())
         .or_else(cmux_core::config::default_cwd);
-    let launch = prepare_launch(role.as_deref(), None, cwd.as_deref(), None, None, task.as_deref())?;
+    let launch = prepare_launch(role.as_deref(), plain, None, cwd.as_deref(), &[], None, task.as_deref())?;
 
     let new_pane = if tab {
         state.workspace.lock().unwrap().new_tab().1
@@ -1611,7 +1673,7 @@ pub fn open_agent_from(
     }
     emit_workspace(&app);
     if let Some(task) = &task {
-        crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None);
+        crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None, title);
     }
     Ok(new_pane)
 }
@@ -1620,24 +1682,29 @@ pub fn open_agent_from(
 /// remember about it on the pane.
 pub(crate) struct Launch {
     pub input: String,
+    /// What it runs: the role's harness, or the plain one.
+    pub harness: cmux_protocol::Harness,
     pub role: Option<cmux_protocol::AgentRole>,
     pub settings: Option<String>,
 }
 
 /// Works out how to start an agent in `cwd`: plain Claude Code, or `role`
 /// (looked up in `catalog`, else in what `cwd` sees) with its prompt and
-/// limits. `extra` follows the role's prompt — a team member's roster —
-/// and `name` is the session's name instead of the role's. Every file it
+/// limits; without a role, `plain` (`agents::plain_harness`). `extra`
+/// follows the role's prompt — a team member's own layers
+/// (`teams::seat_layers`) — and `name` is the session's name instead of
+/// the role's. Every file it
 /// needs is written; nothing is opened, so a refusal changes nothing.
 pub(crate) fn prepare_launch(
     role: Option<&str>,
+    plain: cmux_protocol::Harness,
     catalog: Option<&cmux_protocol::RoleCatalog>,
     cwd: Option<&str>,
-    extra: Option<&str>,
+    extra: &[cmux_protocol::PromptLayer],
     name: Option<&str>,
     task: Option<&str>,
 ) -> Result<Launch, String> {
-    let (role, prompt) = match role.map(str::trim).filter(|r| !r.is_empty()) {
+    let (role, mut layers) = match role.map(str::trim).filter(|r| !r.is_empty()) {
         Some(role) => {
             let read;
             let catalog = match catalog {
@@ -1647,19 +1714,13 @@ pub(crate) fn prepare_launch(
                     &read
                 }
             };
-            let (role, prompt) = cmux_core::roles::resolve(catalog, role)?;
-            (Some(role), prompt)
+            let (role, layers) = cmux_core::roles::role_layers(catalog, role)?;
+            (Some(role), layers)
         }
-        None => (None, None),
+        None => (None, Vec::new()),
     };
-    let prompt = [prompt.as_deref(), extra]
-        .into_iter()
-        .flatten()
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let prompt = (!prompt.is_empty()).then_some(prompt);
+    layers.extend_from_slice(extra);
+    let prompt = cmux_core::roles::join_layers(&layers);
     // What a Claude Code role may use: its MCP servers, plugins, skills and
     // tools, as a settings file. A list of skills or plugins to keep needs
     // every name there is, which only Claude Code knows — asked in the
@@ -1703,33 +1764,34 @@ pub(crate) fn prepare_launch(
     let named = role.clone().map(|r| cmux_protocol::AgentRole { name: name.unwrap_or(&r.name).to_string(), ..r });
     // Codex is allowed Mirador's socket on top of the profile it would run
     // on anyway — on Unix: Windows has a named pipe, and no such sandbox.
-    let codex_socket = match &role {
-        Some(r) if cfg!(unix) && r.harness == cmux_protocol::Harness::Codex => {
-            let home = std::env::var_os("CODEX_HOME")
-                .map(std::path::PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
-            // No file is no config; one that cannot be read is not guessed at.
-            let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
-                Some(Ok(text)) => Some(Some(text)),
-                Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
-                _ => Some(None),
-            };
-            config
-                .and_then(|c| {
-                    // Codex 0.164 keeps a profile in its own file beside
-                    // config.toml; a missing one is Codex's to report.
-                    let profile = r.profile.as_ref().and_then(|p| {
-                        let file = home.as_ref()?.join(format!("{p}.config.toml"));
-                        std::fs::read_to_string(file).ok()
-                    });
-                    cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
-                })
-                .map(|base| (base, cmux_core::ipc::default_socket_path()))
-        }
-        _ => None,
+    let harness = role.as_ref().map_or(plain, |r| r.harness);
+    let codex_socket = if cfg!(unix) && harness == cmux_protocol::Harness::Codex {
+        let home = std::env::var_os("CODEX_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
+        // No file is no config; one that cannot be read is not guessed at.
+        let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
+            Some(Ok(text)) => Some(Some(text)),
+            Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
+            _ => Some(None),
+        };
+        config
+            .and_then(|c| {
+                // Codex 0.164 keeps a profile in its own file beside
+                // config.toml; a missing one is Codex's to report.
+                let profile = role.as_ref().and_then(|r| r.profile.as_ref()).and_then(|p| {
+                    let file = home.as_ref()?.join(format!("{p}.config.toml"));
+                    std::fs::read_to_string(file).ok()
+                });
+                cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
+            })
+            .map(|base| (base, cmux_core::ipc::default_socket_path()))
+    } else {
+        None
     };
     let input = cmux_core::agents::launch_command(
         named.as_ref(),
+        plain,
         prompt.as_deref(),
         prompt_file.as_deref(),
         settings_file.as_deref(),
@@ -1739,6 +1801,7 @@ pub(crate) fn prepare_launch(
     );
     Ok(Launch {
         input,
+        harness,
         role,
         settings: settings_file.map(|f| f.to_string_lossy().into_owned()),
     })
@@ -1751,14 +1814,15 @@ pub(crate) fn mark_launched(entry: &mut cmux_core::state::PaneMeta, launch: Laun
     entry.startup_input = Some(launch.input);
     entry.agent_launched = true;
     entry.agent_started_at = Some(std::time::Instant::now());
+    // A Codex is a Codex agent from the start, not a Claude one until the
+    // poller sees otherwise — and on Windows, which lists no processes, the
+    // poller never would.
+    if launch.harness != cmux_protocol::Harness::Claude {
+        entry.agent_harness = Some(launch.harness);
+    }
     if let Some(role) = launch.role {
-        // A Codex role is a Codex agent from the start, not a Claude one
-        // until the poller sees otherwise — and on Windows, which lists no
-        // processes, the poller never would.
-        if role.harness != cmux_protocol::Harness::Claude {
-            entry.agent_harness = Some(role.harness);
-        }
         entry.agent_model = role.model;
+        entry.agent_effort = role.effort;
         entry.agent_role = Some(role.name);
         entry.agent_settings = launch.settings;
     }
@@ -1777,6 +1841,32 @@ pub fn agent_roles(state: State<'_, AppState>, pane_id: Option<String>) -> cmux_
         .and_then(|m| m.cwd.clone())
         .or_else(cmux_core::config::default_cwd);
     cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new))
+}
+
+/// Shows the tab of `pane_id` (the focused pane when absent) as its wall's
+/// agents in the `mode` layout, turning the wall on if it is off.
+pub fn show_wall_in(
+    app: &AppHandle,
+    state: &AppState,
+    pane_id: Option<String>,
+    mode: cmux_protocol::WallMode,
+) -> Result<(), String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if !state.workspace.lock().unwrap().show_wall_in(&pane, mode) {
+        return Err(format!("no pane {pane}"));
+    }
+    emit_workspace(app);
+    Ok(())
+}
+
+/// The layout of the wall of `pane_id`'s tab (the focused pane's when
+/// absent).
+pub fn wall_mode(state: &AppState, pane_id: Option<&str>) -> cmux_protocol::WallMode {
+    let ws = state.workspace.lock().unwrap();
+    let pane = pane_id.map(String::from).unwrap_or_else(|| ws.focused_pane());
+    ws.tab_of_pane(&pane).map(|t| t.wall_mode).unwrap_or_default()
 }
 
 /// Shows the tab of `pane_id` (the focused pane when absent) as the wall
@@ -1817,6 +1907,52 @@ pub fn set_wall_view(
     }
     emit_workspace(&app);
     Ok(())
+}
+
+/// Lays the Agents side of the wall of `pane_id`'s tab (the focused pane's
+/// when absent) out as `mode`, without turning the wall on.
+#[tauri::command]
+pub fn set_wall_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    mode: cmux_protocol::WallMode,
+) -> Result<(), String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if !state.workspace.lock().unwrap().set_wall_mode(&pane, mode) {
+        return Err(format!("no pane {pane}"));
+    }
+    emit_workspace(&app);
+    Ok(())
+}
+
+/// Lays the Tasks side of the wall of `pane_id`'s tab (the focused pane's
+/// when absent) out as `layout`, without turning the wall on.
+#[tauri::command]
+pub fn set_task_layout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    layout: cmux_protocol::TaskLayout,
+) -> Result<(), String> {
+    let pane = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if !state.workspace.lock().unwrap().set_task_layout(&pane, layout) {
+        return Err(format!("no pane {pane}"));
+    }
+    emit_workspace(&app);
+    Ok(())
+}
+
+/// Sets how many agents a page of the wall's Grid holds: 4, 6 or 9, in
+/// mirador.json. The config watcher picks the file up like any edit, and
+/// a new snapshot refills the pages.
+#[tauri::command]
+pub fn set_agents_per_tab(n: u8) -> Result<(), String> {
+    cmux_core::config::set_agents_per_tab(n)
 }
 
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY
@@ -1979,5 +2115,37 @@ fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
         crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);
         cmux_core::session::delete_scrollback(pane);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn launch(role: Option<cmux_protocol::AgentRole>) -> Launch {
+        Launch { input: "claude\n".into(), harness: cmux_protocol::Harness::Claude, role, settings: None }
+    }
+
+    #[test]
+    fn a_launched_agent_shows_its_roles_model_and_effort() {
+        let role = cmux_protocol::AgentRole {
+            name: "planner".into(),
+            model: Some("opus".into()),
+            effort: Some("high".into()),
+            ..Default::default()
+        };
+        let mut m = cmux_core::state::PaneMeta::default();
+        mark_launched(&mut m, launch(Some(role)), None);
+        assert_eq!(m.agent_model.as_deref(), Some("opus"));
+        assert_eq!(m.agent_effort.as_deref(), Some("high"));
+
+        // A role that sets no effort, and no role at all, show none.
+        let mut m = cmux_core::state::PaneMeta::default();
+        let plain = cmux_protocol::AgentRole { name: "dev".into(), ..Default::default() };
+        mark_launched(&mut m, launch(Some(plain)), None);
+        assert_eq!(m.agent_effort, None);
+        let mut m = cmux_core::state::PaneMeta::default();
+        mark_launched(&mut m, launch(None), None);
+        assert_eq!(m.agent_effort, None);
     }
 }

@@ -62,6 +62,14 @@ pub fn handle_notification(
         tab.focused == pane_id
     };
 
+    let agent = crate::commands::agent_infos(&state).into_iter().find(|a| a.pane_id == pane_id);
+    let tab = {
+        let ws = state.workspace.lock().unwrap();
+        let meta = state.meta.lock().unwrap();
+        ws.tab_of_pane(pane_id).map(|t| t.resolved_title(&meta)).unwrap_or_default()
+    };
+    let title = cmux_core::agents::notification_title(agent.as_ref(), &tab, title);
+
     let dto = NotificationDto {
         id: uuid::Uuid::new_v4().to_string(),
         pane_id: pane_id.to_string(),
@@ -140,8 +148,14 @@ pub fn decorate_snapshot(
     let list = state.notifications.lock().unwrap();
     let unread: Vec<&NotificationDto> = list.iter().filter(|n| !n.read).collect();
 
-    snapshot.unread_panes = unread.iter().map(|n| n.pane_id.clone()).collect();
-    snapshot.unread_panes.dedup();
+    // Once each, in the order first raised: a pane's notifications need not
+    // be adjacent, so `dedup` alone left duplicates.
+    let mut seen = std::collections::HashSet::new();
+    snapshot.unread_panes = unread
+        .iter()
+        .filter(|n| seen.insert(n.pane_id.as_str()))
+        .map(|n| n.pane_id.clone())
+        .collect();
 
     for tab in &mut snapshot.tabs {
         let panes = cmux_core::layout::pane_ids(&tab.root);

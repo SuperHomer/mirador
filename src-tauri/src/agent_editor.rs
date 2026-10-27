@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 
 use cmux_core::role_files::{Kind, Places};
-use cmux_protocol::{RoleCatalog, RoleSource, SplitDir};
+use cmux_protocol::{CatalogKind, FileFields, HarnessChoices, PromptLayer, RoleCatalog, RoleSource, SplitDir, UsedBy};
 
 use crate::commands::emit_workspace;
 use crate::AppState;
@@ -33,6 +33,32 @@ pub fn open_agent_editor(
             m.and_then(|m| m.repo_root.clone()),
         )
     };
+    // In a tab of its own, an editor already open on the same files — the
+    // same repository, or outside one the same directory — is shown again
+    // rather than opened twice. A split always opens one.
+    if tab {
+        let mut ws = state.workspace.lock().unwrap();
+        let existing = {
+            let meta = state.meta.lock().unwrap();
+            ws.find_pane(|p| {
+                meta.get(p).is_some_and(|m| {
+                    m.agent_editor
+                        && cmux_core::state::same_place(
+                            repo_root.as_deref(),
+                            cwd.as_deref(),
+                            m.repo_root.as_deref(),
+                            m.cwd.as_deref(),
+                        )
+                })
+            })
+        };
+        if let Some(pane) = existing {
+            ws.focus_pane(&pane);
+            drop(ws);
+            emit_workspace(&app);
+            return Ok(pane);
+        }
+    }
     let pane = if tab {
         state.workspace.lock().unwrap().new_tab().1
     } else {
@@ -71,6 +97,8 @@ pub struct EditorCatalog {
     pub catalog: RoleCatalog,
     pub repo_dir: Option<String>,
     pub global_dir: String,
+    /// What the role form's pickers offer.
+    pub choices: Vec<HarnessChoices>,
 }
 
 fn catalog(state: &AppState, pane_id: &str) -> Result<EditorCatalog, String> {
@@ -79,12 +107,71 @@ fn catalog(state: &AppState, pane_id: &str) -> Result<EditorCatalog, String> {
         catalog: cmux_core::roles::catalog(cwd.as_deref().map(Path::new)),
         repo_dir: places.repo.map(|p| p.to_string_lossy().into_owned()),
         global_dir: places.global.to_string_lossy().into_owned(),
+        choices: cmux_core::roles::role_choices(),
     })
 }
 
 #[tauri::command]
 pub fn agent_editor_catalog(state: State<'_, AppState>, pane_id: String) -> Result<EditorCatalog, String> {
     catalog(&state, &pane_id)
+}
+
+/// The teams and roles that use the role or way `name`, from what the
+/// editor's directory sees, each running or not: a team of that name
+/// running here, an agent started with that role.
+#[tauri::command]
+pub fn agent_editor_used_by(
+    state: State<'_, AppState>,
+    pane_id: String,
+    kind: CatalogKind,
+    name: String,
+) -> Result<Vec<UsedBy>, String> {
+    let catalog = catalog(&state, &pane_id)?.catalog;
+    let runs = crate::teams::team_list(&state);
+    let running = |m: &cmux_protocol::TeamMemberInfo| m.state == cmux_protocol::SeatState::Running;
+    let teams: Vec<String> = runs.iter().filter(|t| t.members.iter().any(running)).map(|t| t.name.clone()).collect();
+    // A standalone agent's pane names its role; a team member's names its
+    // seat (`reviewer-2`), so its role comes from the team it runs in.
+    let mut roles: Vec<String> = state
+        .meta
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|m| m.is_agent())
+        .filter_map(|m| m.agent_role.clone())
+        .collect();
+    roles.extend(runs.iter().flat_map(|t| t.members.iter().filter(|m| running(m)).map(|m| m.role.clone())));
+    let teams: Vec<&str> = teams.iter().map(String::as_str).collect();
+    let roles: Vec<&str> = roles.iter().map(String::as_str).collect();
+    Ok(cmux_core::roles::used_by(&catalog, kind, &name, &teams, &roles))
+}
+
+/// What a member is told: the layers, and the prompt they join into.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Told {
+    pub layers: Vec<PromptLayer>,
+    pub prompt: Option<String>,
+}
+
+/// What `member` of `team` is told when the team starts, as the layers it
+/// is made of — the very ones the launch joins — and joined as it joins
+/// them.
+#[tauri::command]
+pub fn agent_editor_told(
+    state: State<'_, AppState>,
+    pane_id: String,
+    team: String,
+    member: String,
+) -> Result<Told, String> {
+    let catalog = catalog(&state, &pane_id)?.catalog;
+    let def = catalog.teams.iter().find(|t| t.name == team).ok_or_else(|| format!("no team `{team}`"))?;
+    let seats = cmux_core::teams::seats(def);
+    let seat = seats.iter().find(|s| s.name == member).ok_or_else(|| format!("no member `{member}` in team `{team}`"))?;
+    let (_, mut layers) = cmux_core::roles::role_layers(&catalog, &seat.role)?;
+    layers.extend(cmux_core::teams::seat_layers(&catalog, def, seat, &seats, &crate::teams::mira_for_prompt()));
+    let prompt = cmux_core::roles::join_layers(&layers);
+    Ok(Told { layers, prompt })
 }
 
 #[tauri::command]
@@ -115,6 +202,35 @@ pub fn agent_file_save(
     create: bool,
 ) -> Result<EditorCatalog, String> {
     places(&state, &pane_id)?.0.save(Kind::parse(&kind)?, source, &name, &text, create)?;
+    catalog(&state, &pane_id)
+}
+
+/// Saves a form's `fields` into the team, role or way `name` in `source`'s
+/// place: applied to the text of `from` — the file as it is, or a
+/// built-in's `builtin:` name, which is saved as a new file of yours or
+/// the repository's (`create`) — or to nothing for a new one. Checked and
+/// written as `agent_file_save` writes text.
+#[tauri::command]
+pub fn agent_file_save_fields(
+    state: State<'_, AppState>,
+    pane_id: String,
+    source: RoleSource,
+    name: String,
+    from: Option<String>,
+    fields: FileFields,
+    create: bool,
+) -> Result<EditorCatalog, String> {
+    let places = places(&state, &pane_id)?.0;
+    let text = match &from {
+        Some(path) => places.read(&PathBuf::from(path))?,
+        None => String::new(),
+    };
+    let (kind, text) = match &fields {
+        FileFields::Team(f) => (Kind::Team, cmux_core::teams::set_team_fields(&text, f)?),
+        FileFields::Role(f) => (Kind::Role, cmux_core::roles::set_role_fields(&text, f)?),
+        FileFields::Way(f) => (Kind::Way, cmux_core::roles::set_way_fields(&text, f)?),
+    };
+    places.save(kind, source, &name, &text, create)?;
     catalog(&state, &pane_id)
 }
 

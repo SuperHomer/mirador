@@ -54,7 +54,7 @@ fn tasks_are_logged_as_agents_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { team: "squad".into(), task: Some("plan the chart".into()), pane_id: Some(shell) });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: Some("plan the chart".into()), pane_id: Some(shell) });
     sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
     let planner = pane_of(&sb, "planner");
     let reviewer = pane_of(&sb, "reviewer");
@@ -173,6 +173,17 @@ fn tasks_are_logged_as_agents_work() {
     assert_eq!(texts.len(), 1, "the refused sends typed nothing: {texts:?}");
     assert!(texts[0].ends_with("after the refusals"), "{texts:?}");
 
+    // A message's card can have a title of its own, the message its
+    // description; a card written by hand can say more than its title.
+    mira(&sb, &planner, &["agent", "send", "reviewer", "--title", "Step 4: tests", "Write the tests\nfor the board"]);
+    mira(&sb, &planner, &["task", "add", "Step 5: docs", "--description", "README and AGENTS.md"]);
+    let cards = sb.call(Request::TaskList { all: true, pane_id: None });
+    let card = |title: &str| -> serde_json::Value {
+        cards["cards"].as_array().unwrap().iter().find(|c| c["title"] == title).cloned().unwrap_or_else(|| sb.fail(title))
+    };
+    assert_eq!(card("Step 4: tests")["description"], "Write the tests\nfor the board");
+    assert_eq!(card("Step 5: docs")["description"], "README and AGENTS.md");
+
     // The log outlives the app.
     sb.quit();
     sb.launch();
@@ -270,7 +281,7 @@ fn a_codex_agent_s_card_follows_its_turns() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { team: "pair".into(), task: None, pane_id: Some(shell) });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell) });
     sb.wait_for("the coder", LONG, || sb.member("coder"));
     let dev = pane_of(&sb, "dev");
     let coder = pane_of(&sb, "coder");
@@ -302,7 +313,7 @@ fn a_codex_turn_right_after_new_is_logged_once() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { team: "pair".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()) });
     sb.wait_for("the coder", LONG, || sb.member("coder"));
     let dev = pane_of(&sb, "dev");
     let coder = pane_of(&sb, "coder");

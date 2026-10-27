@@ -47,17 +47,22 @@ pub fn spawn(handle: tauri::AppHandle) {
             }
             let resolved = cmux_core::config::resolve(&cfg);
             let state = handle.state::<AppState>();
-            let changed = {
+            let (changed, pages_changed) = {
                 let mut current = state.config.lock().unwrap();
                 if *current != resolved {
+                    let pages_changed = current.agents_per_tab != resolved.agents_per_tab;
                     *current = resolved.clone();
-                    true
+                    (true, pages_changed)
                 } else {
-                    false
+                    (false, false)
                 }
             };
             if changed {
                 let _ = handle.emit("config-changed", resolved);
+            }
+            // The wall's pages are in the snapshot, cut to agentsPerTab.
+            if pages_changed {
+                crate::commands::broadcast_workspace(&handle);
             }
         }
     });

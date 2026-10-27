@@ -272,9 +272,24 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                         cmux_protocol::AgentStatus::NeedsYou => message,
                         _ => None,
                     };
+                    if status != cmux_protocol::AgentStatus::NeedsYou {
+                        entry.agent_asking = None;
+                    }
                 }
                 cmux_core::tasks::status_event(&pane, before, entry.status())
             };
+            // A permission prompt is about a tool call, which the transcript
+            // has: read once, as the prompt comes, not on every poll, and
+            // through the trail's cache, which reads only what was added.
+            let permission = status == Some(cmux_protocol::AgentStatus::NeedsYou)
+                && notification_type.as_deref() == Some("permission_prompt");
+            let transcript = state.meta.lock().unwrap().get(&pane).and_then(|m| m.agent_transcript.clone());
+            if let Some(path) = transcript.filter(|_| permission) {
+                let asking = state.trails.lock().unwrap().read(&path).and_then(|t| t.asking());
+                if let Some(entry) = state.meta.lock().unwrap().get_mut(&pane) {
+                    entry.agent_asking = asking;
+                }
+            }
             if let Some(turn) = turn {
                 crate::tasks::record(app, turn);
             }
@@ -286,6 +301,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::AgentNew {
             role,
+            harness,
+            title,
             task,
             target,
             pane_id,
@@ -300,6 +317,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 // Beside the pane it was asked from, in the tab you work in;
                 // a tab of its own only when asked for one.
                 target.as_deref() == Some("tab"),
+                harness,
+                title,
                 from,
             )?;
             Ok(json!({ "paneId": pane_id }))
@@ -322,24 +341,24 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::AgentSend { to, message, pane_id, force, card } => {
-            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card)?;
+        Request::AgentSend { to, message, pane_id, force, card, title } => {
+            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentFind { name, pane_id } => {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::TeamStart { team, task, pane_id } => {
+        Request::TeamStart { team, task, pane_id, title } => {
             let from = sender(&state, pane_id.as_deref());
-            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, from)?;
+            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from)?;
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
         Request::TaskList { all, pane_id } => Ok(json!({ "cards": crate::tasks::list(&state, all, pane_id)? })),
-        Request::TaskAdd { title, to, pane_id } => {
+        Request::TaskAdd { title, to, pane_id, description } => {
             let from = sender(&state, pane_id.as_deref());
-            Ok(json!({ "cardId": crate::tasks::add(app, &title, to, pane_id, from)? }))
+            Ok(json!({ "cardId": crate::tasks::add(app, &title, description, to, pane_id, from)? }))
         }
         Request::TaskMove { card, column, pane_id } => {
             let by = sender(&state, pane_id.as_deref());
@@ -369,9 +388,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::commands::set_wall_view(app.clone(), app.state(), pane_id, WallView::Tasks)?;
             Ok(json!({ "wall": true, "wallView": WallView::Tasks }))
         }
-        Request::AgentWall { pane_id } => {
-            let on = crate::commands::toggle_agent_wall(app.clone(), app.state(), pane_id)?;
-            Ok(json!({ "wall": on }))
+        Request::AgentWall { pane_id, mode: Some(mode) } => {
+            crate::commands::show_wall_in(app, &state, pane_id, mode)?;
+            Ok(json!({ "wall": true, "wallView": WallView::Agents, "wallMode": mode }))
+        }
+        Request::AgentWall { pane_id, mode: None } => {
+            let on = crate::commands::toggle_agent_wall(app.clone(), app.state(), pane_id.clone())?;
+            let mode = crate::commands::wall_mode(&state, pane_id.as_deref());
+            Ok(json!({ "wall": on, "wallMode": mode }))
         }
         Request::Run {
             command,

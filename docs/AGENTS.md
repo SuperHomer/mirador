@@ -31,7 +31,7 @@ mira hooks remove     # uninstall
 ```
 
 Mirador offers this on first launch when it finds `~/.claude` (once — "Not
-now" is remembered; the palette's *Set Up Claude Code Integration* runs it
+now" is remembered; the palette's *App: Set Up Claude Code Integration* runs it
 later). The hooks call `mira` by its absolute path, so they work whether or
 not `mira` is on PATH; if the app moves, the next launch points them at the
 new location.
@@ -211,37 +211,47 @@ neither has files to diff.
 Because the repository comes from the calling pane, `mira diff` refuses to
 run outside one: from another terminal it has no way to tell which repo you
 mean, and guessing would show the human someone else's work. Inside the app,
-the command palette's "New Diff Pane" is the same action.
+the command palette's "Git: New Diff Pane" is the same action.
 
 Opening one when you finish a turn beats asking the human to scroll your
 transcript.
 
 ```bash
 mira graph                     # the commit graph, in a reviewable pane
-mira graph --tab               # new tab instead of a split
+mira graph --tab               # in a tab: this repository's graph, if one is open, else a new tab
 ```
 
 The graph pane draws every ref's history with branch lines, and clicking a
 commit opens its diff — it keeps one diff pane and retargets it, so walking
 history does not bury the graph under a pane per commit. Like `mira diff`,
 it takes the repository from the pane it ran in and refuses outside one.
+With `--tab`, a graph of the same repository already open in some tab is
+focused and its pane id printed, rather than a second one opened; without
+it, a graph always opens as a split beside your pane.
 
 ## 6. Agents with roles, and the wall
 
 ```bash
 mira agent roles                              # the roles and ways this directory sees
-mira agent edit [--tab]                       # a pane to edit them, and teams
+mira agent edit [--tab]                       # a pane to edit them, and teams; --tab shows the one open on this repository (outside one, this directory)
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
+mira agent new --harness codex "fix the flaky test"   # plain codex, beside this one
 mira agent list                               # pane, status, harness, name, model
-mira agent wall                               # this tab as its agents' grid, or its splits again
+mira agent wall                               # this tab as its agents' wall, or its splits again
+mira agent wall --focus | --grid              # the wall, in that layout (never turns it off)
 mira agent activity [--pane <id>]             # its tasks and subagents
 mira agent trail [NAME | --pane <id>]         # what it did, turn by turn
 ```
 
 `agent wall` switches the tab it runs in between its splits and the wall,
-its agents' terminals in one grid, and prints the new state, `wall on` or
-`wall off` (`agent_wall` answers `{"wall": true}`). The same tab, not a
+its agents' terminals, and prints the new state, `wall on` or `wall off`
+(`agent_wall` answers `{"wall": true, "wallMode": "focus"}`). With `--focus`
+or `--grid` it shows the wall's agents in that layout instead of
+switching, turning the wall on if it is off, and prints `wall on: focus` or
+`wall on: grid` (`agent_wall` with `"mode"`). Focus fits one agent's
+terminal to the large tile and draws the others as thumbnails that are
+never resized; Grid fits every terminal on the page shown. The same tab, not a
 tab of its own: its panes keep running under the wall, `read-screen` and
 `send-input` reach them as before, and the tab remembers the wall, and
 which side of it (agents or tasks, `wallView` in `list-tabs --json`), across
@@ -306,7 +316,10 @@ way's) through `--append-system-prompt-file`; the session resumes like any
 other, on the role's model and effort, and keeps that prompt. Codex gets
 `--model`, `model_reasoning_effort`, `--profile` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
-It also gets `-c` overrides for a permissions profile, `mirador`, that
+Without a role, `--harness codex` starts plain Codex instead of plain
+Claude Code (no other harness can be started that way, and `--harness`
+with `--role` is refused: a role names its own).
+Any Codex, a role's or plain, also gets `-c` overrides for a permissions profile, `mirador`, that
 extends the one Codex would run on — your `default_permissions`, else
 `:workspace` in a trusted project and `:read-only` elsewhere — with
 Mirador's socket and nothing else (network only through Codex's proxy),
@@ -338,13 +351,17 @@ job a `claude attach` names), whether given with `--name` or `/rename` or
 made up by Claude Code. Without one it goes by its role. The same file's
 busy/idle is the status of an agent whose hooks have not reported one.
 
-`agent activity` (or right-clicking the agent in the app) reads a Claude
+`agent activity` (or the palette's *Agents: Show Activity* in the app) reads a Claude
 Code agent's transcripts: the session's tokens, context and task list
 (`TaskCreate`/`TaskUpdate`, or `TodoWrite`), then each subagent under
 `<session>/subagents/` with its state (`running`, `done`, or `stopped`
 when the Claude Code hosting it is gone), tasks done/total, tokens,
 context and run time. The hooks tell Mirador where the transcript is
 (`transcript_path`), and only a `<session_id>.jsonl` path is accepted.
+For a Codex agent it reads the rollout its process holds open, the one
+`agent trail` reads: the model, tokens (input not from the cache, plus
+output), the last call's context, and the context window Codex itself
+reports. There are no tasks or subagents for Codex.
 
 For Claude Code, `agent list` reads what the hooks reported: `working`, `needs-you` (with the
 message, e.g. the tool awaiting permission), `idle`, or `-` before the first
@@ -391,7 +408,7 @@ before letting it reach Mirador's socket.
 ### Handoffs
 
 ```bash
-mira agent send <name|pane> <message…> [--force] [--wait [--timeout N]]
+mira agent send <name|pane> <message…> [--force] [--title <t>] [--wait [--timeout N]]
 mira agent wait <name|pane> [--timeout N]     # 0 idle, 2 needs you, 3 exited, 124 timeout
 ```
 
@@ -414,7 +431,7 @@ wait by exiting.
 ### Tasks, the board and history
 
 ```bash
-mira task add <title…> [--to <name>]          # a card in this tab, in To do; prints its id
+mira task add <title…> [--to <name>] [--description <text>]   # a card in this tab, in To do; prints its id
 mira task move <id> <todo|doing|needs-you|done>
 mira task done <id>                            # same as move <id> done
 mira task list [--all]                         # this tab's cards by column; every tab's
@@ -457,9 +474,16 @@ Done:
   `task move` / `task done`. A card Mirador made is not moved by hand
   (refused: its agent moves it).
 - `agent send --card <id>` logs the message on that written card, in its
-  history, and makes no card of its own; the card stays in its column. An
+  history, and makes no card of its own; the card stays in its column (a
+  card written for no one becomes the agent's it was sent to). An
   unknown id, an ambiguous prefix or a card Mirador made refuses the send
   before anything is typed.
+- A card's title is the first line of its task, cut at a word to 80
+  characters (with `…`), and its description the whole task when that
+  says more. `--title <t>` on `agent new`, `agent send` and `team start`
+  gives the card that title instead, the task becoming its description;
+  `task add --description <text>` gives a written card one. The log keeps
+  the whole task either way, and `agent history` shows its first line.
 
 Options go before or after a title or a message, in `task add` as in
 `agent send`; words after `--` are text, so a message or title with a
@@ -476,17 +500,29 @@ turn ended and how long it took (since the task, or since it resumed).
 Without a name it is this tab's; with one, the tasks given to that agent
 or sent by it, the moves of its cards, and its turns.
 
-The task board is the agent wall's other side: the wall's **Splits |
-Agents | Tasks** switch shows the tab's task board in place of its agents' tiles.
+The task board is the agent wall's other side: **Tasks** in the
+sidebar's view switch shows the tab's task board in place of its agents' tiles.
 `agent board` turns the tab it runs in to its wall on the Tasks side and
 prints `wall on: tasks` (`agent_board` answers `{"wall": true,
 "wallView": "tasks"}`) — also the palette's *Agents: Task Board*. Its
 old `--tab`, from when the board was a pane of its own, is still taken
-and does nothing. The board switches between this team and all agents, and between Cards, History (newest first) and
-Trail (below); a card's title opens its history, its agent's name goes to
-its pane, and its ⋯ opens Trail on its agent at the turn the card started
-— the first to begin since it was given; going to an agent of this tab
-turns the wall back to its tiles. It reads the log again whenever
+and does nothing. The board's one row switches between Cards, History (newest first) and
+Trail (below), its scope between this team and all agents, and its
+**+ Card** writes a card (a title, a description, and an agent it is for
+or no one; for an idle agent, *Add and send* sends it at once). Its
+columns read Needs you, To do, Doing, Done (today's, or all of them),
+and **Columns | Swimlanes** (kept per tab) turns them into a row per
+agent, in the wall's order of urgency, then one for cards given to no
+one; an idle agent's empty To do offers the tab's unassigned cards to
+send it, and with all agents the rows group under their tabs.
+A card's title opens its history, its description opens in full, its
+agent's name goes to its pane. A card waiting on a person says what its
+agent asks and **Open** shows the agent large on the wall; one written
+for no one has **Assign ▾**, which sends it to an agent of the tab; one
+in Doing has **History** and **Trail** (Trail on its agent at the turn
+the card started — the first to begin since it was given), and the
+failed steps of that turn. Going to an agent of this tab turns the wall
+back to its tiles. It reads the log again whenever
 something is appended.
 
 The log is `tasks.jsonl` in the data directory (on macOS

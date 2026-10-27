@@ -65,6 +65,8 @@ pub struct AppState {
     /// trails.
     pub trails: Mutex<cmux_core::transcript::Cache<cmux_core::trail::Trail>>,
     pub codex_trails: Mutex<cmux_core::transcript::Cache<cmux_core::codex_trail::CodexTrail>>,
+    /// Codex rollouts read so far, for agent activity.
+    pub codex_stats: Mutex<cmux_core::transcript::Cache<cmux_core::codex_trail::CodexStats>>,
     /// The file each pane's agent last wrote its trail to, by pane: kept
     /// after the agent exits, until another starts there or the pane
     /// closes.
@@ -152,8 +154,9 @@ pub fn run() {
         let role = role.filter(|r| r.harness == cmux_protocol::Harness::Claude);
         let role_model = role.as_ref().and_then(|r| r.model.clone());
         m.agent_model = role_model.clone();
+        m.agent_effort = role.as_ref().and_then(|r| r.effort.clone());
         let quoted_model = role_model.as_deref().map(cmux_core::pty::shell::quote_arg);
-        let quoted_effort = role.and_then(|r| r.effort).as_deref().map(cmux_core::pty::shell::quote_arg);
+        let quoted_effort = m.agent_effort.as_deref().map(cmux_core::pty::shell::quote_arg);
         // Its limits too, from the file it started with. A file gone since
         // drops the pane's resume rather than its limits: an agent meant
         // to be held to some tools must not come back with all of them.
@@ -269,6 +272,7 @@ pub fn run() {
             transcripts: Mutex::new(Default::default()),
             trails: Mutex::new(Default::default()),
             codex_trails: Mutex::new(Default::default()),
+            codex_stats: Mutex::new(Default::default()),
             trail_files: Mutex::new(Default::default()),
             codex_tails: Mutex::new(Default::default()),
             task_log: Mutex::new(task_log),
@@ -352,10 +356,13 @@ pub fn run() {
             commands::agent_roles,
             agent_editor::open_agent_editor,
             agent_editor::agent_editor_catalog,
+            agent_editor::agent_editor_used_by,
+            agent_editor::agent_editor_told,
             agent_editor::agent_file_read,
             agent_editor::agent_file_check,
             agent_editor::agent_file_template,
             agent_editor::agent_file_save,
+            agent_editor::agent_file_save_fields,
             agent_editor::agent_file_delete,
             teams::start_team,
             teams::list_teams,
@@ -363,8 +370,14 @@ pub fn run() {
             teams::team_restart,
             tasks::task_cards,
             tasks::task_history,
+            tasks::task_add,
+            tasks::task_send,
+            tasks::send_next_task,
             commands::toggle_agent_wall,
             commands::set_wall_view,
+            commands::set_wall_mode,
+            commands::set_task_layout,
+            commands::set_agents_per_tab,
             commands::get_agent_activity,
             commands::get_agent_trail,
             commands::get_trail_detail,

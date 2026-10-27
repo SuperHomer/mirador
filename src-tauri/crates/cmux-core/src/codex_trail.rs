@@ -19,11 +19,11 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{ActionDetail, ActionStatus, TrailAction, TrailTurn, TurnEnd};
+use cmux_protocol::{ActionDetail, ActionStatus, TrailAction, TrailTurn, TranscriptSummary, TurnEnd};
 use serde_json::Value;
 
 use crate::trail::{head, one_line, stamp, summarize, turn};
-use crate::transcript::{parse_timestamp, text, Feed};
+use crate::transcript::{context_window, parse_timestamp, text, Feed};
 
 /// Items that are the conversation, not something the agent did.
 const NOT_ACTIONS: &[&str] =
@@ -133,6 +133,11 @@ impl CodexTrail {
         let turn = &mut self.turns[t];
         turn.actions.push(TrailAction {
             summary: item_summary(&kind, item),
+            // An Extension says what it is in its own kind (`web_search`).
+            kind: crate::trail::action_kind(match kind.as_str() {
+                "Extension" => item["kind"].as_str().unwrap_or_default(),
+                k => k,
+            }),
             tool: kind,
             id,
             started_ms: started.or(ms),
@@ -156,6 +161,7 @@ impl CodexTrail {
         self.pending.insert(id.clone(), (t, turn.actions.len()));
         turn.actions.push(TrailAction {
             summary: call_summary(&tool, &input),
+            kind: crate::trail::action_kind(&tool),
             tool,
             id,
             started_ms: ms,
@@ -178,6 +184,94 @@ impl CodexTrail {
         action.exit_code = exit_code;
         action.status = if exit_code.is_some_and(|c| c != 0) { ActionStatus::Error } else { ActionStatus::Ok };
         action.output = head(&output);
+    }
+}
+
+/// What a Codex rollout adds up to, in the terms of a Claude Code
+/// transcript's [`TranscriptSummary`], for the activity panel and the
+/// agent status bar. Codex writes its own counts: each `token_count` event
+/// carries the session's running `total_token_usage`, the last model
+/// call's `last_token_usage`, and its `model_context_window`; each
+/// `turn_context` the model. Its `input_tokens` include the cached ones,
+/// and its `output_tokens` the reasoning.
+#[derive(Debug, Default)]
+pub struct CodexStats {
+    model: Option<String>,
+    tokens: u64,
+    context: u64,
+    window: Option<u64>,
+    tool_calls: u32,
+    started_ms: Option<u64>,
+    last_ms: Option<u64>,
+}
+
+impl Feed for CodexStats {
+    fn feed(&mut self, line: &str) {
+        let Ok(entry) = serde_json::from_str::<Value>(line) else {
+            return;
+        };
+        if let Some(ms) = entry["timestamp"].as_str().and_then(parse_timestamp) {
+            self.started_ms.get_or_insert(ms);
+            self.last_ms = Some(ms);
+        }
+        let p = &entry["payload"];
+        match (entry["type"].as_str(), p["type"].as_str()) {
+            (Some("turn_context"), _) => {
+                if let Some(model) = text(&p["model"]) {
+                    self.model = Some(model);
+                }
+            }
+            (Some("event_msg"), Some("token_count")) => self.token_count(&p["info"]),
+            // Counted as the trail counts its actions.
+            (Some("event_msg"), Some("item_completed")) => {
+                let item = &p["item"];
+                let kind = item["type"].as_str().unwrap_or("UserMessage");
+                if kind != "UserMessage" && !NOT_ACTIONS.contains(&kind) && item["id"].is_string() {
+                    self.tool_calls += 1;
+                }
+            }
+            (Some("response_item"), Some("function_call" | "custom_tool_call" | "local_shell_call")) => {
+                let tool = p["name"].as_str().unwrap_or_default();
+                if !WRAPPERS.contains(&tool) {
+                    self.tool_calls += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl CodexStats {
+    /// Fresh tokens are what a Claude transcript counts: input not read
+    /// from the cache, plus output. The context is the last call's input,
+    /// as a Claude transcript's is its last reply's.
+    fn token_count(&mut self, info: &Value) {
+        let n = |usage: &Value, key: &str| usage[key].as_u64().unwrap_or(0);
+        let total = &info["total_token_usage"];
+        if total.is_object() {
+            self.tokens = n(total, "input_tokens").saturating_sub(n(total, "cached_input_tokens")) + n(total, "output_tokens");
+        }
+        let last = &info["last_token_usage"];
+        if last.is_object() {
+            self.context = n(last, "input_tokens");
+        }
+        if let Some(window) = info["model_context_window"].as_u64() {
+            self.window = Some(window);
+        }
+    }
+
+    /// The window Codex reported wins over the table's guess.
+    pub fn summary(&self) -> TranscriptSummary {
+        TranscriptSummary {
+            model: self.model.clone(),
+            tokens: self.tokens,
+            context: self.context,
+            context_window: self.window.or_else(|| self.model.as_deref().and_then(context_window)),
+            tool_calls: self.tool_calls,
+            tasks: None,
+            started_ms: self.started_ms,
+            last_ms: self.last_ms,
+        }
     }
 }
 
@@ -552,6 +646,53 @@ pub fn open_rollout(_pid: u32) -> Result<PathBuf, usize> {
 mod tests {
     use super::*;
 
+    /// A rollout's lines in Codex 0.163's shapes, scrubbed: one turn, a
+    /// command, a shell call, and two token counts (the first with no info).
+    const ROLLOUT: &str = include_str!("../fixtures/codex-rollout.jsonl");
+
+    fn stats<'a>(lines: impl Iterator<Item = &'a str>) -> TranscriptSummary {
+        let mut stats = CodexStats::default();
+        lines.for_each(|line| stats.feed(line));
+        stats.summary()
+    }
+
+    #[test]
+    fn a_codex_command_is_a_run_and_its_shell_call_too() {
+        let mut trail = CodexTrail::default();
+        ROLLOUT.lines().for_each(|l| trail.feed(l));
+        let kinds: Vec<(&str, cmux_protocol::ActionKind)> =
+            trail.turns()[0].actions.iter().map(|a| (a.tool.as_str(), a.kind)).collect();
+        assert_eq!(
+            kinds,
+            [("CommandExecution", cmux_protocol::ActionKind::Run), ("shell", cmux_protocol::ActionKind::Run)]
+        );
+    }
+
+    #[test]
+    fn a_rollout_adds_up_to_codexs_own_counts() {
+        let summary = stats(ROLLOUT.lines());
+        assert_eq!(summary.model.as_deref(), Some("gpt-6-luna"));
+        // Fresh: 37738 input less 23424 cached, plus 242 output.
+        assert_eq!(summary.tokens, 37738 - 23424 + 242);
+        // The last call's input, cached and not.
+        assert_eq!(summary.context, 21087);
+        assert_eq!(summary.context_window, Some(258_400));
+        // The command and the shell call; not `exec`, the wrapper.
+        assert_eq!(summary.tool_calls, 2);
+        assert_eq!(summary.tasks, None);
+        assert_eq!(summary.started_ms, parse_timestamp("2026-10-26T20:00:30.000Z"));
+        assert_eq!(summary.last_ms, parse_timestamp("2026-10-26T20:00:40.000Z"));
+    }
+
+    #[test]
+    fn a_rollout_with_no_token_count_yet_counts_nothing() {
+        let summary = stats(ROLLOUT.lines().filter(|l| !l.contains("token_count")));
+        assert_eq!(summary.model.as_deref(), Some("gpt-6-luna"));
+        assert_eq!((summary.tokens, summary.context), (0, 0));
+        // Not a Claude model, so the table has no window for it either.
+        assert_eq!(summary.context_window, None);
+    }
+
     fn trail(lines: &[String]) -> Vec<TrailTurn> {
         let mut trail = CodexTrail::default();
         for line in lines {
@@ -627,6 +768,9 @@ mod tests {
         assert_eq!(a.actions[0].output, "error[E0425]\nmore");
         let b: Vec<(&str, &str)> = turns[1].actions.iter().map(|x| (x.tool.as_str(), x.summary.as_str())).collect();
         assert_eq!(b, [("CommandExecution", "cargo test"), ("ImageView", "/w/shot.png"), ("Extension", "rust lsof")]);
+        let kinds: Vec<cmux_protocol::ActionKind> = turns[1].actions.iter().map(|x| x.kind).collect();
+        use cmux_protocol::ActionKind::{Read, Run};
+        assert_eq!(kinds, [Run, Read, Read], "an image viewed and a web search are reads");
         assert_eq!(turns[1].prompt.as_deref(), Some("Now test"));
     }
 
@@ -661,6 +805,9 @@ mod tests {
             ]
         );
         assert_eq!(turns[0].prompt.as_deref(), Some("Patch it"));
+        use cmux_protocol::ActionKind::{Edit, Read, Run};
+        let kinds: Vec<cmux_protocol::ActionKind> = turns[0].actions.iter().map(|x| x.kind).collect();
+        assert_eq!(kinds, [Run, Edit, Run, Read], "view_image is a read");
         assert_eq!(turns[0].actions[0].output, "make: *** Error 2");
         assert_eq!(turns[0].actions[0].duration_ms, Some(5000));
     }

@@ -33,6 +33,14 @@ export interface TabSnapshot {
   wall: boolean;
   /** The side of the wall it shows, or will when the wall is next on. */
   wallView: WallView;
+  /** How the Agents side lays its agents out. */
+  wallMode: WallMode;
+  /** How the Tasks side lays its board out. */
+  taskLayout: TaskLayout;
+  /** Its agents' panes by urgency: who Focus shows when none is pinned. */
+  wallUrgency: string[];
+  /** Its agents' panes in team order, in pages of `agentsPerTab`. */
+  wallPages: string[][];
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
   /** Its frame on the board; its cards are placed relative to `x`, `y`. */
@@ -46,6 +54,12 @@ export type View = "tabs" | "board";
 
 /** The side of a tab's wall: its agents' terminals, or its task board. */
 export type WallView = "agents" | "tasks";
+
+/** The Agents side: one agent large with a strip beside it, or a grid. */
+export type WallMode = "focus" | "grid";
+
+/** The Tasks side: a column per status, or a row per agent. */
+export type TaskLayout = "columns" | "swimlanes";
 
 /** The board point at the viewport's top-left, and screen px per unit. */
 export interface Camera {
@@ -218,6 +232,12 @@ export interface GraphPaneInfo {
 
 export type AgentStatus = "working" | "needsYou" | "idle";
 
+/** A tool call an agent asks permission for, summed up as in its trail. */
+export interface Asking {
+  tool: string;
+  summary: string;
+}
+
 /** The agent program a pane runs (`cmux_protocol::Harness`). */
 export type Harness =
   | "claude"
@@ -257,6 +277,20 @@ export const HARNESS_LABEL: Record<Harness, string> = {
 export const agentLabel = (a: AgentInfo): string =>
   a.member ?? a.name ?? a.role ?? HARNESS_LABEL[a.harness];
 
+/** The agents of tab `tabId`, in the snapshot's order: the sidebar's pips
+ *  for it, and its frame's on the board. */
+export const tabAgents = (s: WorkspaceSnapshot, tabId: string): AgentInfo[] =>
+  s.agents.filter((a) => a.tabId === tabId);
+
+/** The agents waiting on you — the Inbox's cards and the count on its
+ *  button — tabs in sidebar order, each tab's in its wall's order. */
+export const waitingAgents = (s: WorkspaceSnapshot): AgentInfo[] =>
+  s.tabs.flatMap((t) =>
+    s.agents
+      .filter((a) => a.tabId === t.id && a.status === "needsYou")
+      .sort((a, b) => t.wallUrgency.indexOf(a.paneId) - t.wallUrgency.indexOf(b.paneId)),
+  );
+
 /** A pane running a coding agent: Claude Code, Codex, OpenCode, … */
 export interface AgentInfo {
   paneId: string;
@@ -267,14 +301,19 @@ export interface AgentInfo {
   role: string | null;
   /** Its name in its tab's team, when it is a member. */
   member: string | null;
-  /** A Claude Code agent whose transcript is known: activity to show. */
+  /** A Claude Code agent with a known transcript, or a Codex one with a
+   *  known rollout: `getAgentActivity` has something to read. */
   hasActivity: boolean;
   /** The Claude Code session's name, as `claude agents` lists it. */
   name: string | null;
   model: string | null;
+  /** Its role's effort ("high", "max"); null without one. */
+  effort: string | null;
   /** Its hooks' status, or else busy/idle from Claude Code's session file. */
   status: AgentStatus | null;
   message: string | null;
+  /** The tool call a Claude Code agent waits on a permission for. */
+  asking: Asking | null;
   /** What its own terminal title says it is on, when that adds to the role. */
   topic: string | null;
   sinceMs: number | null;
@@ -299,6 +338,9 @@ export interface TranscriptSummary {
   tokens: number;
   /** Context size at the last reply. */
   context: number;
+  /** How large the context can grow, when known: a guess of 1M for every
+   *  Claude model for now. */
+  contextWindow: number | null;
   toolCalls: number;
   /** Null when it keeps no task list. */
   tasks: TaskProgress | null;
@@ -336,7 +378,12 @@ export interface TrailAction {
   exitCode: number | null;
   /** The first lines of its result. */
   output: string;
+  /** What sort of thing it did. */
+  kind: ActionKind;
 }
+
+/** What a trail action did (`cmux_protocol::ActionKind`). */
+export type ActionKind = "read" | "edit" | "run" | "other";
 
 /** One turn: a prompt and what the agent did for it. */
 export interface TrailTurn {
@@ -381,6 +428,9 @@ export type TaskSource = "teamStart" | "agentNew" | "agentSend" | "manual";
 export interface TaskCard {
   id: string;
   title: string;
+  /** The whole task when it says more than the title; a card written by
+   *  hand's own description. */
+  description: string | null;
   source: TaskSource;
   from: string;
   assignee: string | null;
@@ -390,6 +440,8 @@ export interface TaskCard {
   column: TaskColumn;
   createdMs: number;
   updatedMs: number;
+  /** In Doing: the failed actions in its agent's latest turn. */
+  failing: number;
 }
 
 /** One line of the task log (`cmux_protocol::TaskHistoryEntry`): the
@@ -400,6 +452,20 @@ export interface TaskHistoryEntry {
   card?: string;
   /** A task given: its whole text. */
   text?: string;
+  /** A task given: who gave it (`you` for a person), and to whom. */
+  from?: string;
+  to?: string | null;
+  /** A task given: its card's title when one was given, and where its
+   *  agent was: the tab's id. */
+  title?: string;
+  tab?: string | null;
+  /** A task given, a turn ended or resumed: the agent's pane. */
+  pane?: string | null;
+  /** A move: the column, and who made it. */
+  column?: TaskColumn;
+  by?: string;
+  /** A turn end: how it ended. */
+  end?: "done" | "needsYou" | "exited";
   agent: string | null;
   turnMs: number | null;
   summary: string;
@@ -413,6 +479,19 @@ export const taskHistory = (tabId: string | null, card: string | null) =>
  *  ones, only the latest. */
 export const taskCards = (tabId: string | null) =>
   invoke<TaskCard[]>("task_cards", { tabId });
+/** Writes a card in a tab, as `mira task add`; its id. */
+export const taskAdd = (
+  tabId: string,
+  title: string,
+  description: string | null,
+  assignee: string | null,
+) => invoke<string>("task_add", { tabId, title, description, assignee });
+/** Sends a card written by hand to an agent and puts it in Doing. */
+export const taskSend = (card: string, paneId: string) =>
+  invoke<string>("task_send", { card, paneId });
+/** Sends an agent its own first To do card, else its tab's first unassigned. */
+export const sendNextTask = (paneId: string) =>
+  invoke<string>("send_next_task", { paneId });
 
 /** Where a role or a way of working was defined (`cmux_protocol::RoleSource`). */
 export type RoleSource = "repo" | "global" | "config" | "builtin";
@@ -456,6 +535,39 @@ export interface RoleCatalog {
   ways: AgentWay[];
   teams: AgentTeam[];
   problems: string[];
+  /** Files hidden by one of the same name that comes first. */
+  shadowed: ShadowedFile[];
+}
+
+/** What the catalog holds (`cmux_protocol::CatalogKind`). */
+export type CatalogKind = "role" | "way" | "team";
+
+/** A role, way or team hidden by one of the same name — repo, then yours,
+ *  then mirador.json, then built-in — and so not used. */
+export interface ShadowedFile {
+  kind: CatalogKind;
+  name: string;
+  source: RoleSource;
+  /** Its file; null for an `agentRoles` entry. */
+  path: string | null;
+  /** Where the one used instead is defined, and its file. */
+  by: RoleSource;
+  byPath: string | null;
+}
+
+/** One part of what a team member is told, in order (`cmux_protocol::PromptLayer`). */
+export interface PromptLayer {
+  kind: "role" | "roleWay" | "team" | "charter" | "teamWay";
+  /** The file it comes from, or "written by Mirador". */
+  source: string;
+  text: string;
+}
+
+/** A team or role using a role or a way of working, and whether it runs. */
+export interface UsedBy {
+  kind: CatalogKind;
+  name: string;
+  running: boolean;
 }
 
 export interface RemotePaneInfo {
@@ -514,7 +626,21 @@ export interface ResolvedConfig {
   customCommands: CustomCommand[];
   /** Only mirador.json's: a pane's roles come from `agentRoles()`. */
   agentRoles: AgentRole[];
+  /** How many agents a page of the wall's Grid layout holds: 4, 6 or 9. */
+  agentsPerTab: number;
+  agentClick: AgentClick;
+  /** Where the app opens the editor, a diff and the commit graph. */
+  editorOpensIn: OpensIn;
+  diffOpensIn: OpensIn;
+  graphOpensIn: OpensIn;
 }
+
+/** A sidebar agent's click: its tab's wall on it, or its pane alone. */
+export type AgentClick = "wall" | "pane";
+
+/** A pane the app opens: in a tab of its own, or split beside the
+ *  focused one (`cmux_protocol::OpensIn`). */
+export type OpensIn = "tab" | "split";
 
 export interface UpdateInfo {
   version: string;
@@ -684,14 +810,66 @@ export interface EditorCatalog {
   /** Where a repository file goes; null outside a repository. */
   repoDir: string | null;
   globalDir: string;
+  /** What the role form's pickers offer, per harness a role can start. */
+  choices: HarnessChoices[];
 }
 
 export type AgentFileKind = "role" | "way" | "team";
+
+/** Models and efforts the launch passes on for a harness; a file's own
+ *  value is offered besides, so one not listed still round-trips. */
+export interface HarnessChoices {
+  harness: Harness;
+  models: string[];
+  efforts: string[];
+}
+
+/** The team form's fields (`cmux_protocol::TeamFields`). */
+export interface TeamFields {
+  description: string | null;
+  way: string | null;
+  layout: string | null;
+  members: AgentTeam["members"];
+  /** The body. */
+  charter: string | null;
+}
+
+/** The role form's fields (`cmux_protocol::RoleFields`). */
+export interface RoleFields {
+  harness: Harness;
+  model: string | null;
+  effort: string | null;
+  way: string | null;
+  description: string | null;
+  /** `tools.deny`. */
+  deny: string[];
+  /** The body. */
+  prompt: string | null;
+}
+
+/** The way page's fields (`cmux_protocol::WayFields`). */
+export interface WayFields {
+  description: string | null;
+  /** The body. */
+  prompt: string;
+}
+
+export type FileFields =
+  | ({ kind: "team" } & TeamFields)
+  | ({ kind: "role" } & RoleFields)
+  | ({ kind: "way" } & WayFields);
 
 export const openAgentEditor = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_agent_editor", { paneId, tab });
 export const agentEditorCatalog = (paneId: string) =>
   invoke<EditorCatalog>("agent_editor_catalog", { paneId });
+/** The teams and roles using the role or way `name`, running or not. */
+export const agentEditorUsedBy = (paneId: string, kind: CatalogKind, name: string) =>
+  invoke<UsedBy[]>("agent_editor_used_by", { paneId, kind, name });
+/** What `member` of `team` is told when the team starts, layer by layer,
+ *  and the prompt they join into, as the launch joins them. */
+export const agentEditorTold = (paneId: string, team: string, member: string) =>
+  invoke<{ layers: PromptLayer[]; prompt: string | null }>("agent_editor_told", { paneId, team, member });
 export const agentFileRead = (paneId: string, path: string) =>
   invoke<string>("agent_file_read", { paneId, path });
 /** Warnings for the text; rejects with why it cannot be saved. */
@@ -718,18 +896,44 @@ export const agentFileSave = (
     text,
     create,
   });
+/** Saves a form's fields into `name` in `source`'s place, applied to the
+ *  file at `from` (a built-in's `builtin:` name saves a new file of yours
+ *  or the repository's, with `create`), or to nothing for a new one. */
+export const agentFileSaveFields = (
+  paneId: string,
+  source: RoleSource,
+  name: string,
+  from: string | null,
+  fields: FileFields,
+  create: boolean,
+) =>
+  invoke<EditorCatalog>("agent_file_save_fields", { paneId, source, name, from, fields, create });
+/** What `team restart` did for a member: "restarted", "reopened", or why
+ *  not ("running", "busy"). */
+export interface Restarted {
+  name: string;
+  pane: string;
+  outcome: string;
+}
+/** Starts again the members of `paneId`'s team (`members` by name, all
+ *  when empty) whose agent exited or whose pane was closed; a running
+ *  member is left alone. */
+export const teamRestart = (members: string[], paneId: string | null) =>
+  invoke<Restarted[]>("team_restart", { members, paneId });
 export const agentFileDelete = (paneId: string, path: string) =>
   invoke<EditorCatalog>("agent_file_delete", { paneId, path });
 
 /** The roles `paneId`'s directory sees: its repository's, then yours. */
 export const agentRoles = (paneId: string | null) =>
   invoke<RoleCatalog>("agent_roles", { paneId });
+/** `harness`: without a role, Claude Code (default) or Codex. */
 export const openAgent = (
   role: string | null,
   task: string | null,
   paneId: string | null,
   tab: boolean,
-) => invoke<string>("open_agent", { role, task, paneId, tab });
+  harness: Harness | null = null,
+) => invoke<string>("open_agent", { role, task, paneId, tab, harness });
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });
@@ -740,6 +944,13 @@ export const toggleAgentWall = (paneId: string | null) =>
   invoke<boolean>("toggle_agent_wall", { paneId });
 export const setWallView = (paneId: string | null, view: WallView) =>
   invoke<void>("set_wall_view", { paneId, view });
+/** Lays out a side of the wall of `paneId`'s tab; neither turns it on. */
+export const setWallMode = (paneId: string | null, mode: WallMode) =>
+  invoke<void>("set_wall_mode", { paneId, mode });
+export const setTaskLayout = (paneId: string | null, layout: TaskLayout) =>
+  invoke<void>("set_task_layout", { paneId, layout });
+/** Writes `agentsPerTab` (4, 6 or 9) to mirador.json. */
+export const setAgentsPerTab = (n: number) => invoke<void>("set_agents_per_tab", { n });
 export const getAgentActivity = (paneId: string) =>
   invoke<AgentActivity>("get_agent_activity", { paneId });
 /** Its last `turns` turns, and any begun at or after `sinceMs`. */

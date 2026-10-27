@@ -1,31 +1,24 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
-  AgentRole,
-  agentRoles,
-  roleHint,
   AgentInfo,
   agentLabel,
-  AgentStatus,
-  focusPane,
-  markPaneRead,
-  openAgent,
-  setWallView,
-  toggleAgentWall,
+  setAgentsPerTab,
+  setWallMode,
+  WallMode,
+  TabSnapshot,
   WallView,
-  zoomPane,
+  taskCards,
 } from "../bindings";
-import { SubagentList, percent, useAgentActivity } from "./ActivityPanel";
-import { TaskBoard } from "./TaskBoard";
-import { useUiStore } from "../state/uiStore";
+import { useNow } from "./time";
+import { NO_CARDS, TaskBoard, useLogRead } from "./TaskBoard";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import {
-  fitTerminal,
-  getTerminal,
-  isLent,
-  isLentTo,
-  lendTerminal,
-  watchTerminal,
-} from "../terminal/registry";
+import { useUiStore, WallFilter } from "../state/uiStore";
+import { useConfigStore } from "../state/configStore";
+import { getTerminal } from "../terminal/registry";
+import { FocusLayout } from "./FocusLayout";
+import { GridLayout } from "./GridLayout";
+import { AgentMenu } from "./AgentMenu";
+import { EmptyWall } from "./EmptyWall";
 
 type Props = {
   /** The tab whose agents it shows, and in place of whose splits. */
@@ -37,24 +30,101 @@ type Props = {
   current: boolean;
 };
 
-const STATUS_LABEL: Record<AgentStatus, string> = {
-  working: "working",
-  needsYou: "needs you",
-  idle: "idle",
-};
+const FILTERS: [WallFilter, string][] = [
+  ["all", "All"],
+  ["needsYou", "Needs you"],
+  ["working", "Working"],
+  ["idle", "Idle"],
+];
 
-/** "42s", "3m", "1h" — how long it has been in its status. */
-function elapsed(sinceMs: number, now: number): string {
-  const s = Math.max(0, Math.floor((now - sinceMs) / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  return `${Math.floor(s / 3600)}h`;
+/**
+ * The wall's one row of controls: which agents it shows, by status; then,
+ * in Focus, who it shows large and whether that follows whoever needs
+ * you; in Grid, how many a page holds; then Focus | Grid, and a new agent.
+ */
+function WallToolbar({
+  tab,
+  agents,
+  filter,
+  onMode,
+  menu,
+}: {
+  tab: TabSnapshot;
+  agents: AgentInfo[];
+  filter: WallFilter;
+  onMode: (mode: WallMode) => void;
+  menu: React.ReactNode;
+}) {
+  const pinnedPane = useUiStore((s) => s.pinned[tab.id]);
+  const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
+  const pinned = agents.find((a) => a.paneId === pinnedPane);
+  // Who Focus shows: the pinned agent while it is here, else the most
+  // urgent.
+  const focus = pinned ?? agents.find((a) => a.paneId === tab.wallUrgency[0]);
+  const count = (f: WallFilter) =>
+    f === "all" ? agents.length : agents.filter((a) => a.status === f).length;
+  return (
+    <div className="wall-toolbar">
+      {FILTERS.map(([f, label]) => (
+        <button
+          key={f}
+          className={`wall-filter ${f}${filter === f ? " selected" : ""}`}
+          onClick={() => useUiStore.getState().setWallFilter(tab.id, f)}
+        >
+          {label} {count(f)}
+        </button>
+      ))}
+      <span className="wall-toolbar-spacer" />
+      {tab.wallMode === "focus" ? (
+        <>
+          <span className="wall-toolbar-note">Focus follows needs you</span>
+          {focus && (
+            <button
+              className={`wall-pill${pinned ? " selected" : ""}`}
+              title={pinned ? "Let Focus follow whoever needs you" : "Keep this agent large"}
+              onClick={() =>
+                useUiStore.getState().pinAgent(tab.id, pinned ? null : focus.paneId)
+              }
+            >
+              {pinned ? "Unpin" : `Pin ${agentLabel(focus)}`}
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="wall-toolbar-label">Agents per tab</span>
+          <span className="wall-segments">
+            {[4, 6, 9].map((n) => (
+              <button
+                key={n}
+                className={perTab === n ? "selected" : undefined}
+                onClick={() => perTab !== n && void setAgentsPerTab(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </span>
+        </>
+      )}
+      <span className="wall-segments">
+        {(["focus", "grid"] as WallMode[]).map((mode) => (
+          <button
+            key={mode}
+            className={tab.wallMode === mode ? "selected" : undefined}
+            // A click must not take the keyboard from the terminal first:
+            // switching asks which agent holds it, to keep it there.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onMode(mode)}
+          >
+            {mode === "focus" ? "Focus" : "Grid"}
+          </button>
+        ))}
+      </span>
+      {menu}
+    </div>
+  );
 }
 
-/** Columns for `n` tiles: as square as it gets, never taller than wide. */
-function columns(n: number): number {
-  return Math.max(1, Math.ceil(Math.sqrt(n)));
-}
 
 /**
  * A tab's agents' terminals in one grid — Claude Code, Codex, OpenCode, …,
@@ -70,14 +140,33 @@ export const AgentWall = memo(function AgentWall({
 }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
-  const [roles, setRoles] = useState<AgentRole[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   const now = useNow(visible);
 
-  const tiles = useMemo(
-    () => (snapshot?.agents ?? []).filter((a) => a.tabId === tabId),
-    [snapshot, tabId],
-  );
+  // The tab's agents in team order, which never moves with status.
+  const agents = useMemo(() => {
+    const byPane = new Map(
+      (snapshot?.agents ?? [])
+        .filter((a) => a.tabId === tabId)
+        .map((a) => [a.paneId, a]),
+    );
+    return (shown?.wallPages ?? [])
+      .flat()
+      .flatMap((pane) => byPane.get(pane) ?? []);
+  }, [snapshot, shown, tabId]);
+  const filter = useUiStore((s) => s.wallFilter[tabId] ?? "all");
+
+  // The tab's cards, once for the wall and only while its agents are on
+  // screen: which idle agent has a next task to be sent — an open To do
+  // card of its own, or one of the tab's for no one.
+  const agentsShown = visible && (shown?.wallView ?? "agents") === "agents";
+  const cards = useLogRead(agentsShown, agentsShown ? tabId : "", (k) => taskCards(k), NO_CARDS);
+  const sendable = useMemo(() => {
+    const todo = cards.filter((c) => c.column === "todo");
+    const anyone = todo.some((c) => !c.pane);
+    return new Set(agents.filter((a) => anyone || todo.some((c) => c.pane === a.paneId)).map((a) => a.paneId));
+  }, [cards, agents]);
 
   // Its tiles, or the tab's task board in their place. On the Tasks side
   // no tile is mounted, so each lent terminal has gone back to its own
@@ -86,328 +175,91 @@ export const AgentWall = memo(function AgentWall({
   const tilesShown = visible && side === "agents";
 
   // The tab's focused pane is under the wall, so the keyboard would go
-  // nowhere: as the tiles come on screen in the active tab — on the board,
-  // as their tab becomes it — the wall gives it to that pane's tile, or
-  // the first. Only then — not on every snapshot, or a click in another
-  // tile would be undone. The tiles' own effects ran first, so their
-  // terminals are here by now — unless another wall holds one, and then
-  // it is not this wall's to focus.
+  // nowhere: each layout hands it to one of its tiles as it comes on
+  // screen in the active tab. Switching layouts keeps it on the agent that
+  // had it: Grid pins that agent for Focus to show large, and Focus tells
+  // Grid which page and tile to give it to.
   const wallRef = useRef<HTMLDivElement>(null);
   const keyboard = tilesShown && current;
-  useEffect(() => {
-    if (!keyboard) return;
-    const tile = tiles.find((a) => a.paneId === shown?.focusedPane) ?? tiles[0];
-    const term = tile && getTerminal(tile.paneId);
-    if (term?.element && wallRef.current?.contains(term.element)) term.focus();
-  }, [keyboard]);
+  const mode = shown?.wallMode ?? "focus";
+  const handover = useRef<string | null>(null);
+  const switchMode = (next: WallMode) => {
+    if (!shown || next === mode) return;
+    const held = agents.find((a) => {
+      const el = getTerminal(a.paneId)?.element;
+      return el && wallRef.current?.contains(el) && el.contains(document.activeElement);
+    });
+    if (held && next === "focus") useUiStore.getState().pinAgent(tabId, held.paneId);
+    if (held && next === "grid") {
+      handover.current = held.paneId;
+      const page = shown.wallPages.findIndex((p) => p.includes(held.paneId));
+      if (page >= 0) useUiStore.getState().setGridPage(tabId, page);
+    }
+    void setWallMode(shown.focusedPane, next);
+  };
 
   const unread = snapshot?.unreadPanes ?? [];
-  const count = (s: AgentStatus) => tiles.filter((a) => a.status === s).length;
-  const cols = columns(tiles.length);
-
-  // The roles of the directory a new agent would work in: the shown tab's
-  // focused pane's, read each time the menu opens.
-  const rolesPane = shown?.focusedPane;
-  useEffect(() => {
-    if (!menuOpen || !rolesPane) return;
-    let live = true;
-    agentRoles(rolesPane)
-      .then((c) => live && setRoles(c.roles))
-      .catch(() => live && setRoles([]));
-    return () => {
-      live = false;
-    };
-  }, [menuOpen, rolesPane]);
-
-  const start = (role: string | null) => {
-    setMenuOpen(false);
-    if (!shown) return;
-    // Like everywhere else, the agent joins a tab rather than getting its
-    // own: it splits the tab's focused pane, under the wall, so the wall
-    // stays on screen and gains a tile.
-    openAgent(role, null, shown.focusedPane, false).catch((e) =>
-      console.error(`mirador: role ${role}: ${e}`),
-    );
-  };
 
   return (
     <div className="pane agent-wall" ref={wallRef}>
-      <div className="wall-chrome">
-        <span className="wall-badge">Agents</span>
-        {shown && (
-          <span className="wall-tab" title="The tab whose agents these are">
-            {shown.title}
-          </span>
-        )}
-        <span className="wall-counts">
-          {tiles.length === 0 ? (
-            "none running"
-          ) : (
-            <>
-              {count("needsYou") > 0 && (
-                <span className="wall-count needs-you">
-                  {count("needsYou")} need you
-                </span>
-              )}
-              <span className="wall-count working">
-                {count("working")} working
-              </span>
-              <span className="wall-count idle">{count("idle")} idle</span>
-            </>
-          )}
-        </span>
-        {shown && (
-          // Splits leaves the wall, so it is never the side shown here.
-          <div className="tb-switch" role="group">
-            <button
-              title="Show this tab's splits (⌘⇧A / Ctrl+Shift+A)"
-              onClick={() => void toggleAgentWall(shown.focusedPane)}
-            >
-              Splits
-            </button>
-            <button
-              className={side === "agents" ? "on" : ""}
-              title="This tab's agents' terminals"
-              onClick={() => void setWallView(shown.focusedPane, "agents")}
-            >
-              Agents
-            </button>
-            <button
-              className={side === "tasks" ? "on" : ""}
-              title="The cards of the tasks this tab's agents were given"
-              onClick={() => void setWallView(shown.focusedPane, "tasks")}
-            >
-              Tasks
-            </button>
-          </div>
-        )}
-        <div className="wall-new">
-          <button
-            className="wall-new-button"
-            title="Start a Claude Code agent"
-            onClick={() => setMenuOpen((o) => !o)}
-          >
-            + New agent
-          </button>
-          {menuOpen && (
-            <div className="wall-menu" onMouseLeave={() => setMenuOpen(false)}>
-              <button onClick={() => start(null)}>
-                <span>Claude</span>
-                <span className="wall-menu-model">default model</span>
+      {/* The Tasks side has no toolbar here: the task board has its own,
+          and the sidebar's view switch leads back. */}
+      {side === "agents" && shown && (
+        <WallToolbar
+          tab={shown}
+          agents={agents}
+          filter={filter}
+          onMode={switchMode}
+          menu={
+            <div className="wall-new">
+              <button
+                className={`wall-new-button${menuOpen ? " open" : ""}`}
+                title="Start an agent in this tab"
+                // The menu remembers which terminal had the keyboard, to
+                // give it back; a click must not move it here first.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setMenuOpen((o) => !o)}
+              >
+                + Agent ▾
               </button>
-              {roles.map((r) => (
-                <button
-                  key={r.name}
-                  disabled={!!r.problem}
-                  title={r.problem ?? r.description ?? undefined}
-                  onClick={() => start(r.name)}
-                >
-                  <span>{r.name}</span>
-                  <span className="wall-menu-model">{roleHint(r)}</span>
-                </button>
-              ))}
-              {roles.length === 0 && (
-                <p className="wall-menu-hint">
-                  Add <code>.mirador/roles/&lt;name&gt;.md</code> to the
-                  repository for roles with their own model, prompt and way of
-                  working.
-                </p>
-              )}
+              {menuOpen && <AgentMenu pane={shown.focusedPane} onClose={closeMenu} />}
             </div>
-          )}
-        </div>
-      </div>
+          }
+        />
+      )}
 
       {side === "tasks" ? (
         <TaskBoard tabId={tabId} visible={visible} />
-      ) : tiles.length === 0 ? (
-        <div className="wall-empty">
-          <p>No agents in {shown?.title ?? "this tab"}.</p>
-          <p className="wall-empty-hint">
-            Start one with <em>+ New agent</em>, or run <code>claude</code>,{" "}
-            <code>codex</code>, <code>opencode</code> or another agent in a pane
-            of the tab: <em>Splits</em> shows them.
-          </p>
-        </div>
+      ) : agents.length === 0 ? (
+        shown && <EmptyWall tab={shown} />
+      ) : mode === "focus" && shown ? (
+        <FocusLayout
+          tab={shown}
+          agents={agents}
+          filter={filter}
+          unread={unread}
+          visible={visible}
+          current={current}
+          keyboard={keyboard}
+          sendable={sendable}
+          now={now}
+        />
       ) : (
-        <div
-          className="wall-grid"
-          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-        >
-          {tiles.map((a) => (
-            <WallTile
-              key={a.paneId}
-              agent={a}
-              unread={unread.includes(a.paneId)}
-              visible={visible}
-              current={current}
-              now={now}
-            />
-          ))}
-        </div>
+        shown && (
+          <GridLayout
+            tab={shown}
+            agents={agents}
+            filter={filter}
+            unread={unread}
+            visible={visible}
+            current={current}
+            keyboard={keyboard}
+            handover={handover}
+            sendable={sendable}
+            now={now}
+          />
+        )
       )}
     </div>
   );
 });
-
-function WallTile({
-  agent,
-  unread,
-  visible,
-  current,
-  now,
-}: {
-  agent: AgentInfo;
-  unread: boolean;
-  visible: boolean;
-  current: boolean;
-  now: number;
-}) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  // Assumed until a lend fails, so a tile does not flash the placeholder.
-  const [shown, setShown] = useState(true);
-  const pane = agent.paneId;
-
-  const releaseRef = useRef<(() => void) | null>(null);
-
-  // Borrow the pane's terminal whenever the wall is on screen. The pane may
-  // register after the wall mounts (tabs mount in order), remount, or have
-  // been taken back while the wall was hidden; a terminal lent nowhere is
-  // picked up whenever it appears.
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!visible || !host) return;
-    const borrow = () => {
-      if (isLentTo(pane, host)) {
-        setShown(true);
-        return;
-      }
-      if (isLent(pane)) {
-        setShown(false);
-        return;
-      }
-      const release = lendTerminal(pane, host);
-      if (release) releaseRef.current = release;
-      setShown(!!release);
-    };
-    borrow();
-    // The tile may have changed size while the wall was hidden.
-    if (isLentTo(pane, host)) fitTerminal(pane);
-    const unwatch = watchTerminal(pane, borrow);
-    const observer = new ResizeObserver(() => {
-      if (isLentTo(pane, host)) fitTerminal(pane);
-    });
-    observer.observe(host);
-    return () => {
-      observer.disconnect();
-      unwatch();
-    };
-  }, [pane, visible]);
-
-  // Give the terminal back only when the tile goes away: while the wall is
-  // merely hidden it stays here, until its own tab is shown and takes it
-  // (see `lendTerminal` for why every move counts). Declared after the
-  // borrow so that React, which runs cleanups in order, unwatches first:
-  // the release announces the terminal free, and a tile still listening
-  // would borrow it again into a host leaving the page.
-  useEffect(
-    () => () => {
-      releaseRef.current?.();
-      releaseRef.current = null;
-    },
-    [pane],
-  );
-
-  // Its subagents, read while the wall is on screen, for an agent that
-  // has them to read (`hasActivity`, decided in Rust).
-  const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
-  const tasks = activity?.session.tasks ?? null;
-
-  const status = agent.status;
-  return (
-    <div
-      className={`wall-tile${status ? ` ${status}` : ""}${unread ? " unread" : ""}`}
-    >
-      <div
-        className="wall-tile-head"
-        title={
-          "Show this agent alone in its tab" +
-          (agent.hasActivity ? " — right-click for its subagents" : "")
-        }
-        onClick={() => void zoomPane(pane, true)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          if (agent.hasActivity) useUiStore.getState().openActivity(pane);
-        }}
-      >
-        <span className="wall-dot" />
-        <span className="wall-role">{agentLabel(agent)}</span>
-        {agent.role && agent.name && agent.role !== agent.name && (
-          <span className="wall-model">{agent.role}</span>
-        )}
-        {agent.model && <span className="wall-model">{agent.model}</span>}
-        <span className="wall-where">
-          {[agent.topic, agent.branch].filter(Boolean).join(" · ")}
-        </span>
-        {tasks && (
-          <span className="wall-tasks" title={tasks.current ?? "Its task list"}>
-            {tasks.done}/{tasks.total} · {percent(tasks)}%
-          </span>
-        )}
-        <span className="wall-status">
-          {status ? STATUS_LABEL[status] : "—"}
-          {status && agent.sinceMs ? ` ${elapsed(agent.sinceMs, now)}` : ""}
-        </span>
-      </div>
-      {status === "needsYou" && agent.message && (
-        <div className="wall-message" title={agent.message}>
-          {agent.message}
-        </div>
-      )}
-      <div className="wall-body">
-        <div
-          className="wall-term"
-          data-pane={pane}
-          onMouseDown={() => {
-            if (unread) void markPaneRead(pane);
-            // On the board, a wall in another tab's frame: its tab becomes
-            // the active one, with this agent focused, so the keyboard
-            // stays in the tile pressed.
-            if (!current) void focusPane(pane);
-          }}
-        >
-          {/* The terminal's element is appended here by `lendTerminal`, so
-              React must own nothing inside it. */}
-          <div className="wall-term-host" ref={hostRef} />
-          {!shown && <span className="wall-term-missing">shown elsewhere</span>}
-        </div>
-        {activity && (activity.subagents.length > 0 || tasks) && (
-          <aside className="wall-side">
-            <div className="wall-side-head">
-              <span>Subagents · {activity.subagents.length}</span>
-              <button
-                title="The full activity panel"
-                onClick={() => useUiStore.getState().openActivity(pane)}
-              >
-                ⤢
-              </button>
-            </div>
-            <SubagentList activity={activity} now={now} compact />
-          </aside>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** The current time, ticking each second while `active`. */
-function useNow(active: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
-}

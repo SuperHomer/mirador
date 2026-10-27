@@ -1,9 +1,28 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Camera, TabSnapshot, closeTab, newTab, setFramePosition, setView } from "../bindings";
+import {
+  Camera,
+  TabSnapshot,
+  closeTab,
+  newTab,
+  setFramePosition,
+  setView,
+  tabAgents,
+  waitingAgents,
+} from "../bindings";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { arrangeBoard, atFullSize, fitBoard, panToCard, takesPointer, useBoardStore } from "../state/boardStore";
+import { useConfigStore } from "../state/configStore";
+import { StatusPips } from "../agents/StatusMark";
+import {
+  arrangeBoard,
+  atFullSize,
+  fitBoard,
+  flyToCard,
+  panToCard,
+  takesPointer,
+  useBoardStore,
+} from "../state/boardStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -404,70 +423,75 @@ export function BoardHost({ board, children }: { board: boolean; children: React
         {children}
       </div>
       {board && (
-        <div className="board-controls">
-          <button
-            className="board-zoom-step"
-            title="Zoom out"
-            disabled={!nextZoomStop(cam.zoom, -1)}
-            onClick={() => zoomStep(-1)}
-          >
-            −
-          </button>
-          {zoomDraft === null ? (
-            <span
-              className="board-zoom"
-              title="Double-click to type a zoom"
-              onDoubleClick={() => {
-                zoomCancelled.current = false;
-                setZoomDraft(String(Math.round(cam.zoom * 100)));
-              }}
+        // One row along the bottom: the banner takes what the controls
+        // leave, so it can never reach under them however narrow the board.
+        <div className="board-overlay">
+          <BoardBanner />
+          <div className="board-controls">
+            <button
+              className="board-zoom-step"
+              title="Zoom out"
+              disabled={!nextZoomStop(cam.zoom, -1)}
+              onClick={() => zoomStep(-1)}
             >
-              {Math.round(cam.zoom * 100)}%
-            </span>
-          ) : (
-            <input
-              className="board-zoom"
-              value={zoomDraft}
-              autoFocus
-              onFocus={(e) => e.currentTarget.select()}
-              onChange={(e) => setZoomDraft(e.target.value)}
-              onBlur={() => {
-                if (!zoomCancelled.current) typeZoom(zoomDraft);
-                setZoomDraft(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") zoomCancelled.current = true;
-                if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
-              }}
-            />
-          )}
-          <button
-            className="board-zoom-step"
-            title="Zoom in"
-            disabled={!nextZoomStop(cam.zoom, 1)}
-            onClick={() => zoomStep(1)}
-          >
-            +
-          </button>
-          {/* The way back, for when the sidebar's switch is hidden (⌘B). */}
-          <button title="Back to tabs (⌘⇧O / Ctrl+Shift+O)" onClick={() => void setView("tabs")}>
-            Tabs
-          </button>
-          <button
-            title="A new tab, its frame where you are looking"
-            onClick={() => void newTab()}
-          >
-            New frame
-          </button>
-          <button title="Show the whole board" onClick={fitBoard}>
-            Fit
-          </button>
-          <button
-            title="Pack the frames into rows, in tab order, to fit the window"
-            onClick={arrangeBoard}
-          >
-            Arrange
-          </button>
+              −
+            </button>
+            {zoomDraft === null ? (
+              <span
+                className="board-zoom"
+                title="Double-click to type a zoom"
+                onDoubleClick={() => {
+                  zoomCancelled.current = false;
+                  setZoomDraft(String(Math.round(cam.zoom * 100)));
+                }}
+              >
+                {Math.round(cam.zoom * 100)}%
+              </span>
+            ) : (
+              <input
+                className="board-zoom"
+                value={zoomDraft}
+                autoFocus
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setZoomDraft(e.target.value)}
+                onBlur={() => {
+                  if (!zoomCancelled.current) typeZoom(zoomDraft);
+                  setZoomDraft(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") zoomCancelled.current = true;
+                  if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+                }}
+              />
+            )}
+            <button
+              className="board-zoom-step"
+              title="Zoom in"
+              disabled={!nextZoomStop(cam.zoom, 1)}
+              onClick={() => zoomStep(1)}
+            >
+              +
+            </button>
+            {/* The way back, for when the sidebar's switch is hidden (⌘B). */}
+            <button title="Back to tabs (⌘⇧O / Ctrl+Shift+O)" onClick={() => void setView("tabs")}>
+              Tabs
+            </button>
+            <button
+              title="A new tab, its frame where you are looking"
+              onClick={() => void newTab()}
+            >
+              New frame
+            </button>
+            <button title="Show the whole board" onClick={fitBoard}>
+              Fit
+            </button>
+            <button
+              title="Pack the frames into rows, in tab order, to fit the window"
+              onClick={arrangeBoard}
+            >
+              Arrange
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -525,6 +549,39 @@ export function boardDrag(
 }
 
 /**
+ * The board's corner, while anyone waits on you: how many, in how many
+ * frames, and a way to each in turn — the agents waiting as the sidebar
+ * and the Inbox count them, flown to one after another, round again.
+ */
+function BoardBanner() {
+  const snapshot = useWorkspaceStore((s) => s.snapshot);
+  // The pane last flown to: the next click goes to the one after it.
+  const [last, setLast] = useState<string | null>(null);
+  if (!snapshot) return null;
+  const waiting = waitingAgents(snapshot);
+  if (waiting.length === 0) return null;
+  const frames = new Set(waiting.map((a) => a.tabId)).size;
+  const flyToNext = () => {
+    // After the last one flown to; from the first when it is gone.
+    const at = waiting.findIndex((a) => a.paneId === last);
+    const next = waiting[(at + 1) % waiting.length];
+    setLast(next.paneId);
+    flyToCard(next.paneId);
+  };
+  return (
+    <div className="board-banner">
+      <span className="board-banner-count">
+        {waiting.length} {waiting.length === 1 ? "agent needs" : "agents need"} you
+      </span>{" "}
+      in {frames} {frames === 1 ? "frame" : "frames"} ·{" "}
+      <button className="board-banner-fly" onClick={flyToNext}>
+        Fly to next
+      </button>
+    </div>
+  );
+}
+
+/**
  * One tab's layer: in the tabs view, the whole host, shown when it is the
  * active tab; on the board, its frame, moved by dragging its label.
  */
@@ -545,6 +602,20 @@ export function TabLayer({
   const at = held ?? tab.frame;
   // Where the "+" that opened the menu is on screen, while it is open.
   const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
+  // The snapshot, not a list made from it: a selector that builds a new
+  // array each time never settles.
+  const snapshot = useWorkspaceStore((s) => s.snapshot);
+  const agents = snapshot ? tabAgents(snapshot, tab.id) : [];
+  const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
+  // What the frame shows, as its tab would.
+  const view = !tab.wall
+    ? "Splits"
+    : tab.wallView === "tasks"
+      ? "Wall · Tasks"
+      : tab.wallMode === "grid"
+        ? `Wall · Grid · ${perTab} per tab`
+        : "Wall · Focus";
+  const waiting = agents.some((a) => a.status === "needsYou");
 
   const drag = (e: React.PointerEvent) => {
     let to = { x: tab.frame.x, y: tab.frame.y };
@@ -565,7 +636,7 @@ export function TabLayer({
 
   return (
     <div
-      className={`tab-layer${current ? " current" : ""}${held ? " dragging" : ""}`}
+      className={`tab-layer${current ? " current" : ""}${board && waiting ? " needs-you" : ""}${held ? " dragging" : ""}`}
       style={
         board
           ? { left: at.x, top: at.y, width: tab.frame.w, height: tab.frame.h }
@@ -575,6 +646,8 @@ export function TabLayer({
       {board && (
         <div className="frame-label" onPointerDown={drag}>
           <span className="frame-title">{tab.title}</span>
+          <StatusPips agents={agents} />
+          <span className="frame-view">{view}</span>
           <button
             className="frame-button"
             data-frame-menu

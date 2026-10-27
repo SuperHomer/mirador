@@ -1,0 +1,181 @@
+import { Ref, useState } from "react";
+import {
+  AgentStatus,
+  HARNESS_LABEL,
+  RoleCatalog,
+  TeamFields,
+} from "../bindings";
+import { useWorkspaceStore } from "../state/workspaceStore";
+import { STATUS_LABEL, StatusMark } from "./StatusMark";
+
+type Props = {
+  name: string;
+  fields: TeamFields;
+  onChange: (fields: TeamFields) => void;
+  catalog: RoleCatalog;
+  /** A built-in or anything else that cannot be saved here. */
+  readOnly: boolean;
+  selected: number | null;
+  onSelect: (member: number) => void;
+  /** The charter's editor, for the inspector's Edit link to focus. */
+  charterRef?: Ref<HTMLTextAreaElement>;
+};
+
+/** How much a status wants you, to show a member's most urgent seat. */
+const URGENCY: AgentStatus[] = ["needsYou", "working", "idle"];
+
+/**
+ * A team file as a form (17a): its members as cards, its way, layout and
+ * description, and its charter. Every edit goes to `fields`; saving them
+ * into the file is the editor's.
+ */
+export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, onSelect, charterRef }: Props) {
+  const [adding, setAdding] = useState(false);
+  const snapshot = useWorkspaceStore((s) => s.snapshot);
+
+  // Where the team runs — in every tab running it — each seat's statuses
+  // by its name, the seat names `teams::seats` gives: `dev` twice is
+  // `dev-1` and `dev-2`.
+  const statusOf = new Map<string, (AgentStatus | null)[]>();
+  for (const tab of snapshot?.tabs ?? []) {
+    if (tab.team?.name !== name) continue;
+    for (const seat of tab.team.members) {
+      const agent = snapshot?.agents.find((a) => a.paneId === seat.pane);
+      if (agent) statusOf.set(seat.name, [...(statusOf.get(seat.name) ?? []), agent.status]);
+    }
+  }
+  // The most urgent of a member's seats, across every run: undefined when
+  // none of them runs, null when running with no status known.
+  const seatStatus = (base: string, count: number): AgentStatus | null | undefined => {
+    const seats = count > 1 ? Array.from({ length: count }, (_, i) => `${base}-${i + 1}`) : [base];
+    const found = seats.flatMap((s) => statusOf.get(s) ?? []);
+    if (found.length === 0) return undefined;
+    return URGENCY.find((u) => found.includes(u)) ?? null;
+  };
+
+  const ways = catalog.ways.map((w) => w.name);
+  if (fields.way && !ways.includes(fields.way)) ways.push(fields.way);
+
+  return (
+    <div className="team-page">
+      <div className="team-label">MEMBERS</div>
+      <div className="team-members">
+        {fields.members.map((m, i) => {
+          const base = m.name ?? m.role;
+          const role = catalog.roles.find((r) => r.name === m.role);
+          const problem = role ? role.problem : `no role \`${m.role}\``;
+          const status = seatStatus(base, m.count);
+          return (
+            <button
+              key={i}
+              className={`team-member${m.lead ? " lead" : ""}${problem ? " problem" : ""}${selected === i ? " selected" : ""}`}
+              onClick={() => onSelect(i)}
+            >
+              <span className="team-member-head">
+                <span className="team-member-name">
+                  {base}
+                  {m.count > 1 && <span className="team-member-count"> ×{m.count}</span>}
+                </span>
+                {m.lead && <span className="team-lead">LEAD</span>}
+                {status !== undefined && (
+                  <span className={`team-member-status ${status ?? "unknown"}`}>
+                    <StatusMark status={status} small />
+                    {status ? STATUS_LABEL[status] : "running"}
+                  </span>
+                )}
+              </span>
+              <span className={`team-member-role${problem ? " problem" : ""}`}>
+                {problem ??
+                  [HARNESS_LABEL[role!.harness], role!.model ?? "default model", role!.effort]
+                    .filter(Boolean)
+                    .join(" · ")}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {!readOnly &&
+        (adding ? (
+          <select
+            className="team-add"
+            autoFocus
+            value=""
+            onBlur={() => setAdding(false)}
+            onChange={(e) => {
+              setAdding(false);
+              if (!e.target.value) return;
+              onChange({
+                ...fields,
+                members: [...fields.members, { role: e.target.value, name: null, count: 1, lead: false }],
+              });
+            }}
+          >
+            <option value="">Pick a role…</option>
+            {catalog.roles.map((r) => (
+              <option key={r.name} value={r.name}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <button className="team-add" onClick={() => setAdding(true)}>
+            + Add member
+          </button>
+        ))}
+      <div className="team-fields">
+        <label>
+          <span>Way of working</span>
+          <select
+            disabled={readOnly}
+            value={fields.way ?? ""}
+            onChange={(e) => onChange({ ...fields, way: e.target.value || null })}
+          >
+            <option value="">none</option>
+            {ways.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Layout</span>
+          <select
+            disabled={readOnly}
+            value={fields.layout ?? "grid"}
+            onChange={(e) => onChange({ ...fields, layout: e.target.value })}
+          >
+            {["grid", "columns", "rows"].map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+            {fields.layout && !["grid", "columns", "rows"].includes(fields.layout) && (
+              <option value={fields.layout}>{fields.layout}</option>
+            )}
+          </select>
+        </label>
+        <label>
+          <span>Description</span>
+          <input
+            readOnly={readOnly}
+            value={fields.description ?? ""}
+            onChange={(e) => onChange({ ...fields, description: e.target.value || null })}
+          />
+        </label>
+      </div>
+      <div className="team-label">
+        CHARTER · TEAM PROMPT
+        <span className="team-label-note">Markdown · every member is told this</span>
+      </div>
+      <textarea
+        ref={charterRef}
+        className="team-charter"
+        spellCheck={false}
+        readOnly={readOnly}
+        value={fields.charter ?? ""}
+        onChange={(e) => onChange({ ...fields, charter: e.target.value || null })}
+      />
+    </div>
+  );
+}

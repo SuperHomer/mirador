@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AgentInfo,
@@ -7,19 +7,24 @@ import {
   agentLabel,
   TabSnapshot,
   newTab,
-  toggleAgentWall,
   zoomPane,
   closeTab,
   setActiveTab,
   renameTab,
   setView,
+  setWallView,
+  tabAgents,
+  toggleAgentWall,
+  waitingAgents,
 } from "../bindings";
-import {
-  isCurrentEntry,
-  sidebarEntries,
-  useWorkspaceStore,
-} from "../state/workspaceStore";
+import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
+import { useConfigStore } from "../state/configStore";
+import { STATUS_LABEL, StatusMark, StatusPips } from "../agents/StatusMark";
+import { elapsed, useNow } from "../agents/time";
+import { AskingLine } from "../agents/AskingLine";
+import { showOnWall } from "../agents/showOnWall";
+import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
@@ -27,77 +32,69 @@ export function Sidebar() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const currentTab = useWorkspaceStore((s) => s.currentTab);
   const visible = useWorkspaceStore((s) => s.sidebarVisible);
+  const accels = acceleratorsByAction(
+    useConfigStore((s) => s.config?.keybindings),
+  );
   if (!snapshot || !visible) return null;
-  const walled = snapshot.tabs.find((t) => t.id === currentTab)?.wall ?? false;
-
-  // Every tab says how many agents it holds, and lights up when one wants
-  // you — the current tab too, so the count stays put when you switch.
-  const agentCount = (tab: TabSnapshot): AgentCount | undefined => {
-    const agents = snapshot.agents.filter((a) => a.tabId === tab.id);
-    if (agents.length === 0) return undefined;
-    return {
-      count: agents.length,
-      attention: agents.some(
-        (a) =>
-          a.status === "needsYou" || snapshot.unreadPanes.includes(a.paneId),
-      ),
-    };
+  const accelOf = (action: string) => {
+    const accel = accels.get(action);
+    return accel ? formatAccel(accel) : undefined;
   };
+  const tab = snapshot.tabs.find((t) => t.id === currentTab);
+  const waiting = waitingAgents(snapshot).length;
 
   return (
     <div className="sidebar">
+      {tab && <ViewSwitch view={snapshot.view} tab={tab} accelOf={accelOf} />}
       <div className="sidebar-tabs">
-        {/* Tabs, whole; then the current tab's agents, each shown alone
-            when clicked. Numbered in that order, which the tab
-            shortcuts use. */}
-        {sidebarEntries(snapshot, currentTab).map((entry, i, entries) =>
-          entry.kind === "tab" ? (
-            <TabRow
-              key={entry.tab.id}
-              tab={entry.tab}
-              index={i}
-              active={isCurrentEntry(snapshot, entry)}
-              agents={agentCount(entry.tab)}
-            />
-          ) : (
-            <Fragment key={entry.agent.paneId}>
-              {entries[i - 1]?.kind === "tab" && (
-                <div className="sidebar-section">
-                  <span>Agents</span>
-                  <button
-                    className={`sidebar-wall${walled ? " selected" : ""}`}
-                    title="Show this tab as the agent wall, or its splits again (⌘⇧A / Ctrl+Shift+A)"
-                    onClick={() => void toggleAgentWall(entry.agent.paneId)}
-                  >
-                    ▦ Wall
-                  </button>
-                </div>
-              )}
-              <AgentRow
-                agent={entry.agent}
+        {/* Tabs, numbered for the tab shortcuts. The current tab's agents
+            hang under its row; any other tab shows a pip per agent. */}
+        {snapshot.tabs.map((tab, i) => {
+          const agents = tabAgents(snapshot, tab.id);
+          const current = tab.id === currentTab;
+          return (
+            <div key={tab.id} className="sidebar-tab">
+              <TabRow
+                tab={tab}
                 index={i}
-                active={isCurrentEntry(snapshot, entry)}
-                unread={snapshot.unreadPanes.includes(entry.agent.paneId)}
+                active={current && !tab.zoomedPane}
+                pips={current ? [] : agents}
               />
-            </Fragment>
-          ),
-        )}
+              {current && agents.length > 0 && (
+                <AgentTree
+                  tab={tab}
+                  agents={agents}
+                  unread={snapshot.unreadPanes}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
       <div className="sidebar-footer">
         <button className="sidebar-new-tab" onClick={() => void newTab()}>
-          + New Tab
+          + New tab
         </button>
-        <div className="view-switch" title="Tabs or board (⌘⇧O / Ctrl+Shift+O)">
-          {(["tabs", "board"] as const).map((view) => (
-            <button
-              key={view}
-              className={snapshot.view === view ? "selected" : undefined}
-              onClick={() => snapshot.view !== view && void setView(view)}
-            >
-              {view === "tabs" ? "Tabs" : "Board"}
-            </button>
-          ))}
-        </div>
+        <button
+          className={`sidebar-button${waiting > 0 ? " waiting" : ""}`}
+          title={
+            waiting > 0
+              ? `${waiting} ${waiting === 1 ? "agent needs" : "agents need"} you`
+              : "Notifications"
+          }
+          onClick={() => useUiStore.getState().toggleNotifications()}
+        >
+          Inbox {waiting}
+        </button>
+        <button
+          className="sidebar-button"
+          onClick={() => useUiStore.getState().togglePalette()}
+        >
+          Commands
+          {accelOf("command_palette") && (
+            <span className="sidebar-accel">{accelOf("command_palette")}</span>
+          )}
+        </button>
       </div>
       <ClaudeBanner />
       <UpdateBanner />
@@ -105,8 +102,69 @@ export function Sidebar() {
   );
 }
 
+type Shown = "splits" | "wall" | "tasks" | "board";
+
 /**
- * The mark each harness draws for itself, in the row's color: OpenCode's
+ * What the current tab shows, and the way to each other view of it: its
+ * splits, its wall's agents, its wall's task board, or every tab on the
+ * board. Every button but Board also leaves the board.
+ */
+function ViewSwitch({
+  view,
+  tab,
+  accelOf,
+}: {
+  view: "tabs" | "board";
+  tab: TabSnapshot;
+  accelOf: (action: string) => string | undefined;
+}) {
+  const shown: Shown =
+    view === "board"
+      ? "board"
+      : !tab.wall
+        ? "splits"
+        : tab.wallView === "tasks"
+          ? "tasks"
+          : "wall";
+  const pane = tab.focusedPane;
+  const show = async (next: Shown) => {
+    if (next === "board") return setView("board");
+    if (view === "board") await setView("tabs");
+    if (next === "splits") {
+      if (tab.wall) await toggleAgentWall(pane);
+    } else {
+      await setWallView(pane, next === "wall" ? "agents" : "tasks");
+    }
+  };
+  const hint = (title: string, action?: string) => {
+    const accel = action && accelOf(action);
+    return accel ? `${title} (${accel})` : title;
+  };
+  const buttons: [Shown, string, string][] = [
+    ["splits", "Splits", hint("This tab's splits", "agent_wall")],
+    ["wall", "Wall", hint("This tab's agents, as the wall", "agent_wall")],
+    ["tasks", "Tasks", hint("This tab's task board", "task_board")],
+    ["board", "Board", hint("Every tab on one board", "toggle_board")],
+  ];
+  return (
+    <div className="view-switch">
+      {buttons.map(([id, label, title]) => (
+        <button
+          key={id}
+          className={shown === id ? "selected" : undefined}
+          title={title}
+          onClick={() => shown !== id && void show(id)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The mark each harness draws for itself, in the row's neutral color — so
+ * no harness's colour competes with a status's: OpenCode's
  * and Pi's logos (from their favicons), Codex's `>_` prompt — it has no
  * logo of its own apart from OpenAI's. Claude Code keeps its spark; the
  * rest share one.
@@ -151,73 +209,118 @@ function HarnessMark({ harness }: { harness: Harness }) {
   }
 }
 
-/**
- * One agent: the harness and its role, on one line. Clicking shows its
- * pane alone, filling its tab; the tab's own row shows the whole tab.
- * Right-clicking opens its activity: task progress and subagents.
- */
-function AgentRow({
-  agent,
-  index,
-  active,
+/** The current tab's agents, under its row. Mounted only while there are
+ *  some to show, so the clock ticks only then. */
+function AgentTree({
+  tab,
+  agents,
   unread,
 }: {
-  agent: AgentInfo;
-  index: number;
-  active: boolean;
-  unread: boolean;
+  tab: TabSnapshot;
+  agents: AgentInfo[];
+  unread: string[];
 }) {
+  const now = useNow(true);
+  const click = useConfigStore((s) => s.config?.agentClick ?? "wall");
+  const pinned = useUiStore((s) => s.pinned[tab.id]);
   return (
-    <div
-      className={`tab-row agent${active ? " active" : ""}`}
-      onClick={() => void zoomPane(agent.paneId, true)}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (agent.hasActivity) useUiStore.getState().openActivity(agent.paneId);
-      }}
-      title={
-        [agent.cwd, agent.hasActivity ? "Right-click for its subagents" : null]
-          .filter(Boolean)
-          .join(" — ") || undefined
-      }
-    >
-      <span className="tab-index">{index + 1}</span>
-      <span
-        className={`tab-harness ${agent.harness}`}
-        aria-label={HARNESS_LABEL[agent.harness]}
-      >
-        <HarnessMark harness={agent.harness} />
-      </span>
-      <span className={`tab-title${unread ? " has-unread" : ""}`}>
-        {agentLabel(agent)}
-      </span>
-      {agent.status === "needsYou" && (
-        <span className="tab-agent-needs" title={agent.message ?? "Needs you"}>
-          needs you
-        </span>
-      )}
-      {unread && <span className="tab-badge">•</span>}
+    <div className="agent-tree">
+      {agents.map((agent) => (
+        <AgentRow
+          key={agent.paneId}
+          agent={agent}
+          now={now}
+          click={click}
+          shown={
+            click === "wall"
+              ? tab.wall && pinned === agent.paneId
+              : tab.zoomedPane === agent.paneId
+          }
+          unread={unread.includes(agent.paneId)}
+        />
+      ))}
     </div>
   );
 }
 
-/** The agents in a tab. */
-interface AgentCount {
-  count: number;
-  /** One of them needs you, or said something unread. */
-  attention: boolean;
+/**
+ * One agent: its status, its name and how long it has been so. Clicking
+ * shows it on its tab's wall, large and pinned, or — with `agentClick`
+ * set to "pane" — its pane alone, filling its tab.
+ */
+function AgentRow({
+  agent,
+  now,
+  click,
+  shown,
+  unread,
+}: {
+  agent: AgentInfo;
+  now: number;
+  click: "wall" | "pane";
+  /** It is what the tab shows: pinned on the wall, or the zoomed pane. */
+  shown: boolean;
+  unread: boolean;
+}) {
+  const open = () => {
+    if (click === "pane") {
+      void zoomPane(agent.paneId, true);
+      return;
+    }
+    showOnWall(agent.tabId, agent.paneId);
+  };
+  const status = agent.status;
+  const classes = [
+    "agent-row",
+    status === "needsYou" && "needs-you",
+    status === "idle" && "idle",
+    shown && (click === "wall" ? "pinned" : "active"),
+  ];
+  return (
+    <div
+      className={classes.filter(Boolean).join(" ")}
+      onClick={open}
+      title={agent.cwd ?? undefined}
+    >
+      <div className="agent-line">
+        <span className="agent-mark">
+          <StatusMark status={status} small />
+        </span>
+        <span className={`agent-name${unread ? " has-unread" : ""}`}>
+          {agentLabel(agent)}
+        </span>
+        <span
+          className="tab-harness"
+          aria-label={HARNESS_LABEL[agent.harness]}
+          title={HARNESS_LABEL[agent.harness]}
+        >
+          <HarnessMark harness={agent.harness} />
+        </span>
+        {unread && <span className="tab-badge">•</span>}
+        {status && (
+          <span className={`agent-status ${status}`}>
+            {STATUS_LABEL[status]}
+            {agent.sinceMs ? ` · ${elapsed(agent.sinceMs, now)}` : ""}
+          </span>
+        )}
+      </div>
+      {status === "needsYou" && <AskingLine agent={agent} className="agent-prompt" />}
+    </div>
+  );
 }
 
 function TabRow({
   tab,
   index,
   active,
-  agents,
+  pips,
 }: {
   tab: TabSnapshot;
   index: number;
   active: boolean;
-  agents?: AgentCount;
+  /** Agents to show a status pip for: none for the current tab, whose
+   *  agents are listed under it. */
+  pips: AgentInfo[];
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(tab.title);
@@ -252,16 +355,19 @@ function TabRow({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
+          <span className="tab-head">
+            <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
+              {tab.title}
+            </span>
             {tab.team && (
               <span
                 className="tab-team"
                 title={`Team ${tab.team.name}: ${tab.team.members.map((m) => m.name).join(", ")}`}
               >
-                ⚑
+                team · {tab.team.name}
+                {tab.team.members.length > 4 && ` · ${tab.team.members.length}`}
               </span>
             )}
-            {tab.title}
           </span>
         )}
         {tab.unread > 0 && tab.lastNotification ? (
@@ -303,14 +409,7 @@ function TabRow({
           </span>
         )}
       </div>
-      {agents && (
-        <span
-          className={`tab-agents${agents.attention ? " attention" : ""}`}
-          title={`${agents.count} ${agents.count === 1 ? "agent" : "agents"} in this tab`}
-        >
-          ✳ {agents.count}
-        </span>
-      )}
+      <StatusPips agents={pips} />
       {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
       <CloseTab tabId={tab.id} />
     </div>
