@@ -565,6 +565,9 @@ function Swimlanes({
 }) {
   const [everything, setEverything] = useState(false);
   const counts = (column: TaskColumn) => cards.filter((c) => c.column === column).length;
+  // With every tab's cards, those of tabs since closed, in one lane at the
+  // end: the columns call each of them "closed tab".
+  const closed = grouped ? cards.filter((c) => !tabs.some((t) => t.id === c.tab)) : [];
   return (
     <div className="tb-lanes">
       <div className="tb-lane-grid tb-lane-heads">
@@ -601,6 +604,20 @@ function Swimlanes({
           </section>
         );
       })}
+      {closed.length > 0 && (
+        <section className="tb-lane-group">
+          <h4 className="tb-lane-tab">Closed tabs</h4>
+          <LaneRow
+            lane={{ key: "closed", pane: null, agent: null, name: "closed tab" }}
+            cards={closed}
+            unassigned={[]}
+            collapsible={grouped}
+            everything={everything}
+            now={now}
+            card={card}
+          />
+        </section>
+      )}
     </div>
   );
 }
@@ -782,6 +799,8 @@ function Card({
           {card.description}
         </button>
       )}
+      {/* Compact, what it waits on in one line, in place of the box. */}
+      {asking && compact && agent && <AskingLine agent={agent} className="tb-asks-compact" />}
       {asking && !compact && agent && (agent.asking || agent.message) && (
         <div className="tb-asks">
           <span className="tb-asks-label">Asks:</span>

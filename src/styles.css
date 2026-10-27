@@ -4216,6 +4216,12 @@ body,
   -webkit-line-clamp: 1;
 }
 
+.tb-asks-compact {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--status-needs-you);
+}
+
 .tb-card.compact .tb-meta {
   margin-top: 4px;
 }
