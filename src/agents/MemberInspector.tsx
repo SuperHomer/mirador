@@ -2,8 +2,6 @@ import { useEffect, useState } from "react";
 import {
   AgentRole,
   EditorCatalog,
-  HARNESS_LABEL,
-  Harness,
   PromptLayer,
   RoleFields,
   RoleSource,
@@ -14,6 +12,7 @@ import {
   agentFileSaveFields,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { RoleFieldsEditor, RolePromptEditor, roleFieldsOf } from "./RoleForm";
 import { Confirm, RestartConfirm, restart, teamRuns } from "./teamRestart";
 import { useDiskCheck } from "./useDiskCheck";
 
@@ -47,23 +46,11 @@ const SOURCE_LABEL: Record<RoleSource, string> = {
   builtin: "built-in",
 };
 
-const roleFieldsOf = (r: AgentRole): RoleFields => ({
-  harness: r.harness,
-  model: r.model,
-  effort: r.effort,
-  way: r.way,
-  description: r.description,
-  deny: r.tools?.deny ?? [],
-  prompt: r.prompt,
-});
 
 /** A member's seat names, as `teams::seats` gives them. */
 const seatsOf = (base: string, count: number) =>
   count > 1 ? Array.from({ length: count }, (_, i) => `${base}-${i + 1}`) : [base];
 
-/** `list` with `value` in it, for a picker that must show the file's own. */
-const withValue = (list: string[], value: string | null | undefined) =>
-  value && !list.includes(value) ? [...list, value] : list;
 
 /**
  * The selected member of a team page (17b, 17c): its place in the team,
@@ -86,7 +73,6 @@ export function MemberInspector(props: Props) {
   const [others, setOthers] = useState<string[]>([]);
   const [told, setTold] = useState<{ layers: PromptLayer[]; prompt: string | null } | null>(null);
   const [toldError, setToldError] = useState<string | null>(null);
-  const [adding, setAdding] = useState("");
 
   const dirty = !!form && JSON.stringify(form) !== formSaved;
   const path = role && role.source !== "config" ? role.path : null;
@@ -167,8 +153,6 @@ export function MemberInspector(props: Props) {
   const setMember = (patch: Partial<TeamFields["members"][number]>) =>
     onFields({ ...fields, members: fields.members.map((x, i) => (i === index ? { ...x, ...patch } : x)) });
 
-  const choices = cat.choices.find((c) => c.harness === form?.harness);
-  const ways = cat.catalog.ways.map((w) => w.name);
   const warning = others.length > 0 && (
     <div className="inspector-warning">
       This role is also used by {others.length === 1 ? "team" : "teams"} {others.join(", ")}. Changing it affects{" "}
@@ -287,89 +271,7 @@ export function MemberInspector(props: Props) {
               <p className="inspector-note">An agentRoles entry: it is edited in mirador.json.</p>
             ) : (
               <>
-                <label className="inspector-field">
-                  <span>Harness</span>
-                  <select
-                    value={form.harness}
-                    onChange={(e) => setForm({ ...form, harness: e.target.value as Harness })}
-                  >
-                    {withValue(
-                      cat.choices.map((c) => c.harness),
-                      form.harness,
-                    ).map((h) => (
-                      <option key={h} value={h}>
-                        {HARNESS_LABEL[h as Harness]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="inspector-field">
-                  <span>Model</span>
-                  <select
-                    value={form.model ?? ""}
-                    onChange={(e) => setForm({ ...form, model: e.target.value || null })}
-                  >
-                    <option value="">the harness's default</option>
-                    {withValue(choices?.models ?? [], form.model).map((x) => (
-                      <option key={x} value={x}>
-                        {x}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="inspector-field">
-                  <span>Effort</span>
-                  <div className="inspector-segments">
-                    {withValue(choices?.efforts ?? [], form.effort).map((x) => (
-                      <button
-                        key={x}
-                        className={form.effort === x ? "selected" : ""}
-                        title={form.effort === x ? "Again for the default" : undefined}
-                        onClick={() => setForm({ ...form, effort: form.effort === x ? null : x })}
-                      >
-                        {x}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <label className="inspector-field">
-                  <span>Way of working</span>
-                  <select value={form.way ?? ""} onChange={(e) => setForm({ ...form, way: e.target.value || null })}>
-                    <option value="">team default</option>
-                    {withValue(ways, form.way).map((w) => (
-                      <option key={w} value={w}>
-                        {w}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="inspector-field">
-                  <span>Tools denied</span>
-                  <div className="inspector-chips">
-                    {form.deny.map((rule) => (
-                      <span key={rule} className="inspector-chip">
-                        {rule}
-                        <button
-                          title={`Allow ${rule} again`}
-                          onClick={() => setForm({ ...form, deny: form.deny.filter((d) => d !== rule) })}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                    <input
-                      placeholder="Bash(git push *)"
-                      value={adding}
-                      onChange={(e) => setAdding(e.target.value)}
-                      onKeyDown={(e) => {
-                        const rule = adding.trim();
-                        if (e.key !== "Enter" || !rule) return;
-                        if (!form.deny.includes(rule)) setForm({ ...form, deny: [...form.deny, rule] });
-                        setAdding("");
-                      }}
-                    />
-                  </div>
-                </div>
+                <RoleFieldsEditor form={form} onChange={setForm} cat={cat} />
                 {warning}
               </>
             )}
@@ -379,12 +281,7 @@ export function MemberInspector(props: Props) {
         {tab === "prompt" &&
           (editRole && form ? (
             <>
-              <textarea
-                className="inspector-prompt"
-                spellCheck={false}
-                value={form.prompt ?? ""}
-                onChange={(e) => setForm({ ...form, prompt: e.target.value || null })}
-              />
+              <RolePromptEditor form={form} onChange={setForm} />
               {warning}
               <p className="inspector-note">
                 {form.way || fields.way

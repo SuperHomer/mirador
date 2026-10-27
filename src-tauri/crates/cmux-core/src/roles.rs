@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use cmux_protocol::{
     AgentRole, AgentTeam, AgentWay, CatalogKind, Harness, HarnessChoices, PromptLayer, PromptLayerKind, RoleCatalog,
-    RoleFields, RoleSource, ShadowedFile, ToolRules, UsedBy,
+    RoleFields, RoleSource, ShadowedFile, ToolRules, UsedBy, WayFields,
 };
 use serde::Deserialize;
 
@@ -477,6 +477,15 @@ pub fn set_role_fields(text: &str, fields: &RoleFields) -> Result<String, String
     write_file(&map, fields.prompt.as_deref())
 }
 
+/// `text`, a way file, with the way page's `fields`: its description in
+/// the frontmatter (removed when blank), its prompt as the body. Every
+/// other key stays, where it was; comments in the frontmatter are lost.
+pub fn set_way_fields(text: &str, fields: &WayFields) -> Result<String, String> {
+    let (mut map, _) = front_and_body(text)?;
+    set_key(&mut map, "description", text_value(&fields.description));
+    write_file(&map, Some(&fields.prompt))
+}
+
 /// What a role form offers, per harness a role can start: the models the
 /// repository's own roles and Claude Code's aliases name, and the efforts
 /// a role is checked against.
@@ -743,6 +752,23 @@ mod tests {
         let out = set_role_fields(text, &edited).unwrap();
         let (r, _) = parse_role("reviewer", &out).unwrap();
         assert_eq!((r.effort.as_deref(), r.tools.unwrap().deny), (Some("high"), vec!["Bash(git push *)".to_string()]));
+    }
+
+    #[test]
+    fn saves_the_way_pages_fields_into_a_way_file() {
+        let text = "---\ndescription: Small steps\nlevel: 2\n---\nTests first.\n";
+        let fields = |text: &str| {
+            let (description, prompt) = parse_way(text).unwrap();
+            WayFields { description, prompt }
+        };
+        let same = set_way_fields(text, &fields(text)).unwrap();
+        assert_eq!(same, text);
+        let edited = WayFields { description: None, prompt: "Read twice.".into() };
+        assert_eq!(set_way_fields(text, &edited).unwrap(), "---\nlevel: 2\n---\nRead twice.\n");
+        assert_eq!(set_way_fields("Plain.\n", &WayFields { description: None, prompt: "Plain.".into() }).unwrap(), "Plain.\n");
+        for (_, name, text) in crate::builtin::of("ways") {
+            assert_eq!(fields(&set_way_fields(text, &fields(text)).unwrap()), fields(text), "{name}");
+        }
     }
 
     #[test]

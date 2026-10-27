@@ -1,10 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentFileKind,
-  AgentTeam,
   EditorCatalog,
+  FileFields,
   RoleSource,
-  TeamFields,
   agentEditorCatalog,
   agentEditorUsedBy,
   agentFileCheck,
@@ -20,6 +19,9 @@ import {
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { MemberInspector } from "./MemberInspector";
+import { RolePage } from "./RolePage";
+import { roleFieldsOf } from "./RoleForm";
+import { WayPage } from "./WayPage";
 import { TeamPage } from "./TeamPage";
 import { Confirm, RestartConfirm, restart, teamRuns } from "./teamRestart";
 import { useDiskCheck } from "./useDiskCheck";
@@ -113,20 +115,30 @@ function items(cat: EditorCatalog | null): Item[] {
   ];
 }
 
-/** A team as the form edits it. */
-const fieldsOf = (t: AgentTeam): TeamFields => ({
-  description: t.description,
-  way: t.way,
-  layout: t.layout,
-  members: t.members,
-  charter: t.prompt,
-});
-
-/** The team the catalog read from `item`'s file, if it is one in use. */
-const teamOf = (cat: EditorCatalog | null, item: Item) =>
-  item.kind === "team" && item.path && !item.shadowedBy
-    ? cat?.catalog.teams.find((t) => t.name === item.name && t.source === item.source)
-    : undefined;
+/** `item` as its page's form edits it, from what the catalog read of its
+ *  file — none for a file the catalog does not hold as one in use (a
+ *  shadowed one, one not saved yet) or for an `agentRoles` entry. */
+function formOf(cat: EditorCatalog | null, item: Item): FileFields | null {
+  if (!cat || !item.path || item.shadowedBy) return null;
+  const mine = <T extends { name: string; source: RoleSource }>(list: T[]) =>
+    list.find((x) => x.name === item.name && x.source === item.source);
+  switch (item.kind) {
+    case "team": {
+      const t = mine(cat.catalog.teams);
+      return t
+        ? { kind: "team", description: t.description, way: t.way, layout: t.layout, members: t.members, charter: t.prompt }
+        : null;
+    }
+    case "role": {
+      const r = mine(cat.catalog.roles);
+      return r ? { kind: "role", ...roleFieldsOf(r) } : null;
+    }
+    case "way": {
+      const w = mine(cat.catalog.ways);
+      return w ? { kind: "way", description: w.description, prompt: w.prompt } : null;
+    }
+  }
+}
 
 const same = (a: Item | null, b: Item | null) =>
   !!a && !!b && a.kind === b.kind && a.name === b.name && a.source === b.source;
@@ -157,9 +169,10 @@ export const AgentEditor = memo(function AgentEditor({
   } | null>(null);
   const [pending, setPending] = useState<Item | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   // A team is edited as a form; its file as text only when asked for.
-  const [form, setForm] = useState<TeamFields | null>(null);
+  const [form, setForm] = useState<FileFields | null>(null);
   const [formSaved, setFormSaved] = useState("");
   const [raw, setRaw] = useState(false);
   const [pendingRaw, setPendingRaw] = useState<boolean | null>(null);
@@ -211,7 +224,7 @@ export const AgentEditor = memo(function AgentEditor({
     (t) => {
       setText(t);
       setSaved(t);
-      if (sel) resetForm(teamOf(cat, sel));
+      if (sel) resetForm(formOf(cat, sel));
     },
     (e) => setStatus(String(e)),
   );
@@ -233,8 +246,7 @@ export const AgentEditor = memo(function AgentEditor({
     return () => clearTimeout(t);
   }, [sel, text, readOnly]);
 
-  const resetForm = (team: AgentTeam | undefined) => {
-    const f = team ? fieldsOf(team) : null;
+  const resetForm = (f: FileFields | null) => {
     setForm(f);
     setFormSaved(f ? JSON.stringify(f) : "");
   };
@@ -243,6 +255,7 @@ export const AgentEditor = memo(function AgentEditor({
     setPending(null);
     setPendingRaw(null);
     setConfirmDelete(false);
+    setMenuOpen(false);
     setConfirm(null);
     setStatus(null);
     setIsNew(false);
@@ -253,7 +266,7 @@ export const AgentEditor = memo(function AgentEditor({
     setRoleDirty(false);
     setStale(false);
     setConfirmOverwrite(false);
-    resetForm(teamOf(catalog, item));
+    resetForm(formOf(catalog, item));
     if (!item.path) {
       // An `agentRoles` entry, shown as the catalog has it — unless it is
       // shadowed, when the catalog has only the one used instead.
@@ -294,6 +307,13 @@ export const AgentEditor = memo(function AgentEditor({
     else open(item);
   };
 
+  // The page of the team, role or way `name` in use, as choosing it in
+  // the list opens it.
+  const openNamed = (kind: AgentFileKind, name: string) => {
+    const item = list.find((i) => i.kind === kind && i.name === name && !i.shadowedBy);
+    if (item) choose(item);
+  };
+
   // Another member drops the role edits of this one: asked first.
   const selectMember = (i: number | null) => {
     if (roleDirty && i !== member) {
@@ -302,7 +322,7 @@ export const AgentEditor = memo(function AgentEditor({
   };
   const removeMember = (i: number) => {
     const remove = () => {
-      setForm((f) => f && { ...f, members: f.members.filter((_, j) => j !== i) });
+      setForm((f) => (f?.kind === "team" ? { ...f, members: f.members.filter((_, j) => j !== i) } : f));
       setMember(null);
     };
     if (roleDirty) {
@@ -324,7 +344,7 @@ export const AgentEditor = memo(function AgentEditor({
     };
     if (formMode && sel.path) {
       const path = sel.path;
-      return agentFileSaveFields(paneId, sel.source, sel.name, path, { kind: "team", ...form! }, false)
+      return agentFileSaveFields(paneId, sel.source, sel.name, path, form!, false)
         .then((next) => {
           setCat(next);
           setFormSaved(JSON.stringify(form));
@@ -350,7 +370,8 @@ export const AgentEditor = memo(function AgentEditor({
         written();
         setIsNew(false);
         const now = items(next).find((i) => same(i, sel));
-        if (now) setSel(now);
+        // A file just created opens as any other, on its form.
+        if (now) isNew ? open(now, next) : setSel(now);
         setStatus("Saved");
         return true;
       })
@@ -365,10 +386,10 @@ export const AgentEditor = memo(function AgentEditor({
   const showRaw = (toRaw: boolean) => {
     setPendingRaw(null);
     if (toRaw) {
-      if (formSaved) setForm(JSON.parse(formSaved) as TeamFields);
+      if (formSaved) setForm(JSON.parse(formSaved) as FileFields);
     } else {
       setText(saved);
-      if (sel) resetForm(teamOf(cat, sel));
+      if (sel) resetForm(formOf(cat, sel));
     }
     setRaw(toRaw);
   };
@@ -673,17 +694,37 @@ export const AgentEditor = memo(function AgentEditor({
                     {raw ? "Edit as form" : "Edit raw file"}
                   </button>
                 )}
-                {!readOnly && dirty && !isNew && (
-                  <button
-                    onClick={() =>
-                      formMode ? setForm(JSON.parse(formSaved) as TeamFields) : setText(saved)
-                    }
-                  >
-                    Revert
-                  </button>
-                )}
-                {sel.path && !readOnly && !confirmDelete && (
-                  <button onClick={() => setConfirmDelete(true)}>Delete</button>
+                {!readOnly && !isNew && !confirmDelete && (
+                  <span className="editor-menu-anchor">
+                    <button title="More" onClick={() => setMenuOpen((o) => !o)}>
+                      ⋯
+                    </button>
+                    {menuOpen && (
+                      <div className="editor-menu">
+                        <button
+                          disabled={!dirty}
+                          onClick={() => {
+                            setMenuOpen(false);
+                            if (formMode) setForm(JSON.parse(formSaved) as FileFields);
+                            else setText(saved);
+                          }}
+                        >
+                          Revert
+                        </button>
+                        {sel.path && (
+                          <button
+                            className="danger"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              setConfirmDelete(true);
+                            }}
+                          >
+                            Delete…
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </span>
                 )}
                 {confirmDelete && (
                   <>
@@ -775,50 +816,76 @@ export const AgentEditor = memo(function AgentEditor({
                     }
                   }}
                 >
-                  <div className="team-layout">
-                    <TeamPage
-                      name={sel.name}
-                      fields={form!}
-                      onChange={(f) => {
-                        setForm(f);
-                        setStatus(null);
-                      }}
-                      catalog={cat.catalog}
-                      readOnly={readOnly}
-                      selected={member}
-                      onSelect={selectMember}
-                      charterRef={charterRef}
-                    />
-                    {member !== null && form!.members[member] ? (
-                      <MemberInspector
-                        key={`${member}:${form!.members[member].role}:${roleEpoch}`}
-                        paneId={paneId}
-                        cat={cat}
-                        refreshed={refreshed}
-                        team={sel.name}
+                  {form!.kind === "team" ? (
+                    <div className="team-layout">
+                      <TeamPage
+                        name={sel.name}
                         fields={form!}
-                        onFields={(f) => {
-                          setForm(f);
+                        onChange={(f) => {
+                          setForm({ ...f, kind: "team" });
                           setStatus(null);
                         }}
-                        index={member}
-                        teamReadOnly={readOnly}
-                        teamDirty={dirty}
-                        onCatalog={setCat}
-                        onRoleDirty={setRoleDirty}
-                        onRemove={() => removeMember(member)}
-                        onOpenWay={(way) => {
-                          const item = list.find((i) => i.kind === "way" && i.name === way && !i.shadowedBy);
-                          if (item) choose(item);
-                        }}
-                        onEditCharter={() => charterRef.current?.focus()}
+                        catalog={cat.catalog}
+                        readOnly={readOnly}
+                        selected={member}
+                        onSelect={selectMember}
+                        charterRef={charterRef}
                       />
-                    ) : (
-                      <aside className="inspector empty">
-                        <p className="inspector-note">Pick a member to see its settings, its role and what it is told.</p>
-                      </aside>
-                    )}
-                  </div>
+                      {member !== null && form!.members[member] ? (
+                        <MemberInspector
+                          key={`${member}:${form!.members[member].role}:${roleEpoch}`}
+                          paneId={paneId}
+                          cat={cat}
+                          refreshed={refreshed}
+                          team={sel.name}
+                          fields={form!}
+                          onFields={(f) => {
+                            setForm({ ...f, kind: "team" });
+                            setStatus(null);
+                          }}
+                          index={member}
+                          teamReadOnly={readOnly}
+                          teamDirty={dirty}
+                          onCatalog={setCat}
+                          onRoleDirty={setRoleDirty}
+                          onRemove={() => removeMember(member)}
+                          onOpenWay={(way) => openNamed("way", way)}
+                          onEditCharter={() => charterRef.current?.focus()}
+                        />
+                      ) : (
+                        <aside className="inspector empty">
+                          <p className="inspector-note">Pick a member to see its settings, its role and what it is told.</p>
+                        </aside>
+                      )}
+                    </div>
+                  ) : form!.kind === "role" ? (
+                    <RolePage
+                      paneId={paneId}
+                      name={sel.name}
+                      form={form!}
+                      onChange={(f) => {
+                        setForm({ ...f, kind: "role" });
+                        setStatus(null);
+                      }}
+                      cat={cat}
+                      readOnly={readOnly}
+                      refreshed={refreshed}
+                      onOpen={openNamed}
+                    />
+                  ) : (
+                    <WayPage
+                      paneId={paneId}
+                      name={sel.name}
+                      form={form!}
+                      onChange={(f) => {
+                        setForm({ ...f, kind: "way" });
+                        setStatus(null);
+                      }}
+                      readOnly={readOnly}
+                      refreshed={refreshed}
+                      onOpen={openNamed}
+                    />
+                  )}
                 </div>
               ) : (
                 <textarea

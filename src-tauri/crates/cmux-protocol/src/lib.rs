@@ -1425,12 +1425,22 @@ pub struct RoleFields {
     pub prompt: Option<String>,
 }
 
+/// What the editor's way page sets in a way file: `roles::set_way_fields`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WayFields {
+    pub description: Option<String>,
+    /// The body.
+    pub prompt: String,
+}
+
 /// A form's fields, saved into the file of their kind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum FileFields {
     Team(TeamFields),
     Role(RoleFields),
+    Way(WayFields),
 }
 
 /// What a role form's pickers offer for a harness a role can start: the

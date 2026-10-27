@@ -179,7 +179,7 @@ pub fn agent_file_save(
     catalog(&state, &pane_id)
 }
 
-/// Saves a form's `fields` into the team or role `name` in `source`'s
+/// Saves a form's `fields` into the team, role or way `name` in `source`'s
 /// place: applied to the text of `from` — the file as it is, or a
 /// built-in's `builtin:` name, which is saved as a new file of yours or
 /// the repository's (`create`) — or to nothing for a new one. Checked and
@@ -202,6 +202,7 @@ pub fn agent_file_save_fields(
     let (kind, text) = match &fields {
         FileFields::Team(f) => (Kind::Team, cmux_core::teams::set_team_fields(&text, f)?),
         FileFields::Role(f) => (Kind::Role, cmux_core::roles::set_role_fields(&text, f)?),
+        FileFields::Way(f) => (Kind::Way, cmux_core::roles::set_way_fields(&text, f)?),
     };
     places.save(kind, source, &name, &text, create)?;
     catalog(&state, &pane_id)

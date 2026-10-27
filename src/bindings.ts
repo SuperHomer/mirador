@@ -834,7 +834,17 @@ export interface RoleFields {
   prompt: string | null;
 }
 
-export type FileFields = ({ kind: "team" } & TeamFields) | ({ kind: "role" } & RoleFields);
+/** The way page's fields (`cmux_protocol::WayFields`). */
+export interface WayFields {
+  description: string | null;
+  /** The body. */
+  prompt: string;
+}
+
+export type FileFields =
+  | ({ kind: "team" } & TeamFields)
+  | ({ kind: "role" } & RoleFields)
+  | ({ kind: "way" } & WayFields);
 
 export const openAgentEditor = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_agent_editor", { paneId, tab });

@@ -5623,6 +5623,154 @@ button.tb-line-row:hover {
   border-color: var(--muted);
 }
 
+/* The header's ⋯: Revert and Delete, out of the way of Save. */
+.editor-menu-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.editor-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: 4px;
+  border: 1px solid var(--overlay);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.editor-head .editor-menu button {
+  background: none;
+  text-align: left;
+  padding: 4px 8px;
+}
+
+.editor-head .editor-menu button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.editor-head .editor-menu button.danger {
+  background: none;
+  color: var(--danger);
+}
+
+/* A way's text in full width, who uses it beside (17d). */
+.way-page {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.way-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.way-users {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-left: 1px solid var(--surface);
+  background: var(--bg-alt);
+  overflow-y: auto;
+}
+
+.way-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  background: none;
+  color: var(--subtext);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.way-user.running {
+  color: var(--text);
+}
+
+.way-user:hover {
+  background: var(--tint-hover);
+}
+
+.way-user-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.way-user-kind {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.way-user-state {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.way-user.running .way-user-state {
+  color: var(--status-working);
+}
+
+/* A role's fields beside its prompt. */
+.role-page {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.role-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--surface);
+  overflow-y: auto;
+}
+
+.role-fields fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.role-prompt {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.inspector-chip.link {
+  border: none;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
 /* The team page beside the selected member's inspector (17b). */
 .team-layout {
   flex: 1;
