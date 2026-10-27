@@ -59,10 +59,9 @@ button { font-family: inherit; cursor: pointer; }
     border-bottom: 1px solid var(--surface);
   }
   .tasks-agent-meta { display: none; }
-  #board .board-mock-controls {
-    position: static !important;
-    width: fit-content;
-    margin: 0 8px 8px auto;
+  #board .board-mock-overlay {
+    position: static;
+    margin: 0 8px 8px;
   }
 }
 
@@ -283,6 +282,49 @@ button { font-family: inherit; cursor: pointer; }
   .ms-rail { display: none; }
   .ms-wall-toolbar .ms-filter:not(.selected) { display: none; }
 }
+
+/* The board mock's frames and bottom row (BoardCanvas.tsx), as the app's
+   BoardHost draws them. */
+.board-frame-title {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--subtext);
+}
+.board-frame-title.current { color: var(--text); }
+.board-frame-name { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-frame-view { flex-shrink: 0; margin-left: 2px; font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.board-frame-wall { height: 100%; display: flex; border-radius: 6px; overflow: hidden; }
+.board-frame-wall .ms-wall-body { grid-template-columns: minmax(0, 1fr) 130px; }
+.board-mock-overlay {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+.board-mock-overlay > * { pointer-events: auto; }
+.board-mock-banner {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--subtext);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board-mock-count { color: var(--peach); font-weight: 600; }
+.board-mock-fly { color: var(--accent); }
+.board-mock-controls { flex: none; margin-left: auto; }
 
 /* The section links need ~1035px (measured with the Board link); below
    that they would push the page into a sideways scroll. The logo and

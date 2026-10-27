@@ -32,13 +32,15 @@ const FRAMES: Frame[] = [
         ],
       },
       {
-        title: "api",
+        title: "claude",
         h: 250,
+        status: "needsYou",
         lines: [
-          { text: "$ cargo test", color: "var(--text)" },
-          { text: "test auth::rejects_expired ... ok" },
-          { text: "test auth::rotates_refresh ... ok" },
-          { text: "test result: ok. 42 passed", color: "var(--green)" },
+          { text: "> wire up the refresh flow", color: "var(--text)" },
+          { text: "⏺ Bash(npm run migrate)" },
+          { text: "Do you want to proceed?", color: "var(--text)" },
+          { text: "❯ 1. Yes", color: "var(--accent)" },
+          { text: "  2. No" },
         ],
       },
     ],
@@ -59,32 +61,57 @@ const FRAMES: Frame[] = [
     ],
   },
   {
-    title: "agents",
-    cards: [
-      {
-        title: "reviewer",
-        h: 260,
-        status: "needsYou",
-        lines: [
-          { text: "✳ Reviewing the token rotation", color: "var(--text)" },
-          { text: "  Bash(cargo test -p api)" },
-          { text: "  Do you want to proceed?", color: "#fab387" },
-          { text: "  ❯ 1. Yes" },
-          { text: "    2. No" },
-        ],
-      },
-      {
-        title: "planner",
-        h: 260,
-        status: "working",
-        lines: [
-          { text: "✳ Splitting the login work", color: "var(--text)" },
-          { text: "  ☒ Read the auth module" },
-          { text: "  ☐ Hand step 2 to the worker" },
-          { text: "  ✶ Thinking…", color: "var(--accent)" },
-        ],
-      },
-    ],
+    // A team's tab showing its wall: its frame holds the wall, in Focus.
+    title: "omakase",
+    cards: [],
+    wall: {
+      h: 520,
+      large: 0,
+      agents: [
+        {
+          name: "reviewer",
+          harness: "claude",
+          status: "needsYou",
+          since: "1m",
+          asking: "Bash cargo test -p api",
+          model: "Haiku 5.5",
+          context: 22,
+          lines: [
+            { text: "✳ Reviewing the token rotation", color: "var(--text)" },
+            { text: "  Bash(cargo test -p api)" },
+            { text: "  Do you want to proceed?", color: "var(--peach)" },
+            { text: "  ❯ 1. Yes" },
+            { text: "    2. No" },
+          ],
+        },
+        {
+          name: "planner",
+          harness: "claude",
+          status: "working",
+          since: "12s",
+          model: "Opus 5.5",
+          context: 41,
+          lines: [
+            { text: "✳ Splitting the login work", color: "var(--text)" },
+            { text: "  ☒ Read the auth module" },
+            { text: "  ☐ Hand step 2 to the worker" },
+            { text: "  ✶ Thinking…", color: "var(--accent)" },
+          ],
+        },
+        {
+          name: "worker",
+          harness: "claude",
+          status: "idle",
+          since: "3m",
+          model: "Opus 5.5",
+          context: 58,
+          lines: [
+            { text: "⏺ Step 1 done: one new test.", color: "var(--text)" },
+            { text: "> ", color: "var(--muted)" },
+          ],
+        },
+      ],
+    },
   },
 ];
 
