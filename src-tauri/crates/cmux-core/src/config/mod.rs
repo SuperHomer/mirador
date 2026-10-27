@@ -4,6 +4,7 @@
 //! builtin defaults → imported theme source → explicit mirador.json values.
 
 pub mod ghostty;
+pub mod settings;
 pub mod ui;
 pub mod wezterm;
 
@@ -191,27 +192,10 @@ pub fn set_agents_per_tab(n: u8) -> Result<(), String> {
     set_agents_per_tab_in(&config_path(), n)
 }
 
-/// Sets `agentsPerTab` to `n` (4, 6 or 9) in the file at `path`, creating
-/// it if absent. Only that key changes: the file is edited as JSON, not
-/// read into [`Config`] and written back, which would drop keys Config
-/// does not know and every value it reads loosely. A file that does not
-/// parse is left alone, not replaced.
+/// Sets `agentsPerTab` to `n` (4, 6 or 9) in the file at `path`, as any
+/// setting is written: only that key changes.
 fn set_agents_per_tab_in(path: &Path, n: u8) -> Result<(), String> {
-    if ![4, 6, 9].contains(&n) {
-        return Err(format!("agentsPerTab is 4, 6 or 9, not {n}"));
-    }
-    let mut cfg = match std::fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str::<serde_json::Value>(&text).map_err(|e| format!("mirador.json: {e}"))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
-        Err(e) => return Err(format!("mirador.json: {e}")),
-    };
-    let obj = cfg.as_object_mut().ok_or("mirador.json is not a JSON object")?;
-    obj.insert("agentsPerTab".into(), n.into());
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    let text = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    std::fs::write(path, text + "\n").map_err(|e| e.to_string())
+    settings::set_config_value_in(path, "agentsPerTab", Some(n.into()))
 }
 
 /// Writes a starter config if none exists, so users can discover options.

@@ -1627,6 +1627,38 @@ pub enum AgentClick {
     Pane,
 }
 
+/// What a mirador.json setting holds, and so how it can be edited.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum SettingKind {
+    /// One of these JSON values, strings or numbers.
+    Choice { values: Vec<serde_json::Value> },
+    Bool,
+    Number { min: f64, max: f64 },
+    Text,
+    /// Shown, but edited in the file: lists and maps a form cannot hold.
+    ReadOnly,
+}
+
+/// A mirador.json key as the Settings pane shows it: what it is, and what
+/// the file sets it to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingRow {
+    /// The key in mirador.json ("fontSize").
+    pub key: String,
+    /// "Appearance", "Terminal", "Agents", "Panes" or "Advanced".
+    pub group: String,
+    pub kind: SettingKind,
+    /// The value in effect when the file does not set it, for a person.
+    pub default: String,
+    pub description: String,
+    /// The value in the file as written, if it sets one.
+    pub value: Option<serde_json::Value>,
+    /// Whether that value is one the key takes. Always true when unset.
+    pub valid: bool,
+}
+
 /// One line of a diff hunk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
