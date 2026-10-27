@@ -422,72 +422,76 @@ export function BoardHost({ board, children }: { board: boolean; children: React
       >
         {children}
       </div>
-      {board && <BoardBanner />}
       {board && (
-        <div className="board-controls">
-          <button
-            className="board-zoom-step"
-            title="Zoom out"
-            disabled={!nextZoomStop(cam.zoom, -1)}
-            onClick={() => zoomStep(-1)}
-          >
-            −
-          </button>
-          {zoomDraft === null ? (
-            <span
-              className="board-zoom"
-              title="Double-click to type a zoom"
-              onDoubleClick={() => {
-                zoomCancelled.current = false;
-                setZoomDraft(String(Math.round(cam.zoom * 100)));
-              }}
+        // One row along the bottom: the banner takes what the controls
+        // leave, so it can never reach under them however narrow the board.
+        <div className="board-overlay">
+          <BoardBanner />
+          <div className="board-controls">
+            <button
+              className="board-zoom-step"
+              title="Zoom out"
+              disabled={!nextZoomStop(cam.zoom, -1)}
+              onClick={() => zoomStep(-1)}
             >
-              {Math.round(cam.zoom * 100)}%
-            </span>
-          ) : (
-            <input
-              className="board-zoom"
-              value={zoomDraft}
-              autoFocus
-              onFocus={(e) => e.currentTarget.select()}
-              onChange={(e) => setZoomDraft(e.target.value)}
-              onBlur={() => {
-                if (!zoomCancelled.current) typeZoom(zoomDraft);
-                setZoomDraft(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") zoomCancelled.current = true;
-                if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
-              }}
-            />
-          )}
-          <button
-            className="board-zoom-step"
-            title="Zoom in"
-            disabled={!nextZoomStop(cam.zoom, 1)}
-            onClick={() => zoomStep(1)}
-          >
-            +
-          </button>
-          {/* The way back, for when the sidebar's switch is hidden (⌘B). */}
-          <button title="Back to tabs (⌘⇧O / Ctrl+Shift+O)" onClick={() => void setView("tabs")}>
-            Tabs
-          </button>
-          <button
-            title="A new tab, its frame where you are looking"
-            onClick={() => void newTab()}
-          >
-            New frame
-          </button>
-          <button title="Show the whole board" onClick={fitBoard}>
-            Fit
-          </button>
-          <button
-            title="Pack the frames into rows, in tab order, to fit the window"
-            onClick={arrangeBoard}
-          >
-            Arrange
-          </button>
+              −
+            </button>
+            {zoomDraft === null ? (
+              <span
+                className="board-zoom"
+                title="Double-click to type a zoom"
+                onDoubleClick={() => {
+                  zoomCancelled.current = false;
+                  setZoomDraft(String(Math.round(cam.zoom * 100)));
+                }}
+              >
+                {Math.round(cam.zoom * 100)}%
+              </span>
+            ) : (
+              <input
+                className="board-zoom"
+                value={zoomDraft}
+                autoFocus
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setZoomDraft(e.target.value)}
+                onBlur={() => {
+                  if (!zoomCancelled.current) typeZoom(zoomDraft);
+                  setZoomDraft(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") zoomCancelled.current = true;
+                  if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+                }}
+              />
+            )}
+            <button
+              className="board-zoom-step"
+              title="Zoom in"
+              disabled={!nextZoomStop(cam.zoom, 1)}
+              onClick={() => zoomStep(1)}
+            >
+              +
+            </button>
+            {/* The way back, for when the sidebar's switch is hidden (⌘B). */}
+            <button title="Back to tabs (⌘⇧O / Ctrl+Shift+O)" onClick={() => void setView("tabs")}>
+              Tabs
+            </button>
+            <button
+              title="A new tab, its frame where you are looking"
+              onClick={() => void newTab()}
+            >
+              New frame
+            </button>
+            <button title="Show the whole board" onClick={fitBoard}>
+              Fit
+            </button>
+            <button
+              title="Pack the frames into rows, in tab order, to fit the window"
+              onClick={arrangeBoard}
+            >
+              Arrange
+            </button>
+          </div>
         </div>
       )}
     </div>

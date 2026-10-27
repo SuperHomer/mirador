@@ -850,13 +850,28 @@ body,
   pointer-events: none;
 }
 
-/* Bottom left, across from the zoom controls and never over them: it is
-   no wider than half the board, and only its own box takes the pointer. */
-.board-banner {
+/* The board's bottom row: the banner at the left, the zoom controls at the
+   right. The row itself takes no pointer; only its two boxes do. */
+.board-overlay {
   position: absolute;
   left: 12px;
+  right: 12px;
   bottom: 12px;
-  max-width: calc(50% - 24px);
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.board-overlay > * {
+  pointer-events: auto;
+}
+
+/* The only thing in the row that gives way, cut short before the
+   controls. */
+.board-banner {
+  flex: 0 1 auto;
+  min-width: 0;
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--surface);
@@ -886,10 +901,11 @@ body,
   color: #b4befe;
 }
 
+/* Their own width always, at the row's right end with or without a
+   banner. */
 .board-controls {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
+  flex: none;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
