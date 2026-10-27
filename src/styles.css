@@ -3740,6 +3740,10 @@ body,
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
 }
 
+.tb-menu:focus {
+  outline: none;
+}
+
 .tb-menu button {
   display: flex;
   align-items: center;

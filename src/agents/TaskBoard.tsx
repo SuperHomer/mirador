@@ -118,7 +118,9 @@ function useMenuFocus(ref: React.RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     const menu = ref.current;
     const trigger = menu?.parentElement?.querySelector<HTMLElement>(":scope > button");
-    menu?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+    // With nothing to pick, the menu itself (tabIndex -1), so Esc still
+    // reaches it.
+    (menu?.querySelector<HTMLElement>("button:not(:disabled)") ?? menu)?.focus();
     return () => {
       requestAnimationFrame(() => {
         const now = document.activeElement;
@@ -342,7 +344,7 @@ function ScopeMenu({
   const { ref, onKeyDown } = usePopover(onClose);
   useMenuFocus(ref);
   return (
-    <div className="tb-menu" ref={ref} onKeyDown={onKeyDown}>
+    <div className="tb-menu" ref={ref} tabIndex={-1} onKeyDown={onKeyDown}>
       {options.map(([v, label]) => (
         <button key={label} className={v === value ? "selected" : undefined} onClick={() => onPick(v)}>
           {label}
@@ -653,7 +655,7 @@ function AssignList({
   const { ref, onKeyDown } = usePopover(onClose);
   useMenuFocus(ref);
   return (
-    <div className="tb-menu right" ref={ref} onKeyDown={onKeyDown}>
+    <div className="tb-menu right" ref={ref} tabIndex={-1} onKeyDown={onKeyDown}>
       {agents.length === 0 && <div className="tb-menu-note">No agents in this tab.</div>}
       {agents.map((a) => {
         const waiting = a.status === "needsYou";
