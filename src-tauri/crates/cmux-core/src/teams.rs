@@ -25,7 +25,8 @@
 use std::path::Path;
 
 use cmux_protocol::{
-    AgentRole, AgentTeam, AgentWay, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SplitDir, TeamMember,
+    AgentRole, AgentTeam, AgentWay, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SplitDir, TeamFields,
+    TeamMember,
 };
 use serde::Deserialize;
 
@@ -77,6 +78,42 @@ pub fn parse_team(name: &str, path: &Path, source: RoleSource, text: &str) -> Re
         },
         front.other.into_keys().collect(),
     ))
+}
+
+/// `text`, a team file, with the team form's `fields`: description, way,
+/// layout and members set in its frontmatter (a key removed when empty),
+/// the charter as its body. A member says only what differs from the
+/// default — no `count: 1`, no `lead: false`, no `name` but its own — so
+/// the file reads as if written by hand. Every key Mirador does not know
+/// stays, where it was. The frontmatter is rewritten, so comments in it
+/// are lost.
+pub fn set_team_fields(text: &str, fields: &TeamFields) -> Result<String, String> {
+    use crate::roles::{set_key, text_value};
+    use serde_yaml_ng::{Mapping, Value};
+    let (mut map, _) = crate::roles::front_and_body(text)?;
+    set_key(&mut map, "description", text_value(&fields.description));
+    set_key(&mut map, "way", text_value(&fields.way));
+    set_key(&mut map, "layout", text_value(&fields.layout));
+    let members: Vec<Value> = fields
+        .members
+        .iter()
+        .map(|m| {
+            let mut entry = Mapping::new();
+            entry.insert("role".into(), m.role.trim().into());
+            if let Some(name) = m.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+                entry.insert("name".into(), name.into());
+            }
+            if m.count != 1 {
+                entry.insert("count".into(), m.count.into());
+            }
+            if m.lead {
+                entry.insert("lead".into(), true.into());
+            }
+            Value::Mapping(entry)
+        })
+        .collect();
+    set_key(&mut map, "members", (!members.is_empty()).then_some(Value::Sequence(members)));
+    crate::roles::write_file(&map, fields.charter.as_deref())
 }
 
 /// One seat of a team about to start: what the member is called, which
@@ -433,6 +470,53 @@ mod tests {
         let joined = crate::roles::join_layers(&layers);
         assert_eq!(joined, as_launched(&catalog, &bare, &all[0], &all));
         assert!(joined.unwrap().starts_with("# Your team: squad\n\nYou are `dev`, in team `squad`."));
+    }
+
+    fn fields_of(t: &AgentTeam) -> TeamFields {
+        TeamFields {
+            description: t.description.clone(),
+            way: t.way.clone(),
+            layout: t.layout.clone(),
+            members: t.members.clone(),
+            charter: t.prompt.clone(),
+        }
+    }
+
+    #[test]
+    fn saves_the_forms_fields_into_a_team_file() {
+        // A key Mirador does not know, between its own, and a comment.
+        let text = "---\ndescription: Plan, build\ncolor: red # mine\nway: our-way\nmembers:\n  - role: planner\n  - role: dev\n    count: 2\n    lead: true\n---\nShip small.\n";
+        let t = team(text);
+        let same = set_team_fields(text, &fields_of(&t)).unwrap();
+        assert_eq!(team(&same), t);
+        // Its key and value survive, in their place; the comment does not.
+        assert!(same.starts_with("---\ndescription: Plan, build\ncolor: red\nway: our-way\nmembers:\n"), "{same}");
+        assert!(same.ends_with("---\nShip small.\n"));
+
+        // Defaults and blanks are left out.
+        let lean = TeamFields {
+            description: Some("  ".into()),
+            members: vec![TeamMember { role: "dev".into(), name: Some("".into()), count: 1, lead: false }],
+            ..Default::default()
+        };
+        let out = set_team_fields(text, &lean).unwrap();
+        assert_eq!(out, "---\ncolor: red\nmembers:\n- role: dev\n---\n");
+        let t = team(&out);
+        assert_eq!((t.description, t.way, t.prompt), (None, None, None));
+
+        // A file with no frontmatter gets one.
+        let fresh = set_team_fields("", &TeamFields { members: vec![TeamMember { role: "dev".into(), name: Some("ana".into()), count: 3, lead: true }], ..Default::default() }).unwrap();
+        assert_eq!(fresh, "---\nmembers:\n- role: dev\n  name: ana\n  count: 3\n  lead: true\n---\n");
+    }
+
+    #[test]
+    fn a_built_in_team_survives_a_save_unchanged() {
+        for (path, name, text) in crate::builtin::of("teams") {
+            let parse = |text: &str| parse_team(&name, Path::new(&path), RoleSource::Builtin, text).unwrap();
+            let (t, ignored) = parse(text);
+            let saved = set_team_fields(text, &fields_of(&t)).unwrap();
+            assert_eq!(parse(&saved), (t, ignored), "{name}");
+        }
     }
 
     #[test]

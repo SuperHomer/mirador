@@ -362,6 +362,7 @@ pub fn run() {
             agent_editor::agent_file_check,
             agent_editor::agent_file_template,
             agent_editor::agent_file_save,
+            agent_editor::agent_file_save_fields,
             agent_editor::agent_file_delete,
             teams::start_team,
             teams::list_teams,

@@ -626,6 +626,11 @@ fn toml_string(text: &str) -> String {
     out
 }
 
+/// The program `harness` runs, which is also how a role file names it.
+pub fn program_of(harness: Harness) -> &'static str {
+    HARNESSES.iter().find(|(_, h)| *h == harness).map(|(p, _)| *p).expect("every harness has a program")
+}
+
 /// The harness a role names, by its program (`codex`, `cursor-agent`) or
 /// as Mirador spells it (`openCode`, `cursorAgent`), in any case.
 pub fn harness_named(name: &str) -> Option<Harness> {

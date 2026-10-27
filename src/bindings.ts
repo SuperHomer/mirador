@@ -797,9 +797,44 @@ export interface EditorCatalog {
   /** Where a repository file goes; null outside a repository. */
   repoDir: string | null;
   globalDir: string;
+  /** What the role form's pickers offer, per harness a role can start. */
+  choices: HarnessChoices[];
 }
 
 export type AgentFileKind = "role" | "way" | "team";
+
+/** Models and efforts the launch passes on for a harness; a file's own
+ *  value is offered besides, so one not listed still round-trips. */
+export interface HarnessChoices {
+  harness: Harness;
+  models: string[];
+  efforts: string[];
+}
+
+/** The team form's fields (`cmux_protocol::TeamFields`). */
+export interface TeamFields {
+  description: string | null;
+  way: string | null;
+  layout: string | null;
+  members: AgentTeam["members"];
+  /** The body. */
+  charter: string | null;
+}
+
+/** The role form's fields (`cmux_protocol::RoleFields`). */
+export interface RoleFields {
+  harness: Harness;
+  model: string | null;
+  effort: string | null;
+  way: string | null;
+  description: string | null;
+  /** `tools.deny`. */
+  deny: string[];
+  /** The body. */
+  prompt: string | null;
+}
+
+export type FileFields = ({ kind: "team" } & TeamFields) | ({ kind: "role" } & RoleFields);
 
 export const openAgentEditor = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_agent_editor", { paneId, tab });
@@ -837,6 +872,18 @@ export const agentFileSave = (
     text,
     create,
   });
+/** Saves a form's fields into `name` in `source`'s place, applied to the
+ *  file at `from` (a built-in's `builtin:` name saves a new file of yours
+ *  or the repository's, with `create`), or to nothing for a new one. */
+export const agentFileSaveFields = (
+  paneId: string,
+  source: RoleSource,
+  name: string,
+  from: string | null,
+  fields: FileFields,
+  create: boolean,
+) =>
+  invoke<EditorCatalog>("agent_file_save_fields", { paneId, source, name, from, fields, create });
 export const agentFileDelete = (paneId: string, path: string) =>
   invoke<EditorCatalog>("agent_file_delete", { paneId, path });
 

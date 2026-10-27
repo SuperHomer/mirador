@@ -27,8 +27,8 @@
 use std::path::{Path, PathBuf};
 
 use cmux_protocol::{
-    AgentRole, AgentTeam, AgentWay, CatalogKind, Harness, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource,
-    ShadowedFile, ToolRules, UsedBy,
+    AgentRole, AgentTeam, AgentWay, CatalogKind, Harness, HarnessChoices, PromptLayer, PromptLayerKind, RoleCatalog,
+    RoleFields, RoleSource, ShadowedFile, ToolRules, UsedBy,
 };
 use serde::Deserialize;
 
@@ -404,6 +404,101 @@ pub(crate) fn split_frontmatter(text: &str) -> Result<(Option<&str>, &str), Stri
     Err("frontmatter opened with `---` is never closed".into())
 }
 
+/// A file's frontmatter as a mapping, in the file's order, and its body.
+pub(crate) fn front_and_body(text: &str) -> Result<(serde_yaml_ng::Mapping, String), String> {
+    let (front, body) = split_frontmatter(text)?;
+    let map = match front {
+        Some(yaml) if !yaml.trim().is_empty() => {
+            serde_yaml_ng::from_str(yaml).map_err(|e| format!("frontmatter: {e}"))?
+        }
+        _ => serde_yaml_ng::Mapping::new(),
+    };
+    Ok((map, body.to_string()))
+}
+
+/// Sets `key` to `value` where the file has it, else after its other keys;
+/// removes it for none, keeping the order of the rest.
+pub(crate) fn set_key(map: &mut serde_yaml_ng::Mapping, key: &str, value: Option<serde_yaml_ng::Value>) {
+    match value {
+        Some(v) => match map.get_mut(key) {
+            Some(slot) => *slot = v,
+            None => {
+                map.insert(key.into(), v);
+            }
+        },
+        None => {
+            map.shift_remove(key);
+        }
+    }
+}
+
+/// A string field: none when blank, so the file never says `model: ''`.
+pub(crate) fn text_value(v: &Option<String>) -> Option<serde_yaml_ng::Value> {
+    present(v.clone()).map(serde_yaml_ng::Value::String)
+}
+
+/// A file written back from its frontmatter and its body, the way people
+/// write them: no fence for no frontmatter, the body after it.
+pub(crate) fn write_file(map: &serde_yaml_ng::Mapping, body: Option<&str>) -> Result<String, String> {
+    let body = body.map(str::trim).filter(|b| !b.is_empty());
+    let mut out = String::new();
+    if !map.is_empty() {
+        let yaml = serde_yaml_ng::to_string(map).map_err(|e| e.to_string())?;
+        out.push_str(&format!("---\n{yaml}---\n"));
+    }
+    if let Some(body) = body {
+        out.push_str(body);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// `text`, a role file, with the role form's `fields`: the frontmatter
+/// keys the form edits set (or removed when empty or the default — Claude
+/// Code is no `harness` key), the body its prompt. Every other key stays,
+/// where it was, and so do the tools rules it does not edit (`allow`).
+/// The frontmatter is rewritten, so comments in it are lost.
+pub fn set_role_fields(text: &str, fields: &RoleFields) -> Result<String, String> {
+    use serde_yaml_ng::Value;
+    let (mut map, _) = front_and_body(text)?;
+    let harness = (fields.harness != Harness::Claude).then(|| Value::String(crate::agents::program_of(fields.harness).into()));
+    set_key(&mut map, "harness", harness);
+    set_key(&mut map, "model", text_value(&fields.model));
+    set_key(&mut map, "effort", text_value(&fields.effort));
+    set_key(&mut map, "way", text_value(&fields.way));
+    set_key(&mut map, "description", text_value(&fields.description));
+    let mut tools = match map.get("tools") {
+        Some(Value::Mapping(t)) => t.clone(),
+        _ => serde_yaml_ng::Mapping::new(),
+    };
+    let deny: Vec<Value> = names(fields.deny.clone()).into_iter().map(Value::String).collect();
+    set_key(&mut tools, "deny", (!deny.is_empty()).then_some(Value::Sequence(deny)));
+    set_key(&mut map, "tools", (!tools.is_empty()).then_some(Value::Mapping(tools)));
+    write_file(&map, fields.prompt.as_deref())
+}
+
+/// What a role form offers, per harness a role can start: the models the
+/// repository's own roles and Claude Code's aliases name, and the efforts
+/// a role is checked against.
+pub fn role_choices() -> Vec<HarnessChoices> {
+    let models: fn(Harness) -> &'static [&'static str] = |h| match h {
+        // `--model` takes an alias or a full name.
+        Harness::Claude => &["opus", "sonnet", "haiku", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+        // What the built-in reviewer and the live tests run.
+        Harness::Codex => &["gpt-6-luna"],
+        _ => &[],
+    };
+    [Harness::Claude, Harness::Codex]
+        .into_iter()
+        .filter(|h| can_start(*h))
+        .map(|harness| HarnessChoices {
+            harness,
+            models: models(harness).iter().map(|m| m.to_string()).collect(),
+            efforts: efforts(harness).iter().map(|e| e.to_string()).collect(),
+        })
+        .collect()
+}
+
 /// A list's entries, trimmed, without the empty ones.
 fn names(list: Vec<String>) -> Vec<String> {
     list.into_iter().filter_map(|n| present(Some(n))).collect()
@@ -613,6 +708,66 @@ mod tests {
         assert!(parse_role("x", "---\nway: ../etc\n---\n").is_err());
         assert!(parse_role("x", "---\nharness: codex\nprofile: ../config\n---\n").is_err());
         assert!(parse_role("x", "---\nmodel: [opus\n---\n").unwrap_err().starts_with("frontmatter"));
+    }
+
+    fn fields_of(r: &AgentRole) -> RoleFields {
+        RoleFields {
+            harness: r.harness,
+            model: r.model.clone(),
+            effort: r.effort.clone(),
+            way: r.way.clone(),
+            description: r.description.clone(),
+            deny: r.tools.as_ref().map(|t| t.deny.clone()).unwrap_or_default(),
+            prompt: r.prompt.clone(),
+        }
+    }
+
+    #[test]
+    fn saves_the_forms_fields_into_a_role_file() {
+        let text = "---\nharness: codex\nmodel: gpt-6-luna\nsandbox: read-only\nprofile: fast\ntools:\n  allow: [Read]\n  deny: [Edit]\n---\nYou review.\n";
+        let (role, ignored) = parse_role("reviewer", text).unwrap();
+        let same = set_role_fields(text, &fields_of(&role)).unwrap();
+        assert_eq!(parse_role("reviewer", &same).unwrap(), (role.clone(), ignored));
+        // What the form does not edit stays: an unknown key, the profile,
+        // the rules it may use.
+        assert_eq!(
+            same,
+            "---\nharness: codex\nmodel: gpt-6-luna\nsandbox: read-only\nprofile: fast\ntools:\n  allow:\n  - Read\n  deny:\n  - Edit\n---\nYou review.\n"
+        );
+
+        // Claude Code, nothing denied, no model: no keys for them.
+        let plain = RoleFields { deny: vec![" ".into()], prompt: Some("You plan.".into()), ..Default::default() };
+        let out = set_role_fields("---\nharness: codex\nmodel: x\ntools:\n  deny: [Edit]\n---\nOld.\n", &plain).unwrap();
+        assert_eq!(out, "You plan.\n");
+        let edited = RoleFields { harness: Harness::Codex, effort: Some("high".into()), deny: vec!["Bash(git push *)".into()], ..fields_of(&role) };
+        let out = set_role_fields(text, &edited).unwrap();
+        let (r, _) = parse_role("reviewer", &out).unwrap();
+        assert_eq!((r.effort.as_deref(), r.tools.unwrap().deny), (Some("high"), vec!["Bash(git push *)".to_string()]));
+    }
+
+    #[test]
+    fn a_built_in_role_survives_a_save_unchanged() {
+        for (_, name, text) in crate::builtin::of("roles") {
+            let parsed = parse_role(&name, text).unwrap();
+            let saved = set_role_fields(text, &fields_of(&parsed.0)).unwrap();
+            assert_eq!(parse_role(&name, &saved).unwrap(), parsed, "{name}");
+        }
+    }
+
+    #[test]
+    fn offers_what_the_launch_accepts() {
+        let choices = role_choices();
+        assert_eq!(choices.iter().map(|c| c.harness).collect::<Vec<_>>(), [Harness::Claude, Harness::Codex]);
+        for c in &choices {
+            assert_eq!(c.efforts, efforts(c.harness));
+            // Every model the built-in roles run is offered.
+            for (_, name, text) in crate::builtin::of("roles") {
+                let (r, _) = parse_role(&name, text).unwrap();
+                if r.harness == c.harness {
+                    assert!(c.models.contains(r.model.as_ref().unwrap()), "{name}");
+                }
+            }
+        }
     }
 
     #[test]

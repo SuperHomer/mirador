@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 
 use cmux_core::role_files::{Kind, Places};
-use cmux_protocol::{CatalogKind, PromptLayer, RoleCatalog, RoleSource, SplitDir, UsedBy};
+use cmux_protocol::{CatalogKind, FileFields, HarnessChoices, PromptLayer, RoleCatalog, RoleSource, SplitDir, UsedBy};
 
 use crate::commands::emit_workspace;
 use crate::AppState;
@@ -71,6 +71,8 @@ pub struct EditorCatalog {
     pub catalog: RoleCatalog,
     pub repo_dir: Option<String>,
     pub global_dir: String,
+    /// What the role form's pickers offer.
+    pub choices: Vec<HarnessChoices>,
 }
 
 fn catalog(state: &AppState, pane_id: &str) -> Result<EditorCatalog, String> {
@@ -79,6 +81,7 @@ fn catalog(state: &AppState, pane_id: &str) -> Result<EditorCatalog, String> {
         catalog: cmux_core::roles::catalog(cwd.as_deref().map(Path::new)),
         repo_dir: places.repo.map(|p| p.to_string_lossy().into_owned()),
         global_dir: places.global.to_string_lossy().into_owned(),
+        choices: cmux_core::roles::role_choices(),
     })
 }
 
@@ -163,6 +166,34 @@ pub fn agent_file_save(
     create: bool,
 ) -> Result<EditorCatalog, String> {
     places(&state, &pane_id)?.0.save(Kind::parse(&kind)?, source, &name, &text, create)?;
+    catalog(&state, &pane_id)
+}
+
+/// Saves a form's `fields` into the team or role `name` in `source`'s
+/// place: applied to the text of `from` — the file as it is, or a
+/// built-in's `builtin:` name, which is saved as a new file of yours or
+/// the repository's (`create`) — or to nothing for a new one. Checked and
+/// written as `agent_file_save` writes text.
+#[tauri::command]
+pub fn agent_file_save_fields(
+    state: State<'_, AppState>,
+    pane_id: String,
+    source: RoleSource,
+    name: String,
+    from: Option<String>,
+    fields: FileFields,
+    create: bool,
+) -> Result<EditorCatalog, String> {
+    let places = places(&state, &pane_id)?.0;
+    let text = match &from {
+        Some(path) => places.read(&PathBuf::from(path))?,
+        None => String::new(),
+    };
+    let (kind, text) = match &fields {
+        FileFields::Team(f) => (Kind::Team, cmux_core::teams::set_team_fields(&text, f)?),
+        FileFields::Role(f) => (Kind::Role, cmux_core::roles::set_role_fields(&text, f)?),
+    };
+    places.save(kind, source, &name, &text, create)?;
     catalog(&state, &pane_id)
 }
 

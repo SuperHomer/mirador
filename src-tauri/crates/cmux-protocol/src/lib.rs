@@ -1398,6 +1398,52 @@ pub struct ShadowedFile {
     pub by_path: Option<String>,
 }
 
+/// What the editor's team form sets in a team file: `teams::set_team_fields`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamFields {
+    pub description: Option<String>,
+    pub way: Option<String>,
+    pub layout: Option<String>,
+    pub members: Vec<TeamMember>,
+    /// The body.
+    pub charter: Option<String>,
+}
+
+/// What the editor's role form sets in a role file: `roles::set_role_fields`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleFields {
+    pub harness: Harness,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub way: Option<String>,
+    pub description: Option<String>,
+    /// `tools.deny`: the permission rules it may not use.
+    pub deny: Vec<String>,
+    /// The body.
+    pub prompt: Option<String>,
+}
+
+/// A form's fields, saved into the file of their kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FileFields {
+    Team(TeamFields),
+    Role(RoleFields),
+}
+
+/// What a role form's pickers offer for a harness a role can start: the
+/// models and efforts the launch passes on. A file's own value is offered
+/// besides, so one not listed still round-trips.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessChoices {
+    pub harness: Harness,
+    pub models: Vec<String>,
+    pub efforts: Vec<String>,
+}
+
 /// One part of what an agent is told, in the order it is told:
 /// `roles::role_layers`, then for a team member `teams::member_layers`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

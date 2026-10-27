@@ -50,6 +50,7 @@ permissions = [
   "allow-agent-file-check",
   "allow-agent-file-template",
   "allow-agent-file-save",
+  "allow-agent-file-save-fields",
   "allow-agent-file-delete",
   "allow-start-team",
   "allow-list-teams",

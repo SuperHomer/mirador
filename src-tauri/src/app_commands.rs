@@ -55,6 +55,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "agent_file_check",
     "agent_file_template",
     "agent_file_save",
+    "agent_file_save_fields",
     "agent_file_delete",
     "start_team",
     "list_teams",
