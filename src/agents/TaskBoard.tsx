@@ -111,6 +111,23 @@ function usePopover(onClose: () => void) {
   return { ref, onKeyDown };
 }
 
+/** A menu takes the keyboard as it opens — its first item — so Esc right
+ *  away reaches it, and gives it back to the button that opened it when it
+ *  closes, unless something else took it meanwhile. */
+function useMenuFocus(ref: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const menu = ref.current;
+    const trigger = menu?.parentElement?.querySelector<HTMLElement>(":scope > button");
+    menu?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+    return () => {
+      requestAnimationFrame(() => {
+        const now = document.activeElement;
+        if (!now || now === document.body) trigger?.focus();
+      });
+    };
+  }, [ref]);
+}
+
 /**
  * The task log's cards (`cmux_core::tasks`), in four columns — the tasks
  * given to a tab's agents, its team's in a team's tab, or every tab's —
@@ -323,6 +340,7 @@ function ScopeMenu({
   onClose: () => void;
 }) {
   const { ref, onKeyDown } = usePopover(onClose);
+  useMenuFocus(ref);
   return (
     <div className="tb-menu" ref={ref} onKeyDown={onKeyDown}>
       {options.map(([v, label]) => (
@@ -633,6 +651,7 @@ function AssignList({
   onClose: () => void;
 }) {
   const { ref, onKeyDown } = usePopover(onClose);
+  useMenuFocus(ref);
   return (
     <div className="tb-menu right" ref={ref} onKeyDown={onKeyDown}>
       {agents.length === 0 && <div className="tb-menu-note">No agents in this tab.</div>}
