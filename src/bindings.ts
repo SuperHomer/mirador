@@ -854,7 +854,9 @@ export interface SettingRow {
   /** The value in effect when the file does not set it, for a person. */
   default: string;
   description: string;
-  /** The value in the file as written; null when it sets none. */
+  /** Whether the file has the key at all, even as null. */
+  set: boolean;
+  /** The value in the file as written; null when it sets none (or null). */
   value: unknown;
   /** Whether that value is one the key takes. */
   valid: boolean;

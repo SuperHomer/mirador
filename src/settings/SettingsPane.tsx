@@ -83,7 +83,7 @@ export function SettingsPane({ paneId, path, focused }: Props) {
  *  write of it failed. */
 function Setting({ row, path }: { row: SettingRow; path: string }) {
   const [failed, setFailed] = useState<string | null>(null);
-  const set = row.value !== null && row.value !== undefined;
+  const set = row.set;
   const write = (value: unknown) =>
     void setConfigValue(row.key, value)
       .then(() => setFailed(null))

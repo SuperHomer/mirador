@@ -1665,7 +1665,10 @@ pub struct SettingRow {
     /// The value in effect when the file does not set it, for a person.
     pub default: String,
     pub description: String,
-    /// The value in the file as written, if it sets one.
+    /// Whether the file has the key at all, even as null.
+    pub set: bool,
+    /// The value in the file as written, if it sets one. A key set to
+    /// null is `set` with a null value, which crosses as null all the same.
     pub value: Option<serde_json::Value>,
     /// Whether that value is one the key takes. Always true when unset.
     pub valid: bool,

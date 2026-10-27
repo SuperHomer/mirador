@@ -105,6 +105,7 @@ fn settings_view_in(path: &Path) -> Result<Vec<SettingRow>, String> {
         .map(|s| {
             let value = obj.get(s.key).cloned();
             SettingRow {
+                set: obj.contains_key(s.key),
                 valid: value.as_ref().is_none_or(|v| accepts(&s, v)),
                 key: s.key.into(),
                 group: s.group.into(),
@@ -260,6 +261,22 @@ mod tests {
         // A file that does not parse is an error, not the defaults.
         std::fs::write(&path, "{ broken").unwrap();
         assert!(settings_view_in(&path).is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn a_key_set_to_null_is_set_invalid_and_removable() {
+        let path = temp_config("null");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{ "fontSize": null, "zeta": 1 }"#).unwrap();
+        let rows = settings_view_in(&path).unwrap();
+        let row = rows.iter().find(|r| r.key == "fontSize").unwrap();
+        assert!(row.set, "the key is in the file");
+        assert!(!row.valid, "null is not a size");
+        assert!(!rows.iter().find(|r| r.key == "scrollback").unwrap().set);
+
+        set_config_value_in(&path, "fontSize", None).unwrap();
+        assert_eq!(read(&path), json!({ "zeta": 1 }));
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 }
