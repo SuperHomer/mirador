@@ -192,6 +192,11 @@ export const AgentEditor = memo(function AgentEditor({
   const [raw, setRaw] = useState(false);
   const [pendingRaw, setPendingRaw] = useState<boolean | null>(null);
   const [member, setMember] = useState<number | null>(null);
+  // The open file changed on disk under unsaved edits, and whether Save
+  // is asking before it writes over that.
+  const [stale, setStale] = useState(false);
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  const [refreshed, setRefreshed] = useState(0);
 
   const formMode = form !== null && !raw;
   const dirty = formMode ? JSON.stringify(form) !== formSaved : text !== saved;
@@ -202,7 +207,10 @@ export const AgentEditor = memo(function AgentEditor({
 
   const refresh = useCallback(() => {
     agentEditorCatalog(paneId)
-      .then(setCat)
+      .then((c) => {
+        setCat(c);
+        setRefreshed((n) => n + 1);
+      })
       .catch((e: unknown) => setStatus(String(e)));
   }, [paneId]);
   useEffect(() => refresh(), [refresh]);
@@ -212,6 +220,26 @@ export const AgentEditor = memo(function AgentEditor({
     if (focused && !wasFocused.current) refresh();
     wasFocused.current = focused;
   }, [focused, refresh]);
+
+  // After a refresh, the open file as it is now: taken as it is when
+  // nothing is unsaved — the form and the text alike — else the edits
+  // stay and the header says the file changed. Runs on the render the
+  // new catalog arrives with, so it reads that render's state.
+  useEffect(() => {
+    if (!sel?.path || isNew || sel.source === "config") return;
+    agentFileRead(paneId, sel.path)
+      .then((t) => {
+        if (t === saved) return;
+        if (dirty) {
+          setStale(true);
+          return;
+        }
+        setText(t);
+        setSaved(t);
+        resetForm(teamOf(cat, sel));
+      })
+      .catch((e: unknown) => setStatus(String(e)));
+  }, [refreshed]);
 
   // Checked as you type: why it cannot be saved, or what is ignored.
   useEffect(() => {
@@ -246,6 +274,8 @@ export const AgentEditor = memo(function AgentEditor({
     setSel(item);
     setRaw(false);
     setMember(null);
+    setStale(false);
+    setConfirmOverwrite(false);
     resetForm(teamOf(catalog, item));
     if (!item.path) {
       // An `agentRoles` entry, shown as the catalog has it — unless it is
@@ -287,15 +317,25 @@ export const AgentEditor = memo(function AgentEditor({
     else open(item);
   };
 
-  /** Saves what is unsaved; whether there is nothing left unsaved. */
-  const save = (): Promise<boolean> => {
+  /** Saves what is unsaved; whether there is nothing left unsaved. Over a
+   *  file changed on disk only when `overwrite`: else it asks first. */
+  const save = (overwrite = false): Promise<boolean> => {
     if (!sel || readOnly || !dirty) return Promise.resolve(true);
+    if (stale && !overwrite) {
+      setConfirmOverwrite(true);
+      return Promise.resolve(false);
+    }
+    const written = () => {
+      setStale(false);
+      setConfirmOverwrite(false);
+    };
     if (formMode && sel.path) {
       const path = sel.path;
       return agentFileSaveFields(paneId, sel.source, sel.name, path, { kind: "team", ...form! }, false)
         .then((next) => {
           setCat(next);
           setFormSaved(JSON.stringify(form));
+          written();
           setStatus("Saved");
           // The file as written, for its raw view.
           return agentFileRead(paneId, path).then((t) => {
@@ -314,6 +354,7 @@ export const AgentEditor = memo(function AgentEditor({
       .then((next) => {
         setCat(next);
         setSaved(text);
+        written();
         setIsNew(false);
         const now = items(next).find((i) => same(i, sel));
         if (now) setSel(now);
@@ -615,7 +656,17 @@ export const AgentEditor = memo(function AgentEditor({
                     {where(sel)}
                   </span>
                 </div>
-                {dirty && !readOnly && (
+                {stale && (
+                  <>
+                    <span className="editor-unsaved" title="Edited outside the app since it was opened">
+                      Changed on disk
+                    </span>
+                    <button title="Discard your edits and read the file again" onClick={() => open(sel)}>
+                      Reload
+                    </button>
+                  </>
+                )}
+                {dirty && !readOnly && !stale && (
                   <span className="editor-unsaved">Unsaved</span>
                 )}
                 {form && (
@@ -684,6 +735,17 @@ export const AgentEditor = memo(function AgentEditor({
                   </button>
                 )}
               </div>
+              {confirmOverwrite && (
+                <div className="editor-bar confirm">
+                  <span>
+                    {sel.name} changed on disk since it was opened. Write your edits over it?
+                  </span>
+                  <button className="primary" onClick={() => void save(true)}>
+                    Overwrite
+                  </button>
+                  <button onClick={() => setConfirmOverwrite(false)}>Cancel</button>
+                </div>
+              )}
               {confirm && (
                 <div className="editor-bar confirm">
                   <span>
