@@ -29,7 +29,7 @@ import { getTerminal, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
 
 /** The palette's groups: what an action is about. */
-export type ActionGroup = "agents" | "git" | "pane" | "view" | "app";
+export type ActionGroup = "agents" | "git" | "pane" | "view" | "app" | "tabs";
 
 export interface ActionDef {
   id: string;
@@ -56,7 +56,7 @@ function cycleTab(offset: number) {
 }
 
 export const actions: ActionDef[] = [
-  { id: "new_tab", title: "Tab: New", group: "pane", run: () => void newTab() },
+  { id: "new_tab", title: "Tab: New", group: "tabs", run: () => void newTab() },
   {
     id: "close_pane",
     title: "Pane: Close",
@@ -69,7 +69,7 @@ export const actions: ActionDef[] = [
   {
     id: "close_tab",
     title: "Tab: Close",
-    group: "pane",
+    group: "tabs",
     run: () => {
       const { snapshot } = useWorkspaceStore.getState();
       if (snapshot) void closeTab(snapshot.activeTab);
@@ -117,8 +117,8 @@ export const actions: ActionDef[] = [
     group: "pane",
     run: () => void focusDirection("down"),
   },
-  { id: "next_tab", title: "Tab: Next", group: "pane", run: () => cycleTab(1) },
-  { id: "prev_tab", title: "Tab: Previous", group: "pane", run: () => cycleTab(-1) },
+  { id: "next_tab", title: "Tab: Next", group: "tabs", run: () => cycleTab(1) },
+  { id: "prev_tab", title: "Tab: Previous", group: "tabs", run: () => cycleTab(-1) },
   {
     id: "toggle_sidebar",
     title: "View: Toggle Sidebar",
