@@ -28,7 +28,8 @@ pub struct ImportedTheme {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
-    /// "auto" (ghostty config if present), "ghostty", "wezterm", "builtin"
+    /// "auto" (ghostty config if present), "ghostty", "wezterm", "builtin",
+    /// "devaslife"
     pub theme_source: Option<String>,
     /// wezterm scheme name (in ~/.config/wezterm/colors) or a .toml path.
     pub wezterm_scheme: Option<String>,
@@ -345,6 +346,24 @@ fn builtin_colors() -> ResolvedColors {
     }
 }
 
+/// devaslife, a Solarized-dark variant, from a friend's iTerm2 profile.
+fn devaslife() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#001b21".into()),
+        foreground: Some("#839496".into()),
+        cursor: Some("#839496".into()),
+        selection_background: Some("#073642".into()),
+        palette: [
+            "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198",
+            "#eee8d5", "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4",
+            "#93a1a1", "#fdf6e3",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: Some(format!("Monaco, {}", default_font_family())),
+        font_size: Some(12.0),
+    }
+}
+
 /// Resolves the user config into the runtime config the frontend consumes.
 pub fn resolve(cfg: &Config) -> ResolvedConfig {
     let imported = import_theme(cfg).unwrap_or_default();
@@ -435,6 +454,7 @@ fn import_theme(cfg: &Config) -> Option<ImportedTheme> {
         "ghostty" => ghostty::import(),
         "wezterm" => wezterm::import(cfg.wezterm_scheme.as_deref()?),
         "builtin" | "none" => None,
+        "devaslife" => Some(devaslife()),
         // auto: use Ghostty's config when the user has one (cmux-parity behavior)
         _ => {
             if ghostty::user_config_path().exists() {
@@ -654,6 +674,39 @@ mod tests {
         assert_eq!(resolved.colors.background, "#000000");
         assert_eq!(resolved.keybindings["mod+t"], "split_right");
         assert!(!resolved.keybindings.contains_key("mod+w"));
+    }
+
+    #[test]
+    fn devaslife_sets_its_colors_and_font() {
+        let resolved = resolve(&serde_json::from_str(r#"{ "themeSource": "devaslife" }"#).unwrap());
+        // As the friend's .itermcolors has them, Ansi 0 to 15.
+        let palette = [
+            "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+            "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+        ];
+        assert_eq!(resolved.colors.palette, palette);
+        assert_eq!(resolved.colors.background, "#001b21");
+        assert_eq!(resolved.colors.foreground, "#839496");
+        assert_eq!(resolved.colors.cursor, "#839496");
+        assert_eq!(resolved.colors.selection_background, "#073642");
+        assert_eq!(resolved.font_size, 12.0);
+        assert_eq!(resolved.font_family, format!("Monaco, {}", default_font_family()));
+    }
+
+    #[test]
+    fn explicit_values_beat_devaslife() {
+        let resolved = resolve(
+            &serde_json::from_str(
+                r##"{ "themeSource": "devaslife", "fontFamily": "Iosevka", "fontSize": 15,
+                     "colors": { "background": "#000000" } }"##,
+            )
+            .unwrap(),
+        );
+        assert_eq!(resolved.font_family, "Iosevka");
+        assert_eq!(resolved.font_size, 15.0);
+        assert_eq!(resolved.colors.background, "#000000");
+        // What was not overridden is still the theme's.
+        assert_eq!(resolved.colors.foreground, "#839496");
     }
 
     #[test]

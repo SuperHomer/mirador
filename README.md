@@ -87,7 +87,8 @@ downloads, the feature tour and the keybinding reference.
 - **Session persistence**: layout, cwds, scrollback, and browser URLs
   survive restarts and crashes
 - **Config**: `~/.config/mirador/mirador.json` (hot-reloaded), Ghostty/wezterm
-  theme import, configurable keybindings, command palette (`mod+K`)
+  theme import (`themeSource` takes `auto`, `ghostty`, `wezterm`, `builtin`
+  or `devaslife`), configurable keybindings, command palette (`mod+K`)
 - **Claude Code integration**: lights up tabs when your agent needs you,
   enables per-pane session resume, and adds a `/mira-diff` skill for
   reviewing the turn's work. Mirador offers to set it up on first launch
