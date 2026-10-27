@@ -85,7 +85,8 @@ pub fn parse_team(name: &str, path: &Path, source: RoleSource, text: &str) -> Re
 /// the charter as its body. A member says only what differs from the
 /// default — no `count: 1`, no `lead: false`, no `name` but its own — so
 /// the file reads as if written by hand. Every key Mirador does not know
-/// stays, where it was. The frontmatter is rewritten, so comments in it
+/// stays, where it was, a member's own included: it keeps those of the
+/// member it was (same role and name, else same place and role). The frontmatter is rewritten, so comments in it
 /// are lost.
 pub fn set_team_fields(text: &str, fields: &TeamFields) -> Result<String, String> {
     use crate::roles::{set_key, text_value};
@@ -94,21 +95,31 @@ pub fn set_team_fields(text: &str, fields: &TeamFields) -> Result<String, String
     set_key(&mut map, "description", text_value(&fields.description));
     set_key(&mut map, "way", text_value(&fields.way));
     set_key(&mut map, "layout", text_value(&fields.layout));
+    // The members as the file has them, for the keys another tool may have
+    // put on one: each member written keeps those of the one it was.
+    let originals: Vec<Mapping> = match map.get("members") {
+        Some(Value::Sequence(list)) => list.iter().filter_map(|m| m.as_mapping().cloned()).collect(),
+        _ => Vec::new(),
+    };
+    let field = |m: &Mapping, key: &str| m.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
     let members: Vec<Value> = fields
         .members
         .iter()
-        .map(|m| {
-            let mut entry = Mapping::new();
-            entry.insert("role".into(), m.role.trim().into());
-            if let Some(name) = m.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-                entry.insert("name".into(), name.into());
-            }
-            if m.count != 1 {
-                entry.insert("count".into(), m.count.into());
-            }
-            if m.lead {
-                entry.insert("lead".into(), true.into());
-            }
+        .enumerate()
+        .map(|(i, m)| {
+            let role = m.role.trim();
+            let name = m.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+            // The same role and name, else the same place if its role
+            // matches; a member added is a new one.
+            let was = originals
+                .iter()
+                .find(|o| field(o, "role").as_deref() == Some(role) && field(o, "name").as_deref() == name)
+                .or_else(|| originals.get(i).filter(|o| field(o, "role").as_deref() == Some(role)));
+            let mut entry = was.cloned().unwrap_or_default();
+            set_key(&mut entry, "role", Some(role.into()));
+            set_key(&mut entry, "name", name.map(Into::into));
+            set_key(&mut entry, "count", (m.count != 1).then(|| m.count.into()));
+            set_key(&mut entry, "lead", m.lead.then_some(true.into()));
             Value::Mapping(entry)
         })
         .collect();
@@ -507,6 +518,26 @@ mod tests {
         // A file with no frontmatter gets one.
         let fresh = set_team_fields("", &TeamFields { members: vec![TeamMember { role: "dev".into(), name: Some("ana".into()), count: 3, lead: true }], ..Default::default() }).unwrap();
         assert_eq!(fresh, "---\nmembers:\n- role: dev\n  name: ana\n  count: 3\n  lead: true\n---\n");
+    }
+
+    #[test]
+    fn a_members_own_keys_stay_with_it() {
+        let text = "---\nmembers:\n  - role: planner\n    color: blue\n  - role: dev\n    name: ana\n    seat: 3\n---\n";
+        let t = team(text);
+        let same = set_team_fields(text, &fields_of(&t)).unwrap();
+        assert_eq!(same, "---\nmembers:\n- role: planner\n  color: blue\n- role: dev\n  name: ana\n  seat: 3\n---\n");
+        // ana counted twice and moved first: her key goes with her.
+        let mut f = fields_of(&t);
+        f.members.swap(0, 1);
+        f.members[0].count = 2;
+        let out = set_team_fields(text, &f).unwrap();
+        assert_eq!(out, "---\nmembers:\n- role: dev\n  name: ana\n  seat: 3\n  count: 2\n- role: planner\n  color: blue\n---\n");
+        // The planner removed, and a reviewer added: its keys go, the new
+        // one has none.
+        let mut f = fields_of(&t);
+        f.members[0] = TeamMember { role: "reviewer".into(), name: None, count: 1, lead: false };
+        let out = set_team_fields(text, &f).unwrap();
+        assert_eq!(out, "---\nmembers:\n- role: reviewer\n- role: dev\n  name: ana\n  seat: 3\n---\n");
     }
 
     #[test]
