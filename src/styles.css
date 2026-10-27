@@ -3444,9 +3444,12 @@ button.inbox-update:hover {
   flex-shrink: 0;
 }
 
-/* The working take whatever height the others leave. */
+/* The working are as tall as what they show, and shrink — down to their
+   rows' 110px — when the rail is short. Height to spare stays at the
+   rail's foot, never inside a tile. */
 .rail-section.working {
-  flex: 1 0 auto;
+  flex: 0 1 auto;
+  min-height: 0;
 }
 
 .rail-label {
@@ -3462,10 +3465,11 @@ button.inbox-update:hover {
 }
 
 .rail-grid {
-  flex: 1;
+  flex: 0 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-auto-rows: minmax(110px, 1fr);
+  grid-auto-rows: minmax(110px, auto);
   gap: 6px;
 }
 
@@ -3482,8 +3486,11 @@ button.inbox-update:hover {
   text-align: center;
 }
 
-/* An agent on the rail: its live terminal, shrunk to fit, never resized. */
+/* An agent on the rail: its live terminal, scaled, never resized. Its
+   scale and its terminal's height are measured and set on the tile
+   (FocusLayout's useMiniFit); until then, the smallest scale. */
 .mini-tile {
+  --mini-scale: 0.65;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -3537,22 +3544,24 @@ button.inbox-update:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* A thumbnail: a click picks the tile, it never reaches the terminal. */
+/* A thumbnail: a click picks the tile, it never reaches the terminal.
+   As tall as the scaled terminal, and less when the tile has less room. */
 .mini-body {
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
+  height: calc(var(--mini-term-h, 0px) * var(--mini-scale));
   min-height: 0;
   overflow: hidden;
   pointer-events: none;
 }
 
-/* The terminal at a fixed scale, its bottom-left corner pinned to the
-   tile's, so the latest lines and any prompt show and the rest is cropped.
-   Scaled to fit, a wide terminal came out a third of its size and could
-   not be read: readable text beats seeing the whole screen. The wrapper
-   is the terminal's own height, so it stays pinned as that changes. */
+/* The terminal scaled to the tile's width, never under 0.65 — scaled to
+   fit the whole tile, a wide terminal came out a third of its size and
+   could not be read — with its bottom-left corner pinned to the tile's,
+   so when the tile is shorter the latest lines and any prompt show and
+   the top is cropped. The wrapper is the terminal's own size, so it stays
+   pinned as that changes. */
 .mini-host {
-  --mini-scale: 0.65;
   position: absolute;
   left: 0;
   bottom: 0;
@@ -4278,23 +4287,30 @@ button.inbox-update:hover {
   background: transparent;
 }
 
-/* Two lines of it, all of it once clicked. */
-.tb-description {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+/* Its description, three lines of it — all of it once clicked, and in its
+   tooltip. */
+.tb-description-toggle {
+  display: block;
   width: 100%;
+  min-width: 0;
   margin-top: 3px;
   border: none;
   padding: 0;
   background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tb-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  min-width: 0;
+  overflow: hidden;
   color: var(--subtext);
   font-size: 11.5px;
-  text-align: left;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  cursor: pointer;
 }
 
 .tb-description.full {
