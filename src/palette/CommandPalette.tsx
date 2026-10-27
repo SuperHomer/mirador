@@ -10,9 +10,10 @@ import {
   sshHosts,
   openAgent,
   roleHint,
+  setActiveTab,
 } from "../bindings";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
-import { actions } from "../keymap/actions";
+import { ActionGroup, actions } from "../keymap/actions";
 import { useConfigStore } from "../state/configStore";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
@@ -21,6 +22,10 @@ interface Entry {
   id: string;
   title: string;
   hint?: string;
+  /** Where an empty query lists it; a step's own entries have none. */
+  group?: ActionGroup;
+  /** A custom command's hint is the command it runs. */
+  command?: boolean;
   /** Already formatted for this platform; absent when nothing is bound. */
   accel?: string;
   run: () => void;
@@ -35,7 +40,9 @@ interface Entry {
 interface Step {
   id: string;
   title: string;
-  hint?: string;
+  /** What it opens: "pick a role ›". */
+  hint: string;
+  group: ActionGroup;
   /** Shown before the query once inside: "New Agent". */
   crumb: string;
   placeholder: string;
@@ -45,6 +52,22 @@ interface Step {
 }
 
 type Row = { kind: "entry"; entry: Entry } | { kind: "step"; step: Step };
+
+/** The groups an empty query lists, in order. */
+const GROUPS: [ActionGroup, string][] = [
+  ["agents", "AGENTS"],
+  ["git", "GIT"],
+  ["pane", "PANE"],
+  ["view", "VIEW"],
+  ["app", "APP"],
+  ["tabs", "TABS"],
+];
+
+/** Rows under a group label; `label` is null for a ranked list. */
+interface Section {
+  label: string | null;
+  rows: Row[];
+}
 
 const rowId = (r: Row) =>
   r.kind === "entry" ? r.entry.id : `step:${r.step.id}`;
@@ -74,6 +97,7 @@ export function CommandPalette() {
   const close = useUiStore((s) => s.closePalette);
   const customCommands = useConfigStore((s) => s.config?.customCommands ?? []);
   const keybindings = useConfigStore((s) => s.config?.keybindings);
+  const tabs = useWorkspaceStore((s) => s.snapshot?.tabs);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [hosts, setHosts] = useState<string[]>([]);
@@ -102,13 +126,24 @@ export function CommandPalette() {
         id: a.id,
         title: a.title,
         hint: a.hint,
+        group: a.group,
         accel: accelOf(a.id),
         run: a.run,
       }));
+    // Every open tab, by the number its shortcut jumps to.
+    const tabEntries: Entry[] = (tabs ?? []).map((t, i) => ({
+      id: `tab:${t.id}`,
+      title: `Tab: ${t.title}`,
+      group: "tabs",
+      accel: i < 9 ? accelOf(`tab_${i + 1}`) : undefined,
+      run: () => void setActiveTab(t.id),
+    }));
     const custom: Entry[] = customCommands.map((c) => ({
       id: `custom:${c.name}`,
       title: c.name,
       hint: c.command,
+      group: "pane",
+      command: true,
       run: () => {
         if (c.target === "tab") {
           void newTab(c.command);
@@ -125,9 +160,8 @@ export function CommandPalette() {
     const agents: Step = {
       id: "agent",
       title: "Agents: New Agent…",
-      hint: roles.length
-        ? `Claude Code, or one of ${roles.length} ${roles.length === 1 ? "role" : "roles"}`
-        : "Claude Code",
+      hint: "pick a role ›",
+      group: "agents",
       crumb: "New Agent",
       placeholder: "Search roles…",
       empty: "No matching role",
@@ -155,7 +189,8 @@ export function CommandPalette() {
     const teamStep: Step = {
       id: "team",
       title: "Agents: Start Team…",
-      hint: `${teams.length} ${teams.length === 1 ? "team" : "teams"}`,
+      hint: "pick a team ›",
+      group: "agents",
       crumb: "Start Team",
       placeholder: "Search teams…",
       empty: "No matching team",
@@ -187,7 +222,8 @@ export function CommandPalette() {
     const ssh: Step = {
       id: "ssh",
       title: "Pane: SSH…",
-      hint: `${hosts.length} ${hosts.length === 1 ? "host" : "hosts"} in ~/.ssh/config`,
+      hint: "pick a host ›",
+      group: "pane",
       crumb: "SSH",
       placeholder: "Search hosts…",
       empty: "No matching host",
@@ -201,12 +237,12 @@ export function CommandPalette() {
     // A step with nothing in it is not offered; "Agents: New Agent…" always
     // has plain Claude Code.
     const steps = [agents, teamStep, ssh].filter((st) => st.entries.length > 0);
-    return { entries: [...custom, ...base], steps };
-  }, [customCommands, roles, teams, hosts, keybindings]);
+    return { entries: [...base, ...custom, ...tabEntries], steps };
+  }, [customCommands, roles, teams, hosts, keybindings, tabs]);
 
   const step = steps.find((st) => st.id === stepId) ?? null;
 
-  const filtered = useMemo<Row[]>(() => {
+  const sections = useMemo<Section[]>(() => {
     const rank = <T,>(items: T[], text: (t: T) => string) =>
       items
         .map((item) => ({ item, score: fuzzyScore(query, text(item)) }))
@@ -214,10 +250,18 @@ export function CommandPalette() {
         .sort((a, b) => b.score - a.score)
         .map((x) => x.item);
     if (step) {
-      return rank(step.entries, (e) => e.title).map((entry) => ({
-        kind: "entry",
-        entry,
-      }));
+      const rows = rank(step.entries, (e) => e.title).map((entry) => ({ kind: "entry" as const, entry }));
+      return [{ label: null, rows }];
+    }
+    if (!query) {
+      // Each group's steps, then its commands, in the actions' order.
+      return GROUPS.map(([group, label]) => ({
+        label,
+        rows: [
+          ...steps.filter((st) => st.group === group).map((st) => ({ kind: "step" as const, step: st })),
+          ...entries.filter((e) => e.group === group).map((entry) => ({ kind: "entry" as const, entry })),
+        ],
+      })).filter((sec) => sec.rows.length > 0);
     }
     const top: Row[] = rank<Row>(
       [
@@ -226,7 +270,6 @@ export function CommandPalette() {
       ],
       (r) => (r.kind === "entry" ? r.entry.title : r.step.title),
     );
-    if (!query) return top;
     // What a step holds is still found from the top by its name — a
     // `reviewer` you know needs no second step — below the commands, so a
     // dozen roles never crowd them out.
@@ -236,8 +279,10 @@ export function CommandPalette() {
         entry: { ...e, id: `deep:${e.id}`, title: `${st.crumb} › ${e.title}` },
       })),
     );
-    return [...top, ...deep];
+    return [{ label: null, rows: [...top, ...deep] }];
   }, [entries, steps, step, query]);
+  // The rows in the order shown, which the arrow keys walk.
+  const filtered = useMemo(() => sections.flatMap((sec) => sec.rows), [sections]);
 
   useEffect(() => {
     if (open) {
@@ -270,6 +315,12 @@ export function CommandPalette() {
   }, [open]);
 
   useEffect(() => setSelected(0), [query, stepId]);
+
+  // Keep the selected row in view as the arrows walk past the list's edge.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    listRef.current?.querySelector(".palette-item.selected")?.scrollIntoView({ block: "nearest" });
+  }, [selected, sections]);
 
   if (!open) return null;
 
@@ -337,23 +388,31 @@ export function CommandPalette() {
             }}
           />
         </div>
-        <div className="palette-list">
-          {filtered.map((row, i) => {
-            const title =
-              row.kind === "entry" ? row.entry.title : row.step.title;
-            const hint = row.kind === "entry" ? row.entry.hint : row.step.hint;
-            const accel = row.kind === "entry" ? row.entry.accel : undefined;
+        <div className="palette-list" ref={listRef}>
+          {sections.map((sec, si) => {
+            const offset = sections.slice(0, si).reduce((n, x) => n + x.rows.length, 0);
             return (
-              <div
-                key={rowId(row)}
-                className={`palette-item${i === selected ? " selected" : ""}`}
-                onMouseEnter={() => setSelected(i)}
-                onClick={() => choose(row)}
-              >
-                <span className="palette-title">{title}</span>
-                {hint && <span className="palette-hint">{hint}</span>}
-                {accel && <kbd className="palette-accel">{accel}</kbd>}
-                {row.kind === "step" && <span className="palette-more">›</span>}
+              <div key={sec.label ?? "ranked"}>
+                {sec.label && <div className="palette-group">{sec.label}</div>}
+                {sec.rows.map((row, ri) => {
+                  const i = offset + ri;
+                  const title = row.kind === "entry" ? row.entry.title : row.step.title;
+                  const hint = row.kind === "entry" ? row.entry.hint : row.step.hint;
+                  const accel = row.kind === "entry" ? row.entry.accel : undefined;
+                  const command = row.kind === "entry" && row.entry.command;
+                  return (
+                    <div
+                      key={rowId(row)}
+                      className={`palette-item${i === selected ? " selected" : ""}`}
+                      onMouseEnter={() => setSelected(i)}
+                      onClick={() => choose(row)}
+                    >
+                      <span className="palette-title">{title}</span>
+                      <span className={`palette-hint${command ? " command" : ""}`}>{hint}</span>
+                      {accel && <kbd className="palette-accel">{accel}</kbd>}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -362,6 +421,9 @@ export function CommandPalette() {
               {step ? step.empty : "No matching commands"}
             </div>
           )}
+        </div>
+        <div className="palette-foot">
+          Groups: <span>Agents</span> · <span>Git</span> · <span>Pane</span> · <span>View</span> · <span>App</span>
         </div>
       </div>
     </div>
