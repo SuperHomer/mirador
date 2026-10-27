@@ -14,6 +14,7 @@
   --yellow: #f9e2af;
   --mauve: #cba6f7;
   --red: #f38ba8;
+  --peach: #fab387;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
@@ -41,12 +42,10 @@ button { font-family: inherit; cursor: pointer; }
 }
 
 /* At phone width the board mock is too short for the board's controls
-   to sit on it, as they do in the app, without hiding it: they go under.
-   The teams mock drops its sidebar, and its columns scroll inside it. */
+   to sit on it, as they do in the app, without hiding it: they go under. */
 @media (max-width: 600px) {
   /* The hero's mock needs the width more than the page needs a margin. */
   .hero { padding-left: 16px !important; padding-right: 16px !important; }
-  .teams-sidebar { display: none; }
   /* The task board's columns go two by two, as the app's do in a narrow
      split; its switches, which do not shrink there, wrap under the name. */
   .tasks-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
@@ -98,27 +97,191 @@ button { font-family: inherit; cursor: pointer; }
   white-space: nowrap;
 }
 
-/* At phone width the hero mock's sidebar becomes a strip of tabs over the
-   panes, which stack: side by side, each would be a few characters wide. */
+/* At phone width the hero mock's sidebar becomes its view switch over a
+   strip of tabs, over the panes, which stack: side by side, each would be
+   a few characters wide. The teams mock drops its sidebar. */
 @media (max-width: 600px) {
   .mock-body { flex-direction: column; }
-  .mock-sidebar {
-    width: auto !important;
-    flex-direction: row !important;
-    border-right: none !important;
-    border-bottom: 1px solid var(--surface);
-  }
-  .mock-tab { flex: 1 1 auto; min-width: 0; min-height: 0 !important; }
-  /* The strip keeps each tab's title and unread badge, and ends with the
-     Tabs | Board switch. */
-  .mock-tab-detail, .mock-tab-index, .mock-new-tab { display: none !important; }
-  .mock-sidebar-footer { margin-top: 0 !important; }
-  .mock-sidebar .mock-tab { padding: 6px !important; gap: 5px !important; }
-  .mock-view-switch { padding: 3px 6px !important; }
+  .ms-sidebar.mock-sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--surface); }
+  .mock-sidebar .ms-tabs { flex-direction: row; padding: 0 6px 6px; }
+  .mock-sidebar .ms-tab-block { flex: 1 1 0; min-width: 0; }
+  .mock-sidebar .ms-tree,
+  .mock-sidebar .ms-footer,
+  .mock-sidebar .ms-tab-index,
+  .mock-sidebar .ms-tab-chips { display: none; }
+  .mock-sidebar .ms-tab { padding: 6px; gap: 5px; }
   .mock-panes { flex-direction: column; }
   /* A team's tab shows its focused member alone, picked from the agents row. */
   .mock-agents { display: flex !important; }
   .mock-zoomable .mock-pane:not(.focused) { display: none !important; }
+  .ms-sidebar.teams-sidebar { display: none; }
+}
+
+/* The app's agent chrome as the mocks draw it (MockAgents.tsx), from the
+   app's own rules: the sidebar, status marks, status bars, the wall. */
+.ms-sidebar {
+  width: 216px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-alt);
+  border-right: 1px solid var(--surface);
+  font-size: 12.5px;
+}
+.ms-switch {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  margin: 6px;
+  padding: 2px;
+  border: 1px solid var(--surface);
+  border-radius: 7px;
+}
+.ms-switch button {
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--subtext);
+  font-size: 11px;
+  padding: 4px 0;
+}
+.ms-switch button[aria-pressed="true"] { background: var(--surface); color: var(--text); }
+.ms-switch button:disabled { cursor: default; }
+.ms-tabs { flex: 1; min-height: 0; overflow: hidden; padding: 2px 6px; display: flex; flex-direction: column; gap: 2px; }
+.ms-tab {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.ms-tab[aria-pressed="true"] { background: var(--surface); }
+.ms-tab-index { width: 12px; text-align: center; font-size: 10px; color: var(--muted); }
+.ms-tab-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ms-tab-title { min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-tab-chips { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+.ms-branch { font-size: 10px; color: var(--subtext); white-space: nowrap; }
+.ms-chip-pr, .ms-chip-port { font-size: 9.5px; font-weight: 600; border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+.ms-chip-pr.pass { background: rgba(166,227,161,.25); color: var(--green); }
+.ms-chip-pr.pending { background: rgba(249,226,175,.25); color: var(--yellow); }
+.ms-chip-port { background: #262637; color: var(--accent); }
+.ms-badge { flex-shrink: 0; min-width: 16px; height: 16px; line-height: 16px; border-radius: 8px; background: var(--accent); color: var(--bg-alt); font-size: 10px; font-weight: 700; text-align: center; }
+.ms-empty-wall { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; color: var(--muted); font-size: 13px; text-align: center; background: var(--bg-alt); }
+.ms-team { color: var(--accent); margin-right: 5px; font-size: 11px; }
+.ms-pips { display: flex; gap: 3px; flex-shrink: 0; }
+.ms-tree { margin-left: 22px; padding-left: 8px; border-left: 1px solid var(--surface); display: flex; flex-direction: column; gap: 1px; }
+.ms-agent { padding: 5px 8px; border-radius: 5px; min-width: 0; }
+.ms-agent.needs-you { background: #3a2f2c; }
+.ms-agent-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ms-agent-mark { width: 14px; flex-shrink: 0; display: flex; justify-content: center; }
+.ms-agent-name { font-size: 12px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-agent.needs-you .ms-agent-name { font-weight: 600; }
+.ms-agent.idle .ms-agent-name { color: var(--subtext); }
+.ms-harness { flex-shrink: 0; font-family: var(--mono); font-size: 10px; color: var(--subtext); }
+.ms-standing { margin-left: auto; flex-shrink: 0; font-size: 10px; white-space: nowrap; }
+.ms-standing.working, .ms-since.working { color: var(--accent); }
+.ms-standing.needs-you, .ms-since.needs-you { color: var(--peach); font-weight: 600; }
+.ms-standing.idle, .ms-since.idle { color: var(--green); }
+.ms-asking { display: block; padding-left: 19px; font-size: 10.5px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-footer { display: flex; align-items: center; gap: 6px; padding: 8px; border-top: 1px solid var(--surface); }
+.ms-new-tab { flex: 1; font-size: 12px; color: var(--subtext); padding: 4px 6px; white-space: nowrap; }
+.ms-button { flex-shrink: 0; border: 1px solid var(--surface); border-radius: 5px; padding: 3px 7px; font-size: 11px; color: var(--subtext); white-space: nowrap; }
+.ms-button.waiting { border-color: var(--peach); color: var(--peach); }
+
+.ms-mark, .ms-pip { display: inline-block; flex-shrink: 0; border-radius: 50%; border: 1.5px solid var(--muted); }
+.ms-mark { width: 8px; height: 8px; }
+.ms-mark.small { width: 7px; height: 7px; }
+.ms-mark.needs-you {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 4px;
+  background: var(--peach);
+  color: var(--bg-alt);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+.ms-mark.needs-you.small { width: 12px; height: 12px; font-size: 9px; }
+.ms-mark.working, .ms-pip.working { border: none; background: var(--accent); animation: ms-pulse 1.4s ease-in-out infinite; }
+.ms-mark.idle, .ms-pip.idle { border-color: var(--green); }
+.ms-pip { width: 7px; height: 7px; }
+.ms-pip.needs-you { border: none; border-radius: 2px; background: var(--peach); }
+@keyframes ms-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .ms-mark.working, .ms-pip.working { animation: none; }
+}
+
+.ms-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--surface);
+  background: var(--bg-alt);
+  font-size: 10.5px;
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ms-bar.compact { padding: 3px 8px; font-size: 10px; }
+.ms-chip { padding: 0 6px; border-radius: 4px; background: var(--surface); color: var(--text); }
+.ms-chip.outline { background: none; border: 1px solid var(--surface); color: var(--subtext); }
+.ms-bar-label { color: var(--subtext); }
+.ms-bar-model { color: var(--muted); }
+.ms-context { display: inline-flex; align-items: center; gap: 6px; }
+.ms-meter { width: 80px; height: 5px; border-radius: 3px; background: var(--surface); overflow: hidden; display: inline-block; }
+.ms-bar.compact .ms-meter { width: 50px; height: 4px; }
+.ms-meter > span { display: block; height: 100%; }
+.ms-meter.low > span { background: var(--green); }
+.ms-meter.mid > span { background: var(--yellow); }
+.ms-meter.high > span { background: var(--red); }
+.ms-meter.low + .ms-pct { color: var(--green); }
+.ms-meter.mid + .ms-pct { color: var(--yellow); }
+.ms-meter.high + .ms-pct { color: var(--red); }
+.ms-subagents { margin-left: auto; padding: 0 8px; border-radius: 10px; background: var(--overlay); color: var(--text); }
+
+.ms-wall { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-alt); }
+.ms-wall-toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--surface); font-size: 11px; white-space: nowrap; overflow: hidden; }
+.ms-filter { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--surface); color: var(--subtext); }
+.ms-filter.selected { background: var(--surface); color: var(--text); border-color: var(--surface); }
+.ms-filter.needs-you { color: var(--peach); }
+.ms-filter.working { color: var(--accent); }
+.ms-filter.idle { color: var(--green); }
+.ms-segmented { margin-left: auto; display: flex; border: 1px solid var(--surface); border-radius: 5px; overflow: hidden; }
+.ms-segmented span { padding: 1px 9px; color: var(--subtext); }
+.ms-segmented span.selected { background: var(--surface); color: var(--text); }
+.ms-wall-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 6px; padding: 6px; }
+.ms-tile { min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--surface); border-radius: 6px; overflow: hidden; background: var(--crust); }
+.ms-tile.large { border-color: var(--muted); }
+.ms-tile.needs-you { border-color: var(--peach); }
+.ms-tile-head { display: flex; align-items: center; gap: 7px; padding: 5px 8px; background: var(--bg-alt); border-bottom: 1px solid var(--surface); font-size: 11px; white-space: nowrap; overflow: hidden; }
+.ms-tile.large .ms-tile-head { padding: 7px 10px; gap: 8px; }
+.ms-tile.needs-you .ms-tile-head { background: #2c2630; }
+.ms-tile-name { font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ms-tile.large .ms-tile-name { font-size: 13px; }
+.ms-tile.large .ms-standing { margin-left: 0; font-size: 11px; }
+.ms-since { margin-left: auto; font-size: 10.5px; }
+.ms-tile-asking { padding: 4px 10px; background: #2c2630; border-bottom: 1px solid var(--surface); font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-tile-term { flex: 1; min-height: 0; overflow: hidden; padding: 6px 10px; font-size: 11px; line-height: 1.6; }
+.ms-tile.mini .ms-tile-term { padding: 4px 8px; font-size: 9.5px; line-height: 1.5; }
+.ms-rail { min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.ms-rail .ms-tile { flex: 1; }
+
+/* At phone width the wall shows its large agent alone, as a narrow tab
+   would leave no room for the rail. */
+@media (max-width: 600px) {
+  .ms-wall-body { grid-template-columns: minmax(0, 1fr); }
+  .ms-rail { display: none; }
+  .ms-wall-toolbar .ms-filter:not(.selected) { display: none; }
 }
 
 /* The section links need ~1035px (measured with the Board link); below

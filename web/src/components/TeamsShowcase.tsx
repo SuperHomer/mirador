@@ -1,17 +1,20 @@
 /**
  * Agent teams, as a static mock: the built-in `omakase` team's tab,
- * mid-handoff, beside its team file.
+ * mid-handoff, shown as its wall in Focus, beside its team file.
  *
- * Kept honest to the app: `layout: columns` makes the tab one row split,
- * its members' panes side by side (cmux-core's teams.rs), so the mock draws
- * three columns. A pane in a tab has no header; the sidebar names each
- * agent, with its harness's mark, under the team's ⚑ tab. A handed message
- * opens with the line `mira agent send` really prefixes. The team file is
- * the built-in one (cmux-core/builtin/teams/omakase.md) word for word,
- * except that the charter is one line, so it reflows at phone width.
+ * Kept honest to the app: the sidebar is the app's (MockAgents.tsx), the
+ * team's ⚑ tab current with its members nested under it, each with its
+ * status mark, a grey harness mark and how long in its status. The wall
+ * draws the lead large with its status bar and the others in the rail, as
+ * FocusLayout does; the Codex reviewer reports no status or context, so
+ * its mark is the muted ring and its bar says so. A handed message opens
+ * with the line `mira agent send` really prefixes. The team file is the
+ * built-in one (cmux-core/builtin/teams/omakase.md) word for word, except
+ * that the charter is one line, so it reflows at phone width.
  */
 
-import TermLines, { type Line } from "./TermLines";
+import { type Line } from "./TermLines";
+import { FocusWall, MockSidebar, type MockAgent, type MockTab } from "./MockAgents";
 
 type Member = { name: string; harness: "claude" | "codex"; lines: Line[] };
 
@@ -70,8 +73,47 @@ members:
 ---
 The planner owns the task: it splits it into small steps and hands them to the worker one at a time, waiting for each. When a step is done, the planner asks the reviewer, who reads the diff and answers the planner with APPROVE or CHANGES. The planner decides what happens next, and tells the person when the task is done. Nobody pushes or merges: a person does.`;
 
-/** The sidebar's harness marks: Claude Code's spark, Codex's prompt. */
-export const MARK = { claude: { text: "✳", color: "#d97757" }, codex: { text: ">_", color: "var(--subtext)" } };
+/** The sidebar's harness marks: Claude Code's spark, Codex's prompt — grey,
+    as the app draws them, so no harness's colour competes with needs you. */
+export const MARK = { claude: { text: "✳", color: "var(--subtext)" }, codex: { text: ">_", color: "var(--subtext)" } };
+
+/** The team's members as the wall and the sidebar show them: the planner
+    working, the worker idle after its step, the Codex reviewer with no
+    status to report. */
+export const TEAM_AGENTS: MockAgent[] = [
+  { ...MEMBERS[0], status: "working", since: "38s", model: "Opus 5.5", context: 34 },
+  { ...MEMBERS[1], status: "idle", since: "2m", model: "Opus 5.5", context: 61 },
+  { ...MEMBERS[2], status: null, model: "gpt-6-luna" },
+];
+
+/** The api tab's agent, waiting on a permission. */
+export const API_AGENT: MockAgent = {
+  name: "claude",
+  harness: "claude",
+  status: "needsYou",
+  since: "2m",
+  asking: "Bash npm run migrate",
+  model: "Sonnet 5.5",
+  effort: "high",
+  context: 47,
+  lines: [
+    { text: "> wire up the refresh flow", color: "var(--text)" },
+    { text: "⏺ Read(src/auth/refresh.ts)" },
+    { text: "⏺ Update(src/auth/refresh.ts)" },
+    { text: "  ⎿ Added 18 lines, removed 3", color: "var(--muted)" },
+    { text: "⏺ Bash(npm run migrate)" },
+    { text: "Do you want to proceed?", color: "var(--text)" },
+    { text: "❯ 1. Yes", color: "var(--accent)" },
+    { text: "  2. No, and tell Claude what to do differently" },
+  ],
+};
+
+/** The sidebar's tabs, the hero's three. */
+const TABS: MockTab[] = [
+  { title: "api", agents: [API_AGENT] },
+  { title: "omakase", team: true, agents: TEAM_AGENTS },
+  { title: "web", agents: [] },
+];
 
 function TeamMockup() {
   return (
@@ -86,72 +128,11 @@ function TeamMockup() {
         boxShadow: "0 24px 60px rgba(0,0,0,.5)",
         textAlign: "left",
         display: "flex",
-        height: 330,
+        height: 360,
       }}
     >
-      <div
-        className="teams-sidebar"
-        style={{
-          width: 180,
-          flexShrink: 0,
-          background: "var(--bg-alt)",
-          borderRight: "1px solid var(--surface)",
-          padding: 6,
-          fontSize: 12.5,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, borderRadius: 6, background: "var(--surface)" }}>
-          <span style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>1</span>
-          <span style={{ fontWeight: 600 }}>
-            <span style={{ color: "var(--accent)", marginRight: 5, fontSize: 11 }}>⚑</span>api
-          </span>
-        </div>
-        <div
-          style={{
-            margin: "10px 8px 4px",
-            fontSize: 10,
-            fontWeight: 600,
-            letterSpacing: ".06em",
-            textTransform: "uppercase",
-            color: "var(--muted)",
-          }}
-        >
-          Agents
-        </div>
-        {MEMBERS.map((m, i) => (
-          <div key={m.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px" }}>
-            <span style={{ fontSize: 10, color: "var(--muted)", width: 12, textAlign: "center" }}>{i + 2}</span>
-            <span className="mono" style={{ width: 14, textAlign: "center", fontSize: 11, color: MARK[m.harness].color }}>
-              {MARK[m.harness].text}
-            </span>
-            <span>{m.name}</span>
-          </div>
-        ))}
-      </div>
-      {/* the tab, as layout: columns splits it */}
-      <div className="teams-panes" style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
-        <div style={{ display: "flex", gap: 6, padding: 6, height: "100%", minWidth: 600 }}>
-          {MEMBERS.map((m, i) => (
-            <div
-              key={m.name}
-              className="mono"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                border: `1px solid ${i === 0 ? "var(--muted)" : "var(--surface)"}`,
-                borderRadius: 5,
-                background: "var(--crust)",
-                padding: "8px 10px",
-                fontSize: 11,
-                lineHeight: 1.6,
-                overflow: "hidden",
-              }}
-            >
-              <TermLines lines={m.lines} />
-            </div>
-          ))}
-        </div>
-      </div>
+      <MockSidebar tabs={TABS} current={1} view="wall" className="teams-sidebar" />
+      <FocusWall agents={TEAM_AGENTS} large={0} />
     </div>
   );
 }
