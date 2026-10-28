@@ -608,6 +608,38 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
+    /// Saves the conversations of `pane_id`'s team as `name` (the team's
+    /// name by default), to resume after a restart. Nothing is saved
+    /// unless every member's can be.
+    TeamSave {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Opens the team save `name` in a tab of its own, each member
+    /// resuming its conversation.
+    TeamResume { name: String },
+    /// Saves one agent's conversation: `name` as `AgentSend` finds it,
+    /// else `pane_id`'s, as `save_as` (what it goes by, by default).
+    AgentSave {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        save_as: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Opens one agent's save `name` beside `pane_id`, or in a new tab.
+    AgentResume {
+        name: String,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        tab: bool,
+    },
+    /// Every save, team's and agent's, newest first.
+    SaveList,
     /// Agent-visible command execution: opens a command pane (split of the
     /// focused pane, or a new tab) whose PTY runs the command directly —
     /// exit detection, output capture, and human interruption all work.

@@ -11,7 +11,7 @@ use crate::commands::{emit_workspace, mark_launched, prepare_launch};
 use crate::AppState;
 
 /// The directory `pane_id` (the focused pane when absent) works in.
-fn cwd_of(state: &AppState, pane_id: Option<&str>) -> Option<String> {
+pub(crate) fn cwd_of(state: &AppState, pane_id: Option<&str>) -> Option<String> {
     let pane = pane_id
         .map(str::to_string)
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
@@ -149,7 +149,7 @@ pub fn team_list(state: &AppState) -> Vec<TeamInfo> {
 
 /// The team of `pane_id`'s tab (the focused pane's when absent): its tab
 /// id and what is running there.
-fn team_here(state: &AppState, pane_id: Option<&str>) -> Result<(String, TeamRun), String> {
+pub(crate) fn team_here(state: &AppState, pane_id: Option<&str>) -> Result<(String, TeamRun), String> {
     let ws = state.workspace.lock().unwrap();
     let pane = pane_id.map(str::to_string).unwrap_or_else(|| ws.focused_pane());
     let tab = ws.tab_of_pane(&pane).ok_or_else(|| format!("no pane {pane}"))?;
@@ -162,7 +162,7 @@ fn team_here(state: &AppState, pane_id: Option<&str>) -> Result<(String, TeamRun
 
 /// What a member is told of its team now: the team as it stands, `with`
 /// the member being started.
-fn roster_now(
+pub(crate) fn roster_now(
     run: &TeamRun,
     catalog: &cmux_protocol::RoleCatalog,
     seat: &cmux_core::teams::Seat,

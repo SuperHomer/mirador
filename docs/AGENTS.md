@@ -388,6 +388,11 @@ mira team list                           # running teams: each member's state an
 mira team add reviewer [--name gate]     # another member, beside this pane
 mira team restart [member…]              # bring back exited or closed members
 mira team clear [--force]                # every running member on a new conversation, the lead last
+mira team save [name]                    # this team's conversations, as name (the team's by default)
+mira team resume <name>                  # a tab of its own, each member back in its conversation
+mira team saves                          # every save, team's and agent's, newest first
+mira agent save [name | --pane <id>] [--as <save>]  # one agent's (this pane's by default)
+mira agent resume <save> [--tab]         # beside this pane, or in a new tab
 ```
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
@@ -410,6 +415,23 @@ member a new pane beside a teammate. `team clear` does `agent clear` for
 each member, teammates first and the lead last, and reports each as
 `cleared`, `not running`, `needs you` or `no harness`. `team add`, `team
 restart` and `team clear` act on the team of the calling pane's tab.
+
+A save is what to make before turning the computer off: running agents
+survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
+data directory (beside `session.json`): the team, its layout and cwd, and
+each member's role, harness, cwd and conversation — Claude Code's session
+id, the thread id of the rollout a Codex holds open. Saving again under a
+name replaces it. Nothing is saved unless every member can be: not one
+exited or closed, run by Claude Code's background daemon (`claude --bg`,
+whose jobs do not outlive a restart), or Codex on Windows, which cannot
+see a process's open files. `team resume` opens a team's save as `team
+start` lays a team out, a team like any other from then on; each member
+runs `claude --resume <id>` or `codex resume <id>` with its role's flags,
+its prompt passed again, since a conversation keeps its own only until it
+is compacted. A resume is refused while any pane runs one of the saved
+conversations, naming it — two processes on one conversation write over
+each other — and `team resume` refuses an agent's save, `agent resume` a
+team's. `agent save` names a save after what the agent goes by.
 
 Built in: Mirador ships the `omakase` team, its roles `omakase-planner`,
 `omakase-worker` (Claude Code, `claude-opus-5-5`) and `omakase-reviewer`

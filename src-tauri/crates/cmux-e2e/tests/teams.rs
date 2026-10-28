@@ -254,3 +254,87 @@ fn a_team_is_cleared_with_its_lead_last() {
         .collect();
     assert_eq!(order.last(), Some(&planner), "the lead is cleared last: {order:?}");
 }
+
+/// A team saved, its tab closed, and resumed: a new tab with the same
+/// members, each Claude started again on its own conversation. Never while
+/// that conversation still runs somewhere, and the same for one agent.
+#[test]
+fn a_saved_team_resumes_its_conversations() {
+    e2e!();
+    let mut sb = Sandbox::new("saves");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(
+        ".mirador/teams/squad.md",
+        "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n    count: 2\n---\nShip small.\n",
+    );
+    sb.launch();
+    let first = sb.first_pane();
+    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first.clone()) })
+        ["tabId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("the team", LONG, || sb.member("reviewer-2"));
+    let names = ["planner", "reviewer-1", "reviewer-2"];
+    let sessions: Vec<String> = names
+        .iter()
+        .map(|n| {
+            let pane = pane_of(&sb, n);
+            let hooked = sb.wait_for("each member's session", LONG, || sb.events("hooked", &pane).into_iter().next());
+            hooked["session"].as_str().unwrap().to_string()
+        })
+        .collect();
+    let planner = pane_of(&sb, "planner");
+    sb.wait_for("the planner's session recorded", LONG, || {
+        let (code, _, _) = sb.mira(Some(&planner), &["team", "save"]);
+        (code == 0).then_some(())
+    });
+    let (code, out, err) = sb.mira(Some(&planner), &["agent", "save", "reviewer-1", "--as", "solo"]);
+    assert_eq!(code, 0, "agent save: {err}");
+    assert!(out.contains("saved solo: reviewer-1"), "{out}");
+    let (_, listed, _) = sb.mira(None, &["team", "saves"]);
+    assert!(listed.lines().next().is_some_and(|l| l.starts_with("solo ")), "newest first: {listed}");
+    assert!(listed.contains("team squad") && listed.contains("planner, reviewer-1, reviewer-2"), "{listed}");
+
+    // Its conversations still run: nothing opens.
+    let refused = sb.request(Request::TeamResume { name: "squad".into() }).unwrap_err();
+    assert!(refused.contains("still running") && refused.contains(&pane_of(&sb, "planner")), "{refused}");
+    let wrong = sb.request(Request::AgentResume { name: "squad".into(), pane_id: None, tab: false }).unwrap_err();
+    assert!(wrong.contains("mira team resume squad"), "{wrong}");
+
+    // Ended: one agent comes back beside the first pane, on its own.
+    sb.call(Request::CloseTab { tab_id: tab.clone() });
+    sb.wait_for("the team gone", LONG, || sb.teams().is_empty().then_some(()));
+    let solo = sb.call(Request::AgentResume { name: "solo".into(), pane_id: Some(first.clone()), tab: false })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let args = sb.nth_start(&solo, 1);
+    assert_eq!(cmux_e2e::flag(&args, "--resume").as_deref(), Some(sessions[1].as_str()), "{args:?}");
+    assert_eq!(cmux_e2e::flag(&args, "--model").as_deref(), Some("haiku"));
+    sb.wait_for("its session again", LONG, || sb.events("hooked", &solo).into_iter().next());
+    let refused = sb.request(Request::TeamResume { name: "squad".into() }).unwrap_err();
+    assert!(refused.contains("reviewer-1's in pane") && refused.contains(&solo) && !refused.contains("planner's"), "{refused}");
+    sb.call(Request::ClosePane { pane_id: solo });
+
+    // The team, in a tab of its own, every member on its conversation.
+    let resumed = sb.wait_for("the team resumed", LONG, || {
+        sb.request(Request::TeamResume { name: "squad".into() }).ok().and_then(|v| v["tabId"].as_str().map(String::from))
+    });
+    assert_ne!(resumed, tab);
+    let teams = sb.teams();
+    assert_eq!(teams.len(), 1);
+    assert_eq!(teams[0]["tabId"], resumed.as_str());
+    for (name, session) in names.iter().zip(&sessions) {
+        let pane = pane_of(&sb, name);
+        let args = sb.nth_start(&pane, 1);
+        assert_eq!(cmux_e2e::flag(&args, "--resume").as_deref(), Some(session.as_str()), "{name}: {args:?}");
+        assert_eq!(cmux_e2e::flag(&args, "--name").as_deref(), Some(*name));
+        let prompt = std::fs::read_to_string(cmux_e2e::flag(&args, "--append-system-prompt-file").unwrap()).unwrap();
+        assert!(prompt.contains("# Your team: squad"), "{name}'s prompt passed again: {prompt}");
+        sb.wait_for(&format!("{name} running"), LONG, || state(&sb, name).filter(|s| s == "running"));
+    }
+    let lead = teams[0]["members"].as_array().unwrap().iter().find(|m| m["lead"] == true).map(|m| m["name"].clone());
+    assert_eq!(lead, Some("planner".into()));
+}

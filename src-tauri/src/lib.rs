@@ -3,6 +3,7 @@ mod agent_editor;
 #[cfg(test)]
 mod app_commands;
 mod browser;
+mod checkpoints;
 mod commands;
 mod config_watch;
 mod handoff;
