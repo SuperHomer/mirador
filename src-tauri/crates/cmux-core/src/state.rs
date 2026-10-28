@@ -95,6 +95,9 @@ pub struct PaneMeta {
     /// Agent-editor pane: the role, way and team files its directory sees,
     /// for editing.
     pub agent_editor: bool,
+    /// Settings pane: mirador.json's settings, one global file, so at most
+    /// one such pane is open.
+    pub settings: bool,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
@@ -343,7 +346,8 @@ impl Tab {
     }
 
     /// The name the sidebar shows: an explicit rename, else the focused
-    /// pane's OSC title, else the basename of its cwd, else "shell".
+    /// pane's OSC title, else the basename of its cwd, else what its card
+    /// on the board would say — "Settings", a page's URL, "shell".
     pub fn resolved_title(&self, meta: &HashMap<String, PaneMeta>) -> String {
         let pane_meta = meta.get(&self.focused);
         self.title
@@ -353,7 +357,7 @@ impl Tab {
                 pane_meta
                     .and_then(|m| m.cwd.as_deref())
                     .map(display_dir)
-                    .unwrap_or_else(|| "shell".to_string())
+                    .unwrap_or_else(|| pane_title(pane_meta))
             })
     }
 }
@@ -840,6 +844,7 @@ impl Workspace {
             whats_new_panes: Vec::new(),
             graph_panes: Vec::new(),
             agent_editor_panes: Vec::new(),
+            settings_panes: Vec::new(),
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
@@ -866,6 +871,8 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
     let name = |path: &str| display_dir(path);
     if m.agent_editor {
         "Roles, ways & teams".to_string()
+    } else if m.settings {
+        "Settings".to_string()
     } else if let Some(version) = &m.whats_new {
         format!("What's new in {version}")
     } else if let Some(url) = &m.browser_url {
@@ -1523,6 +1530,19 @@ mod tests {
         assert_eq!(meta(PaneMeta { title: Some(r"C:\pwsh.exe".into()), ..Default::default() }), "shell");
         assert_eq!(meta(PaneMeta { diff_repo: Some("/src/mirador".into()), ..Default::default() }), "Diff · mirador");
         assert_eq!(meta(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
+    }
+
+    #[test]
+    fn a_tab_with_no_cwd_says_what_its_pane_is() {
+        let ws = Workspace::default();
+        let pane = ws.focused_pane();
+        let title = |m: PaneMeta| ws.active_tab().resolved_title(&HashMap::from([(pane.clone(), m)]));
+        assert_eq!(title(PaneMeta { settings: true, ..Default::default() }), "Settings");
+        assert_eq!(title(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
+        assert_eq!(title(PaneMeta::default()), "shell");
+        assert_eq!(ws.active_tab().resolved_title(&HashMap::new()), "shell");
+        // A cwd still names the tab, as before.
+        assert_eq!(title(PaneMeta { settings: true, cwd: Some("/tmp/project".into()), ..Default::default() }), "project");
     }
 
     #[test]

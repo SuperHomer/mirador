@@ -236,6 +236,9 @@ pub struct WorkspaceSnapshot {
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
+    /// Settings panes: at most one, showing mirador.json's settings.
+    #[serde(default)]
+    pub settings_panes: Vec<SettingsPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -455,6 +458,15 @@ pub enum Request {
     /// Opens the editor for the role, way and team files `pane_id`'s
     /// directory sees: a split of that pane, or a tab with `target` "tab".
     AgentEditor {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// Shows the settings pane, or opens one: a split of `pane_id`, or a
+    /// tab with `target` "tab"; without a target, where `editorOpensIn`
+    /// says.
+    Settings {
         #[serde(default)]
         pane_id: Option<String>,
         #[serde(default)]
@@ -1627,6 +1639,54 @@ pub enum AgentClick {
     Pane,
 }
 
+/// What a mirador.json setting holds, and so how it can be edited.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum SettingKind {
+    /// One of these options, offered in this order.
+    Choice { options: Vec<ChoiceOption> },
+    Bool,
+    Number { min: f64, max: f64 },
+    Text,
+    /// Shown, but edited in the file: lists and maps a form cannot hold.
+    ReadOnly,
+}
+
+/// One value a Choice setting offers, and whether picking it does
+/// anything here. An unavailable one can still be written: the file may
+/// be shared with a machine where it does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceOption {
+    /// A JSON string or number.
+    pub value: serde_json::Value,
+    pub available: bool,
+    /// Why it is unavailable, or what it does here.
+    pub note: Option<String>,
+}
+
+/// A mirador.json key as the Settings pane shows it: what it is, and what
+/// the file sets it to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingRow {
+    /// The key in mirador.json ("fontSize").
+    pub key: String,
+    /// "Appearance", "Terminal", "Agents", "Panes" or "Advanced".
+    pub group: String,
+    pub kind: SettingKind,
+    /// The value in effect when the file does not set it, for a person.
+    pub default: String,
+    pub description: String,
+    /// Whether the file has the key at all, even as null.
+    pub set: bool,
+    /// The value in the file as written, if it sets one. A key set to
+    /// null is `set` with a null value, which crosses as null all the same.
+    pub value: Option<serde_json::Value>,
+    /// Whether that value is one the key takes. Always true when unset.
+    pub valid: bool,
+}
+
 /// One line of a diff hunk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1725,6 +1785,15 @@ pub struct GraphResult {
 pub struct AgentEditorPane {
     pub pane_id: String,
     pub cwd: Option<String>,
+}
+
+/// A pane showing mirador.json's settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsPane {
+    pub pane_id: String,
+    /// The mirador.json it shows, for keys edited in the file itself.
+    pub path: String,
 }
 
 /// A pane showing a commit graph, and the repository it reads.

@@ -341,6 +341,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane }))
         }
+        Request::Settings { pane_id, target } => {
+            let tab = match target.as_deref() {
+                Some("tab") => true,
+                Some("split") => false,
+                _ => state.config.lock().unwrap().editor_opens_in == cmux_protocol::OpensIn::Tab,
+            };
+            let pane = crate::settings::open_settings(app.clone(), app.state(), pane_id, tab)?;
+            Ok(json!({ "paneId": pane }))
+        }
         Request::AgentSend { to, message, pane_id, force, card, title } => {
             let pane = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
             Ok(json!({ "paneId": pane }))

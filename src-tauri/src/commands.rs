@@ -111,6 +111,14 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .map(|(pane, m)| cmux_protocol::AgentEditorPane { pane_id: pane.clone(), cwd: m.cwd.clone() })
             .collect()
     };
+    snapshot.settings_panes = {
+        let meta = state.meta.lock().unwrap();
+        let path = cmux_core::config::config_path().to_string_lossy().into_owned();
+        meta.iter()
+            .filter(|(_, m)| m.settings)
+            .map(|(pane, _)| cmux_protocol::SettingsPane { pane_id: pane.clone(), path: path.clone() })
+            .collect()
+    };
     snapshot.agents = agent_infos(state);
     let per_tab = state.config.lock().unwrap().agents_per_tab;
     cmux_core::wall::fill(&mut snapshot, per_tab);
@@ -420,6 +428,24 @@ pub fn emit_workspace(app: &AppHandle) {
         .session_dirty
         .store(true, std::sync::atomic::Ordering::Relaxed);
     broadcast_workspace(app);
+}
+
+/// Shows the first pane whose meta `wanted` picks, in whatever tab it is:
+/// focuses it and returns it. None when no pane is wanted.
+pub(crate) fn show_existing_pane(
+    app: &AppHandle,
+    state: &AppState,
+    wanted: impl Fn(&cmux_core::state::PaneMeta) -> bool,
+) -> Option<String> {
+    let mut ws = state.workspace.lock().unwrap();
+    let pane = {
+        let meta = state.meta.lock().unwrap();
+        ws.find_pane(|p| meta.get(p).is_some_and(&wanted))
+    }?;
+    ws.focus_pane(&pane);
+    drop(ws);
+    emit_workspace(app);
+    Some(pane)
 }
 
 /// Sends a fresh snapshot without scheduling a session save: for changes
@@ -1483,18 +1509,12 @@ pub fn open_graph(
     // shown again rather than opened twice. A split always opens one,
     // beside the pane it was asked from.
     if tab {
-        let mut ws = state.workspace.lock().unwrap();
-        let existing = {
-            let meta = state.meta.lock().unwrap();
-            ws.find_pane(|p| {
-                let graph = meta.get(p).and_then(|m| m.graph_repo.as_deref());
-                graph.is_some_and(|g| cmux_core::state::same_place(Some(&repo), None, Some(g), None))
-            })
-        };
-        if let Some(pane) = existing {
-            ws.focus_pane(&pane);
-            drop(ws);
-            emit_workspace(&app);
+        let shown = show_existing_pane(&app, &state, |m| {
+            m.graph_repo
+                .as_deref()
+                .is_some_and(|g| cmux_core::state::same_place(Some(&repo), None, Some(g), None))
+        });
+        if let Some(pane) = shown {
             return Ok(pane);
         }
     }

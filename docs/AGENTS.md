@@ -229,6 +229,18 @@ With `--tab`, a graph of the same repository already open in some tab is
 focused and its pane id printed, rather than a second one opened; without
 it, a graph always opens as a split beside your pane.
 
+```bash
+mira settings                  # mirador.json's settings, where editorOpensIn says
+mira settings --tab            # in a tab of its own
+mira settings --split          # as a split of this pane
+```
+
+The settings pane lists every key of `mirador.json` by group, with what
+the file sets it to, the default otherwise, and a mark on a value the key
+does not take. There is only one such pane: when one is open, in any tab,
+it is focused and its pane id printed, whatever the flags say. It works
+from any terminal, and outside a pane it splits the focused one.
+
 ## 6. Agents with roles, and the wall
 
 ```bash

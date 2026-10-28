@@ -39,6 +39,9 @@ pub fn spawn(handle: tauri::AppHandle) {
         while rx.recv().is_ok() {
             // Debounce editor save bursts.
             while rx.recv_timeout(Duration::from_millis(300)).is_ok() {}
+            // For the settings pane, on every change: config-changed comes
+            // only when the file parses and resolves differently.
+            let _ = handle.emit("config-file-changed", ());
 
             let (cfg, err) = cmux_core::config::load();
             if let Some(err) = err {

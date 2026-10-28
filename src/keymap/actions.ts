@@ -15,6 +15,7 @@ import {
   toggleAgentWall,
   setWallView,
   openAgentEditor,
+  openSettings,
   openWhatsNew,
   zoomPane,
   setView,
@@ -285,6 +286,14 @@ export const actions: ActionDef[] = [
     // With persistSessions on, Cmd+Q leaves every terminal running for the
     // next launch; this ends them first. Without it, it is a plain quit.
     run: () => void quitEndingSessions(),
+  },
+  {
+    id: "settings",
+    title: "App: Settings",
+    group: "app",
+    // mirador.json's settings: the one pane, wherever it is, or a new one
+    // where the editor would open.
+    run: () => void openSettings(focusedPane() ?? null, opensInTab("editor")),
   },
   {
     id: "whats_new",

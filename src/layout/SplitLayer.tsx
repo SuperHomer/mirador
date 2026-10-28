@@ -9,6 +9,7 @@ import {
   SplitDir,
   GraphPaneInfo,
   AgentEditorPaneInfo,
+  SettingsPaneInfo,
   TabSnapshot,
   WhatsNewPaneInfo,
   closePane,
@@ -25,6 +26,7 @@ import { DiffPane } from "../diff/DiffPane";
 import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
 import { AgentEditor } from "../agents/AgentEditor";
+import { SettingsPane } from "../settings/SettingsPane";
 import { AgentWall } from "../agents/AgentWall";
 
 // Mirrors `cmux_core::board`, which has the last word when a card is
@@ -87,6 +89,7 @@ export function SplitLayer({
   whatsNewPanes,
   graphPanes,
   agentEditorPanes,
+  settingsPanes,
 }: {
   tab: TabSnapshot;
   /** Drawn as cards on the board. */
@@ -104,6 +107,7 @@ export function SplitLayer({
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
+  settingsPanes: SettingsPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
   const [overrides, setOverrides] = useState<Map<string, number[]>>(new Map());
@@ -220,6 +224,7 @@ export function SplitLayer({
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
+        const settings = settingsPanes.find((s) => s.paneId === p.paneId);
         const hide: React.CSSProperties = hidden
           ? { visibility: "hidden", pointerEvents: "none" }
           : {};
@@ -248,7 +253,9 @@ export function SplitLayer({
               />
             )}
             <div className={`pane-body${browser ? " browser" : ""}`}>
-              {editor ? (
+              {settings ? (
+                <SettingsPane paneId={p.paneId} path={settings.path} focused={focused} />
+              ) : editor ? (
                 <AgentEditor
                   paneId={p.paneId}
                   cwd={editor.cwd}

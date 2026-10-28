@@ -65,6 +65,8 @@ pub struct SessionPane {
     pub agent_wall: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub agent_editor: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub settings: bool,
     #[serde(default, skip_serializing)]
     pub task_board: bool,
 }
@@ -179,6 +181,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_settings: m.and_then(|m| m.agent_settings.clone()),
                         agent_wall: false,
                         agent_editor: m.is_some_and(|m| m.agent_editor),
+                        settings: m.is_some_and(|m| m.settings),
                         task_board: false,
                     },
                 )
@@ -296,6 +299,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_role: p.agent_role,
                     agent_settings: p.agent_settings,
                     agent_editor: p.agent_editor,
+                    settings: p.settings,
                     ..Default::default()
                 },
             )

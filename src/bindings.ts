@@ -586,6 +586,7 @@ export interface WorkspaceSnapshot {
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
+  settingsPanes: SettingsPaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;
@@ -829,6 +830,54 @@ export const startTeam = (
   task: string | null,
   paneId: string | null,
 ) => invoke<string>("start_team", { team, task, paneId });
+
+/** The settings pane: at most one, showing mirador.json's settings. */
+export interface SettingsPaneInfo {
+  paneId: string;
+  /** The mirador.json it shows. */
+  path: string;
+}
+
+/** What a setting holds, and so how it can be edited. */
+/** One value a choice offers; an unavailable one does nothing here, and
+ *  its note says why. */
+export interface ChoiceOption {
+  value: string | number;
+  available: boolean;
+  note: string | null;
+}
+
+export type SettingKind =
+  | { kind: "choice"; options: ChoiceOption[] }
+  | { kind: "bool" }
+  | { kind: "number"; min: number; max: number }
+  | { kind: "text" }
+  | { kind: "readOnly" };
+
+/** A mirador.json key, and what the file sets it to (`SettingRow`). */
+export interface SettingRow {
+  key: string;
+  group: string;
+  kind: SettingKind;
+  /** The value in effect when the file does not set it, for a person. */
+  default: string;
+  description: string;
+  /** Whether the file has the key at all, even as null. */
+  set: boolean;
+  /** The value in the file as written; null when it sets none (or null). */
+  value: unknown;
+  /** Whether that value is one the key takes. */
+  valid: boolean;
+}
+
+/** Shows the settings pane, or opens one beside `paneId` or in a tab. */
+export const openSettings = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_settings", { paneId, tab });
+/** Every setting, or why mirador.json cannot be read. */
+export const settingsView = () => invoke<SettingRow[]>("settings_view");
+/** Sets `key` in mirador.json, or removes it with null. */
+export const setConfigValue = (key: string, value: unknown) =>
+  invoke<void>("set_config_value", { key, value });
 
 /** An agent-editor pane, and the directory whose files it edits. */
 export interface AgentEditorPaneInfo {
