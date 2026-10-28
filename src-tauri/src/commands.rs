@@ -1706,6 +1706,8 @@ pub(crate) struct Launch {
     pub harness: cmux_protocol::Harness,
     pub role: Option<cmux_protocol::AgentRole>,
     pub settings: Option<String>,
+    /// The role's prompt file, for Claude Code.
+    pub prompt: Option<String>,
 }
 
 /// Works out how to start an agent in `cwd`: plain Claude Code, or `role`
@@ -1824,6 +1826,7 @@ pub(crate) fn prepare_launch(
         harness,
         role,
         settings: settings_file.map(|f| f.to_string_lossy().into_owned()),
+        prompt: prompt_file.map(|f| f.to_string_lossy().into_owned()),
     })
 }
 
@@ -1845,6 +1848,7 @@ pub(crate) fn mark_launched(entry: &mut cmux_core::state::PaneMeta, launch: Laun
         entry.agent_effort = role.effort;
         entry.agent_role = Some(role.name);
         entry.agent_settings = launch.settings;
+        entry.agent_prompt = launch.prompt;
     }
 }
 
@@ -2143,7 +2147,7 @@ mod tests {
     use super::*;
 
     fn launch(role: Option<cmux_protocol::AgentRole>) -> Launch {
-        Launch { input: "claude\n".into(), harness: cmux_protocol::Harness::Claude, role, settings: None }
+        Launch { input: "claude\n".into(), harness: cmux_protocol::Harness::Claude, role, settings: None, prompt: None }
     }
 
     #[test]
