@@ -783,6 +783,90 @@ mod tests {
         assert_eq!(ui(r##"{ "themeSource": "builtin", "colors": { "foreground": "#ffffff" } }"##), ui::builtin_ui());
     }
 
+    /// Holds a named theme to values typed from its upstream files: the
+    /// terminal's four colours and 16 ANSI, every app role (all but the
+    /// tints, which are mixed, not taken), the needs-you ink, the hues.
+    fn assert_named_theme(name: &str, terminal: [&str; 4], ansi: [&str; 16], roles: &[(&str, &str)], hues: [&str; 8]) {
+        let c = resolve(&serde_json::from_str(&format!(r#"{{ "themeSource": "{name}" }}"#)).unwrap()).colors;
+        assert_eq!([&*c.background, &*c.foreground, &*c.cursor, &*c.selection_background], terminal, "{name}: terminal");
+        assert_eq!(c.palette, ansi, "{name}: ANSI");
+        assert_eq!(c.ui.categorical, hues, "{name}: hues");
+        let ui = serde_json::to_value(&c.ui).unwrap();
+        for (role, want) in roles {
+            assert_eq!(ui[role], *want, "{name}: {role}");
+        }
+        // No role left unpinned.
+        for role in ui.as_object().unwrap().keys().filter(|k| !k.starts_with("tint") && *k != "categorical") {
+            assert!(roles.iter().any(|(r, _)| r == role), "{name}: {role} not pinned");
+        }
+    }
+
+    #[test]
+    fn catppuccin_latte_is_upstreams() {
+        assert_named_theme(
+            "catppuccin-latte",
+            // catppuccin/ghostty themes/catppuccin-latte.conf
+            ["#eff1f5", "#4c4f69", "#dc8a78", "#d8dae1"],
+            [
+                "#5c5f77", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299", "#acb0be",
+                "#6c6f85", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299", "#bcc0cc",
+            ],
+            // catppuccin/palette palette.json, latte
+            &[
+                ("bg", "#eff1f5"),             // base
+                ("bgAlt", "#e6e9ef"),          // mantle
+                ("surface", "#ccd0da"),        // surface0
+                ("overlay", "#bcc0cc"),        // surface1
+                ("text", "#4c4f69"),           // text
+                ("subtext", "#6c6f85"),        // subtext0
+                ("muted", "#9ca0b0"),          // overlay0
+                ("accent", "#1e66f5"),         // blue
+                ("statusWorking", "#1e66f5"),  // blue
+                ("statusNeedsYou", "#fe640b"), // peach
+                ("statusIdle", "#40a02b"),     // green
+                ("danger", "#d20f39"),         // red
+                ("warn", "#df8e1d"),           // yellow
+                ("merged", "#8839ef"),         // mauve
+                ("onNeedsYou", "#000000"),     // by contrast: mantle and text do not read on peach
+            ],
+            // blue, green, yellow, red, mauve, teal, peach, lavender
+            ["#1e66f5", "#40a02b", "#df8e1d", "#d20f39", "#8839ef", "#179299", "#fe640b", "#7287fd"],
+        );
+    }
+
+    #[test]
+    fn tokyo_night_is_upstreams() {
+        assert_named_theme(
+            "tokyo-night",
+            // folke/tokyonight.nvim extras/ghostty/tokyonight_night
+            ["#1a1b26", "#c0caf5", "#c0caf5", "#283457"],
+            [
+                "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
+                "#414868", "#ff899d", "#9fe044", "#faba4a", "#8db0ff", "#c7a9ff", "#a4daff", "#c0caf5",
+            ],
+            // lua/tokyonight/colors/storm.lua, with night.lua's backgrounds
+            &[
+                ("bg", "#1a1b26"),             // bg (night)
+                ("bgAlt", "#16161e"),          // bg_dark (night)
+                ("surface", "#292e42"),        // bg_highlight
+                ("overlay", "#3b4261"),        // fg_gutter
+                ("text", "#c0caf5"),           // fg
+                ("subtext", "#a9b1d6"),        // fg_dark
+                ("muted", "#565f89"),          // comment
+                ("accent", "#7aa2f7"),         // blue
+                ("statusWorking", "#7aa2f7"),  // blue
+                ("statusNeedsYou", "#ff9e64"), // orange
+                ("statusIdle", "#9ece6a"),     // green
+                ("danger", "#f7768e"),         // red
+                ("warn", "#e0af68"),           // yellow
+                ("merged", "#bb9af7"),         // magenta
+                ("onNeedsYou", "#16161e"),     // bg_dark, by contrast
+            ],
+            // blue, green, yellow, red, magenta, cyan, orange, purple
+            ["#7aa2f7", "#9ece6a", "#e0af68", "#f7768e", "#bb9af7", "#7dcfff", "#ff9e64", "#9d7cd8"],
+        );
+    }
+
     #[test]
     fn explicit_values_beat_devaslife() {
         let resolved = resolve(
