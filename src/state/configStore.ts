@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { ITheme } from "@xterm/xterm";
-import { ResolvedConfig } from "../bindings";
+import { ResolvedConfig, UiColors } from "../bindings";
 
 interface ConfigStore {
   config: ResolvedConfig | null;
@@ -9,8 +9,21 @@ interface ConfigStore {
 
 export const useConfigStore = create<ConfigStore>((set) => ({
   config: null,
-  setConfig: (config) => set({ config }),
+  setConfig: (config) => {
+    applyUiColors(config.colors.ui);
+    set({ config });
+  },
 }));
+
+/** Sets the theme's app colors as the `:root` tokens, on the document
+ *  element so html, body and anything portaled outside `.app` take them
+ *  too. styles.css's own values are what shows until the config loads. */
+function applyUiColors(ui: UiColors) {
+  const root = document.documentElement.style;
+  for (const [field, color] of Object.entries(ui)) {
+    root.setProperty(`--${field.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, color);
+  }
+}
 
 /** Whether the app opens the editor, a diff or the graph in a tab of its
  *  own, from mirador.json — before it is read, as its defaults do. */
