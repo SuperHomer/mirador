@@ -8,19 +8,22 @@ import {
   getAgentActivity,
   zoomPane,
 } from "../bindings";
+import { useConfigStore } from "../state/configStore";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 
 /** How often the open panel reads the transcripts again. */
 const POLL_MS = 2000;
 
-/** Each subagent type gets one of these, the same one every time. */
-const TYPE_COLORS = ["#fab387", "#a6e3a1", "#89b4fa", "#f9e2af", "#cba6f7", "#94e2d5", "#f38ba8"];
+/** Each subagent type gets one of seven of the theme's hues, the same one
+ *  every time: these places in it, so builtin keeps the colours it always
+ *  gave (peach, green, blue, yellow, mauve, teal, red). */
+const TYPE_HUES = [6, 1, 0, 2, 4, 5, 3];
 
-export function typeColor(type: string): string {
+export function typeColor(type: string, hues: string[]): string {
   let h = 0;
   for (const c of type) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return TYPE_COLORS[h % TYPE_COLORS.length];
+  return hues[TYPE_HUES[h % TYPE_HUES.length]] ?? "var(--accent)";
 }
 
 export function tokens(n: number): string {
@@ -252,7 +255,8 @@ export function SubagentRow({
   now: number;
   compact: boolean;
 }) {
-  const color = typeColor(agent.agentType ?? "agent");
+  const hues = useConfigStore((s) => s.config?.colors.ui.categorical) ?? [];
+  const color = typeColor(agent.agentType ?? "agent", hues);
   const end = agent.state === "running" ? now : agent.lastMs;
   return (
     <div className={`activity-agent ${agent.state}`} style={{ paddingLeft: (agent.depth - 1) * 12 }}>

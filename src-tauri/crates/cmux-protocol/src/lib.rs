@@ -1546,6 +1546,42 @@ pub struct ResolvedColors {
     pub selection_background: String,
     /// 16 ANSI colors (normal 0-7, bright 8-15).
     pub palette: Vec<String>,
+    /// The app's own colors around the terminals, from the same theme.
+    pub ui: UiColors,
+}
+
+/// The app's colors, one per token on `:root` in `src/styles.css`, each
+/// `#rrggbb`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiColors {
+    pub bg: String,
+    pub bg_alt: String,
+    pub surface: String,
+    pub text: String,
+    pub subtext: String,
+    pub muted: String,
+    pub accent: String,
+    pub overlay: String,
+    pub status_working: String,
+    pub status_needs_you: String,
+    pub status_idle: String,
+    pub danger: String,
+    pub warn: String,
+    pub merged: String,
+    pub tint_needs_you_row: String,
+    pub tint_needs_you_head: String,
+    pub tint_needs_you_area: String,
+    pub tint_needs_you_panel: String,
+    pub tint_hover: String,
+    pub tint_info: String,
+    pub tint_warn: String,
+    pub tint_error_row: String,
+    /// Ink on a needs-you fill: the needs-you mark, the board's Open.
+    pub on_needs_you: String,
+    /// Eight hues told apart from one another, for things that are only
+    /// different, not good or bad: the graph's lanes, subagent types.
+    pub categorical: Vec<String>,
 }
 
 /// Fully-resolved runtime configuration pushed to the frontend on load and

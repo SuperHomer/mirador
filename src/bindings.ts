@@ -614,6 +614,38 @@ export interface ResolvedColors {
   cursor: string;
   selectionBackground: string;
   palette: string[];
+  /** The app's colors from the same theme: one per `:root` token. */
+  ui: UiColors;
+}
+
+/** The app's colors (`UiColors`), each `#rrggbb`: `bgAlt` is `--bg-alt`. */
+export interface UiColors {
+  bg: string;
+  bgAlt: string;
+  surface: string;
+  text: string;
+  subtext: string;
+  muted: string;
+  accent: string;
+  overlay: string;
+  statusWorking: string;
+  statusNeedsYou: string;
+  statusIdle: string;
+  danger: string;
+  warn: string;
+  merged: string;
+  tintNeedsYouRow: string;
+  tintNeedsYouHead: string;
+  tintNeedsYouArea: string;
+  tintNeedsYouPanel: string;
+  tintHover: string;
+  tintInfo: string;
+  tintWarn: string;
+  tintErrorRow: string;
+  /** Ink on a needs-you fill. */
+  onNeedsYou: string;
+  /** Eight distinct hues for the graph's lanes and subagent types. */
+  categorical: string[];
 }
 
 export interface ResolvedConfig {

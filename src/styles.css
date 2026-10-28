@@ -30,6 +30,19 @@
   --tint-info: #1e2433;
   --tint-warn: #2e2c25;
   --tint-error-row: #3b2a33;
+  /* Ink on a needs-you fill: whichever of bg-alt, text, black or white
+     reads best on it. */
+  --on-needs-you: #181825;
+  /* The theme's eight hues, for what is only different: the graph's
+     lanes, tags, remote chips, link hovers. */
+  --hue-0: #89b4fa;
+  --hue-1: #a6e3a1;
+  --hue-2: #f9e2af;
+  --hue-3: #f38ba8;
+  --hue-4: #cba6f7;
+  --hue-5: #94e2d5;
+  --hue-6: #fab387;
+  --hue-7: #b4befe;
 }
 
 /* Scrollbars. WebKit on macOS draws these as overlays that fade out, so
@@ -225,7 +238,7 @@ body,
 
 /* The agent the tab's wall shows large. */
 .agent-row.pinned {
-  box-shadow: inset 2px 0 0 #cdd6f4;
+  box-shadow: inset 2px 0 0 var(--text);
 }
 
 .agent-line {
@@ -344,23 +357,23 @@ body,
 }
 
 .tab-pr.pass {
-  background: color-mix(in srgb, #a6e3a1 25%, var(--surface));
-  color: #a6e3a1;
+  background: color-mix(in srgb, var(--status-idle) 25%, var(--surface));
+  color: var(--status-idle);
 }
 
 .tab-pr.fail {
-  background: color-mix(in srgb, #f38ba8 25%, var(--surface));
-  color: #f38ba8;
+  background: color-mix(in srgb, var(--danger) 25%, var(--surface));
+  color: var(--danger);
 }
 
 .tab-pr.pending {
-  background: color-mix(in srgb, #f9e2af 25%, var(--surface));
-  color: #f9e2af;
+  background: color-mix(in srgb, var(--warn) 25%, var(--surface));
+  color: var(--warn);
 }
 
 .tab-pr.merged {
-  background: color-mix(in srgb, #cba6f7 25%, var(--surface));
-  color: #cba6f7;
+  background: color-mix(in srgb, var(--merged) 25%, var(--surface));
+  color: var(--merged);
 }
 
 .tab-port {
@@ -826,11 +839,11 @@ body,
 }
 
 .card-header.needsYou .card-dot {
-  background: #fab387;
+  background: var(--status-needs-you);
 }
 
 .card-header.idle .card-dot {
-  background: #a6e3a1;
+  background: var(--status-idle);
 }
 
 .card-header.working .card-dot {
@@ -898,7 +911,7 @@ body,
 }
 
 .board-banner-fly:hover {
-  color: #b4befe;
+  color: var(--hue-7);
 }
 
 /* Their own width always, at the row's right end with or without a
@@ -1004,7 +1017,7 @@ body,
 /* Attention ring: an agent in this pane wants you. */
 .pane.unread {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(137, 180, 250, 0.35);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .pane {
@@ -1112,13 +1125,13 @@ body,
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: #ffffff10;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 /* Remote (SSH) pane chip. */
 .agent-chip.remote-chip {
-  background: color-mix(in srgb, #cba6f7 22%, var(--bg-alt));
-  border-color: color-mix(in srgb, #cba6f7 45%, transparent);
+  background: color-mix(in srgb, var(--hue-4) 22%, var(--bg-alt));
+  border-color: color-mix(in srgb, var(--hue-4) 45%, transparent);
 }
 
 /* Command pane chip: this pane runs an agent-launched command. */
@@ -1730,7 +1743,7 @@ button.inbox-update:hover {
 }
 
 .activity-mark.done {
-  color: #a6e3a1;
+  color: var(--status-idle);
 }
 
 .activity-mark.running {
@@ -2176,7 +2189,7 @@ button.inbox-update:hover {
 }
 
 .diff-error {
-  color: var(--diff-del, #f38ba8);
+  color: var(--diff-del, var(--danger));
   text-align: left;
   font-family: ui-monospace, monospace;
   font-size: 11.5px;
@@ -2192,7 +2205,7 @@ button.inbox-update:hover {
   padding: 8px 9px;
   border: 1px solid var(--accent);
   border-radius: 7px;
-  background: rgba(137, 180, 250, 0.1);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2675,8 +2688,8 @@ button.inbox-update:hover {
 }
 
 .graph-ref.tag {
-  border-color: #f9e2af;
-  color: #f9e2af;
+  border-color: var(--hue-2);
+  color: var(--hue-2);
 }
 
 .graph-empty,
@@ -2695,8 +2708,8 @@ button.inbox-update:hover {
   background: var(--bg-alt);
   /* The status colours, named once. */
   --wall-working: var(--accent);
-  --wall-needs-you: #fab387;
-  --wall-idle: #a6e3a1;
+  --wall-needs-you: var(--status-needs-you);
+  --wall-idle: var(--status-idle);
 }
 
 /* The Agents side's one row of controls: status filters, then Focus's pin
@@ -2932,7 +2945,7 @@ button.inbox-update:hover {
 
 .agent-menu-link:hover,
 .empty-wall-link:hover {
-  color: #b4befe;
+  color: var(--hue-7);
 }
 
 .agent-menu-foot {
@@ -3191,7 +3204,7 @@ button.inbox-update:hover {
 /* The same attention ring a pane gets: an agent here said something. */
 .grid-tile.unread {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(137, 180, 250, 0.35);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .grid-tile-head {
@@ -3669,7 +3682,7 @@ button.inbox-update:hover {
 }
 
 .send-next:hover {
-  color: #b4befe;
+  color: var(--hue-7);
 }
 
 .send-next.sent {
@@ -3733,7 +3746,7 @@ button.inbox-update:hover {
   border: none;
   border-radius: 4px;
   background: var(--status-needs-you);
-  color: #181825;
+  color: var(--on-needs-you);
   font-size: 10px;
   font-weight: 900;
   line-height: 1;
@@ -4367,7 +4380,7 @@ button.inbox-update:hover {
   border-radius: 5px;
   padding: 2px 10px;
   background: var(--status-needs-you);
-  color: #181825;
+  color: var(--on-needs-you);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -4670,7 +4683,7 @@ button.tb-assignee:hover {
 }
 
 .tb-history-older:hover {
-  color: #b4befe;
+  color: var(--hue-7);
 }
 
 .tb-lines {
@@ -5001,7 +5014,7 @@ button.tb-line-row:hover {
 }
 
 .tb-trail-card:hover {
-  color: #b4befe;
+  color: var(--hue-7);
 }
 
 .tb-trail-card-history {
@@ -5451,7 +5464,7 @@ button.tb-line-row:hover {
 }
 
 .editor-head button.danger {
-  background: #f38ba8;
+  background: var(--danger);
   color: var(--bg);
 }
 
@@ -5470,11 +5483,11 @@ button.tb-line-row:hover {
 }
 
 .editor-bar.warn {
-  color: #fab387;
+  color: var(--status-needs-you);
 }
 
 .editor-bar.error {
-  color: #f38ba8;
+  color: var(--danger);
 }
 
 /* A restart waiting for a yes. */

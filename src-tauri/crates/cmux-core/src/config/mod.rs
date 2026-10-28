@@ -4,6 +4,7 @@
 //! builtin defaults → imported theme source → explicit mirador.json values.
 
 pub mod ghostty;
+pub mod ui;
 pub mod wezterm;
 
 use std::collections::HashMap;
@@ -343,6 +344,7 @@ fn builtin_colors() -> ResolvedColors {
         .into_iter()
         .map(String::from)
         .collect(),
+        ui: ui::builtin_ui(),
     }
 }
 
@@ -366,13 +368,25 @@ fn devaslife() -> ImportedTheme {
 
 /// Resolves the user config into the runtime config the frontend consumes.
 pub fn resolve(cfg: &Config) -> ResolvedConfig {
-    let imported = import_theme(cfg).unwrap_or_default();
+    let theme = import_theme(cfg);
+    let named_theme = theme.is_some();
+    let imported = theme.unwrap_or_default();
 
     let mut colors = builtin_colors();
     apply_imported(&mut colors, &imported);
     if let Some(o) = &cfg.colors {
         apply_overrides(&mut colors, o);
     }
+    // The app's colors: builtin's and devaslife's own while the terminal
+    // background is still theirs; a background of any other origin (an
+    // import, an override) gets colors derived to match it.
+    colors.ui = if !named_theme && colors.background == builtin_colors().background {
+        ui::builtin_ui()
+    } else if cfg.theme_source.as_deref() == Some("devaslife") && Some(&colors.background) == devaslife().background.as_ref() {
+        ui::devaslife_ui()
+    } else {
+        ui::derive_ui(&colors)
+    };
 
     let mut keybindings = default_keybindings();
     for (accel, action) in &cfg.keybindings {
@@ -691,6 +705,22 @@ mod tests {
         assert_eq!(resolved.colors.selection_background, "#073642");
         assert_eq!(resolved.font_size, 12.0);
         assert_eq!(resolved.font_family, format!("Monaco, {}", default_font_family()));
+    }
+
+    #[test]
+    fn the_app_takes_its_colors_from_the_theme() {
+        let ui = |json: &str| resolve(&serde_json::from_str(json).unwrap()).colors.ui;
+        assert_eq!(ui(r#"{ "themeSource": "builtin" }"#), ui::builtin_ui());
+        assert_eq!(ui(r#"{ "themeSource": "devaslife" }"#), ui::devaslife_ui());
+        // A background of the user's own gets colors derived to match it,
+        // over builtin or devaslife alike.
+        for source in ["builtin", "devaslife"] {
+            let derived = ui(&format!(r##"{{ "themeSource": "{source}", "colors": {{ "background": "#0b1020" }} }}"##));
+            assert_eq!(derived.bg, "#0b1020", "{source}");
+            assert_ne!(derived, ui::builtin_ui());
+        }
+        // Another terminal color changed leaves builtin's app colors alone.
+        assert_eq!(ui(r##"{ "themeSource": "builtin", "colors": { "foreground": "#ffffff" } }"##), ui::builtin_ui());
     }
 
     #[test]
