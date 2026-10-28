@@ -408,6 +408,25 @@ fn gruvbox_dark() -> ImportedTheme {
     }
 }
 
+/// Nord, as nordtheme/xresources maps its palette onto a terminal, and
+/// nord2 for the selection, as Nord's own ports select.
+fn nord() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#2e3440".into()),
+        foreground: Some("#d8dee9".into()),
+        cursor: Some("#d8dee9".into()),
+        selection_background: Some("#434c5e".into()),
+        palette: [
+            "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0",
+            "#e5e9f0", "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead",
+            "#8fbcbb", "#eceff4",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
 /// A theme Mirador carries by name: what `themeSource` calls it, its
 /// terminal colors (and font, for one), and the app colors picked for it.
 pub struct NamedTheme {
@@ -424,6 +443,7 @@ pub const NAMED_THEMES: &[NamedTheme] = &[
     NamedTheme { name: "catppuccin-latte", terminal: catppuccin_latte, ui: ui::catppuccin_latte_ui },
     NamedTheme { name: "tokyo-night", terminal: tokyo_night, ui: ui::tokyo_night_ui },
     NamedTheme { name: "gruvbox-dark", terminal: gruvbox_dark, ui: ui::gruvbox_dark_ui },
+    NamedTheme { name: "nord", terminal: nord, ui: ui::nord_ui },
 ];
 
 fn named_theme(name: &str) -> Option<&'static NamedTheme> {
@@ -920,6 +940,40 @@ mod tests {
             ],
             // bright blue, green, yellow, red, purple, aqua, orange; neutral_blue
             ["#83a598", "#b8bb26", "#fabd2f", "#fb4934", "#d3869b", "#8ec07c", "#fe8019", "#458588"],
+        );
+    }
+
+    #[test]
+    fn nord_is_upstreams() {
+        assert_named_theme(
+            "nord",
+            // nordtheme/xresources src/nord: nord0, nord4, cursor nord4; the
+            // selection nord2
+            ["#2e3440", "#d8dee9", "#d8dee9", "#434c5e"],
+            [
+                "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
+                "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
+            ],
+            // nordtheme/nord src/nord.css, nord0 to nord15
+            &[
+                ("bg", "#2e3440"),             // nord0
+                ("bgAlt", "#252a33"),          // nord0 mixed 0.2 toward black: Nord has nothing darker
+                ("surface", "#3b4252"),        // nord1
+                ("overlay", "#434c5e"),        // nord2
+                ("text", "#eceff4"),           // nord6
+                ("subtext", "#d8dee9"),        // nord4
+                ("muted", "#7a818c"),          // nord4 mixed 0.55 toward nord0: nord3 reads at 1.7:1
+                ("accent", "#88c0d0"),         // nord8
+                ("statusWorking", "#88c0d0"),  // nord8
+                ("statusNeedsYou", "#d08770"), // nord12
+                ("statusIdle", "#a3be8c"),     // nord14
+                ("danger", "#bf616a"),         // nord11
+                ("warn", "#ebcb8b"),           // nord13
+                ("merged", "#b48ead"),         // nord15
+                ("onNeedsYou", "#252a33"),     // bg-alt, by contrast
+            ],
+            // nord9, nord14, nord13, nord11, nord15, nord8, nord12, nord10
+            ["#81a1c1", "#a3be8c", "#ebcb8b", "#bf616a", "#b48ead", "#88c0d0", "#d08770", "#5e81ac"],
         );
     }
 

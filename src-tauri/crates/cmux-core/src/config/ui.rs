@@ -167,6 +167,41 @@ pub fn gruvbox_dark_ui() -> UiColors {
     }
 }
 
+/// Nord's colors, from nordtheme/nord's nord0 to nord15: Polar Night for
+/// surfaces, Snow Storm for text, nord8 its primary accent, Aurora for
+/// the statuses. Two roles have no Nord colour, and are mixed as a
+/// derived theme mixes them: bg-alt, since nothing is darker than nord0,
+/// and muted, since nord3 reads at 1.7:1 on nord0.
+pub fn nord_ui() -> UiColors {
+    let (nord0, nord4, nord6, nord8) = ("#2e3440", "#d8dee9", "#eceff4", "#88c0d0");
+    let (orange, yellow, red) = ("#d08770", "#ebcb8b", "#bf616a"); // nord12, nord13, nord11
+    let bg_alt = mix(nord0, "#000000", 0.2);
+    let t = tints(nord0, nord6, orange, nord8, yellow, red);
+    UiColors {
+        bg: nord0.into(),
+        surface: "#3b4252".into(), // nord1
+        text: nord6.into(),
+        subtext: nord4.into(),
+        muted: mix(nord4, nord0, 0.55),
+        accent: nord8.into(),
+        overlay: "#434c5e".into(), // nord2
+        status_working: nord8.into(),
+        status_needs_you: orange.into(),
+        status_idle: "#a3be8c".into(), // nord14
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#b48ead".into(), // nord15
+        on_needs_you: ink(orange, &bg_alt, nord6),
+        bg_alt,
+        // Builtin's order of hue. Nord's four blues are close, so the two
+        // used besides nord9 are its cyan (nord8) and its darkest (nord10).
+        categorical: ["#81a1c1", "#a3be8c", "#ebcb8b", "#bf616a", "#b48ead", "#88c0d0", "#d08770", "#5e81ac"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
 /// The app's colors for any other theme, from its terminal colors: the
 /// background and foreground and mixes of them for the surfaces and
 /// text, the palette's blue, red, yellow, green and magenta for the
