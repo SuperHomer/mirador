@@ -5,6 +5,9 @@ const COMMANDS = [
   'mira agent new --role reviewer',
   'mira agent wall --grid',
   'mira team start squad "add OAuth"',
+  'mira team save squad',
+  'mira team resume squad',
+  'mira team clear',
   'mira agent board',
   'mira agent trail worker',
   'mira diff main...HEAD',
@@ -53,6 +56,9 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent new --role <span style={{ color: "var(--mauve)" }}>reviewer</span><span style={{ color: "var(--muted)" }}> # .mirador/roles/reviewer.md</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent wall --grid<span style={{ color: "var(--muted)" }}>      # its agents, in pages</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> <span style={{ color: "var(--green)" }}>"add OAuth"</span><span style={{ color: "var(--muted)" }}> # a tab of agents</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira team save <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>       # before you shut down</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira team resume <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>     # each back where it was</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira team clear<span style={{ color: "var(--muted)" }}>            # a fresh start, lead last</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent board<span style={{ color: "var(--muted)" }}>           # who is doing what</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent trail <span style={{ color: "var(--mauve)" }}>worker</span><span style={{ color: "var(--muted)" }}>    # what it ran</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
