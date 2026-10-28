@@ -102,6 +102,38 @@ pub fn catppuccin_latte_ui() -> UiColors {
     }
 }
 
+/// Tokyo Night's colors, the night variant, from folke/tokyonight.nvim's
+/// palette (lua/tokyonight/colors/storm.lua, with night.lua's darker
+/// backgrounds): its editor's own roles for each token.
+pub fn tokyo_night_ui() -> UiColors {
+    let (bg, fg, blue, orange, yellow, red) = ("#1a1b26", "#c0caf5", "#7aa2f7", "#ff9e64", "#e0af68", "#f7768e");
+    let bg_dark = "#16161e";
+    let t = tints(bg, fg, orange, blue, yellow, red);
+    UiColors {
+        bg: bg.into(),
+        bg_alt: bg_dark.into(),
+        surface: "#292e42".into(), // bg_highlight
+        text: fg.into(),
+        subtext: "#a9b1d6".into(), // fg_dark
+        muted: "#565f89".into(),   // comment
+        accent: blue.into(),
+        overlay: "#3b4261".into(), // fg_gutter
+        status_working: blue.into(),
+        status_needs_you: orange.into(),
+        status_idle: "#9ece6a".into(), // green
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#bb9af7".into(), // magenta
+        on_needs_you: ink(orange, bg_dark, fg),
+        // Builtin's order of hue: blue, green, yellow, red, magenta, cyan,
+        // orange, purple.
+        categorical: ["#7aa2f7", "#9ece6a", "#e0af68", "#f7768e", "#bb9af7", "#7dcfff", "#ff9e64", "#9d7cd8"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
 /// The app's colors for any other theme, from its terminal colors: the
 /// background and foreground and mixes of them for the surfaces and
 /// text, the palette's blue, red, yellow, green and magenta for the

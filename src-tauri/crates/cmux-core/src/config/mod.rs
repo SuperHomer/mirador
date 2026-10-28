@@ -369,6 +369,25 @@ fn catppuccin_latte() -> ImportedTheme {
     }
 }
 
+/// Tokyo Night, the night variant, as folke/tokyonight.nvim's
+/// extras/ghostty/tokyonight_night sets a terminal.
+fn tokyo_night() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#1a1b26".into()),
+        foreground: Some("#c0caf5".into()),
+        cursor: Some("#c0caf5".into()),
+        selection_background: Some("#283457".into()),
+        palette: [
+            "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff",
+            "#a9b1d6", "#414868", "#ff899d", "#9fe044", "#faba4a", "#8db0ff", "#c7a9ff",
+            "#a4daff", "#c0caf5",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
 /// A theme Mirador carries by name: what `themeSource` calls it, its
 /// terminal colors (and font, for one), and the app colors picked for it.
 pub struct NamedTheme {
@@ -383,6 +402,7 @@ pub struct NamedTheme {
 pub const NAMED_THEMES: &[NamedTheme] = &[
     NamedTheme { name: "devaslife", terminal: devaslife, ui: ui::devaslife_ui },
     NamedTheme { name: "catppuccin-latte", terminal: catppuccin_latte, ui: ui::catppuccin_latte_ui },
+    NamedTheme { name: "tokyo-night", terminal: tokyo_night, ui: ui::tokyo_night_ui },
 ];
 
 fn named_theme(name: &str) -> Option<&'static NamedTheme> {
