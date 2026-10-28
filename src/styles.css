@@ -5816,6 +5816,17 @@ button.tb-line-row:hover {
   overflow-wrap: anywhere;
 }
 
+/* What the chosen option does here, or why it does nothing. */
+.settings-note {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.settings-select option.unavailable {
+  color: var(--muted);
+}
+
 .settings-error {
   color: var(--status-needs-you);
   font-size: 11px;

@@ -97,6 +97,7 @@ function Setting({ row, path }: { row: SettingRow; path: string }) {
         {row.kind.kind === "readOnly" && (
           <span className="settings-where">Edit in mirador.json: {path}</span>
         )}
+        {chosen(row)?.note && <span className="settings-note">{chosen(row)?.note}</span>}
         {failed && <span className="settings-error">{failed}</span>}
       </div>
       <div className="settings-value">
@@ -116,6 +117,12 @@ function Setting({ row, path }: { row: SettingRow; path: string }) {
   );
 }
 
+/** The option a choice shows chosen: the file's, or unset the default's. */
+function chosen(row: SettingRow) {
+  if (row.kind.kind !== "choice") return undefined;
+  return row.kind.options.find((o) => (row.set ? o.value === row.value : String(o.value) === row.default));
+}
+
 /** The control a setting's kind calls for. */
 function Control({ row, set, write }: { row: SettingRow; set: boolean; write: (value: unknown) => void }) {
   const kind = row.kind;
@@ -124,23 +131,23 @@ function Control({ row, set, write }: { row: SettingRow; set: boolean; write: (v
       // Unset, the default is what shows chosen; the key stays unset
       // until another is picked. A value the file has that is not a
       // choice shows as itself.
-      const at = set
-        ? kind.values.findIndex((v) => v === row.value)
-        : kind.values.findIndex((v) => String(v) === row.default);
+      // An unavailable option can still be picked (the file may be
+      // shared with a machine where it does something): greyed, with why.
+      const at = kind.options.findIndex((o) => o === chosen(row));
       return (
         <select
           className={`settings-select${set ? "" : " unset"}`}
           value={at}
-          onChange={(e) => write(kind.values[Number(e.target.value)])}
+          onChange={(e) => write(kind.options[Number(e.target.value)].value)}
         >
           {at === -1 && (
             <option value={-1} disabled>
               {set ? shown(row.value) : row.default}
             </option>
           )}
-          {kind.values.map((v, i) => (
-            <option key={i} value={i}>
-              {String(v)}
+          {kind.options.map((o, i) => (
+            <option key={i} value={i} className={o.available ? undefined : "unavailable"}>
+              {o.available || !o.note ? String(o.value) : `${String(o.value)} — ${o.note}`}
             </option>
           ))}
         </select>

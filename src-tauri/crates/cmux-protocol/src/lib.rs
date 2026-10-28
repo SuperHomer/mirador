@@ -1643,13 +1643,26 @@ pub enum AgentClick {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SettingKind {
-    /// One of these JSON values, strings or numbers.
-    Choice { values: Vec<serde_json::Value> },
+    /// One of these options, offered in this order.
+    Choice { options: Vec<ChoiceOption> },
     Bool,
     Number { min: f64, max: f64 },
     Text,
     /// Shown, but edited in the file: lists and maps a form cannot hold.
     ReadOnly,
+}
+
+/// One value a Choice setting offers, and whether picking it does
+/// anything here. An unavailable one can still be written: the file may
+/// be shared with a machine where it does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChoiceOption {
+    /// A JSON string or number.
+    pub value: serde_json::Value,
+    pub available: bool,
+    /// Why it is unavailable, or what it does here.
+    pub note: Option<String>,
 }
 
 /// A mirador.json key as the Settings pane shows it: what it is, and what

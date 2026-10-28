@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use cmux_protocol::{SettingKind, SettingRow};
+use cmux_protocol::{ChoiceOption, SettingKind, SettingRow};
 use serde_json::{json, Value};
 
 use super::{config_path, default_font_family, Config};
@@ -18,8 +18,12 @@ pub struct Setting {
     pub description: &'static str,
 }
 
+fn option(value: Value) -> ChoiceOption {
+    ChoiceOption { value, available: true, note: None }
+}
+
 fn choice(values: &[&str]) -> SettingKind {
-    SettingKind::Choice { values: values.iter().map(|v| json!(v)).collect() }
+    SettingKind::Choice { options: values.iter().map(|v| option(json!(v))).collect() }
 }
 
 fn setting(key: &'static str, group: &'static str, kind: SettingKind, default: &str, description: &'static str) -> Setting {
@@ -48,7 +52,7 @@ pub fn settings() -> Vec<Setting> {
             "Where a new tab's first pane starts; splits inherit their pane's directory."),
         setting("persistSessions", "Terminal", Bool, "true",
             "Keep terminals running when Mirador quits, and reattach to them next launch. Applies to new panes."),
-        setting("agentsPerTab", "Agents", SettingKind::Choice { values: vec![json!(4), json!(6), json!(9)] }, "4",
+        setting("agentsPerTab", "Agents", SettingKind::Choice { options: vec![option(json!(4)), option(json!(6)), option(json!(9))] }, "4",
             "How many agents a page of the wall's Grid layout holds."),
         setting("agentClick", "Agents", choice(&["wall", "pane"]), "wall",
             "What clicking an agent in the sidebar does: its tab's wall, or the agent alone."),
@@ -68,7 +72,7 @@ pub fn settings() -> Vec<Setting> {
 /// (a fraction in `scrollback` is a number in range, and not a `u32`).
 fn accepts(setting: &Setting, value: &Value) -> bool {
     let kind_allows = match &setting.kind {
-        SettingKind::Choice { values } => values.contains(value),
+        SettingKind::Choice { options } => options.iter().any(|o| o.value == *value),
         SettingKind::Bool => value.is_boolean(),
         SettingKind::Number { min, max } => value.as_f64().is_some_and(|n| n >= *min && n <= *max),
         SettingKind::Text => value.is_string(),
@@ -92,30 +96,64 @@ fn read_object(path: &Path) -> Result<serde_json::Map<String, Value>, String> {
 
 /// Every setting with the value mirador.json gives it.
 pub fn settings_view() -> Result<Vec<SettingRow>, String> {
-    settings_view_in(&config_path())
+    settings_view_in(&config_path(), &super::ghostty::user_config_path())
 }
 
 /// Every setting with the value the file at `path` gives it, and whether
 /// that value is valid. A file that does not parse is that error, not a
 /// view of the defaults, which would show as if nothing were set.
-fn settings_view_in(path: &Path) -> Result<Vec<SettingRow>, String> {
+/// `ghostty` is where a Ghostty config would be, for themeSource's notes.
+fn settings_view_in(path: &Path, ghostty: &Path) -> Result<Vec<SettingRow>, String> {
     let obj = read_object(path)?;
     Ok(settings()
         .into_iter()
         .map(|s| {
             let value = obj.get(s.key).cloned();
+            let kind = match s.kind.clone() {
+                SettingKind::Choice { options } if s.key == "themeSource" => {
+                    SettingKind::Choice { options: theme_options(options, &obj, ghostty) }
+                }
+                kind => kind,
+            };
             SettingRow {
                 set: obj.contains_key(s.key),
                 valid: value.as_ref().is_none_or(|v| accepts(&s, v)),
                 key: s.key.into(),
                 group: s.group.into(),
-                kind: s.kind,
+                kind,
                 default: s.default,
                 description: s.description.into(),
                 value,
             }
         })
         .collect())
+}
+
+/// themeSource's options as the pane offers them, from the file and the
+/// disk: whether a source has anything to read, and what auto does here.
+/// "none" is accepted, an alias of builtin that older files use, but not
+/// offered: a file that has it still shows it, set and valid.
+fn theme_options(options: Vec<ChoiceOption>, obj: &serde_json::Map<String, Value>, ghostty: &Path) -> Vec<ChoiceOption> {
+    let has_ghostty = ghostty.exists();
+    let scheme = obj.get("weztermScheme").and_then(Value::as_str).filter(|s| !s.trim().is_empty());
+    options
+        .into_iter()
+        .filter(|o| o.value != "none")
+        .map(|o| {
+            let (available, note) = match o.value.as_str() {
+                Some("auto") if has_ghostty => (true, Some("Uses your Ghostty config".to_string())),
+                Some("auto") => (true, Some("No Ghostty config: builtin colors".to_string())),
+                Some("ghostty") if !has_ghostty => (false, Some(format!("No Ghostty config at {}", ghostty.display()))),
+                Some("wezterm") => match scheme {
+                    None => (false, Some("Set weztermScheme first".to_string())),
+                    Some(name) if super::wezterm::import(name).is_none() => (false, Some(format!("No wezterm scheme {name}"))),
+                    Some(_) => (true, None),
+                },
+                _ => (true, None),
+            };
+            ChoiceOption { available, note, ..o }
+        })
+        .collect()
 }
 
 /// Sets `key` in mirador.json, or removes it with `None`.
@@ -245,13 +283,13 @@ mod tests {
     fn the_view_shows_what_the_file_sets_and_whether_it_is_valid() {
         let path = temp_config("view");
         // No file: every setting, none set.
-        let rows = settings_view_in(&path).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
         assert_eq!(rows.len(), settings().len());
         assert!(rows.iter().all(|r| r.value.is_none() && r.valid));
 
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, r#"{ "agentsPerTab": 5, "fontSize": 14, "keybindings": { "mod+t": "new_tab" } }"#).unwrap();
-        let rows = settings_view_in(&path).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
         let row = |key: &str| rows.iter().find(|r| r.key == key).unwrap();
         assert_eq!((row("agentsPerTab").value.clone(), row("agentsPerTab").valid), (Some(json!(5)), false));
         assert_eq!((row("fontSize").value.clone(), row("fontSize").valid), (Some(json!(14)), true));
@@ -260,7 +298,7 @@ mod tests {
 
         // A file that does not parse is an error, not the defaults.
         std::fs::write(&path, "{ broken").unwrap();
-        assert!(settings_view_in(&path).is_err());
+        assert!(settings_view_in(&path, &no_ghostty(&path)).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
@@ -269,7 +307,7 @@ mod tests {
         let path = temp_config("null");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, r#"{ "fontSize": null, "zeta": 1 }"#).unwrap();
-        let rows = settings_view_in(&path).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
         let row = rows.iter().find(|r| r.key == "fontSize").unwrap();
         assert!(row.set, "the key is in the file");
         assert!(!row.valid, "null is not a size");
@@ -278,5 +316,88 @@ mod tests {
         set_config_value_in(&path, "fontSize", None).unwrap();
         assert_eq!(read(&path), json!({ "zeta": 1 }));
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    /// Where no Ghostty config is, beside the test's mirador.json.
+    fn no_ghostty(path: &Path) -> std::path::PathBuf {
+        path.parent().unwrap().join("no-ghostty").join("config")
+    }
+
+    /// themeSource's options as the view gives them: value → (available, note).
+    fn theme_choices(path: &Path, ghostty: &Path) -> Vec<(String, bool, Option<String>)> {
+        let rows = settings_view_in(path, ghostty).unwrap();
+        let row = rows.into_iter().find(|r| r.key == "themeSource").unwrap();
+        let SettingKind::Choice { options } = row.kind else { panic!("themeSource is a choice") };
+        options.into_iter().map(|o| (o.value.as_str().unwrap().to_string(), o.available, o.note)).collect()
+    }
+
+    fn choice_of(choices: &[(String, bool, Option<String>)], value: &str) -> (bool, Option<String>) {
+        let (_, available, note) = choices.iter().find(|(v, _, _)| v == value).unwrap_or_else(|| panic!("{value} offered"));
+        (*available, note.clone())
+    }
+
+    #[test]
+    fn theme_sources_say_whether_they_can_do_anything() {
+        let path = temp_config("sources");
+        let dir = path.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "{}").unwrap();
+
+        // No Ghostty config, no weztermScheme.
+        let ghostty = no_ghostty(&path);
+        let c = theme_choices(&path, &ghostty);
+        assert_eq!(choice_of(&c, "auto"), (true, Some("No Ghostty config: builtin colors".into())));
+        assert_eq!(choice_of(&c, "ghostty"), (false, Some(format!("No Ghostty config at {}", ghostty.display()))));
+        assert_eq!(choice_of(&c, "wezterm"), (false, Some("Set weztermScheme first".into())));
+        assert_eq!(choice_of(&c, "builtin"), (true, None));
+        assert_eq!(choice_of(&c, "devaslife"), (true, None));
+        // "none" is an alias kept for old files, offered nowhere.
+        assert!(c.iter().all(|(v, _, _)| v != "none"));
+
+        // A Ghostty config there: auto uses it, ghostty is available.
+        let ghostty = dir.join("ghostty").join("config");
+        std::fs::create_dir_all(ghostty.parent().unwrap()).unwrap();
+        std::fs::write(&ghostty, "background = 101010\n").unwrap();
+        let c = theme_choices(&path, &ghostty);
+        assert_eq!(choice_of(&c, "auto"), (true, Some("Uses your Ghostty config".into())));
+        assert_eq!(choice_of(&c, "ghostty"), (true, None));
+
+        // A weztermScheme that resolves to nothing, then one that does.
+        let missing = dir.join("missing.toml");
+        std::fs::write(&path, json!({ "weztermScheme": missing.to_str().unwrap() }).to_string()).unwrap();
+        let c = theme_choices(&path, &ghostty);
+        assert_eq!(choice_of(&c, "wezterm"), (false, Some(format!("No wezterm scheme {}", missing.display()))));
+        let scheme = dir.join("light.toml");
+        std::fs::write(&scheme, "[colors]\nbackground = \"#fdf6e3\"\nforeground = \"#657b83\"\n").unwrap();
+        std::fs::write(&path, json!({ "weztermScheme": scheme.to_str().unwrap() }).to_string()).unwrap();
+        assert_eq!(choice_of(&theme_choices(&path, &ghostty), "wezterm"), (true, None));
+
+        // Other choices carry no notes.
+        let rows = settings_view_in(&path, &ghostty).unwrap();
+        for row in rows.iter().filter(|r| r.key != "themeSource") {
+            if let SettingKind::Choice { options } = &row.kind {
+                assert!(options.iter().all(|o| o.available && o.note.is_none()), "{}", row.key);
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn a_hidden_or_unavailable_theme_source_is_still_valid_and_written() {
+        let path = temp_config("hidden");
+        let dir = path.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&dir).unwrap();
+        // A file with the hidden alias shows it, set and valid.
+        std::fs::write(&path, r#"{ "themeSource": "none" }"#).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
+        let row = rows.iter().find(|r| r.key == "themeSource").unwrap();
+        assert!(row.set && row.valid);
+        // An unavailable one is written all the same: the file may be
+        // shared with a machine where it does something.
+        set_config_value_in(&path, "themeSource", Some(json!("ghostty"))).unwrap();
+        set_config_value_in(&path, "themeSource", Some(json!("wezterm"))).unwrap();
+        set_config_value_in(&path, "themeSource", Some(json!("none"))).unwrap();
+        assert_eq!(read(&path), json!({ "themeSource": "none" }));
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

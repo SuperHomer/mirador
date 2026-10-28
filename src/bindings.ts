@@ -839,8 +839,16 @@ export interface SettingsPaneInfo {
 }
 
 /** What a setting holds, and so how it can be edited. */
+/** One value a choice offers; an unavailable one does nothing here, and
+ *  its note says why. */
+export interface ChoiceOption {
+  value: string | number;
+  available: boolean;
+  note: string | null;
+}
+
 export type SettingKind =
-  | { kind: "choice"; values: (string | number)[] }
+  | { kind: "choice"; options: ChoiceOption[] }
   | { kind: "bool" }
   | { kind: "number"; min: number; max: number }
   | { kind: "text" }
