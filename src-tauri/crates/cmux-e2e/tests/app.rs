@@ -230,6 +230,41 @@ fn there_is_one_settings_pane() {
     assert_eq!(listed(&sb), [settings], "it comes back as the settings pane, not a shell");
 }
 
+/// A graph pane is still a graph pane after a relaunch, on the same
+/// repository: it once came back as a plain shell, its repository never
+/// saved in the session.
+#[test]
+fn a_graph_pane_comes_back_as_a_graph() {
+    e2e!();
+    let mut sb = Sandbox::new("graphback");
+    std::fs::create_dir_all(&sb.project).unwrap();
+    std::fs::write(sb.project.join("notes.txt"), "one\n").unwrap();
+    for args in [&["init", "-q"][..], &["add", "."], &["commit", "-qm", "init"]] {
+        let ok = std::process::Command::new("git")
+            .args(["-c", "user.name=e2e", "-c", "user.email=e2e@example.com"])
+            .args(args)
+            .current_dir(&sb.project)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+    sb.launch();
+    let first = sb.first_pane();
+    let (code, out, err) = sb.mira(Some(&first), &["graph", "--tab"]);
+    assert_eq!(code, 0, "{err}");
+    let graph = out.trim().to_string();
+    let listed = |sb: &Sandbox| -> Option<Value> {
+        sb.snapshot()["graphPanes"].as_array()?.iter().find(|g| g["paneId"] == graph.as_str()).cloned()
+    };
+    let before = sb.wait_for("the graph pane", LONG, || listed(&sb));
+
+    sb.quit();
+    sb.launch();
+    let after = listed(&sb).expect("the graph comes back as a graph, not a shell");
+    assert_eq!(after["repo"], before["repo"], "on the same repository");
+}
+
 /// Opened in a tab, a graph or an editor already open on the same files is
 /// shown again rather than opened twice: one graph per repository, one
 /// editor per repository or, outside one, per directory — the second ask
