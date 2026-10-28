@@ -350,6 +350,25 @@ fn devaslife() -> ImportedTheme {
     }
 }
 
+/// Catppuccin Latte, the light flavor, as catppuccin/ghostty's
+/// catppuccin-latte.conf sets a terminal.
+fn catppuccin_latte() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#eff1f5".into()),
+        foreground: Some("#4c4f69".into()),
+        cursor: Some("#dc8a78".into()),
+        selection_background: Some("#d8dae1".into()),
+        palette: [
+            "#5c5f77", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299",
+            "#acb0be", "#6c6f85", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb",
+            "#179299", "#bcc0cc",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
 /// A theme Mirador carries by name: what `themeSource` calls it, its
 /// terminal colors (and font, for one), and the app colors picked for it.
 pub struct NamedTheme {
@@ -361,7 +380,10 @@ pub struct NamedTheme {
 /// Every named theme. Adding one is an entry here: importing it, its app
 /// colors, the Settings pane's choices and the readability tests all read
 /// this list.
-pub const NAMED_THEMES: &[NamedTheme] = &[NamedTheme { name: "devaslife", terminal: devaslife, ui: ui::devaslife_ui }];
+pub const NAMED_THEMES: &[NamedTheme] = &[
+    NamedTheme { name: "devaslife", terminal: devaslife, ui: ui::devaslife_ui },
+    NamedTheme { name: "catppuccin-latte", terminal: catppuccin_latte, ui: ui::catppuccin_latte_ui },
+];
 
 fn named_theme(name: &str) -> Option<&'static NamedTheme> {
     NAMED_THEMES.iter().find(|t| t.name == name)

@@ -69,6 +69,39 @@ pub fn devaslife_ui() -> UiColors {
     }
 }
 
+/// Catppuccin Latte's colors: the light counterpart of builtin, each token
+/// the same Catppuccin role builtin takes from Mocha (base, mantle,
+/// surface0, surface1, text, subtext0, overlay0, blue, peach, green, red,
+/// yellow, mauve), from catppuccin/palette's palette.json.
+pub fn catppuccin_latte_ui() -> UiColors {
+    let (base, text, blue, peach, yellow, red) = ("#eff1f5", "#4c4f69", "#1e66f5", "#fe640b", "#df8e1d", "#d20f39");
+    let mantle = "#e6e9ef";
+    let t = tints(base, text, peach, blue, yellow, red);
+    UiColors {
+        bg: base.into(),
+        bg_alt: mantle.into(),
+        surface: "#ccd0da".into(), // surface0
+        text: text.into(),
+        subtext: "#6c6f85".into(), // subtext0
+        muted: "#9ca0b0".into(),   // overlay0
+        accent: blue.into(),
+        overlay: "#bcc0cc".into(), // surface1
+        status_working: blue.into(),
+        status_needs_you: peach.into(),
+        status_idle: "#40a02b".into(), // green
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#8839ef".into(), // mauve
+        on_needs_you: ink(peach, mantle, text),
+        // Builtin's order: blue, green, yellow, red, mauve, teal, peach,
+        // lavender.
+        categorical: ["#1e66f5", "#40a02b", "#df8e1d", "#d20f39", "#8839ef", "#179299", "#fe640b", "#7287fd"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
 /// The app's colors for any other theme, from its terminal colors: the
 /// background and foreground and mixes of them for the surfaces and
 /// text, the palette's blue, red, yellow, green and magenta for the
@@ -352,6 +385,27 @@ mod tests {
             for c in terminal_colors {
                 assert!(rgb(&c).is_some(), "{name}: terminal {c}");
             }
+        }
+    }
+
+    #[test]
+    fn latte_is_catppuccins_own() {
+        // palette.json's latte base, text and blue: a typo shows here.
+        let ui = catppuccin_latte_ui();
+        assert_eq!((ui.bg.as_str(), ui.text.as_str(), ui.accent.as_str()), ("#eff1f5", "#4c4f69", "#1e66f5"));
+        // On a light background a tint is the background darkened toward
+        // its colour, never lighter than it.
+        for (name, tint) in [
+            ("needs-you row", &ui.tint_needs_you_row),
+            ("needs-you head", &ui.tint_needs_you_head),
+            ("needs-you area", &ui.tint_needs_you_area),
+            ("needs-you panel", &ui.tint_needs_you_panel),
+            ("hover", &ui.tint_hover),
+            ("info", &ui.tint_info),
+            ("warn", &ui.tint_warn),
+            ("error row", &ui.tint_error_row),
+        ] {
+            assert!(luminance(tint) < luminance(&ui.bg), "latte {name}: {tint} is not darker than {}", ui.bg);
         }
     }
 
