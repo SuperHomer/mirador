@@ -177,3 +177,80 @@ fn the_built_in_omakase_team_starts_out_of_the_box() {
     let reviewer_line = listed.lines().find(|l| l.starts_with(&reviewer_pane)).unwrap_or_default().to_string();
     assert!(reviewer_line.contains(" reviewer ") && !reviewer_line.contains("omakase-reviewer"), "{listed}");
 }
+
+/// Clearing types each agent's own new-conversation command into it, as a
+/// person typing /clear does: Claude Code's `/clear`, Codex's `/new`. A
+/// team is cleared teammates first and the lead last, and one waiting on
+/// a person is left alone.
+#[test]
+fn a_team_is_cleared_with_its_lead_last() {
+    e2e!();
+    let mut sb = Sandbox::new("clear");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(".mirador/roles/coder.md", "---\nharness: codex\n---\nYou code.\n");
+    sb.write(
+        ".mirador/teams/squad.md",
+        "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n    count: 2\n  - role: coder\n---\nShip small.\n",
+    );
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first) });
+    sb.wait_for("the team", LONG, || sb.member("coder"));
+    let [planner, r1, r2, coder] = ["planner", "reviewer-1", "reviewer-2", "coder"].map(|n| pane_of(&sb, n));
+    for pane in [&planner, &r1, &r2] {
+        sb.wait_for("each Claude member's session", LONG, || sb.events("hooked", pane).into_iter().next());
+    }
+    sb.nth_start(&coder, 1);
+    for name in ["planner", "reviewer-1", "reviewer-2", "coder"] {
+        sb.wait_for(&format!("{name} running"), LONG, || state(&sb, name).filter(|s| s == "running"));
+    }
+    let cleared = |pane: &str| {
+        sb.events("message", pane).iter().filter(|m| matches!(m["text"].as_str(), Some("/clear" | "/new"))).count()
+    };
+
+    // One, by name, from a teammate.
+    let (code, _, err) = sb.mira(Some(&planner), &["agent", "clear", "reviewer-1"]);
+    assert_eq!(code, 0, "agent clear: {err}");
+    sb.wait_for("reviewer-1's /clear", LONG, || (cleared(&r1) == 1).then_some(()));
+    // The fake takes it as a turn; a line typed during one waits for it,
+    // which would put reviewer-1 after the lead below.
+    sb.wait_for("that turn to end", LONG, || sb.events("turn-done", &r1).into_iter().next());
+
+    // The whole team, from the lead: reviewer-2 is waiting on a person.
+    sb.call(Request::AgentSend {
+        title: None,
+        to: "reviewer-2".into(),
+        message: "!ask".into(),
+        pane_id: Some(planner.clone()),
+        force: false,
+        card: None,
+    });
+    sb.wait_for("reviewer-2 to need you", LONG, || {
+        sb.member("reviewer-2").filter(|m| m["status"] == "needsYou")
+    });
+    let (code, out, err) = sb.mira(Some(&planner), &["--json", "team", "clear"]);
+    assert_eq!(code, 0, "team clear: {err}");
+    let done: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let outcomes: Vec<(String, String)> = done["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| (m["name"].as_str().unwrap().into(), m["outcome"].as_str().unwrap().into()))
+        .collect();
+    let want = [("reviewer-1", "cleared"), ("reviewer-2", "needs you"), ("coder", "cleared"), ("planner", "cleared")];
+    assert_eq!(outcomes, want.map(|(n, o)| (n.to_string(), o.to_string())), "teammates first, the lead last");
+    sb.wait_for("every /clear and /new", LONG, || {
+        (cleared(&r1) == 2 && cleared(&coder) == 1 && cleared(&planner) == 1).then_some(())
+    });
+    assert_eq!(cleared(&r2), 0, "nothing typed into a permission prompt");
+    let coder_line = sb.events("message", &coder).last().and_then(|m| m["text"].as_str().map(String::from));
+    assert_eq!(coder_line.as_deref(), Some("/new"), "Codex starts over with /new");
+    let order: Vec<String> = sb
+        .agent_events()
+        .into_iter()
+        .filter(|e| e["event"] == "message" && matches!(e["text"].as_str(), Some("/clear" | "/new")))
+        .map(|e| e["pane"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(order.last(), Some(&planner), "the lead is cleared last: {order:?}");
+}

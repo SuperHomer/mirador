@@ -387,6 +387,7 @@ mira team start squad "add OAuth"        # a tab of its own; the task goes to th
 mira team list                           # running teams: each member's state and pane
 mira team add reviewer [--name gate]     # another member, beside this pane
 mira team restart [member…]              # bring back exited or closed members
+mira team clear [--force]                # every running member on a new conversation, the lead last
 ```
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
@@ -405,8 +406,10 @@ runs an agent, `exited` when the pane is back to a shell, `closed` when
 the pane is gone. `team restart` types an exited member's command into its
 pane only if the shell is idle (on macOS and Linux it checks the
 terminal's processes; anything else on it is `busy`), and gives a closed
-member a new pane beside a teammate. `team add` and `team restart` act on
-the team of the calling pane's tab.
+member a new pane beside a teammate. `team clear` does `agent clear` for
+each member, teammates first and the lead last, and reports each as
+`cleared`, `not running`, `needs you` or `no harness`. `team add`, `team
+restart` and `team clear` act on the team of the calling pane's tab.
 
 Built in: Mirador ships the `omakase` team, its roles `omakase-planner`,
 `omakase-worker` (Claude Code, `claude-opus-5-5`) and `omakase-reviewer`
@@ -422,6 +425,7 @@ before letting it reach Mirador's socket.
 ```bash
 mira agent send <name|pane> <message…> [--force] [--title <t>] [--wait [--timeout N]]
 mira agent wait <name|pane> [--timeout N]     # 0 idle, 2 needs you, 3 exited, 124 timeout
+mira agent clear [name | --pane <id>] [--force]  # a new conversation; this pane's agent by default
 ```
 
 `send` resolves a name among the agents of the calling pane's tab — a
@@ -439,6 +443,13 @@ after it started, or after it saw the agent working — so a wait begun
 right after a `send` does not end on the idle from before the message. It
 reads status from Claude Code's hooks; an agent without them only ends a
 wait by exiting.
+
+`clear` finds the agent as `send` does and types its harness's
+new-conversation command as plain keystrokes — `/clear` for Claude Code,
+`/new` for Codex — then Enter as a separate write; any other harness is
+refused. The process keeps running, so the role's prompt (a launch flag)
+holds. Refused as `send` is, except that it may name the caller's own
+pane. A working agent is not refused: the line queues behind its turn.
 
 ### Tasks, the board and history
 

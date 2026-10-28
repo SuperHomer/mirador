@@ -492,6 +492,18 @@ pub enum Request {
         #[serde(default)]
         title: Option<String>,
     },
+    /// Starts an agent on a new conversation, typing its harness's command
+    /// for that (`/clear`, Codex's `/new`): `name` as `AgentSend` finds it,
+    /// else `pane_id` itself. Refused as `AgentSend` is, and for a harness
+    /// with no such command; a working agent takes it after its turn.
+    AgentClear {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        force: bool,
+    },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {
         name: String,
@@ -587,6 +599,14 @@ pub enum Request {
         members: Vec<String>,
         #[serde(default)]
         pane_id: Option<String>,
+    },
+    /// `AgentClear` for every running member of `pane_id`'s team, the lead
+    /// last.
+    TeamClear {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        force: bool,
     },
     /// Agent-visible command execution: opens a command pane (split of the
     /// focused pane, or a new tab) whose PTY runs the command directly —

@@ -14,6 +14,9 @@
 //!   but newline and tab is taken out first, so it cannot end the paste
 //!   early and type the rest as keystrokes.
 //!
+//! `mira agent clear` types an agent's own new-conversation command under
+//! the first two rules; a working agent takes it once its turn is over.
+//!
 //! A name is looked up in the sender's tab only — its teammates — by
 //! team member name, then session name, then role. A pane id reaches any
 //! pane.
@@ -104,6 +107,23 @@ pub fn keystrokes(message: &str, from: Option<&str>) -> Result<(Vec<u8>, Vec<u8>
     paste.extend_from_slice(body.as_bytes());
     paste.extend_from_slice(b"\x1b[201~");
     Ok((paste, b"\r".to_vec()))
+}
+
+/// The line that starts `harness` on a new conversation, typed as plain
+/// keystrokes: a slash command pasted is text in the prompt, not a command.
+/// The process keeps running, so what it was launched with — a role's
+/// prompt, Claude Code's `--append-system-prompt-file`, Codex's `-c
+/// developer_instructions` — holds for the new conversation too.
+pub fn clear_line(harness: Option<cmux_protocol::Harness>) -> Result<&'static str, String> {
+    use cmux_protocol::Harness;
+    match harness {
+        Some(Harness::Claude) => Ok("/clear"),
+        // Codex's own `/clear` also wipes the terminal; `/new` is the one
+        // that only starts over.
+        Some(Harness::Codex) => Ok("/new"),
+        Some(other) => Err(format!("{} has no new-conversation command Mirador knows", other.label())),
+        None => Err("its harness is not known".into()),
+    }
 }
 
 /// What `mira agent wait` has seen so far, and whether it is done.
@@ -203,6 +223,16 @@ mod tests {
         assert_eq!(evil, "\x1b[200~hi[201~rm -rf ~\x1b[201~");
         assert_eq!(evil.matches('\x1b').count(), 2);
         assert!(keystrokes(" \n\x07 ", None).is_err());
+    }
+
+    #[test]
+    fn clears_only_a_harness_it_knows() {
+        use cmux_protocol::Harness;
+        assert_eq!(clear_line(Some(Harness::Claude)), Ok("/clear"));
+        assert_eq!(clear_line(Some(Harness::Codex)), Ok("/new"));
+        let aider = clear_line(Some(Harness::Aider)).unwrap_err();
+        assert!(aider.contains("Aider"), "{aider}");
+        assert!(clear_line(None).is_err());
     }
 
     #[test]
