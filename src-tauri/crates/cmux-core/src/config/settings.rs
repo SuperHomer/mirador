@@ -96,14 +96,16 @@ fn read_object(path: &Path) -> Result<serde_json::Map<String, Value>, String> {
 
 /// Every setting with the value mirador.json gives it.
 pub fn settings_view() -> Result<Vec<SettingRow>, String> {
-    settings_view_in(&config_path(), &super::ghostty::user_config_path())
+    settings_view_in(&config_path(), &super::ghostty::user_config_path(), super::wezterm::colors_dir().as_deref())
 }
 
 /// Every setting with the value the file at `path` gives it, and whether
 /// that value is valid. A file that does not parse is that error, not a
 /// view of the defaults, which would show as if nothing were set.
-/// `ghostty` is where a Ghostty config would be, for themeSource's notes.
-fn settings_view_in(path: &Path, ghostty: &Path) -> Result<Vec<SettingRow>, String> {
+/// `ghostty` is where a Ghostty config would be and `wezterm_colors` where
+/// wezterm schemes are by name, for themeSource's notes; nothing else on
+/// disk is looked at.
+fn settings_view_in(path: &Path, ghostty: &Path, wezterm_colors: Option<&Path>) -> Result<Vec<SettingRow>, String> {
     let obj = read_object(path)?;
     Ok(settings()
         .into_iter()
@@ -111,7 +113,7 @@ fn settings_view_in(path: &Path, ghostty: &Path) -> Result<Vec<SettingRow>, Stri
             let value = obj.get(s.key).cloned();
             let kind = match s.kind.clone() {
                 SettingKind::Choice { options } if s.key == "themeSource" => {
-                    SettingKind::Choice { options: theme_options(options, &obj, ghostty) }
+                    SettingKind::Choice { options: theme_options(options, &obj, ghostty, wezterm_colors) }
                 }
                 kind => kind,
             };
@@ -133,7 +135,12 @@ fn settings_view_in(path: &Path, ghostty: &Path) -> Result<Vec<SettingRow>, Stri
 /// disk: whether a source has anything to read, and what auto does here.
 /// "none" is accepted, an alias of builtin that older files use, but not
 /// offered: a file that has it still shows it, set and valid.
-fn theme_options(options: Vec<ChoiceOption>, obj: &serde_json::Map<String, Value>, ghostty: &Path) -> Vec<ChoiceOption> {
+fn theme_options(
+    options: Vec<ChoiceOption>,
+    obj: &serde_json::Map<String, Value>,
+    ghostty: &Path,
+    wezterm_colors: Option<&Path>,
+) -> Vec<ChoiceOption> {
     let has_ghostty = ghostty.exists();
     let scheme = obj.get("weztermScheme").and_then(Value::as_str).filter(|s| !s.trim().is_empty());
     options
@@ -146,7 +153,13 @@ fn theme_options(options: Vec<ChoiceOption>, obj: &serde_json::Map<String, Value
                 Some("ghostty") if !has_ghostty => (false, Some(format!("No Ghostty config at {}", ghostty.display()))),
                 Some("wezterm") => match scheme {
                     None => (false, Some("Set weztermScheme first".to_string())),
-                    Some(name) if super::wezterm::import(name).is_none() => (false, Some(format!("No wezterm scheme {name}"))),
+                    Some(name)
+                        if super::wezterm::scheme_path(name, wezterm_colors)
+                            .and_then(|p| super::wezterm::import_from(&p))
+                            .is_none() =>
+                    {
+                        (false, Some(format!("No wezterm scheme {name}")))
+                    }
                     Some(_) => (true, None),
                 },
                 _ => (true, None),
@@ -283,13 +296,13 @@ mod tests {
     fn the_view_shows_what_the_file_sets_and_whether_it_is_valid() {
         let path = temp_config("view");
         // No file: every setting, none set.
-        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path), Some(&wezterm_colors(&path))).unwrap();
         assert_eq!(rows.len(), settings().len());
         assert!(rows.iter().all(|r| r.value.is_none() && r.valid));
 
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, r#"{ "agentsPerTab": 5, "fontSize": 14, "keybindings": { "mod+t": "new_tab" } }"#).unwrap();
-        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path), Some(&wezterm_colors(&path))).unwrap();
         let row = |key: &str| rows.iter().find(|r| r.key == key).unwrap();
         assert_eq!((row("agentsPerTab").value.clone(), row("agentsPerTab").valid), (Some(json!(5)), false));
         assert_eq!((row("fontSize").value.clone(), row("fontSize").valid), (Some(json!(14)), true));
@@ -298,7 +311,7 @@ mod tests {
 
         // A file that does not parse is an error, not the defaults.
         std::fs::write(&path, "{ broken").unwrap();
-        assert!(settings_view_in(&path, &no_ghostty(&path)).is_err());
+        assert!(settings_view_in(&path, &no_ghostty(&path), Some(&wezterm_colors(&path))).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
@@ -307,7 +320,7 @@ mod tests {
         let path = temp_config("null");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, r#"{ "fontSize": null, "zeta": 1 }"#).unwrap();
-        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path), Some(&wezterm_colors(&path))).unwrap();
         let row = rows.iter().find(|r| r.key == "fontSize").unwrap();
         assert!(row.set, "the key is in the file");
         assert!(!row.valid, "null is not a size");
@@ -323,9 +336,15 @@ mod tests {
         path.parent().unwrap().join("no-ghostty").join("config")
     }
 
+    /// Where wezterm schemes by name are for the test, beside its
+    /// mirador.json: never the real home's.
+    fn wezterm_colors(path: &Path) -> std::path::PathBuf {
+        path.parent().unwrap().join("wezterm-colors")
+    }
+
     /// themeSource's options as the view gives them: value → (available, note).
     fn theme_choices(path: &Path, ghostty: &Path) -> Vec<(String, bool, Option<String>)> {
-        let rows = settings_view_in(path, ghostty).unwrap();
+        let rows = settings_view_in(path, ghostty, Some(&wezterm_colors(path))).unwrap();
         let row = rows.into_iter().find(|r| r.key == "themeSource").unwrap();
         let SettingKind::Choice { options } = row.kind else { panic!("themeSource is a choice") };
         options.into_iter().map(|o| (o.value.as_str().unwrap().to_string(), o.available, o.note)).collect()
@@ -372,8 +391,17 @@ mod tests {
         std::fs::write(&path, json!({ "weztermScheme": scheme.to_str().unwrap() }).to_string()).unwrap();
         assert_eq!(choice_of(&theme_choices(&path, &ghostty), "wezterm"), (true, None));
 
+        // A scheme by name is looked for in the colors directory passed in,
+        // and only there.
+        std::fs::write(&path, json!({ "weztermScheme": "Light" }).to_string()).unwrap();
+        assert_eq!(choice_of(&theme_choices(&path, &ghostty), "wezterm"), (false, Some("No wezterm scheme Light".into())));
+        let colors = wezterm_colors(&path);
+        std::fs::create_dir_all(&colors).unwrap();
+        std::fs::copy(&scheme, colors.join("Light.toml")).unwrap();
+        assert_eq!(choice_of(&theme_choices(&path, &ghostty), "wezterm"), (true, None));
+
         // Other choices carry no notes.
-        let rows = settings_view_in(&path, &ghostty).unwrap();
+        let rows = settings_view_in(&path, &ghostty, Some(&wezterm_colors(&path))).unwrap();
         for row in rows.iter().filter(|r| r.key != "themeSource") {
             if let SettingKind::Choice { options } = &row.kind {
                 assert!(options.iter().all(|o| o.available && o.note.is_none()), "{}", row.key);
@@ -389,7 +417,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         // A file with the hidden alias shows it, set and valid.
         std::fs::write(&path, r#"{ "themeSource": "none" }"#).unwrap();
-        let rows = settings_view_in(&path, &no_ghostty(&path)).unwrap();
+        let rows = settings_view_in(&path, &no_ghostty(&path), Some(&wezterm_colors(&path))).unwrap();
         let row = rows.iter().find(|r| r.key == "themeSource").unwrap();
         assert!(row.set && row.valid);
         // An unavailable one is written all the same: the file may be

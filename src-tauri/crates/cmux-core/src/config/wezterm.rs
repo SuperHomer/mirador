@@ -27,12 +27,17 @@ struct SchemeColors {
 /// `scheme` is either a path to a .toml file or a scheme name resolved in
 /// `~/.config/wezterm/colors/<name>.toml`.
 pub fn import(scheme: &str) -> Option<ImportedTheme> {
-    let path = if scheme.ends_with(".toml") && Path::new(scheme).is_file() {
-        PathBuf::from(scheme)
+    import_from(&scheme_path(scheme, colors_dir().as_deref())?)
+}
+
+/// Where `scheme` is: a .toml path that is a file, else `<colors>/<scheme>.toml`
+/// when there is a colors directory to look in.
+pub fn scheme_path(scheme: &str, colors: Option<&Path>) -> Option<PathBuf> {
+    if scheme.ends_with(".toml") && Path::new(scheme).is_file() {
+        Some(PathBuf::from(scheme))
     } else {
-        colors_dir()?.join(format!("{scheme}.toml"))
-    };
-    import_from(&path)
+        Some(colors?.join(format!("{scheme}.toml")))
+    }
 }
 
 pub fn import_from(path: &Path) -> Option<ImportedTheme> {
@@ -56,7 +61,8 @@ pub fn import_from(path: &Path) -> Option<ImportedTheme> {
     Some(theme)
 }
 
-fn colors_dir() -> Option<PathBuf> {
+/// `~/.config/wezterm/colors`, where wezterm keeps schemes by name.
+pub fn colors_dir() -> Option<PathBuf> {
     let home = super::home_dir()?;
     Some(PathBuf::from(home).join(".config/wezterm/colors"))
 }
