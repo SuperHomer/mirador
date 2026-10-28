@@ -69,6 +69,139 @@ pub fn devaslife_ui() -> UiColors {
     }
 }
 
+/// Catppuccin Latte's colors: the light counterpart of builtin, each token
+/// the same Catppuccin role builtin takes from Mocha (base, mantle,
+/// surface0, surface1, text, subtext0, overlay0, blue, peach, green, red,
+/// yellow, mauve), from catppuccin/palette's palette.json.
+pub fn catppuccin_latte_ui() -> UiColors {
+    let (base, text, blue, peach, yellow, red) = ("#eff1f5", "#4c4f69", "#1e66f5", "#fe640b", "#df8e1d", "#d20f39");
+    let mantle = "#e6e9ef";
+    let t = tints(base, text, peach, blue, yellow, red);
+    UiColors {
+        bg: base.into(),
+        bg_alt: mantle.into(),
+        surface: "#ccd0da".into(), // surface0
+        text: text.into(),
+        subtext: "#6c6f85".into(), // subtext0
+        muted: "#9ca0b0".into(),   // overlay0
+        accent: blue.into(),
+        overlay: "#bcc0cc".into(), // surface1
+        status_working: blue.into(),
+        status_needs_you: peach.into(),
+        status_idle: "#40a02b".into(), // green
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#8839ef".into(), // mauve
+        on_needs_you: ink(peach, mantle, text),
+        // Builtin's order: blue, green, yellow, red, mauve, teal, peach,
+        // lavender.
+        categorical: ["#1e66f5", "#40a02b", "#df8e1d", "#d20f39", "#8839ef", "#179299", "#fe640b", "#7287fd"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
+/// Tokyo Night's colors, the night variant, from folke/tokyonight.nvim's
+/// palette (lua/tokyonight/colors/storm.lua, with night.lua's darker
+/// backgrounds): its editor's own roles for each token.
+pub fn tokyo_night_ui() -> UiColors {
+    let (bg, fg, blue, orange, yellow, red) = ("#1a1b26", "#c0caf5", "#7aa2f7", "#ff9e64", "#e0af68", "#f7768e");
+    let bg_dark = "#16161e";
+    let t = tints(bg, fg, orange, blue, yellow, red);
+    UiColors {
+        bg: bg.into(),
+        bg_alt: bg_dark.into(),
+        surface: "#292e42".into(), // bg_highlight
+        text: fg.into(),
+        subtext: "#a9b1d6".into(), // fg_dark
+        muted: "#565f89".into(),   // comment
+        accent: blue.into(),
+        overlay: "#3b4261".into(), // fg_gutter
+        status_working: blue.into(),
+        status_needs_you: orange.into(),
+        status_idle: "#9ece6a".into(), // green
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#bb9af7".into(), // magenta
+        on_needs_you: ink(orange, bg_dark, fg),
+        // Builtin's order of hue: blue, green, yellow, red, magenta, cyan,
+        // orange, purple.
+        categorical: ["#7aa2f7", "#9ece6a", "#e0af68", "#f7768e", "#bb9af7", "#7dcfff", "#ff9e64", "#9d7cd8"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
+/// Gruvbox Dark's colors, medium contrast, from morhetz/gruvbox's
+/// colors/gruvbox.vim palette: the bright accents a dark background takes,
+/// its bg and fg steps for surfaces and text.
+pub fn gruvbox_dark_ui() -> UiColors {
+    let (bg0, fg1, blue, orange, yellow, red) = ("#282828", "#ebdbb2", "#83a598", "#fe8019", "#fabd2f", "#fb4934");
+    let dark0_hard = "#1d2021";
+    let t = tints(bg0, fg1, orange, blue, yellow, red);
+    UiColors {
+        bg: bg0.into(),
+        bg_alt: dark0_hard.into(),
+        surface: "#3c3836".into(), // bg1
+        text: fg1.into(),
+        subtext: "#a89984".into(), // fg4
+        muted: "#928374".into(),   // gray
+        accent: blue.into(),
+        overlay: "#504945".into(), // bg2
+        status_working: blue.into(),
+        status_needs_you: orange.into(),
+        status_idle: "#b8bb26".into(), // bright_green
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#d3869b".into(), // bright_purple
+        on_needs_you: ink(orange, dark0_hard, fg1),
+        // Builtin's order of hue, the bright ones; Gruvbox has no
+        // lavender, so the eighth is its neutral blue, darker than the
+        // first.
+        categorical: ["#83a598", "#b8bb26", "#fabd2f", "#fb4934", "#d3869b", "#8ec07c", "#fe8019", "#458588"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
+/// Nord's colors, from nordtheme/nord's nord0 to nord15: Polar Night for
+/// surfaces, Snow Storm for text, nord8 its primary accent, Aurora for
+/// the statuses. Two roles have no Nord colour, and are mixed as a
+/// derived theme mixes them: bg-alt, since nothing is darker than nord0,
+/// and muted, since nord3 reads at 1.7:1 on nord0.
+pub fn nord_ui() -> UiColors {
+    let (nord0, nord4, nord6, nord8) = ("#2e3440", "#d8dee9", "#eceff4", "#88c0d0");
+    let (orange, yellow, red) = ("#d08770", "#ebcb8b", "#bf616a"); // nord12, nord13, nord11
+    let bg_alt = mix(nord0, "#000000", 0.2);
+    let t = tints(nord0, nord6, orange, nord8, yellow, red);
+    UiColors {
+        bg: nord0.into(),
+        surface: "#3b4252".into(), // nord1
+        text: nord6.into(),
+        subtext: nord4.into(),
+        muted: mix(nord4, nord0, 0.55),
+        accent: nord8.into(),
+        overlay: "#434c5e".into(), // nord2
+        status_working: nord8.into(),
+        status_needs_you: orange.into(),
+        status_idle: "#a3be8c".into(), // nord14
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#b48ead".into(), // nord15
+        on_needs_you: ink(orange, &bg_alt, nord6),
+        bg_alt,
+        // Builtin's order of hue. Nord's four blues are close, so the two
+        // used besides nord9 are its cyan (nord8) and its darkest (nord10).
+        categorical: ["#81a1c1", "#a3be8c", "#ebcb8b", "#bf616a", "#b48ead", "#88c0d0", "#d08770", "#5e81ac"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
 /// The app's colors for any other theme, from its terminal colors: the
 /// background and foreground and mixes of them for the surfaces and
 /// text, the palette's blue, red, yellow, green and magenta for the
@@ -324,6 +457,56 @@ mod tests {
         // Too mid-toned for the panel or the text: black or white then.
         assert_eq!(derive_ui(&light()).on_needs_you, "#000000");
         assert_eq!(devaslife_ui().on_needs_you, "#ffffff");
+    }
+
+    #[test]
+    fn every_named_theme_reads() {
+        // An entry added to the table is checked here without being named.
+        for t in super::super::NAMED_THEMES {
+            let ui = (t.ui)();
+            let terminal = (t.terminal)();
+            let name = t.name;
+            // Its own colours apply only while the background is its own.
+            assert_eq!(Some(&ui.bg), terminal.background.as_ref(), "{name}: bg is its terminal's");
+            let text = contrast(&ui.text, &ui.bg);
+            assert!(text >= 4.5, "{name}: text on bg is {text:.2}:1");
+            let ink = contrast(&ui.on_needs_you, &ui.status_needs_you);
+            assert!(ink >= 4.5, "{name}: ink on needs-you is {ink:.2}:1");
+            assert_eq!(ui.categorical.len(), 8, "{name}: eight hues");
+            let mut json = serde_json::to_value(&ui).unwrap();
+            let hues = json.as_object_mut().unwrap().remove("categorical").unwrap();
+            let terminal_colors = [&terminal.background, &terminal.foreground, &terminal.cursor, &terminal.selection_background]
+                .into_iter()
+                .chain(&terminal.palette)
+                .map(|c| c.clone().expect("every terminal colour set"));
+            for value in json.as_object().unwrap().values().chain(hues.as_array().unwrap()) {
+                assert!(rgb(value.as_str().unwrap()).is_some(), "{name}: {value}");
+            }
+            for c in terminal_colors {
+                assert!(rgb(&c).is_some(), "{name}: terminal {c}");
+            }
+        }
+    }
+
+    #[test]
+    fn latte_is_catppuccins_own() {
+        // palette.json's latte base, text and blue: a typo shows here.
+        let ui = catppuccin_latte_ui();
+        assert_eq!((ui.bg.as_str(), ui.text.as_str(), ui.accent.as_str()), ("#eff1f5", "#4c4f69", "#1e66f5"));
+        // On a light background a tint is the background darkened toward
+        // its colour, never lighter than it.
+        for (name, tint) in [
+            ("needs-you row", &ui.tint_needs_you_row),
+            ("needs-you head", &ui.tint_needs_you_head),
+            ("needs-you area", &ui.tint_needs_you_area),
+            ("needs-you panel", &ui.tint_needs_you_panel),
+            ("hover", &ui.tint_hover),
+            ("info", &ui.tint_info),
+            ("warn", &ui.tint_warn),
+            ("error row", &ui.tint_error_row),
+        ] {
+            assert!(luminance(tint) < luminance(&ui.bg), "latte {name}: {tint} is not darker than {}", ui.bg);
+        }
     }
 
     #[test]

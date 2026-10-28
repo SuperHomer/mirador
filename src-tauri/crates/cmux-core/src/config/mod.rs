@@ -11,7 +11,7 @@ pub mod wezterm;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig, UiColors};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -30,8 +30,8 @@ pub struct ImportedTheme {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
-    /// "auto" (ghostty config if present), "ghostty", "wezterm", "builtin",
-    /// "devaslife"
+    /// "auto" (ghostty config if present), "ghostty", "wezterm", "builtin"
+    /// (or "none"), or the name of one of [`NAMED_THEMES`].
     pub theme_source: Option<String>,
     /// wezterm scheme name (in ~/.config/wezterm/colors) or a .toml path.
     pub wezterm_scheme: Option<String>,
@@ -350,10 +350,110 @@ fn devaslife() -> ImportedTheme {
     }
 }
 
+/// Catppuccin Latte, the light flavor, as catppuccin/ghostty's
+/// catppuccin-latte.conf sets a terminal.
+fn catppuccin_latte() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#eff1f5".into()),
+        foreground: Some("#4c4f69".into()),
+        cursor: Some("#dc8a78".into()),
+        selection_background: Some("#d8dae1".into()),
+        palette: [
+            "#5c5f77", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299",
+            "#acb0be", "#6c6f85", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb",
+            "#179299", "#bcc0cc",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
+/// Tokyo Night, the night variant, as folke/tokyonight.nvim's
+/// extras/ghostty/tokyonight_night sets a terminal.
+fn tokyo_night() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#1a1b26".into()),
+        foreground: Some("#c0caf5".into()),
+        cursor: Some("#c0caf5".into()),
+        selection_background: Some("#283457".into()),
+        palette: [
+            "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff",
+            "#a9b1d6", "#414868", "#ff899d", "#9fe044", "#faba4a", "#8db0ff", "#c7a9ff",
+            "#a4daff", "#c0caf5",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
+/// Gruvbox Dark, medium contrast: the 16 ANSI as gruvbox.vim gives
+/// Neovim's terminal (and gruvbox-contrib's Xresources port), the cursor
+/// in the foreground and the selection in bg3, as its Visual is.
+fn gruvbox_dark() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#282828".into()),
+        foreground: Some("#ebdbb2".into()),
+        cursor: Some("#ebdbb2".into()),
+        selection_background: Some("#665c54".into()),
+        palette: [
+            "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a",
+            "#a89984", "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b",
+            "#8ec07c", "#ebdbb2",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
+/// Nord, as nordtheme/xresources maps its palette onto a terminal, and
+/// nord2 for the selection, as Nord's own ports select.
+fn nord() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#2e3440".into()),
+        foreground: Some("#d8dee9".into()),
+        cursor: Some("#d8dee9".into()),
+        selection_background: Some("#434c5e".into()),
+        palette: [
+            "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0",
+            "#e5e9f0", "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead",
+            "#8fbcbb", "#eceff4",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
+/// A theme Mirador carries by name: what `themeSource` calls it, its
+/// terminal colors (and font, for one), and the app colors picked for it.
+pub struct NamedTheme {
+    pub name: &'static str,
+    pub terminal: fn() -> ImportedTheme,
+    pub ui: fn() -> UiColors,
+}
+
+/// Every named theme. Adding one is an entry here: importing it, its app
+/// colors, the Settings pane's choices and the readability tests all read
+/// this list.
+pub const NAMED_THEMES: &[NamedTheme] = &[
+    NamedTheme { name: "devaslife", terminal: devaslife, ui: ui::devaslife_ui },
+    NamedTheme { name: "catppuccin-latte", terminal: catppuccin_latte, ui: ui::catppuccin_latte_ui },
+    NamedTheme { name: "tokyo-night", terminal: tokyo_night, ui: ui::tokyo_night_ui },
+    NamedTheme { name: "gruvbox-dark", terminal: gruvbox_dark, ui: ui::gruvbox_dark_ui },
+    NamedTheme { name: "nord", terminal: nord, ui: ui::nord_ui },
+];
+
+fn named_theme(name: &str) -> Option<&'static NamedTheme> {
+    NAMED_THEMES.iter().find(|t| t.name == name)
+}
+
 /// Resolves the user config into the runtime config the frontend consumes.
 pub fn resolve(cfg: &Config) -> ResolvedConfig {
     let theme = import_theme(cfg);
-    let named_theme = theme.is_some();
+    let imported_any = theme.is_some();
     let imported = theme.unwrap_or_default();
 
     let mut colors = builtin_colors();
@@ -361,13 +461,18 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
     if let Some(o) = &cfg.colors {
         apply_overrides(&mut colors, o);
     }
-    // The app's colors: builtin's and devaslife's own while the terminal
+    // The app's colors: builtin's or a named theme's own while the terminal
     // background is still theirs; a background of any other origin (an
     // import, an override) gets colors derived to match it.
-    colors.ui = if !named_theme && colors.background == builtin_colors().background {
+    let named = cfg
+        .theme_source
+        .as_deref()
+        .and_then(named_theme)
+        .filter(|t| (t.terminal)().background.as_ref() == Some(&colors.background));
+    colors.ui = if !imported_any && colors.background == builtin_colors().background {
         ui::builtin_ui()
-    } else if cfg.theme_source.as_deref() == Some("devaslife") && Some(&colors.background) == devaslife().background.as_ref() {
-        ui::devaslife_ui()
+    } else if let Some(t) = named {
+        (t.ui)()
     } else {
         ui::derive_ui(&colors)
     };
@@ -449,11 +554,14 @@ pub fn agent_roles() -> Vec<AgentRole> {
 }
 
 fn import_theme(cfg: &Config) -> Option<ImportedTheme> {
-    match cfg.theme_source.as_deref().unwrap_or("auto") {
+    let source = cfg.theme_source.as_deref().unwrap_or("auto");
+    if let Some(t) = named_theme(source) {
+        return Some((t.terminal)());
+    }
+    match source {
         "ghostty" => ghostty::import(),
         "wezterm" => wezterm::import(cfg.wezterm_scheme.as_deref()?),
         "builtin" | "none" => None,
-        "devaslife" => Some(devaslife()),
         // auto: use Ghostty's config when the user has one (cmux-parity behavior)
         _ => {
             if ghostty::user_config_path().exists() {
@@ -714,6 +822,159 @@ mod tests {
         }
         // Another terminal color changed leaves builtin's app colors alone.
         assert_eq!(ui(r##"{ "themeSource": "builtin", "colors": { "foreground": "#ffffff" } }"##), ui::builtin_ui());
+    }
+
+    /// Holds a named theme to values typed from its upstream files: the
+    /// terminal's four colours and 16 ANSI, every app role (all but the
+    /// tints, which are mixed, not taken), the needs-you ink, the hues.
+    fn assert_named_theme(name: &str, terminal: [&str; 4], ansi: [&str; 16], roles: &[(&str, &str)], hues: [&str; 8]) {
+        let c = resolve(&serde_json::from_str(&format!(r#"{{ "themeSource": "{name}" }}"#)).unwrap()).colors;
+        assert_eq!([&*c.background, &*c.foreground, &*c.cursor, &*c.selection_background], terminal, "{name}: terminal");
+        assert_eq!(c.palette, ansi, "{name}: ANSI");
+        assert_eq!(c.ui.categorical, hues, "{name}: hues");
+        let ui = serde_json::to_value(&c.ui).unwrap();
+        for (role, want) in roles {
+            assert_eq!(ui[role], *want, "{name}: {role}");
+        }
+        // No role left unpinned.
+        for role in ui.as_object().unwrap().keys().filter(|k| !k.starts_with("tint") && *k != "categorical") {
+            assert!(roles.iter().any(|(r, _)| r == role), "{name}: {role} not pinned");
+        }
+    }
+
+    #[test]
+    fn catppuccin_latte_is_upstreams() {
+        assert_named_theme(
+            "catppuccin-latte",
+            // catppuccin/ghostty themes/catppuccin-latte.conf
+            ["#eff1f5", "#4c4f69", "#dc8a78", "#d8dae1"],
+            [
+                "#5c5f77", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299", "#acb0be",
+                "#6c6f85", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299", "#bcc0cc",
+            ],
+            // catppuccin/palette palette.json, latte
+            &[
+                ("bg", "#eff1f5"),             // base
+                ("bgAlt", "#e6e9ef"),          // mantle
+                ("surface", "#ccd0da"),        // surface0
+                ("overlay", "#bcc0cc"),        // surface1
+                ("text", "#4c4f69"),           // text
+                ("subtext", "#6c6f85"),        // subtext0
+                ("muted", "#9ca0b0"),          // overlay0
+                ("accent", "#1e66f5"),         // blue
+                ("statusWorking", "#1e66f5"),  // blue
+                ("statusNeedsYou", "#fe640b"), // peach
+                ("statusIdle", "#40a02b"),     // green
+                ("danger", "#d20f39"),         // red
+                ("warn", "#df8e1d"),           // yellow
+                ("merged", "#8839ef"),         // mauve
+                ("onNeedsYou", "#000000"),     // by contrast: mantle and text do not read on peach
+            ],
+            // blue, green, yellow, red, mauve, teal, peach, lavender
+            ["#1e66f5", "#40a02b", "#df8e1d", "#d20f39", "#8839ef", "#179299", "#fe640b", "#7287fd"],
+        );
+    }
+
+    #[test]
+    fn tokyo_night_is_upstreams() {
+        assert_named_theme(
+            "tokyo-night",
+            // folke/tokyonight.nvim extras/ghostty/tokyonight_night
+            ["#1a1b26", "#c0caf5", "#c0caf5", "#283457"],
+            [
+                "#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#a9b1d6",
+                "#414868", "#ff899d", "#9fe044", "#faba4a", "#8db0ff", "#c7a9ff", "#a4daff", "#c0caf5",
+            ],
+            // lua/tokyonight/colors/storm.lua, with night.lua's backgrounds
+            &[
+                ("bg", "#1a1b26"),             // bg (night)
+                ("bgAlt", "#16161e"),          // bg_dark (night)
+                ("surface", "#292e42"),        // bg_highlight
+                ("overlay", "#3b4261"),        // fg_gutter
+                ("text", "#c0caf5"),           // fg
+                ("subtext", "#a9b1d6"),        // fg_dark
+                ("muted", "#565f89"),          // comment
+                ("accent", "#7aa2f7"),         // blue
+                ("statusWorking", "#7aa2f7"),  // blue
+                ("statusNeedsYou", "#ff9e64"), // orange
+                ("statusIdle", "#9ece6a"),     // green
+                ("danger", "#f7768e"),         // red
+                ("warn", "#e0af68"),           // yellow
+                ("merged", "#bb9af7"),         // magenta
+                ("onNeedsYou", "#16161e"),     // bg_dark, by contrast
+            ],
+            // blue, green, yellow, red, magenta, cyan, orange, purple
+            ["#7aa2f7", "#9ece6a", "#e0af68", "#f7768e", "#bb9af7", "#7dcfff", "#ff9e64", "#9d7cd8"],
+        );
+    }
+
+    #[test]
+    fn gruvbox_dark_is_upstreams() {
+        assert_named_theme(
+            "gruvbox-dark",
+            // morhetz/gruvbox colors/gruvbox.vim (and gruvbox-contrib's
+            // xresources/gruvbox-dark.xresources): bg0, fg1, the cursor in
+            // fg1, the selection in bg3 as Visual is.
+            ["#282828", "#ebdbb2", "#ebdbb2", "#665c54"],
+            [
+                "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+                "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
+            ],
+            // gruvbox.vim's s:gb, dark, medium contrast
+            &[
+                ("bg", "#282828"),             // dark0 (bg0)
+                ("bgAlt", "#1d2021"),          // dark0_hard
+                ("surface", "#3c3836"),        // dark1 (bg1)
+                ("overlay", "#504945"),        // dark2 (bg2)
+                ("text", "#ebdbb2"),           // light1 (fg1)
+                ("subtext", "#a89984"),        // light4 (fg4)
+                ("muted", "#928374"),          // gray_245
+                ("accent", "#83a598"),         // bright_blue
+                ("statusWorking", "#83a598"),  // bright_blue
+                ("statusNeedsYou", "#fe8019"), // bright_orange
+                ("statusIdle", "#b8bb26"),     // bright_green
+                ("danger", "#fb4934"),         // bright_red
+                ("warn", "#fabd2f"),           // bright_yellow
+                ("merged", "#d3869b"),         // bright_purple
+                ("onNeedsYou", "#1d2021"),     // dark0_hard, by contrast
+            ],
+            // bright blue, green, yellow, red, purple, aqua, orange; neutral_blue
+            ["#83a598", "#b8bb26", "#fabd2f", "#fb4934", "#d3869b", "#8ec07c", "#fe8019", "#458588"],
+        );
+    }
+
+    #[test]
+    fn nord_is_upstreams() {
+        assert_named_theme(
+            "nord",
+            // nordtheme/xresources src/nord: nord0, nord4, cursor nord4; the
+            // selection nord2
+            ["#2e3440", "#d8dee9", "#d8dee9", "#434c5e"],
+            [
+                "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0",
+                "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
+            ],
+            // nordtheme/nord src/nord.css, nord0 to nord15
+            &[
+                ("bg", "#2e3440"),             // nord0
+                ("bgAlt", "#252a33"),          // nord0 mixed 0.2 toward black: Nord has nothing darker
+                ("surface", "#3b4252"),        // nord1
+                ("overlay", "#434c5e"),        // nord2
+                ("text", "#eceff4"),           // nord6
+                ("subtext", "#d8dee9"),        // nord4
+                ("muted", "#7a818c"),          // nord4 mixed 0.55 toward nord0: nord3 reads at 1.7:1
+                ("accent", "#88c0d0"),         // nord8
+                ("statusWorking", "#88c0d0"),  // nord8
+                ("statusNeedsYou", "#d08770"), // nord12
+                ("statusIdle", "#a3be8c"),     // nord14
+                ("danger", "#bf616a"),         // nord11
+                ("warn", "#ebcb8b"),           // nord13
+                ("merged", "#b48ead"),         // nord15
+                ("onNeedsYou", "#252a33"),     // bg-alt, by contrast
+            ],
+            // nord9, nord14, nord13, nord11, nord15, nord8, nord12, nord10
+            ["#81a1c1", "#a3be8c", "#ebcb8b", "#bf616a", "#b48ead", "#88c0d0", "#d08770", "#5e81ac"],
+        );
     }
 
     #[test]

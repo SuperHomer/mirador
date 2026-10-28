@@ -88,7 +88,9 @@ downloads, the feature tour and the keybinding reference.
   survive restarts and crashes
 - **Config**: `~/.config/mirador/mirador.json` (hot-reloaded), Ghostty/wezterm
   theme import (`themeSource` takes `auto`, `ghostty`, `wezterm`, `builtin`
-  or `devaslife`), configurable keybindings, command palette (`mod+K`)
+  or `none`, or a named theme: `devaslife`, `catppuccin-latte`,
+  `tokyo-night`, `gruvbox-dark`, `nord`), configurable keybindings,
+  command palette (`mod+K`)
 - **Claude Code integration**: lights up tabs when your agent needs you,
   enables per-pane session resume, and adds a `/mira-diff` skill for
   reviewing the turn's work. Mirador offers to set it up on first launch
