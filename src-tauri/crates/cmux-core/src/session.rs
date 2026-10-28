@@ -67,6 +67,18 @@ pub struct SessionPane {
     pub agent_editor: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub settings: bool,
+    /// Graph pane: the repository it draws, and the diff pane it
+    /// retargets when a commit is clicked (ignored if that pane is gone).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_repo: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_diff_pane: Option<String>,
+    /// What's New pane: the version whose notes it shows, and the one it
+    /// covers releases since, if a range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whats_new: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whats_new_since: Option<String>,
     #[serde(default, skip_serializing)]
     pub task_board: bool,
 }
@@ -182,6 +194,10 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_wall: false,
                         agent_editor: m.is_some_and(|m| m.agent_editor),
                         settings: m.is_some_and(|m| m.settings),
+                        graph_repo: m.and_then(|m| m.graph_repo.clone()),
+                        graph_diff_pane: m.and_then(|m| m.graph_diff_pane.clone()),
+                        whats_new: m.and_then(|m| m.whats_new.clone()),
+                        whats_new_since: m.and_then(|m| m.whats_new_since.clone()),
                         task_board: false,
                     },
                 )
@@ -300,6 +316,10 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_settings: p.agent_settings,
                     agent_editor: p.agent_editor,
                     settings: p.settings,
+                    graph_repo: p.graph_repo,
+                    graph_diff_pane: p.graph_diff_pane,
+                    whats_new: p.whats_new,
+                    whats_new_since: p.whats_new_since,
                     ..Default::default()
                 },
             )
@@ -553,6 +573,56 @@ mod tests {
         assert!(ws.tabs[1].cards.contains_key("c"));
         // And no tab is a wall, each on the Agents side when it becomes one.
         assert!(ws.tabs.iter().all(|t| !t.wall && t.wall_view == WallView::Agents));
+    }
+
+    #[test]
+    fn graph_and_whats_new_panes_come_back_as_themselves() {
+        let mut ws = Workspace::default();
+        let graph = ws.focused_pane();
+        let diff = ws.split_pane(&graph, SplitDir::Row).unwrap();
+        let (_tab, news) = ws.new_tab();
+        let meta = HashMap::from([
+            (
+                graph.clone(),
+                PaneMeta {
+                    cwd: Some("/src/mirador".into()),
+                    graph_repo: Some("/src/mirador".into()),
+                    graph_diff_pane: Some(diff.clone()),
+                    ..Default::default()
+                },
+            ),
+            (
+                diff.clone(),
+                PaneMeta { diff_repo: Some("/src/mirador".into()), diff_spec: Some("0e47a2c".into()), ..Default::default() },
+            ),
+            (
+                news.clone(),
+                PaneMeta { whats_new: Some("0.1.37".into()), whats_new_since: Some("0.1.35".into()), ..Default::default() },
+            ),
+        ]);
+
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        let (_, rmeta) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(rmeta[&graph].graph_repo.as_deref(), Some("/src/mirador"));
+        assert_eq!(rmeta[&graph].graph_diff_pane.as_deref(), Some(diff.as_str()));
+        assert_eq!(rmeta[&news].whats_new.as_deref(), Some("0.1.37"));
+        assert_eq!(rmeta[&news].whats_new_since.as_deref(), Some("0.1.35"));
+        // A plain shell's entry gains none of them.
+        assert!(!json.contains("\"graph_repo\":null") && !json.contains("whats_new\":null"));
+    }
+
+    #[test]
+    fn a_session_saved_before_graph_and_whats_new_were_kept_still_loads() {
+        let json = r#"{
+            "version": 1,
+            "tabs": [{"id": "t", "title": null, "focused": "a", "root": {"type": "leaf", "paneId": "a"}}],
+            "active_tab": "t",
+            "panes": {"a": {"cwd": "/tmp", "command": null, "diff_repo": null}}
+        }"#;
+        let (ws, meta) = restore(serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(ws.tabs.len(), 1);
+        assert_eq!(meta["a"].cwd.as_deref(), Some("/tmp"));
+        assert_eq!((meta["a"].graph_repo.as_deref(), meta["a"].whats_new.as_deref()), (None, None));
     }
 
     #[test]
