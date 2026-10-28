@@ -642,6 +642,8 @@ export interface UiColors {
   tintInfo: string;
   tintWarn: string;
   tintErrorRow: string;
+  /** Ink on a needs-you fill. */
+  onNeedsYou: string;
   /** Eight distinct hues for the graph's lanes and subagent types. */
   categorical: string[];
 }

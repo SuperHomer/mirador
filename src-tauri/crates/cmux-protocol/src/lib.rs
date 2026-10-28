@@ -1577,6 +1577,8 @@ pub struct UiColors {
     pub tint_info: String,
     pub tint_warn: String,
     pub tint_error_row: String,
+    /// Ink on a needs-you fill: the needs-you mark, the board's Open.
+    pub on_needs_you: String,
     /// Eight hues told apart from one another, for things that are only
     /// different, not good or bad: the graph's lanes, subagent types.
     pub categorical: Vec<String>,

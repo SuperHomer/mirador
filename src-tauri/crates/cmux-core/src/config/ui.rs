@@ -31,6 +31,7 @@ pub fn builtin_ui() -> UiColors {
         tint_info: "#1e2433".into(),
         tint_warn: "#2e2c25".into(),
         tint_error_row: "#3b2a33".into(),
+        on_needs_you: "#181825".into(),
         categorical: ["#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8", "#cba6f7", "#94e2d5", "#fab387", "#b4befe"]
             .map(String::from)
             .to_vec(),
@@ -59,6 +60,7 @@ pub fn devaslife_ui() -> UiColors {
         danger: red.into(),
         warn: yellow.into(),
         merged: "#6c71c4".into(), // violet
+        on_needs_you: ink(orange, "#00141a", text),
         // Solarized's eight accents, in the order of builtin's hues.
         categorical: ["#268bd2", "#859900", "#b58900", "#dc322f", "#d33682", "#2aa198", "#cb4b16", "#6c71c4"]
             .map(String::from)
@@ -92,6 +94,7 @@ pub fn derive_ui(c: &ResolvedColors) -> UiColors {
     let needs_you = mix(&red, &yellow, 0.5);
     // A light background's panel is a shade darker, as a dark one's is.
     let alt = if luminance(bg) > 0.5 { 0.04 } else { 0.2 };
+    let bg_alt = mix(bg, "#000000", alt);
     let t = tints(bg, fg, &needs_you, &blue, &yellow, &red);
     // Blue, green, yellow, red, magenta, cyan, then bright red and bright
     // magenta: never the bright green, yellow, blue or cyan, which
@@ -103,7 +106,8 @@ pub fn derive_ui(c: &ResolvedColors) -> UiColors {
         .collect();
     UiColors {
         bg: bg.into(),
-        bg_alt: mix(bg, "#000000", alt),
+        on_needs_you: ink(&needs_you, &bg_alt, fg),
+        bg_alt,
         surface: mix(bg, fg, 0.11),
         text: fg.into(),
         subtext: mix(fg, bg, 0.22),
@@ -135,6 +139,24 @@ fn tints(bg: &str, text: &str, needs_you: &str, info: &str, warn: &str, error: &
         tint_error_row: mix(bg, error, 0.12),
         ..builtin_ui()
     }
+}
+
+/// The ink for small text on `fill`: the panel colour, else the text, if
+/// it reads at 4.5:1 (builtin's dark ink on its peach); for a fill too
+/// mid-toned for either, whichever of the four reads best, black and
+/// white included. Not simply the best of the four: black beats builtin's
+/// own ink on peach, and builtin keeps the colours it has.
+fn ink(fill: &str, bg_alt: &str, text: &str) -> String {
+    if let Some(c) = [bg_alt, text].into_iter().find(|c| contrast(c, fill) >= 4.5) {
+        return c.to_string();
+    }
+    [bg_alt, text, "#000000", "#ffffff"]
+        .into_iter()
+        .fold((String::new(), 0.0), |best, c| {
+            let ratio = contrast(c, fill);
+            if ratio > best.1 { (c.to_string(), ratio) } else { best }
+        })
+        .0
 }
 
 fn rgb(hex: &str) -> Option<[f64; 3]> {
@@ -170,15 +192,15 @@ fn luminance(hex: &str) -> f64 {
     0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
 }
 
+/// WCAG contrast ratio, 1 to 21.
+fn contrast(a: &str, b: &str) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// WCAG contrast ratio, 1 to 21.
-    fn contrast(a: &str, b: &str) -> f64 {
-        let (la, lb) = (luminance(a), luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
-    }
 
     fn terminal(background: &str, foreground: &str, palette: [&str; 16]) -> ResolvedColors {
         ResolvedColors {
@@ -288,6 +310,20 @@ mod tests {
             let ratio = contrast(&ui.text, &ui.bg);
             assert!(ratio >= 4.5, "{name}: text on bg is {ratio:.2}:1");
         }
+    }
+
+    #[test]
+    fn ink_reads_on_the_needs_you_fill() {
+        // Builtin keeps the dark ink it always had, and the rule agrees.
+        let builtin = builtin_ui();
+        assert_eq!(ink(&builtin.status_needs_you, &builtin.bg_alt, &builtin.text), "#181825");
+        for (name, ui) in [("builtin", builtin), ("devaslife", devaslife_ui()), ("light", derive_ui(&light()))] {
+            let ratio = contrast(&ui.on_needs_you, &ui.status_needs_you);
+            assert!(ratio >= 4.5, "{name}: {} on {} is {ratio:.2}:1", ui.on_needs_you, ui.status_needs_you);
+        }
+        // Too mid-toned for the panel or the text: black or white then.
+        assert_eq!(derive_ui(&light()).on_needs_you, "#000000");
+        assert_eq!(devaslife_ui().on_needs_you, "#ffffff");
     }
 
     #[test]

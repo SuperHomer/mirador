@@ -30,6 +30,9 @@
   --tint-info: #1e2433;
   --tint-warn: #2e2c25;
   --tint-error-row: #3b2a33;
+  /* Ink on a needs-you fill: whichever of bg-alt, text, black or white
+     reads best on it. */
+  --on-needs-you: #181825;
   /* The theme's eight hues, for what is only different: the graph's
      lanes, tags, remote chips, link hovers. */
   --hue-0: #89b4fa;
@@ -3743,7 +3746,7 @@ button.inbox-update:hover {
   border: none;
   border-radius: 4px;
   background: var(--status-needs-you);
-  color: var(--bg-alt);
+  color: var(--on-needs-you);
   font-size: 10px;
   font-weight: 900;
   line-height: 1;
@@ -4377,7 +4380,7 @@ button.inbox-update:hover {
   border-radius: 5px;
   padding: 2px 10px;
   background: var(--status-needs-you);
-  color: var(--bg-alt);
+  color: var(--on-needs-you);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
