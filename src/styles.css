@@ -3501,9 +3501,10 @@ button.inbox-update:hover {
 
 /* An agent on the rail: its live terminal, scaled, never resized. Its
    scale and its terminal's height are measured and set on the tile
-   (FocusLayout's useMiniFit); until then, the smallest scale. */
+   (FocusLayout's useMiniFit); until then, its own size, which keeps the
+   body's height and the host's transform valid for that first frame. */
 .mini-tile {
-  --mini-scale: 0.65;
+  --mini-scale: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -3568,11 +3569,9 @@ button.inbox-update:hover {
   pointer-events: none;
 }
 
-/* The terminal scaled to the tile's width, never under 0.65 — scaled to
-   fit the whole tile, a wide terminal came out a third of its size and
-   could not be read — with its bottom-left corner pinned to the tile's,
-   so when the tile is shorter the latest lines and any prompt show and
-   the top is cropped. The wrapper is the terminal's own size, so it stays
+/* The terminal scaled to exactly the tile's width, with its bottom-left
+   corner pinned to the tile's, so when the tile is shorter the latest
+   lines and any prompt show and the top is cropped. The wrapper is the terminal's own size, so it stays
    pinned as that changes. */
 .mini-host {
   position: absolute;

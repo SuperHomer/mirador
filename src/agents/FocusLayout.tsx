@@ -342,16 +342,12 @@ function MiniTile({
   );
 }
 
-/** The smallest a rail terminal is drawn, as before; never larger than
- *  its own size. */
-const MINI_MIN_SCALE = 0.65;
-
 /**
- * A rail tile's terminal scaled to the tile's width — as large as the
- * width allows, never under MINI_MIN_SCALE nor over 1 — and the tile's
- * body as tall as that scaled terminal, so a wide tile shows it larger
- * and no tile is taller than what it shows. Both are only measured: the
- * terminal, lent into `hostRef`, keeps its size and so does its PTY.
+ * A rail tile's terminal scaled to the tile's width, down or up — a floor
+ * cut its right side off and a cap left it short of the tile — and the
+ * tile's body as tall as that scaled terminal, so no tile is taller than
+ * what it shows. Both are only measured: the terminal, lent into
+ * `hostRef`, keeps its size and so does its PTY.
  */
 function useMiniFit(hostRef: React.RefObject<HTMLDivElement | null>) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -366,7 +362,7 @@ function useMiniFit(hostRef: React.RefObject<HTMLDivElement | null>) {
       const width = host.offsetWidth;
       const height = host.offsetHeight;
       if (width === 0 || height === 0) return;
-      const scale = Math.min(1, Math.max(MINI_MIN_SCALE, body.clientWidth / width));
+      const scale = body.clientWidth / width;
       setFit((f) => (f && f.scale === scale && f.height === height ? f : { scale, height }));
     };
     measure();
