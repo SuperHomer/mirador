@@ -30,12 +30,20 @@ fn setting(key: &'static str, group: &'static str, kind: SettingKind, default: &
     Setting { key, group, kind, default: default.into(), description }
 }
 
+/// What themeSource takes: the sources, then every named theme, so a
+/// theme added to the table is a choice without touching this list.
+fn theme_sources() -> Vec<&'static str> {
+    let mut sources = vec!["auto", "ghostty", "wezterm", "builtin", "none"];
+    sources.extend(super::NAMED_THEMES.iter().map(|t| t.name));
+    sources
+}
+
 /// Every key of [`Config`], in the order the Settings pane shows them.
 pub fn settings() -> Vec<Setting> {
     use SettingKind::{Bool, Number, ReadOnly, Text};
     let shell = if cfg!(windows) { "PowerShell 7, Windows PowerShell or cmd.exe" } else { "$SHELL" };
     vec![
-        setting("themeSource", "Appearance", choice(&["auto", "ghostty", "wezterm", "builtin", "none", "devaslife"]), "auto",
+        setting("themeSource", "Appearance", choice(&theme_sources()), "auto",
             "Where colors come from: auto uses Ghostty's config when there is one; builtin (or none) is Mirador's own colors."),
         setting("weztermScheme", "Appearance", Text, "none",
             "The wezterm scheme a wezterm theme source reads: a name in ~/.config/wezterm/colors, or a .toml path."),

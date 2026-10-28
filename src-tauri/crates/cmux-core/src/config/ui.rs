@@ -327,6 +327,35 @@ mod tests {
     }
 
     #[test]
+    fn every_named_theme_reads() {
+        // An entry added to the table is checked here without being named.
+        for t in super::super::NAMED_THEMES {
+            let ui = (t.ui)();
+            let terminal = (t.terminal)();
+            let name = t.name;
+            // Its own colours apply only while the background is its own.
+            assert_eq!(Some(&ui.bg), terminal.background.as_ref(), "{name}: bg is its terminal's");
+            let text = contrast(&ui.text, &ui.bg);
+            assert!(text >= 4.5, "{name}: text on bg is {text:.2}:1");
+            let ink = contrast(&ui.on_needs_you, &ui.status_needs_you);
+            assert!(ink >= 4.5, "{name}: ink on needs-you is {ink:.2}:1");
+            assert_eq!(ui.categorical.len(), 8, "{name}: eight hues");
+            let mut json = serde_json::to_value(&ui).unwrap();
+            let hues = json.as_object_mut().unwrap().remove("categorical").unwrap();
+            let terminal_colors = [&terminal.background, &terminal.foreground, &terminal.cursor, &terminal.selection_background]
+                .into_iter()
+                .chain(&terminal.palette)
+                .map(|c| c.clone().expect("every terminal colour set"));
+            for value in json.as_object().unwrap().values().chain(hues.as_array().unwrap()) {
+                assert!(rgb(value.as_str().unwrap()).is_some(), "{name}: {value}");
+            }
+            for c in terminal_colors {
+                assert!(rgb(&c).is_some(), "{name}: terminal {c}");
+            }
+        }
+    }
+
+    #[test]
     fn a_derived_ui_takes_its_accents_from_the_palette() {
         let ui = derive_ui(&dracula());
         assert_eq!((ui.bg.as_str(), ui.text.as_str()), ("#282a36", "#f8f8f2"));

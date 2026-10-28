@@ -11,7 +11,7 @@ pub mod wezterm;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig, UiColors};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -30,8 +30,8 @@ pub struct ImportedTheme {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Config {
-    /// "auto" (ghostty config if present), "ghostty", "wezterm", "builtin",
-    /// "devaslife"
+    /// "auto" (ghostty config if present), "ghostty", "wezterm", "builtin"
+    /// (or "none"), or the name of one of [`NAMED_THEMES`].
     pub theme_source: Option<String>,
     /// wezterm scheme name (in ~/.config/wezterm/colors) or a .toml path.
     pub wezterm_scheme: Option<String>,
@@ -350,10 +350,27 @@ fn devaslife() -> ImportedTheme {
     }
 }
 
+/// A theme Mirador carries by name: what `themeSource` calls it, its
+/// terminal colors (and font, for one), and the app colors picked for it.
+pub struct NamedTheme {
+    pub name: &'static str,
+    pub terminal: fn() -> ImportedTheme,
+    pub ui: fn() -> UiColors,
+}
+
+/// Every named theme. Adding one is an entry here: importing it, its app
+/// colors, the Settings pane's choices and the readability tests all read
+/// this list.
+pub const NAMED_THEMES: &[NamedTheme] = &[NamedTheme { name: "devaslife", terminal: devaslife, ui: ui::devaslife_ui }];
+
+fn named_theme(name: &str) -> Option<&'static NamedTheme> {
+    NAMED_THEMES.iter().find(|t| t.name == name)
+}
+
 /// Resolves the user config into the runtime config the frontend consumes.
 pub fn resolve(cfg: &Config) -> ResolvedConfig {
     let theme = import_theme(cfg);
-    let named_theme = theme.is_some();
+    let imported_any = theme.is_some();
     let imported = theme.unwrap_or_default();
 
     let mut colors = builtin_colors();
@@ -361,13 +378,18 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
     if let Some(o) = &cfg.colors {
         apply_overrides(&mut colors, o);
     }
-    // The app's colors: builtin's and devaslife's own while the terminal
+    // The app's colors: builtin's or a named theme's own while the terminal
     // background is still theirs; a background of any other origin (an
     // import, an override) gets colors derived to match it.
-    colors.ui = if !named_theme && colors.background == builtin_colors().background {
+    let named = cfg
+        .theme_source
+        .as_deref()
+        .and_then(named_theme)
+        .filter(|t| (t.terminal)().background.as_ref() == Some(&colors.background));
+    colors.ui = if !imported_any && colors.background == builtin_colors().background {
         ui::builtin_ui()
-    } else if cfg.theme_source.as_deref() == Some("devaslife") && Some(&colors.background) == devaslife().background.as_ref() {
-        ui::devaslife_ui()
+    } else if let Some(t) = named {
+        (t.ui)()
     } else {
         ui::derive_ui(&colors)
     };
@@ -449,11 +471,14 @@ pub fn agent_roles() -> Vec<AgentRole> {
 }
 
 fn import_theme(cfg: &Config) -> Option<ImportedTheme> {
-    match cfg.theme_source.as_deref().unwrap_or("auto") {
+    let source = cfg.theme_source.as_deref().unwrap_or("auto");
+    if let Some(t) = named_theme(source) {
+        return Some((t.terminal)());
+    }
+    match source {
         "ghostty" => ghostty::import(),
         "wezterm" => wezterm::import(cfg.wezterm_scheme.as_deref()?),
         "builtin" | "none" => None,
-        "devaslife" => Some(devaslife()),
         // auto: use Ghostty's config when the user has one (cmux-parity behavior)
         _ => {
             if ghostty::user_config_path().exists() {
