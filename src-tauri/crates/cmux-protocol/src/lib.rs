@@ -1214,6 +1214,45 @@ pub struct TeamSeat {
     pub lead: bool,
 }
 
+/// A named checkpoint of a team's conversations, or of one agent's (a
+/// checkpoint with one member and no team), to pick the work up again
+/// after a restart: `mira team save` / `team resume`, `agent save` /
+/// `agent resume`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkpoint {
+    pub name: String,
+    /// When it was saved, in milliseconds since the epoch.
+    pub saved_at: u64,
+    /// The team's name, for a team's.
+    #[serde(default)]
+    pub team: Option<String>,
+    /// The team's layout as it was defined ("grid", "columns", "rows").
+    #[serde(default)]
+    pub layout: Option<String>,
+    /// Where the team, or the agent, worked.
+    #[serde(default)]
+    pub cwd: Option<String>,
+    pub members: Vec<CheckpointMember>,
+}
+
+/// One agent of a checkpoint and the conversation it resumes.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointMember {
+    /// Its team member name, or its session's name for a lone agent.
+    pub name: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    pub harness: Harness,
+    #[serde(default)]
+    pub lead: bool,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// Its conversation: Claude Code's session id, Codex's thread id.
+    pub session: String,
+}
+
 /// A running team, as `mira team list` shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

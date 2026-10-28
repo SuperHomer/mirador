@@ -786,7 +786,7 @@ pub fn job_from_dir(dir: &str) -> Option<String> {
     is_safe_id(job).then(|| job.to_string())
 }
 
-fn is_safe_id(id: &str) -> bool {
+pub(crate) fn is_safe_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')

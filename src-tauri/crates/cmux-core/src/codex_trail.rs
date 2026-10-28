@@ -577,6 +577,16 @@ fn is_rollout(p: &Path) -> bool {
     name.starts_with("rollout-") && name.ends_with(".jsonl") && sessions_of(p).is_some()
 }
 
+/// The thread id a rollout is named after
+/// (`rollout-<time>-<uuid>.jsonl`): what `codex resume` takes.
+pub fn rollout_id(rollout: &Path) -> Option<String> {
+    let stem = rollout.file_name()?.to_str()?.strip_prefix("rollout-")?.strip_suffix(".jsonl")?;
+    let id = stem.get(stem.len().checked_sub(36)?..)?;
+    let groups: Vec<&str> = id.split('-').collect();
+    let shape = groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12]);
+    (shape && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_hexdigit()))).then(|| id.to_ascii_lowercase())
+}
+
 /// The `sessions` directory a rollout is in.
 pub fn sessions_of(rollout: &Path) -> Option<&Path> {
     rollout.ancestors().find(|a| a.file_name().is_some_and(|n| n == "sessions"))
@@ -654,6 +664,17 @@ mod tests {
         let mut stats = CodexStats::default();
         lines.for_each(|line| stats.feed(line));
         stats.summary()
+    }
+
+    #[test]
+    fn a_rollout_is_named_after_its_thread() {
+        let dir = std::env::temp_dir().join("sessions/2026/10/23");
+        let id = "01a16910-50d2-7590-8de0-5e5e7b78b19c";
+        assert_eq!(rollout_id(&dir.join(format!("rollout-2026-10-23T16-00-39-{id}.jsonl"))).as_deref(), Some(id));
+        assert_eq!(rollout_id(&dir.join("rollout-2026-10-23T16-00-39.jsonl")), None);
+        assert_eq!(rollout_id(&dir.join("rollout-2026-10-23T16-00-39-01a16910-50d2-7590-8de0-5e5e7b78b19z.jsonl")), None);
+        assert_eq!(rollout_id(&dir.join(format!("notes-{id}.jsonl"))), None);
+        assert_eq!(rollout_id(&dir.join("rollout-é.jsonl")), None);
     }
 
     #[test]
