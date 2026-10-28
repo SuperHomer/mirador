@@ -507,14 +507,13 @@ const FileSection = memo(function FileSection({
 });
 
 /**
- * Add/delete colors come from the resolved terminal palette, so a diff
- * pane matches whichever Ghostty/wezterm theme the user imported instead
- * of importing GitHub's green and red.
+ * Add/delete colors are the theme's idle green and danger red, so a diff
+ * pane matches the theme instead of importing GitHub's green and red. Not
+ * the palette's bright green: Solarized-style palettes make it a grey.
  */
 function diffTheme(colors?: ResolvedColors): React.CSSProperties {
-  const palette = colors?.palette ?? [];
-  const add = palette[10] ?? palette[2] ?? "#3fb950";
-  const del = palette[9] ?? palette[1] ?? "#f85149";
+  const add = colors?.ui.statusIdle ?? "#3fb950";
+  const del = colors?.ui.danger ?? "#f85149";
   return {
     "--diff-add": add,
     "--diff-del": del,

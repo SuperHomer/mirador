@@ -1577,6 +1577,9 @@ pub struct UiColors {
     pub tint_info: String,
     pub tint_warn: String,
     pub tint_error_row: String,
+    /// Eight hues told apart from one another, for things that are only
+    /// different, not good or bad: the graph's lanes, subagent types.
+    pub categorical: Vec<String>,
 }
 
 /// Fully-resolved runtime configuration pushed to the frontend on load and

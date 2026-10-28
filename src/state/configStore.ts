@@ -21,6 +21,8 @@ export const useConfigStore = create<ConfigStore>((set) => ({
 function applyUiColors(ui: UiColors) {
   const root = document.documentElement.style;
   for (const [field, color] of Object.entries(ui)) {
+    // The hues are a list, read where they are used, not a token.
+    if (typeof color !== "string") continue;
     root.setProperty(`--${field.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, color);
   }
 }

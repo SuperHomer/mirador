@@ -31,6 +31,9 @@ pub fn builtin_ui() -> UiColors {
         tint_info: "#1e2433".into(),
         tint_warn: "#2e2c25".into(),
         tint_error_row: "#3b2a33".into(),
+        categorical: ["#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8", "#cba6f7", "#94e2d5", "#fab387", "#b4befe"]
+            .map(String::from)
+            .to_vec(),
     }
 }
 
@@ -56,6 +59,10 @@ pub fn devaslife_ui() -> UiColors {
         danger: red.into(),
         warn: yellow.into(),
         merged: "#6c71c4".into(), // violet
+        // Solarized's eight accents, in the order of builtin's hues.
+        categorical: ["#268bd2", "#859900", "#b58900", "#dc322f", "#d33682", "#2aa198", "#cb4b16", "#6c71c4"]
+            .map(String::from)
+            .to_vec(),
         ..t
     }
 }
@@ -86,6 +93,14 @@ pub fn derive_ui(c: &ResolvedColors) -> UiColors {
     // A light background's panel is a shade darker, as a dark one's is.
     let alt = if luminance(bg) > 0.5 { 0.04 } else { 0.2 };
     let t = tints(bg, fg, &needs_you, &blue, &yellow, &red);
+    // Blue, green, yellow, red, magenta, cyan, then bright red and bright
+    // magenta: never the bright green, yellow, blue or cyan, which
+    // Solarized-style palettes make greys.
+    let categorical = [4, 2, 3, 1, 5, 6, 9, 13]
+        .iter()
+        .zip(&builtin.categorical)
+        .map(|(&i, fallback)| ansi(i, fallback))
+        .collect();
     UiColors {
         bg: bg.into(),
         bg_alt: mix(bg, "#000000", alt),
@@ -101,6 +116,7 @@ pub fn derive_ui(c: &ResolvedColors) -> UiColors {
         danger: red,
         warn: yellow,
         merged: magenta,
+        categorical,
         ..t
     }
 }
@@ -215,7 +231,32 @@ mod tests {
             }
             tokens.insert(key, value.trim().trim_end_matches(';').into());
         }
-        assert_eq!(serde_json::Value::Object(tokens), serde_json::to_value(builtin_ui()).unwrap());
+        let mut ui = serde_json::to_value(builtin_ui()).unwrap();
+        // Not a :root token: the graph's lanes and subagent types, in TS.
+        ui.as_object_mut().unwrap().remove("categorical");
+        assert_eq!(serde_json::Value::Object(tokens), ui);
+    }
+
+    #[test]
+    fn eight_hues_always() {
+        // Builtin's are the graph's lane colours from before themes.
+        assert_eq!(
+            builtin_ui().categorical,
+            ["#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8", "#cba6f7", "#94e2d5", "#fab387", "#b4befe"]
+        );
+        for ui in [builtin_ui(), devaslife_ui(), derive_ui(&dracula()), derive_ui(&light())] {
+            assert_eq!(ui.categorical.len(), 8);
+        }
+        // Slots 4, 2, 3, 1, 5, 6, 9, 13 of the palette; never a grey from
+        // the bright green, yellow, blue or cyan (10, 11, 12, 14).
+        assert_eq!(
+            derive_ui(&light()).categorical,
+            ["#268bd2", "#859900", "#b58900", "#dc322f", "#d33682", "#2aa198", "#cb4b16", "#6c71c4"]
+        );
+        // A palette too short falls back to builtin's hue in that place.
+        let mut short = dracula();
+        short.palette.truncate(8);
+        assert_eq!(derive_ui(&short).categorical[7], builtin_ui().categorical[7]);
     }
 
     #[test]
@@ -251,9 +292,10 @@ mod tests {
         assert_ne!(ui.status_needs_you, ui.danger);
         assert_ne!(ui.status_needs_you, ui.warn);
         // Every color is #rrggbb.
-        let json = serde_json::to_value(&ui).unwrap();
-        for (key, value) in json.as_object().unwrap() {
-            assert!(rgb(value.as_str().unwrap()).is_some(), "{key}: {value}");
+        let mut json = serde_json::to_value(&ui).unwrap();
+        let hues = json.as_object_mut().unwrap().remove("categorical").unwrap();
+        for value in json.as_object().unwrap().values().chain(hues.as_array().unwrap()) {
+            assert!(rgb(value.as_str().unwrap()).is_some(), "{value}");
         }
     }
 

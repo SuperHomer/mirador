@@ -24,19 +24,10 @@ const DOT_R = 3.5;
  *  rather than pushing the subject column off the pane. */
 const MAX_LANES = 10;
 
-/** Lane colour, by index. Branches keep their colour for their whole length
- *  because a lane is never renumbered mid-history. */
-const LANE_COLORS = [
-  "#89b4fa",
-  "#a6e3a1",
-  "#f9e2af",
-  "#f38ba8",
-  "#cba6f7",
-  "#94e2d5",
-  "#fab387",
-  "#b4befe",
-];
-const laneColor = (lane: number) => LANE_COLORS[lane % LANE_COLORS.length];
+/** Lane colour, by index, from the theme's hues. Branches keep their colour
+ *  for their whole length because a lane is never renumbered mid-history. */
+const laneColor = (hues: string[], lane: number) =>
+  hues.length ? hues[lane % hues.length] : "var(--accent)";
 
 const laneX = (lane: number) => Math.min(lane, MAX_LANES) * LANE_W + LANE_W / 2;
 
@@ -75,6 +66,7 @@ export function GraphPane({ paneId, repo, focused }: Props) {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const colors = useConfigStore((s) => s.config?.colors);
+  const hues = colors?.ui.categorical ?? [];
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -183,7 +175,7 @@ export function GraphPane({ paneId, repo, focused }: Props) {
                           ` ${laneX(link.to)} ${i * ROW_H + ROW_H},` +
                           ` ${laneX(link.to)} ${(i + 1) * ROW_H + ROW_H / 2}`
                     }
-                    stroke={laneColor(link.from === link.to ? link.from : link.to)}
+                    stroke={laneColor(hues, link.from === link.to ? link.from : link.to)}
                     strokeWidth={1.5}
                     fill="none"
                   />
@@ -196,8 +188,8 @@ export function GraphPane({ paneId, repo, focused }: Props) {
                   cy={i * ROW_H + ROW_H / 2}
                   r={DOT_R}
                   // A merge is hollow: it is a joining point, not work.
-                  fill={row.merge ? "var(--term-bg)" : laneColor(row.lane)}
-                  stroke={laneColor(row.lane)}
+                  fill={row.merge ? "var(--term-bg)" : laneColor(hues, row.lane)}
+                  stroke={laneColor(hues, row.lane)}
                   strokeWidth={1.5}
                 />
               ))}

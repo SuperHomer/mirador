@@ -642,6 +642,8 @@ export interface UiColors {
   tintInfo: string;
   tintWarn: string;
   tintErrorRow: string;
+  /** Eight distinct hues for the graph's lanes and subagent types. */
+  categorical: string[];
 }
 
 export interface ResolvedConfig {
