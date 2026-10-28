@@ -214,10 +214,16 @@ mod tests {
             .expect("src/styles.css");
         let root = css.split(":root {").nth(1).and_then(|r| r.split("\n}").next()).expect("a :root block");
         let mut tokens = serde_json::Map::new();
+        let mut hues = Vec::new();
         for line in root.lines() {
             let Some((name, value)) = line.trim().strip_prefix("--").and_then(|l| l.split_once(':')) else {
                 continue;
             };
+            let value = value.trim().trim_end_matches(';');
+            if let Some(i) = name.strip_prefix("hue-") {
+                hues.push((i.parse::<usize>().unwrap(), value.to_string()));
+                continue;
+            }
             // bg-alt → bgAlt, as UiColors serializes its fields.
             let mut key = String::new();
             let mut upper = false;
@@ -229,12 +235,14 @@ mod tests {
                     upper = false;
                 }
             }
-            tokens.insert(key, value.trim().trim_end_matches(';').into());
+            tokens.insert(key, value.into());
         }
         let mut ui = serde_json::to_value(builtin_ui()).unwrap();
-        // Not a :root token: the graph's lanes and subagent types, in TS.
+        // The hues are --hue-0 to --hue-7, one per place in the list.
         ui.as_object_mut().unwrap().remove("categorical");
         assert_eq!(serde_json::Value::Object(tokens), ui);
+        hues.sort();
+        assert_eq!(hues.into_iter().map(|(_, v)| v).collect::<Vec<_>>(), builtin_ui().categorical);
     }
 
     #[test]
