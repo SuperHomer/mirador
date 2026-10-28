@@ -388,6 +388,26 @@ fn tokyo_night() -> ImportedTheme {
     }
 }
 
+/// Gruvbox Dark, medium contrast: the 16 ANSI as gruvbox.vim gives
+/// Neovim's terminal (and gruvbox-contrib's Xresources port), the cursor
+/// in the foreground and the selection in bg3, as its Visual is.
+fn gruvbox_dark() -> ImportedTheme {
+    ImportedTheme {
+        background: Some("#282828".into()),
+        foreground: Some("#ebdbb2".into()),
+        cursor: Some("#ebdbb2".into()),
+        selection_background: Some("#665c54".into()),
+        palette: [
+            "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a",
+            "#a89984", "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b",
+            "#8ec07c", "#ebdbb2",
+        ]
+        .map(|c| Some(c.to_string())),
+        font_family: None,
+        font_size: None,
+    }
+}
+
 /// A theme Mirador carries by name: what `themeSource` calls it, its
 /// terminal colors (and font, for one), and the app colors picked for it.
 pub struct NamedTheme {
@@ -403,6 +423,7 @@ pub const NAMED_THEMES: &[NamedTheme] = &[
     NamedTheme { name: "devaslife", terminal: devaslife, ui: ui::devaslife_ui },
     NamedTheme { name: "catppuccin-latte", terminal: catppuccin_latte, ui: ui::catppuccin_latte_ui },
     NamedTheme { name: "tokyo-night", terminal: tokyo_night, ui: ui::tokyo_night_ui },
+    NamedTheme { name: "gruvbox-dark", terminal: gruvbox_dark, ui: ui::gruvbox_dark_ui },
 ];
 
 fn named_theme(name: &str) -> Option<&'static NamedTheme> {
@@ -864,6 +885,41 @@ mod tests {
             ],
             // blue, green, yellow, red, magenta, cyan, orange, purple
             ["#7aa2f7", "#9ece6a", "#e0af68", "#f7768e", "#bb9af7", "#7dcfff", "#ff9e64", "#9d7cd8"],
+        );
+    }
+
+    #[test]
+    fn gruvbox_dark_is_upstreams() {
+        assert_named_theme(
+            "gruvbox-dark",
+            // morhetz/gruvbox colors/gruvbox.vim (and gruvbox-contrib's
+            // xresources/gruvbox-dark.xresources): bg0, fg1, the cursor in
+            // fg1, the selection in bg3 as Visual is.
+            ["#282828", "#ebdbb2", "#ebdbb2", "#665c54"],
+            [
+                "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+                "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
+            ],
+            // gruvbox.vim's s:gb, dark, medium contrast
+            &[
+                ("bg", "#282828"),             // dark0 (bg0)
+                ("bgAlt", "#1d2021"),          // dark0_hard
+                ("surface", "#3c3836"),        // dark1 (bg1)
+                ("overlay", "#504945"),        // dark2 (bg2)
+                ("text", "#ebdbb2"),           // light1 (fg1)
+                ("subtext", "#a89984"),        // light4 (fg4)
+                ("muted", "#928374"),          // gray_245
+                ("accent", "#83a598"),         // bright_blue
+                ("statusWorking", "#83a598"),  // bright_blue
+                ("statusNeedsYou", "#fe8019"), // bright_orange
+                ("statusIdle", "#b8bb26"),     // bright_green
+                ("danger", "#fb4934"),         // bright_red
+                ("warn", "#fabd2f"),           // bright_yellow
+                ("merged", "#d3869b"),         // bright_purple
+                ("onNeedsYou", "#1d2021"),     // dark0_hard, by contrast
+            ],
+            // bright blue, green, yellow, red, purple, aqua, orange; neutral_blue
+            ["#83a598", "#b8bb26", "#fabd2f", "#fb4934", "#d3869b", "#8ec07c", "#fe8019", "#458588"],
         );
     }
 

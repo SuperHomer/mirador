@@ -134,6 +134,39 @@ pub fn tokyo_night_ui() -> UiColors {
     }
 }
 
+/// Gruvbox Dark's colors, medium contrast, from morhetz/gruvbox's
+/// colors/gruvbox.vim palette: the bright accents a dark background takes,
+/// its bg and fg steps for surfaces and text.
+pub fn gruvbox_dark_ui() -> UiColors {
+    let (bg0, fg1, blue, orange, yellow, red) = ("#282828", "#ebdbb2", "#83a598", "#fe8019", "#fabd2f", "#fb4934");
+    let dark0_hard = "#1d2021";
+    let t = tints(bg0, fg1, orange, blue, yellow, red);
+    UiColors {
+        bg: bg0.into(),
+        bg_alt: dark0_hard.into(),
+        surface: "#3c3836".into(), // bg1
+        text: fg1.into(),
+        subtext: "#a89984".into(), // fg4
+        muted: "#928374".into(),   // gray
+        accent: blue.into(),
+        overlay: "#504945".into(), // bg2
+        status_working: blue.into(),
+        status_needs_you: orange.into(),
+        status_idle: "#b8bb26".into(), // bright_green
+        danger: red.into(),
+        warn: yellow.into(),
+        merged: "#d3869b".into(), // bright_purple
+        on_needs_you: ink(orange, dark0_hard, fg1),
+        // Builtin's order of hue, the bright ones; Gruvbox has no
+        // lavender, so the eighth is its neutral blue, darker than the
+        // first.
+        categorical: ["#83a598", "#b8bb26", "#fabd2f", "#fb4934", "#d3869b", "#8ec07c", "#fe8019", "#458588"]
+            .map(String::from)
+            .to_vec(),
+        ..t
+    }
+}
+
 /// The app's colors for any other theme, from its terminal colors: the
 /// background and foreground and mixes of them for the surfaces and
 /// text, the palette's blue, red, yellow, green and magenta for the
