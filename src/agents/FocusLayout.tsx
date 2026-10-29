@@ -369,20 +369,26 @@ function useMiniFit(pane: string, hostRef: React.RefObject<HTMLDivElement | null
       if (width === 0 || full === 0) return;
       const scale = Math.min(MINI_MAX_SCALE, body.clientWidth / width);
       const term = getTerminal(pane);
-      const rows = term ? Math.min(term.rows, term.buffer.active.cursorY + 1) : 0;
+      // cursorY counts from the buffer's last page, not from what is in
+      // view: scrolled back, the cursor's row is lower, or out of view, and
+      // then the whole viewport shows.
+      const buffer = term?.buffer.active;
+      const row = term && buffer ? buffer.baseY + buffer.cursorY - buffer.viewportY : -1;
+      const rows = term && row >= 0 && row < term.rows ? row + 1 : 0;
       const height = term && rows > 0 ? (full / term.rows) * rows : full;
       const drop = full - height;
       setFit((f) =>
         f && f.scale === scale && f.height === height && f.drop === drop ? f : { scale, height, drop },
       );
     };
-    // The cursor's row moves with the output; the terminal may be another
-    // one after a remount, so its listeners follow it.
+    // The cursor's row moves with the output and with scrolling; the
+    // terminal may be another one after a remount, so its listeners
+    // follow it.
     let listeners: { dispose(): void }[] = [];
     const follow = () => {
       listeners.forEach((l) => l.dispose());
       const term = getTerminal(pane);
-      listeners = term ? [term.onCursorMove(measure), term.onResize(measure)] : [];
+      listeners = term ? [term.onCursorMove(measure), term.onResize(measure), term.onScroll(measure)] : [];
       measure();
     };
     follow();

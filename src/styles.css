@@ -3560,12 +3560,14 @@ button.inbox-update:hover {
 
 /* A thumbnail: a click picks the tile, it never reaches the terminal.
    As tall as the rows it shows, scaled, and less when the tile has less
-   room — never more, even in a taller tile, which would be blank above. */
+   room — never more, even in a taller tile, which would be blank above.
+   The cap has no fallback: until the rows are measured there is none,
+   and the body keeps room for "shown elsewhere". */
 .mini-body {
   position: relative;
   flex: 1 1 auto;
   height: calc(var(--mini-term-h, 0px) * var(--mini-scale));
-  max-height: calc(var(--mini-term-h, 0px) * var(--mini-scale));
+  max-height: calc(var(--mini-term-h) * var(--mini-scale));
   min-height: 0;
   overflow: hidden;
   pointer-events: none;
