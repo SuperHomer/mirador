@@ -2,9 +2,39 @@
 //! and typing a message into its terminal. The rules — what may be typed
 //! into, and how — are `cmux_core::handoff`'s.
 
-use cmux_core::handoff::Candidate;
+use cmux_core::handoff::{Candidate, Readiness};
 
 use crate::AppState;
+
+/// Waits for the agent in `pane` while it is starting — launched,
+/// resumed or restored, and not yet running, so that what is typed would
+/// reach its shell — for no longer than the app waits for any agent
+/// (`cmux_core::agents::START_GRACE`), then says where it is. Never asleep
+/// holding the lock.
+fn started(state: &AppState, pane: &str) -> Readiness {
+    let mut waited = false;
+    loop {
+        let readiness = {
+            let meta = state.meta.lock().unwrap();
+            let m = meta.get(pane);
+            cmux_core::handoff::readiness(
+                m.is_some_and(|m| m.is_agent()),
+                m.is_some_and(|m| m.agent_live),
+                m.and_then(|m| m.agent_started_at).map(|t| t.elapsed()),
+                cmux_core::agents::AUTO_RESUME,
+            )
+        };
+        match readiness {
+            Readiness::Starting => {
+                waited = true;
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            // Forgotten while waited for: the app gave up on it.
+            Readiness::NotAgent if waited => return Readiness::NeverStarted,
+            other => return other,
+        }
+    }
+}
 
 /// The agents of `caller`'s tab, by every name they go by.
 fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> {
@@ -55,14 +85,15 @@ pub fn send(
     if caller.as_deref() == Some(pane.as_str()) {
         return Err("that is the pane this runs in: an agent cannot message itself".into());
     }
-    let status = {
-        let meta = state.meta.lock().unwrap();
-        let m = meta
-            .get(&pane)
-            .filter(|m| m.is_agent())
-            .ok_or_else(|| format!("{to} runs no agent: a message would run in its shell as a command"))?;
-        m.status()
-    };
+    match started(state, &pane) {
+        Readiness::NotAgent => return Err(format!("{to} runs no agent: a message would run in its shell as a command")),
+        // With no terminal it never could: the check below says why.
+        Readiness::NeverStarted if state.pty.is_running(&pane) => {
+            return Err(format!("{to}: its agent has not started yet (pane {pane})"))
+        }
+        _ => {}
+    }
+    let status = state.meta.lock().unwrap().get(&pane).and_then(|m| m.status());
     cmux_core::handoff::can_receive(status, force).map_err(|e| format!("{to}: {e}"))?;
     if !state.pty.is_running(&pane) {
         return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
@@ -86,6 +117,13 @@ pub fn send(
 /// such command. A working agent is not refused: the line waits for its
 /// turn to end, which is how a lead clears itself last.
 pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
+    match started(state, pane) {
+        Readiness::NotAgent => return Err(("not running", "it runs no agent".into())),
+        Readiness::NeverStarted if state.pty.is_running(pane) => {
+            return Err(("not running", format!("its agent has not started yet (pane {pane})")))
+        }
+        _ => {}
+    }
     let (status, harness) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(pane).filter(|m| m.is_agent()).ok_or(("not running", "it runs no agent".to_string()))?;

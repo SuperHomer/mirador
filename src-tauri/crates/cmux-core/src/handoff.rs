@@ -7,6 +7,9 @@
 //!
 //! - into a plain shell it would run as a command: only a pane running an
 //!   agent receives one;
+//! - into a pane whose agent was started but is not running yet it would
+//!   reach the shell first: the message waits for the agent, and is
+//!   refused if it never comes up;
 //! - into a permission prompt it would answer it: an agent waiting on a
 //!   person is refused (unless forced);
 //! - a newline would submit half of it: the message goes in as one
@@ -72,6 +75,42 @@ fn label(c: &Candidate) -> String {
 /// order.
 pub fn sender_name(c: &Candidate) -> Option<String> {
     c.member.clone().or_else(|| c.session.clone()).or_else(|| c.role.clone())
+}
+
+/// Whether a pane's agent can be typed into yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    /// Started (launched, resumed, restored) but not yet seen running:
+    /// its shell would take what is typed. Worth waiting for.
+    Starting,
+    /// Started longer ago than the app waits for any agent
+    /// (`agents::START_GRACE`): it is not coming.
+    NeverStarted,
+    NotAgent,
+}
+
+/// Where a pane's agent is: `is_agent` and `live` (seen running) as the
+/// pane says, `started` how long since it was started or resumed while
+/// not yet seen. `sees_processes` is false on Windows, which lists no
+/// processes, so nothing is ever seen running there: an agent counts as
+/// ready, as it always did.
+pub fn readiness(
+    is_agent: bool,
+    live: bool,
+    started: Option<std::time::Duration>,
+    sees_processes: bool,
+) -> Readiness {
+    if !is_agent {
+        return Readiness::NotAgent;
+    }
+    match started {
+        _ if live || !sees_processes => Readiness::Ready,
+        Some(waited) if waited >= crate::agents::START_GRACE => Readiness::NeverStarted,
+        Some(_) => Readiness::Starting,
+        // Known from a hook, not started from here: nothing to wait for.
+        None => Readiness::Ready,
+    }
 }
 
 /// Whether an agent with `status` may be typed into. One waiting on a
@@ -207,6 +246,24 @@ mod tests {
         assert!(can_receive(Some(AgentStatus::NeedsYou), true).is_ok());
         assert!(can_receive(Some(AgentStatus::Working), false).is_ok());
         assert!(can_receive(None, false).is_ok());
+    }
+
+    #[test]
+    fn waits_for_an_agent_that_has_not_started_yet() {
+        use std::time::Duration;
+        use Readiness::*;
+        let grace = crate::agents::START_GRACE;
+        assert_eq!(readiness(false, false, None, true), NotAgent);
+        assert_eq!(readiness(true, true, None, true), Ready);
+        // Launched or restored, its shell still to type it in.
+        assert_eq!(readiness(true, false, Some(Duration::from_millis(300)), true), Starting);
+        assert_eq!(readiness(true, false, Some(grace), true), NeverStarted);
+        // Seen once, then started again (`team restart`): live wins.
+        assert_eq!(readiness(true, true, Some(Duration::ZERO), true), Ready);
+        assert_eq!(readiness(true, false, None, true), Ready);
+        // Windows sees no process: never waited for, as before.
+        assert_eq!(readiness(true, false, Some(Duration::ZERO), false), Ready);
+        assert_eq!(readiness(true, false, Some(grace), false), Ready);
     }
 
     #[test]

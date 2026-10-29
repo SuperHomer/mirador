@@ -456,9 +456,13 @@ first kind that matches must match exactly one pane — or takes any pane id.
 It writes the message as a bracketed paste (`ESC[200~ … ESC[201~`), every
 control character but newline and tab removed so nothing in it can end
 the paste, then Enter as a separate write. When the caller is an agent the
-message opens with `[message from <name>, via mira agent send]`. Refused:
-a pane that runs no agent, the caller's own pane, a pane whose terminal has
-not started, and an agent whose status is `needsYou` unless `--force`.
+message opens with `[message from <name>, via mira agent send]`. An agent
+started but not yet running (just launched, resumed or restored, its
+command still to reach its shell) is waited for, up to the 20 s the app
+gives any agent to show up. Refused: a pane that runs no agent, the
+caller's own pane, a pane whose terminal has not started, an agent that
+has not started within that time, and an agent whose status is `needsYou`
+unless `--force`.
 
 `wait` polls `agent list` once a second and ends on a status that changed
 after it started, or after it saw the agent working — so a wait begun
