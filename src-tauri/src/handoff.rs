@@ -2,9 +2,37 @@
 //! and typing a message into its terminal. The rules — what may be typed
 //! into, and how — are `cmux_core::handoff`'s.
 
-use cmux_core::handoff::Candidate;
+use cmux_core::handoff::{Candidate, Readiness};
 
 use crate::AppState;
+
+/// Waits, once the checks that refuse at once have passed, for the agent
+/// in `pane` while it is starting — launched, resumed or restored, its
+/// terminal running but its command not yet run, so that what is typed
+/// would reach its shell — for no longer than the app waits for any agent
+/// (`cmux_core::agents::START_GRACE`). Never asleep holding the lock. An
+/// agent forgotten meanwhile is one the app gave up on.
+fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
+    loop {
+        let readiness = {
+            let meta = state.meta.lock().unwrap();
+            let m = meta.get(pane);
+            cmux_core::handoff::readiness(
+                m.is_some_and(|m| m.is_agent()),
+                m.is_some_and(|m| m.agent_live),
+                m.and_then(|m| m.agent_started_at).map(|t| t.elapsed()),
+                cmux_core::agents::AUTO_RESUME,
+            )
+        };
+        match readiness {
+            Readiness::Ready => return Ok(()),
+            Readiness::Starting => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Readiness::NeverStarted | Readiness::NotAgent => {
+                return Err(format!("its agent has not started yet (pane {pane})"))
+            }
+        }
+    }
+}
 
 /// The agents of `caller`'s tab, by every name they go by.
 fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> {
@@ -55,18 +83,22 @@ pub fn send(
     if caller.as_deref() == Some(pane.as_str()) {
         return Err("that is the pane this runs in: an agent cannot message itself".into());
     }
-    let status = {
+    let status = |state: &AppState| {
         let meta = state.meta.lock().unwrap();
         let m = meta
             .get(&pane)
             .filter(|m| m.is_agent())
             .ok_or_else(|| format!("{to} runs no agent: a message would run in its shell as a command"))?;
-        m.status()
+        Ok::<_, String>(m.status())
     };
-    cmux_core::handoff::can_receive(status, force).map_err(|e| format!("{to}: {e}"))?;
+    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
     if !state.pty.is_running(&pane) {
         return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
     }
+    wait_started(state, &pane).map_err(|e| format!("{to}: {e}"))?;
+    // As it is once up, not as it was before the wait: still an agent, and
+    // perhaps already asking a person something.
+    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
     let from = caller.as_deref().and_then(|c| sender(state, c));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
     state.pty.write(&pane, &paste)?;
@@ -86,14 +118,18 @@ pub fn send(
 /// such command. A working agent is not refused: the line waits for its
 /// turn to end, which is how a lead clears itself last.
 pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
-    let (status, harness) = {
+    let agent = |state: &AppState| {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(pane).filter(|m| m.is_agent()).ok_or(("not running", "it runs no agent".to_string()))?;
-        (m.status(), m.harness())
+        Ok((m.status(), m.harness()))
     };
+    agent(state)?;
     if !state.pty.is_running(pane) {
         return Err(("not running", "its terminal has not started yet: show its tab once, then clear again".into()));
     }
+    wait_started(state, pane).map_err(|e| ("not running", e))?;
+    // As it is once up, not as it was before the wait.
+    let (status, harness) = agent(state)?;
     cmux_core::handoff::can_receive(status, force).map_err(|e| ("needs you", e))?;
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;
     state.pty.write(pane, line.as_bytes()).map_err(|e| ("not running", e))?;

@@ -105,3 +105,37 @@ fn agents_hand_each_other_work() {
     assert_eq!(code, 124);
     assert!(!std::path::Path::new("/tmp/should-not-exist").exists());
 }
+
+/// A message sent the moment an agent is started — `mira agent new` then
+/// `mira agent send`, as a lead does — waits for the agent to be running.
+/// Typed at once, it went to the pane's shell, still to type the agent's
+/// command in, and ran there as a command (CI, #159).
+#[test]
+fn a_message_sent_before_its_agent_is_up_waits_for_it() {
+    e2e!();
+    let mut sb = Sandbox::new("sendearly");
+    // A slow shell: its terminal runs for seconds before the agent's
+    // command is typed in, as on a loaded machine.
+    std::fs::write(sb.home.join(".zshrc"), "sleep 3\n").unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(first.clone()),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Its terminal running, its shell still in `.zshrc`: where CI sent.
+    sb.type_into(&pane, "");
+    send(&sb, &first, &pane, "hello early").unwrap();
+    sb.wait_for("the message, to the agent", LONG, || {
+        sb.events("message", &pane).into_iter().find(|m| m["text"] == "hello early")
+    });
+    let screen = sb.screen(&pane).unwrap_or_default();
+    assert!(!screen.contains("command not found"), "the shell ran it:\n{screen}");
+}

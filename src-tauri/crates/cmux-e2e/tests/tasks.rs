@@ -286,6 +286,15 @@ fn a_codex_agent_s_card_follows_its_turns() {
     let dev = pane_of(&sb, "dev");
     let coder = pane_of(&sb, "coder");
     sb.wait_for("the dev's session", LONG, || sb.events("hooked", &dev).into_iter().next());
+    // The coder's codex running, and its rollout followed: sent before
+    // that, the message is typed into a shell with no codex yet (CI did,
+    // 0.3s after the dev's session), and a turn over before the poller
+    // finds the rollout is history, never logged.
+    sb.nth_start(&coder, 1);
+    sb.wait_for("the coder's rollout", LONG, || {
+        let (_, out, _) = sb.mira(Some(&dev), &["agent", "trail", "--pane", &coder]);
+        (out.trim() == "(no actions yet)").then_some(())
+    });
 
     // Codex has no hooks: its turn ends come from its rollout.
     mira(&sb, &dev, &["agent", "send", "coder", "Refactor the parser"]);
