@@ -79,6 +79,42 @@ pub fn send(
     Ok(pane)
 }
 
+/// Starts the agent in `pane` on a new conversation, by typing its
+/// harness's command for that. Refused, with what `team clear` reports
+/// and why, for a pane running no agent, one whose terminal has not
+/// started, one waiting on a person unless `force`, and a harness with no
+/// such command. A working agent is not refused: the line waits for its
+/// turn to end, which is how a lead clears itself last.
+pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
+    let (status, harness) = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(pane).filter(|m| m.is_agent()).ok_or(("not running", "it runs no agent".to_string()))?;
+        (m.status(), m.harness())
+    };
+    if !state.pty.is_running(pane) {
+        return Err(("not running", "its terminal has not started yet: show its tab once, then clear again".into()));
+    }
+    cmux_core::handoff::can_receive(status, force).map_err(|e| ("needs you", e))?;
+    let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;
+    state.pty.write(pane, line.as_bytes()).map_err(|e| ("not running", e))?;
+    // Enter on its own read, as `send` does.
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    state.pty.write(pane, b"\r").map_err(|e| ("not running", e))?;
+    Ok(())
+}
+
+/// `clear_pane` for the agent `name` means from the caller's tab, as
+/// `send` finds it, or the caller itself. Returns its pane.
+pub fn clear(state: &AppState, name: Option<&str>, caller: Option<String>, force: bool) -> Result<String, String> {
+    let pane = match name {
+        Some(name) => find(state, name, caller)?,
+        None => caller.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane()),
+    };
+    let label = name.unwrap_or(&pane).to_string();
+    clear_pane(state, &pane, force).map_err(|(_, why)| format!("{label}: {why}"))?;
+    Ok(pane)
+}
+
 /// What the agent in `pane` calls itself in a message; none when it is no
 /// agent — a person, then.
 pub fn sender(state: &AppState, pane: &str) -> Option<String> {

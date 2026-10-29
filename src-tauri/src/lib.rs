@@ -3,6 +3,7 @@ mod agent_editor;
 #[cfg(test)]
 mod app_commands;
 mod browser;
+mod checkpoints;
 mod commands;
 mod config_watch;
 mod handoff;
@@ -135,8 +136,8 @@ pub fn run() {
     // see `cmux_core::agents::AUTO_RESUME`.
     // A role's pane resumes on the role's model and effort — looked up
     // where the pane works, never taken from the session file, which only
-    // names the role. Its prompt is not given again: a resumed
-    // conversation keeps the one it started with.
+    // names the role. Its prompt file is passed again too: a conversation
+    // keeps its prompt only until it is compacted.
     let mut catalogs: HashMap<Option<String>, cmux_protocol::RoleCatalog> = HashMap::new();
     let mut other_harness: HashMap<String, cmux_protocol::Harness> = HashMap::new();
     for (id, m) in meta.iter_mut() {
@@ -164,23 +165,32 @@ pub fn run() {
         let settings = m.agent_settings.clone();
         let settings_gone = settings.as_deref().is_some_and(|f| !std::path::Path::new(f).is_file());
         let quoted_settings = settings.as_deref().map(cmux_core::pty::shell::quote_arg);
+        // A prompt file gone since is left out rather than the resume: the
+        // conversation still has its prompt until it is compacted, and a
+        // prompt, unlike limits, holds nothing back.
+        let prompt = m.agent_prompt.as_deref().filter(|f| std::path::Path::new(f).is_file());
+        let quoted_prompt = prompt.map(cmux_core::pty::shell::quote_arg);
         let restored = cmux_core::agents::restore_pane(
             m.command.as_deref(),
             m.remote_host.is_some(),
             m.agent_session.as_deref().filter(|_| !settings_gone),
-            quoted_model.as_deref(),
-            quoted_effort.as_deref(),
-            quoted_settings.as_deref(),
+            cmux_core::agents::ResumeFlags {
+                model: quoted_model.as_deref(),
+                effort: quoted_effort.as_deref(),
+                settings: quoted_settings.as_deref(),
+                prompt: quoted_prompt.as_deref(),
+            },
             cmux_core::agents::AUTO_RESUME,
         );
         m.command = restored.command;
         m.startup_input = restored.startup_input;
     }
     // Launch files nobody has started an agent with in a month — except
-    // the settings a restored pane is about to pass again.
+    // the settings and prompts a restored pane is about to pass again.
     let keep: Vec<std::path::PathBuf> = meta
         .values()
-        .filter_map(|m| m.agent_settings.as_ref().map(std::path::PathBuf::from))
+        .flat_map(|m| [&m.agent_settings, &m.agent_prompt])
+        .filter_map(|f| f.as_ref().map(std::path::PathBuf::from))
         .collect();
     cmux_core::roles::prune_prompts(&keep);
     // Panes whose holder survived the quit are still running: nothing about

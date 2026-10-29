@@ -354,6 +354,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
             Ok(json!({ "paneId": pane }))
         }
+        Request::AgentClear { name, pane_id, force } => {
+            let pane = crate::handoff::clear(&state, name.as_deref(), pane_id, force)?;
+            Ok(json!({ "paneId": pane }))
+        }
         Request::AgentFind { name, pane_id } => {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
@@ -392,6 +396,20 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::TeamRestart { members, pane_id } => {
             let done = crate::teams::team_restart(app.clone(), app.state(), members, pane_id)?;
             Ok(json!({ "members": done }))
+        }
+        Request::TeamSave { name, pane_id } => {
+            Ok(json!({ "checkpoint": crate::checkpoints::team_save(&state, name, pane_id)? }))
+        }
+        Request::TeamResume { name } => Ok(json!({ "tabId": crate::checkpoints::team_resume(app, &name)? })),
+        Request::AgentSave { name, save_as, pane_id } => {
+            Ok(json!({ "checkpoint": crate::checkpoints::agent_save(&state, name.as_deref(), save_as, pane_id)? }))
+        }
+        Request::AgentResume { name, pane_id, tab } => {
+            Ok(json!({ "paneId": crate::checkpoints::agent_resume(app, &name, pane_id, tab)? }))
+        }
+        Request::SaveList => Ok(json!({ "saves": crate::checkpoints::list() })),
+        Request::TeamClear { pane_id, force } => {
+            Ok(json!({ "members": crate::teams::team_clear(&state, pane_id.as_deref(), force)? }))
         }
         Request::AgentBoard { pane_id } => {
             crate::commands::set_wall_view(app.clone(), app.state(), pane_id, WallView::Tasks)?;

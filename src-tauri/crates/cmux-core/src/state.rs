@@ -51,6 +51,11 @@ pub struct PaneMeta {
     /// plugins, skills and tools (`roles::write_settings`). Kept, like the
     /// role, so a resume passes it again.
     pub agent_settings: Option<String>,
+    /// The file holding the role's prompt, and a team member's team
+    /// section (`roles::write_prompt`). Kept, like the settings, so a
+    /// resume passes it again: a conversation keeps its prompt only until
+    /// it is compacted.
+    pub agent_prompt: Option<String>,
     /// Started as an agent (`mira agent new`, the wall, the palette), with
     /// or without a role. It makes the pane an agent from the moment it
     /// opens, before Claude has started and a hook has recorded a session —
@@ -143,6 +148,7 @@ impl PaneMeta {
         self.agent_session = None;
         self.agent_role = None;
         self.agent_settings = None;
+        self.agent_prompt = None;
         self.agent_launched = false;
         self.agent_harness = None;
         self.agent_transcript = None;

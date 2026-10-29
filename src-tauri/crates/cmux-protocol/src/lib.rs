@@ -492,6 +492,18 @@ pub enum Request {
         #[serde(default)]
         title: Option<String>,
     },
+    /// Starts an agent on a new conversation, typing its harness's command
+    /// for that (`/clear`, Codex's `/new`): `name` as `AgentSend` finds it,
+    /// else `pane_id` itself. Refused as `AgentSend` is, and for a harness
+    /// with no such command; a working agent takes it after its turn.
+    AgentClear {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        force: bool,
+    },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {
         name: String,
@@ -588,6 +600,46 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// `AgentClear` for every running member of `pane_id`'s team, the lead
+    /// last.
+    TeamClear {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        force: bool,
+    },
+    /// Saves the conversations of `pane_id`'s team as `name` (the team's
+    /// name by default), to resume after a restart. Nothing is saved
+    /// unless every member's can be.
+    TeamSave {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Opens the team save `name` in a tab of its own, each member
+    /// resuming its conversation.
+    TeamResume { name: String },
+    /// Saves one agent's conversation: `name` as `AgentSend` finds it,
+    /// else `pane_id`'s, as `save_as` (what it goes by, by default).
+    AgentSave {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        save_as: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Opens one agent's save `name` beside `pane_id`, or in a new tab.
+    AgentResume {
+        name: String,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        tab: bool,
+    },
+    /// Every save, team's and agent's, newest first.
+    SaveList,
     /// Agent-visible command execution: opens a command pane (split of the
     /// focused pane, or a new tab) whose PTY runs the command directly —
     /// exit detection, output capture, and human interruption all work.
@@ -1192,6 +1244,45 @@ pub struct TeamSeat {
     pub pane: String,
     #[serde(default)]
     pub lead: bool,
+}
+
+/// A named checkpoint of a team's conversations, or of one agent's (a
+/// checkpoint with one member and no team), to pick the work up again
+/// after a restart: `mira team save` / `team resume`, `agent save` /
+/// `agent resume`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkpoint {
+    pub name: String,
+    /// When it was saved, in milliseconds since the epoch.
+    pub saved_at: u64,
+    /// The team's name, for a team's.
+    #[serde(default)]
+    pub team: Option<String>,
+    /// The team's layout as it was defined ("grid", "columns", "rows").
+    #[serde(default)]
+    pub layout: Option<String>,
+    /// Where the team, or the agent, worked.
+    #[serde(default)]
+    pub cwd: Option<String>,
+    pub members: Vec<CheckpointMember>,
+}
+
+/// One agent of a checkpoint and the conversation it resumes.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointMember {
+    /// Its team member name, or its session's name for a lone agent.
+    pub name: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    pub harness: Harness,
+    #[serde(default)]
+    pub lead: bool,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    /// Its conversation: Claude Code's session id, Codex's thread id.
+    pub session: String,
 }
 
 /// A running team, as `mira team list` shows it.

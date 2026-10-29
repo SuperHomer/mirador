@@ -57,6 +57,10 @@ pub struct SessionPane {
     /// passes it again, or the agent would come back without its limits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_settings: Option<String>,
+    /// The prompt file the role's Claude Code started with, passed again
+    /// on a resume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_prompt: Option<String>,
     /// The wall and the task board were panes of their own before they
     /// were the two sides of a way of showing a tab. Read so that such a
     /// pane is dropped on restore rather than coming back as a shell;
@@ -191,6 +195,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
                         agent_settings: m.and_then(|m| m.agent_settings.clone()),
+                        agent_prompt: m.and_then(|m| m.agent_prompt.clone()),
                         agent_wall: false,
                         agent_editor: m.is_some_and(|m| m.agent_editor),
                         settings: m.is_some_and(|m| m.settings),
@@ -314,6 +319,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     diff_spec: p.diff_spec,
                     agent_role: p.agent_role,
                     agent_settings: p.agent_settings,
+                    agent_prompt: p.agent_prompt,
                     agent_editor: p.agent_editor,
                     settings: p.settings,
                     graph_repo: p.graph_repo,
@@ -476,6 +482,7 @@ mod tests {
                 agent_session: Some("claude-fg:s1".into()),
                 agent_role: Some("reviewer".into()),
                 agent_settings: Some("/data/prompts/reviewer-1.settings.json".into()),
+                agent_prompt: Some("/data/prompts/reviewer-1-0123.md".into()),
                 agent_status: Some(cmux_protocol::AgentStatus::Working),
                 ..Default::default()
             },
@@ -496,6 +503,7 @@ mod tests {
         // ever what this run heard.
         assert_eq!(rmeta[&b].agent_role.as_deref(), Some("reviewer"));
         assert_eq!(rmeta[&b].agent_settings.as_deref(), Some("/data/prompts/reviewer-1.settings.json"));
+        assert_eq!(rmeta[&b].agent_prompt.as_deref(), Some("/data/prompts/reviewer-1-0123.md"));
         assert_eq!(rmeta[&b].agent_status, None);
         assert_eq!(rmeta[&c].command.as_deref(), Some("npm test"));
     }

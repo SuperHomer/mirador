@@ -2,6 +2,7 @@ pub mod agents;
 pub mod board;
 pub mod browser_url;
 pub mod builtin;
+pub mod checkpoints;
 pub mod claude_integration;
 pub mod codex_trail;
 pub mod config;

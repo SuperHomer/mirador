@@ -143,10 +143,20 @@ fn a_role_pane_comes_back_resumed_with_its_model_and_limits() {
     assert_eq!(flag("--resume").as_deref(), Some(session.as_str()), "{args:?}");
     assert_eq!(flag("--model").as_deref(), Some("haiku"), "{args:?}");
     assert_eq!(flag("--settings").as_deref(), Some(settings.as_str()), "{args:?}");
-    // A resumed conversation keeps its prompt; giving it again would
-    // append it twice (#117).
-    assert_eq!(flag("--append-system-prompt-file"), None, "{args:?}");
+    // Its prompt too: a conversation keeps the prompt it started with only
+    // until it is compacted, then builds it from what this launch passed
+    // (Claude Code's --system-prompt-snapshot), and before that a prompt
+    // passed again is not sent, so it cannot be doubled.
+    assert_eq!(flag("--append-system-prompt-file").as_deref(), Some(prompt.as_str()), "{args:?}");
     assert_eq!(sb.launches(), 2);
+
+    // A prompt file gone since is left out, not the resume.
+    std::fs::remove_file(&prompt).unwrap();
+    sb.quit();
+    sb.launch();
+    let args = sb.nth_start(&pane, 3);
+    assert_eq!(cmux_e2e::flag(&args, "--resume").as_deref(), Some(session.as_str()), "{args:?}");
+    assert_eq!(cmux_e2e::flag(&args, "--append-system-prompt-file"), None, "{args:?}");
 }
 
 /// The editor for role, way and team files opens beside the pane it is

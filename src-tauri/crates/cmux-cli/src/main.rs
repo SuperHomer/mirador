@@ -237,6 +237,23 @@ enum TeamAction {
     /// closed — the ones named, or all of them. A member's shell must be
     /// idle: a command is typed into it.
     Restart { members: Vec<String> },
+    /// Start every running member of this tab's team on a new
+    /// conversation, as `agent clear` does one — the lead last, so a lead
+    /// running this is cleared once its turn ends.
+    Clear {
+        /// Answer a prompt a member is waiting on anyway.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Save this tab's team — each member's conversation — as NAME (the
+    /// team's name by default), to resume after the computer was turned
+    /// off. Nothing is saved unless every member can be.
+    Save { name: Option<String> },
+    /// Open a team save in a tab of its own, each member back in its
+    /// conversation.
+    Resume { name: String },
+    /// Every save, team's and agent's, newest first.
+    Saves,
 }
 
 #[derive(Subcommand)]
@@ -327,6 +344,38 @@ enum AgentAction {
         /// With --wait: give up after this many seconds.
         #[arg(long, default_value_t = 1800)]
         timeout: u64,
+    },
+    /// Start an agent on a new conversation, as typing /clear into it does
+    /// (Codex's /new): NAME as `agent send` takes it, else this pane's
+    /// agent. Its role's prompt is kept. A working agent starts over once
+    /// its turn ends; one waiting on a person is refused unless --force.
+    Clear {
+        name: Option<String>,
+        /// The agent's pane, instead of a name.
+        #[arg(long, conflicts_with = "name")]
+        pane: Option<String>,
+        /// Answer a prompt the agent is waiting on anyway.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Save an agent's conversation to resume after a restart: NAME as
+    /// `agent send` takes it, else this pane's agent. Saved as what it
+    /// goes by, or --as.
+    Save {
+        name: Option<String>,
+        /// The agent's pane, instead of a name.
+        #[arg(long, conflicts_with = "name")]
+        pane: Option<String>,
+        /// The save's name.
+        #[arg(long = "as")]
+        save_as: Option<String>,
+    },
+    /// Open one agent's save beside this pane, back in its conversation.
+    Resume {
+        name: String,
+        /// Open a new tab instead of splitting this pane.
+        #[arg(long)]
+        tab: bool,
     },
     /// Wait until an agent has worked and stopped: exit 0 when it is idle,
     /// 2 when it stopped to ask a person, 3 when it exited, 124 on timeout.
@@ -726,6 +775,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
                 return agent_wait(&to, &pane, started, timeout);
             }
+            AgentAction::Clear { name, pane, force } => Request::AgentClear {
+                name: name.or(pane),
+                pane_id: own_pane(),
+                force,
+            },
+            AgentAction::Save { name, pane, save_as } => Request::AgentSave {
+                name: name.or(pane),
+                save_as,
+                pane_id: own_pane(),
+            },
+            AgentAction::Resume { name, tab } => Request::AgentResume { name, pane_id: own_pane(), tab },
             AgentAction::Wait { name, timeout } => {
                 let started = now_ms();
                 let resp = send_request(Request::AgentFind { name: name.clone(), pane_id: own_pane() })?;
@@ -783,6 +843,10 @@ fn run(cli: Cli) -> Result<(), String> {
             TeamAction::List { defined: false } => Request::TeamList,
             TeamAction::Add { role, name } => Request::TeamAdd { role, name, pane_id: own_pane() },
             TeamAction::Restart { members } => Request::TeamRestart { members, pane_id: own_pane() },
+            TeamAction::Clear { force } => Request::TeamClear { pane_id: own_pane(), force },
+            TeamAction::Save { name } => Request::TeamSave { name, pane_id: own_pane() },
+            TeamAction::Resume { name } => Request::TeamResume { name },
+            TeamAction::Saves => Request::SaveList,
         },
         Command::Task { action } => match action {
             TaskAction::List { all } => Request::TaskList { all, pane_id: own_pane() },
@@ -1092,6 +1156,13 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 render_agents(agents);
             } else if map.contains_key("subagents") {
                 render_activity(&data);
+            } else if let Some(saves) = map.get("saves") {
+                render_saves(serde_json::from_value(saves.clone()).map_err(|e| format!("bad response: {e}"))?);
+            } else if let Some(saved) = map.get("checkpoint") {
+                let saved: cmux_protocol::Checkpoint =
+                    serde_json::from_value(saved.clone()).map_err(|e| format!("bad response: {e}"))?;
+                let names: Vec<&str> = saved.members.iter().map(|m| m.name.as_str()).collect();
+                println!("saved {}: {}", saved.name, names.join(", "));
             } else if let Some(teams) = map.get("teams").and_then(|v| v.as_array()) {
                 render_teams(teams);
             } else if let Some(cards) = map.get("cards") {
@@ -1143,6 +1214,25 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
 }
 
 /// Running teams: a line per team, then one per member with its state.
+fn render_saves(saves: Vec<cmux_protocol::Checkpoint>) {
+    if saves.is_empty() {
+        println!("(no saves — `mira team save` or `mira agent save` makes one)");
+        return;
+    }
+    let now = now_ms();
+    for s in saves {
+        let what = s.team.as_deref().map_or_else(|| "agent".to_string(), |t| format!("team {t}"));
+        let names: Vec<&str> = s.members.iter().map(|m| m.name.as_str()).collect();
+        println!(
+            "{:<14}  {:<14}  {:>4} ago  {}",
+            s.name,
+            what,
+            cmux_core::tasks::span(now.saturating_sub(s.saved_at)),
+            names.join(", ")
+        );
+    }
+}
+
 fn render_teams(teams: &[serde_json::Value]) {
     if teams.is_empty() {
         println!("(no teams running — `mira team start <team>` starts one)");

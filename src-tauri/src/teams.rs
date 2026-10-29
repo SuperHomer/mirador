@@ -1,6 +1,6 @@
 //! Teams in the app: starting one in a tab of its own, and keeping track
 //! of it there — listing its members, adding one, restarting those whose
-//! agent exited or whose pane was closed. The team's definition and the
+//! agent exited or whose pane was closed, clearing them. The team's definition and the
 //! rules for it are in `cmux_core::teams`; this is where it meets panes.
 
 use tauri::{AppHandle, State};
@@ -11,7 +11,7 @@ use crate::commands::{emit_workspace, mark_launched, prepare_launch};
 use crate::AppState;
 
 /// The directory `pane_id` (the focused pane when absent) works in.
-fn cwd_of(state: &AppState, pane_id: Option<&str>) -> Option<String> {
+pub(crate) fn cwd_of(state: &AppState, pane_id: Option<&str>) -> Option<String> {
     let pane = pane_id
         .map(str::to_string)
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
@@ -149,7 +149,7 @@ pub fn team_list(state: &AppState) -> Vec<TeamInfo> {
 
 /// The team of `pane_id`'s tab (the focused pane's when absent): its tab
 /// id and what is running there.
-fn team_here(state: &AppState, pane_id: Option<&str>) -> Result<(String, TeamRun), String> {
+pub(crate) fn team_here(state: &AppState, pane_id: Option<&str>) -> Result<(String, TeamRun), String> {
     let ws = state.workspace.lock().unwrap();
     let pane = pane_id.map(str::to_string).unwrap_or_else(|| ws.focused_pane());
     let tab = ws.tab_of_pane(&pane).ok_or_else(|| format!("no pane {pane}"))?;
@@ -162,7 +162,7 @@ fn team_here(state: &AppState, pane_id: Option<&str>) -> Result<(String, TeamRun
 
 /// What a member is told of its team now: the team as it stands, `with`
 /// the member being started.
-fn roster_now(
+pub(crate) fn roster_now(
     run: &TeamRun,
     catalog: &cmux_protocol::RoleCatalog,
     seat: &cmux_core::teams::Seat,
@@ -223,13 +223,15 @@ pub fn team_add(
     Ok(pane)
 }
 
-/// What `team restart` did for each member it was asked about.
+/// What `team restart` or `team clear` did for each member it was asked
+/// about.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Restarted {
     pub name: String,
     pub pane: String,
-    /// "restarted", "reopened", or why not: "running", "busy".
+    /// Restarted: "restarted", "reopened", or why not: "running", "busy".
+    /// Cleared: see `team_clear`.
     pub outcome: String,
 }
 
@@ -342,4 +344,30 @@ pub fn team_restart(
     }
     emit_workspace(&app);
     Ok(out)
+}
+
+/// Starts every running member of `pane_id`'s team on a new conversation,
+/// as `agent clear` does one: its teammates first and the lead last, so a
+/// lead that runs this clears itself only once the others are done.
+/// `outcome` is "cleared", or why not: "not running", "needs you", "no
+/// harness".
+pub fn team_clear(state: &AppState, pane_id: Option<&str>, force: bool) -> Result<Vec<Restarted>, String> {
+    let (tab, run) = team_here(state, pane_id)?;
+    let mut seats: Vec<&TeamSeat> = run.members.iter().collect();
+    seats.sort_by_key(|s| s.lead);
+    Ok(seats
+        .into_iter()
+        .map(|seat| {
+            let in_tab = {
+                let ws = state.workspace.lock().unwrap();
+                ws.tabs.iter().find(|t| t.id == tab).is_some_and(|t| cmux_core::layout::contains(&t.root, &seat.pane))
+            };
+            let outcome = if !in_tab {
+                "not running"
+            } else {
+                crate::handoff::clear_pane(state, &seat.pane, force).map_or_else(|(outcome, _)| outcome, |()| "cleared")
+            };
+            Restarted { name: seat.name.clone(), pane: seat.pane.clone(), outcome: outcome.to_string() }
+        })
+        .collect())
 }
