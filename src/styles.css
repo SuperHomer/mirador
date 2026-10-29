@@ -3501,10 +3501,9 @@ button.inbox-update:hover {
 
 /* An agent on the rail: its live terminal, scaled, never resized. Its
    scale and its terminal's height are measured and set on the tile
-   (FocusLayout's useMiniFit); until then, its own size, which keeps the
-   body's height and the host's transform valid for that first frame. */
+   (FocusLayout's useMiniFit); until then, the smallest scale. */
 .mini-tile {
-  --mini-scale: 1;
+  --mini-scale: 0.65;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -3559,31 +3558,27 @@ button.inbox-update:hover {
 }
 
 /* A thumbnail: a click picks the tile, it never reaches the terminal.
-   As tall as the rows it shows, scaled, and less when the tile has less
-   room — never more, even in a taller tile, which would be blank above.
-   The cap has no fallback: until the rows are measured there is none,
-   and the body keeps room for "shown elsewhere". */
+   As tall as the scaled terminal, and less when the tile has less room. */
 .mini-body {
   position: relative;
   flex: 1 1 auto;
   height: calc(var(--mini-term-h, 0px) * var(--mini-scale));
-  max-height: calc(var(--mini-term-h) * var(--mini-scale));
   min-height: 0;
   overflow: hidden;
   pointer-events: none;
 }
 
-/* The terminal scaled to the tile's width, its bottom-left corner pinned
-   to the tile's and moved down past the rows below its cursor
-   (--mini-drop, unscaled): the tile ends on the cursor's line, so a
-   terminal with an empty bottom is never a blank tile, and when the tile
-   is shorter its top is what is cropped. The wrapper is the terminal's
-   own size, so it stays pinned as that changes. */
+/* The terminal scaled to the tile's width, never under 0.65 — scaled to
+   fit the whole tile, a wide terminal came out a third of its size and
+   could not be read — with its bottom-left corner pinned to the tile's,
+   so when the tile is shorter the latest lines and any prompt show and
+   the top is cropped. The wrapper is the terminal's own size, so it stays
+   pinned as that changes. */
 .mini-host {
   position: absolute;
   left: 0;
   bottom: 0;
-  transform: translateY(calc(var(--mini-drop, 0px) * var(--mini-scale))) scale(var(--mini-scale));
+  transform: scale(var(--mini-scale));
   transform-origin: 0 100%;
 }
 
