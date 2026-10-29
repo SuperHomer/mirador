@@ -3559,25 +3559,29 @@ button.inbox-update:hover {
 }
 
 /* A thumbnail: a click picks the tile, it never reaches the terminal.
-   As tall as the scaled terminal, and less when the tile has less room. */
+   As tall as the rows it shows, scaled, and less when the tile has less
+   room — never more, even in a taller tile, which would be blank above. */
 .mini-body {
   position: relative;
   flex: 1 1 auto;
   height: calc(var(--mini-term-h, 0px) * var(--mini-scale));
+  max-height: calc(var(--mini-term-h, 0px) * var(--mini-scale));
   min-height: 0;
   overflow: hidden;
   pointer-events: none;
 }
 
-/* The terminal scaled to exactly the tile's width, with its bottom-left
-   corner pinned to the tile's, so when the tile is shorter the latest
-   lines and any prompt show and the top is cropped. The wrapper is the terminal's own size, so it stays
-   pinned as that changes. */
+/* The terminal scaled to the tile's width, its bottom-left corner pinned
+   to the tile's and moved down past the rows below its cursor
+   (--mini-drop, unscaled): the tile ends on the cursor's line, so a
+   terminal with an empty bottom is never a blank tile, and when the tile
+   is shorter its top is what is cropped. The wrapper is the terminal's
+   own size, so it stays pinned as that changes. */
 .mini-host {
   position: absolute;
   left: 0;
   bottom: 0;
-  transform: scale(var(--mini-scale));
+  transform: translateY(calc(var(--mini-drop, 0px) * var(--mini-scale))) scale(var(--mini-scale));
   transform-origin: 0 100%;
 }
 

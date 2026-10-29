@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { AgentInfo, agentLabel, focusPane, markPaneRead, TabSnapshot } from "../bindings";
 import { useUiStore, WallFilter } from "../state/uiStore";
-import { getTerminal } from "../terminal/registry";
+import { getTerminal, watchTerminal } from "../terminal/registry";
 import { useAgentActivity } from "./ActivityPanel";
 import { AgentStatusBar, fullness } from "./AgentStatusBar";
 import { STATUS_LABEL, StatusMark } from "./StatusMark";
@@ -292,7 +292,7 @@ function MiniTile({
 }) {
   const pane = agent.paneId;
   const { hostRef, shown } = useLentTerminal(pane, visible, { fit: false });
-  const fit = useMiniFit(hostRef);
+  const fit = useMiniFit(pane, hostRef);
   const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
   const session = activity?.session;
   const pct =
@@ -342,16 +342,21 @@ function MiniTile({
   );
 }
 
+/** The most a rail terminal is scaled up: past it, a narrow terminal is a
+ *  few huge letters. One narrower than half its tile leaves a gap. */
+const MINI_MAX_SCALE = 2;
+
 /**
- * A rail tile's terminal scaled to the tile's width, down or up — a floor
- * cut its right side off and a cap left it short of the tile — and the
- * tile's body as tall as that scaled terminal, so no tile is taller than
- * what it shows. Both are only measured: the terminal, lent into
- * `hostRef`, keeps its size and so does its PTY.
+ * A rail tile's terminal scaled to the tile's width — no floor, which cut
+ * its right side off, and up to MINI_MAX_SCALE — and cropped to the rows
+ * up to its cursor's, so a terminal whose bottom is still empty does not
+ * show a blank tile; the tile's body is as tall as those rows, scaled.
+ * All of it only measured: the terminal, lent into `hostRef`, keeps its
+ * size and so does its PTY.
  */
-function useMiniFit(hostRef: React.RefObject<HTMLDivElement | null>) {
+function useMiniFit(pane: string, hostRef: React.RefObject<HTMLDivElement | null>) {
   const bodyRef = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState<{ scale: number; height: number } | null>(null);
+  const [fit, setFit] = useState<{ scale: number; height: number; drop: number } | null>(null);
   useEffect(() => {
     const body = bodyRef.current;
     const host = hostRef.current;
@@ -360,19 +365,43 @@ function useMiniFit(hostRef: React.RefObject<HTMLDivElement | null>) {
     // the terminal's own: the scale is a transform, which layout ignores.
     const measure = () => {
       const width = host.offsetWidth;
-      const height = host.offsetHeight;
-      if (width === 0 || height === 0) return;
-      const scale = body.clientWidth / width;
-      setFit((f) => (f && f.scale === scale && f.height === height ? f : { scale, height }));
+      const full = host.offsetHeight;
+      if (width === 0 || full === 0) return;
+      const scale = Math.min(MINI_MAX_SCALE, body.clientWidth / width);
+      const term = getTerminal(pane);
+      const rows = term ? Math.min(term.rows, term.buffer.active.cursorY + 1) : 0;
+      const height = term && rows > 0 ? (full / term.rows) * rows : full;
+      const drop = full - height;
+      setFit((f) =>
+        f && f.scale === scale && f.height === height && f.drop === drop ? f : { scale, height, drop },
+      );
     };
-    measure();
+    // The cursor's row moves with the output; the terminal may be another
+    // one after a remount, so its listeners follow it.
+    let listeners: { dispose(): void }[] = [];
+    const follow = () => {
+      listeners.forEach((l) => l.dispose());
+      const term = getTerminal(pane);
+      listeners = term ? [term.onCursorMove(measure), term.onResize(measure)] : [];
+      measure();
+    };
+    follow();
+    const unwatch = watchTerminal(pane, follow);
     const observer = new ResizeObserver(measure);
     observer.observe(body);
     observer.observe(host);
-    return () => observer.disconnect();
-  }, [hostRef]);
+    return () => {
+      observer.disconnect();
+      unwatch();
+      listeners.forEach((l) => l.dispose());
+    };
+  }, [pane, hostRef]);
   const style = fit
-    ? ({ "--mini-scale": fit.scale, "--mini-term-h": `${fit.height}px` } as React.CSSProperties)
+    ? ({
+        "--mini-scale": fit.scale,
+        "--mini-term-h": `${fit.height}px`,
+        "--mini-drop": `${fit.drop}px`,
+      } as React.CSSProperties)
     : undefined;
   return { bodyRef, style };
 }
