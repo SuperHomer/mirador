@@ -83,22 +83,22 @@ pub fn send(
     if caller.as_deref() == Some(pane.as_str()) {
         return Err("that is the pane this runs in: an agent cannot message itself".into());
     }
-    let status = {
+    let status = |state: &AppState| {
         let meta = state.meta.lock().unwrap();
         let m = meta
             .get(&pane)
             .filter(|m| m.is_agent())
             .ok_or_else(|| format!("{to} runs no agent: a message would run in its shell as a command"))?;
-        m.status()
+        Ok::<_, String>(m.status())
     };
-    cmux_core::handoff::can_receive(status, force).map_err(|e| format!("{to}: {e}"))?;
+    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
     if !state.pty.is_running(&pane) {
         return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
     }
     wait_started(state, &pane).map_err(|e| format!("{to}: {e}"))?;
-    // Up now, it may already be asking a person something.
-    let status = state.meta.lock().unwrap().get(&pane).and_then(|m| m.status());
-    cmux_core::handoff::can_receive(status, force).map_err(|e| format!("{to}: {e}"))?;
+    // As it is once up, not as it was before the wait: still an agent, and
+    // perhaps already asking a person something.
+    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
     let from = caller.as_deref().and_then(|c| sender(state, c));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
     state.pty.write(&pane, &paste)?;
