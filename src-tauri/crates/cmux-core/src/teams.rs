@@ -303,8 +303,13 @@ pub fn team_way<'a>(catalog: &'a RoleCatalog, team: &AgentTeam, role: &str) -> O
 /// and the least a turn costs to re-send them, read from the prompt cache.
 /// What else a turn sends is not counted (see [`TeamWeight`]). A seat whose
 /// model has no known price has tokens and no floor, and is counted as
-/// unpriced. Fails as starting the team would, on a role it cannot find.
+/// unpriced. Fails as starting the team would: on a team that cannot
+/// start, whose weight would be short or none, and on a role it cannot
+/// find.
 pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Result<TeamWeight, String> {
+    if let Some(problem) = &team.problem {
+        return Err(format!("team `{}`: {problem}", team.name));
+    }
     let all = seats(team);
     let mut out = Vec::new();
     for seat in &all {
@@ -597,6 +602,40 @@ mod tests {
         let mut missing = catalog.clone();
         missing.roles.retain(|r| r.name != "dev");
         assert!(team_weight(&missing, &t, "mira").unwrap_err().contains("no role `dev`"));
+    }
+
+    #[test]
+    fn a_team_that_cannot_start_is_not_weighed() {
+        let catalog = RoleCatalog {
+            roles: vec![role("dev"), role("planner")],
+            ways: vec![AgentWay { name: "our-way".into(), ..Default::default() }],
+            ..Default::default()
+        };
+        // Its problem as the catalog finds it (`roles::catalog_in`).
+        let refused = |text: &str| {
+            let mut t = team(text);
+            t.problem = problem_of(&t, &catalog.roles, &catalog.ways);
+            team_weight(&catalog, &t, "mira").unwrap_err()
+        };
+        assert_eq!(
+            refused("---
+members: [{role: dev, count: 0}, {role: planner}]
+---
+"),
+            "team `squad`: a member's `count` must be at least 1"
+        );
+        assert_eq!(
+            refused("---
+way: nowhere
+members: [{role: dev}]
+---
+"),
+            "team `squad`: way of working `nowhere` is not in any ways/ directory"
+        );
+        assert_eq!(refused("---
+members: []
+---
+"), "team `squad`: a team needs `members`");
     }
 
     fn fields_of(t: &AgentTeam) -> TeamFields {
