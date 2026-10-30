@@ -218,8 +218,12 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
     sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
     sb.wait_for("the welcome", LONG, || sb.screen(&pane).filter(|s| s.contains("Press any key")));
 
+    let asked = std::time::Instant::now();
     let refused = send(&sb, &first, &pane, "hello").unwrap_err();
+    let took = asked.elapsed();
     assert!(refused.contains("no input box"), "{refused}");
+    // The wait is 10 s, and no read of the screen outlives it.
+    assert!(took >= Duration::from_secs(10) && took < Duration::from_secs(12), "refused after {took:?}");
     let clear = |force| sb.request(Request::AgentClear { name: Some(pane.clone()), pane_id: Some(first.clone()), force });
     let refused = clear(false).unwrap_err();
     assert!(refused.contains("no input box"), "{refused}");

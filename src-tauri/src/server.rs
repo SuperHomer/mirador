@@ -190,7 +190,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::ReadScreen { pane_id, lines } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
-            let text = read_screen(app, &pane, lines)?;
+            let text = read_screen(app, &pane, lines, Duration::from_secs(5))?;
             Ok(json!({ "paneId": pane, "text": text }))
         }
         Request::Notify {
@@ -742,8 +742,8 @@ fn parse_bridge_result(pane: &str, raw: &str) -> Result<Value, String> {
 }
 
 /// Round-trips to the webview: the frontend serializes the pane's buffer
-/// and resolves the pending request. 5s timeout.
-pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>) -> Result<String, String> {
+/// and resolves the pending request, or the read gives up after `timeout`.
+pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>, timeout: Duration) -> Result<String, String> {
     let state = app.state::<AppState>();
     // The webview's terminal buffer outlives the PTY, so exited command
     // panes and idle restored panes are still readable — that's exactly
@@ -767,7 +767,7 @@ pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>) ->
     );
 
     let result = rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(timeout)
         .map_err(|_| "read-screen timed out (pane not mounted?)".to_string());
     state.screen_requests.lock().unwrap().remove(&request_id);
     result

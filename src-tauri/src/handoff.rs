@@ -46,27 +46,39 @@ const INPUT_BOX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 /// (`cmux_core::handoff::showing`): a menu, which the Enter after it would
 /// answer; or, for a harness whose input box Mirador knows, no input box
 /// within [`INPUT_BOX_WAIT`] — the paste might dismiss a welcome screen
-/// and the Enter land on the menu that replaces it. A screen that cannot
-/// be read — its terminal not mounted, the read timed out — counts as
-/// ready: refusing then would refuse every send to a tab never shown.
+/// and the Enter land on the menu that replaces it. No read outlives that
+/// wait: each is given only the time left. A screen that cannot be read at
+/// all — its terminal not mounted, the read timed out — counts as ready:
+/// refusing then would refuse every send to a tab never shown.
 fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_protocol::Harness>) -> Option<String> {
     use cmux_core::handoff::Showing;
     use cmux_protocol::Harness;
+    use std::time::{Duration, Instant};
     let knows_input_box = matches!(harness, Some(Harness::Claude | Harness::Codex));
-    let deadline = std::time::Instant::now() + INPUT_BOX_WAIT;
+    let no_input_box =
+        || Some("shows no input box yet: it may still be starting, or waiting on a screen of its own — look at its pane".into());
+    let deadline = Instant::now() + INPUT_BOX_WAIT;
+    // Once a screen with neither was read, a read cut short by the
+    // deadline is the wait running out, not an unreadable screen.
+    let mut seen_neither = false;
     loop {
-        let screen = crate::server::read_screen(app, pane, None).ok()?;
+        let left = deadline.saturating_duration_since(Instant::now());
+        if seen_neither && left.is_zero() {
+            return no_input_box();
+        }
+        let screen = match crate::server::read_screen(app, pane, None, left.min(Duration::from_secs(5))) {
+            Ok(screen) => screen,
+            Err(_) if seen_neither => return no_input_box(),
+            Err(_) => return None,
+        };
         match cmux_core::handoff::showing(&screen) {
             Showing::Choice(row) => return Some(format!("is showing a choice, `{row}`: answer it in its pane")),
             Showing::Composer => return None,
             Showing::Neither if !knows_input_box => return None,
-            Showing::Neither if std::time::Instant::now() >= deadline => {
-                return Some(
-                    "shows no input box yet: it may still be starting, or waiting on a screen of its own — look at its pane"
-                        .into(),
-                )
+            Showing::Neither => {
+                seen_neither = true;
+                std::thread::sleep(left.min(Duration::from_millis(250)));
             }
-            Showing::Neither => std::thread::sleep(std::time::Duration::from_millis(250)),
         }
     }
 }

@@ -487,6 +487,61 @@ mod tests {
   ? for shortcuts
 ";
 
+    /// Codex 0.165 idle after a turn: our team's real reviewer, its screen
+    /// read through `mira read-screen` (the bottom of it).
+    const CODEX_AFTER_A_TURN: &str = "\
+• Explored · 1 failed
+  └ Search read-screen-request|readScreen|
+           serialize.*buffer|serialize\\( in src
+    Read registry.ts
+    + Show details
+
+• The readiness checks run without holding app
+  locks, but the advertised 10-second bound needs a
+  closer look: each screen read can itself wait up
+  to five seconds. I’m checking whether the retry
+  loop can exceed that bound before I finalize.
+
+• Explored
+  └ Read server.rs, handoff.rs
+    + Show details
+
+• Ran /Applications/Mirador.app/Contents/MacOS/mir…
+  └ e1ea323e-8fc7-409c-9bac-facfebc8bf64
+    + Show details
+
+• CHANGES sent to the planner: slow screen reads
+  can push the refusal past the stated 10-second
+  bound, and the Codex-while-working case still
+  needs coverage.
+
+  Worked for 50s • 12:53
+
+
+› Ask Codex to do anything
+";
+
+    /// Claude Code mid-turn, a tool running: our team's real planner, its
+    /// screen read through `mira read-screen` (the bottom of it). The input
+    /// box stays up while it works.
+    const CLAUDE_WORKING: &str = "\
+⏺ I'm flagging two issues for the worker: the 10-second wait can stretch to nearly 15 seconds since
+  each screen read takes up to 5 seconds and the deadline check happens after the read, and there's no
+  test screen for Codex mid-turn, which risks wrongly blocking a send that would otherwise work.
+
+  Sending the reviewer's two changes to the worker · 29s
+  ⎿  $ /Applications/Mirador.app/Contents/MacOS/mira agent send worker --wait --timeout 590 \"Reviewer
+     CHANGES on ad2b281 (step 3), two things:
+     1) The 10 s bound isn't one: screen_refusal checks the deadline only after each read_screen,
+     which can itself block up to 5 s, so a read started just before 10 s… (27s)
+     (ctrl+b to run in background)
+
+✳ Fluttering… (1m 53s · ↓ 3.7k tokens)
+                                                              ✔ Update installed · /restart to apply
+──────────────────────────────────────────────────────────────────────────────────────────── planner ─
+❯
+";
+
     #[test]
     fn sees_a_menu_the_agent_is_showing() {
         use Showing::Choice;
@@ -507,6 +562,8 @@ mod tests {
         assert_eq!(showing(CODEX_IDLE), Composer);
         assert_eq!(showing(&CODEX_IDLE.replace("› Ask Codex to do anything", "› fix the bug")), Composer);
         assert_eq!(showing(CODEX_LOADING), Composer);
+        assert_eq!(showing(CODEX_AFTER_A_TURN), Composer);
+        assert_eq!(showing(CLAUDE_WORKING), Composer);
         // A number that is not a menu row's.
         assert_eq!(showing("› 2026 was a year\n"), Composer);
         assert_eq!(showing("› 1.5 seconds\n"), Composer);
