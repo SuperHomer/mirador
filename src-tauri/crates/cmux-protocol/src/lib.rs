@@ -978,7 +978,7 @@ pub struct Asking {
 }
 
 /// What one transcript adds up to: the model, the tokens, the tasks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSummary {
     /// The model of its last reply.
@@ -993,6 +993,17 @@ pub struct TranscriptSummary {
     #[serde(default)]
     pub context_window: Option<u64>,
     pub tool_calls: u32,
+    /// What its replies cost at API list prices
+    /// (`cmux_core::pricing`), each at its own model's rates and counting
+    /// every token the transcript records, cache reads included. On a
+    /// Claude subscription it is what the session would have cost, not
+    /// what is billed. None when no reply could be priced.
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+    /// Some replies were by a model with no known price, and are not in
+    /// `cost_usd`.
+    #[serde(default)]
+    pub unpriced: bool,
     /// Absent when it keeps no task list.
     pub tasks: Option<TaskProgress>,
     /// Unix millis of its first and latest entries.
@@ -1001,7 +1012,7 @@ pub struct TranscriptSummary {
 }
 
 /// A subagent of a Claude Code session (`Agent` tool), from its transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubagentInfo {
     pub id: String,
@@ -1017,7 +1028,7 @@ pub struct SubagentInfo {
 }
 
 /// What an agent pane's Claude Code session and its subagents are doing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentActivity {
     pub pane_id: String,

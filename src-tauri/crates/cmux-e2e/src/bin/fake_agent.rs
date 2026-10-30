@@ -28,7 +28,9 @@
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
 //!   Mirador by its hooks as Claude Code's are, gets each turn's prompt
 //!   and one Bash call, `echo` of the message's first line, with its
-//!   result — a failure (exit 1) when the message says `!fail`.
+//!   result — a failure (exit 1) when the message says `!fail`. The call's
+//!   reply is Opus 5.5's and carries a usage, the same each turn
+//!   ([`TURN_USAGE`]), for a cost to be read from it.
 //!
 //! As `codex` it echoes each message, and holds a rollout open as Codex
 //! does (`~/.codex/sessions/YYYY/MM/DD/rollout-….jsonl`), writing each
@@ -48,6 +50,10 @@ fn log(event: serde_json::Value) {
     }
 }
 
+/// What each turn's reply used: 10 tokens in, 100 written to the cache,
+/// 1000 read from it, 20 out — $0.00114 at Opus 5.5's list prices.
+const TURN_USAGE: &str = r#"{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":20}"#;
+
 /// Appends one turn to the transcript at `path`, in the shape Claude Code
 /// writes: the prompt, a Bash call, and its result.
 fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
@@ -56,9 +62,13 @@ fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
     let at = timestamp();
     let lines = [
         serde_json::json!({ "type": "user", "timestamp": at, "message": { "role": "user", "content": message } }),
-        serde_json::json!({ "type": "assistant", "timestamp": at, "message": { "role": "assistant", "content": [
-            { "type": "tool_use", "id": id, "name": "Bash", "input": { "command": command(first) } }
-        ] } }),
+        serde_json::json!({ "type": "assistant", "timestamp": at, "message": {
+            "id": format!("msg_{}_{n}", std::process::id()),
+            "role": "assistant",
+            "model": "claude-opus-5-5",
+            "content": [{ "type": "tool_use", "id": id, "name": "Bash", "input": { "command": command(first) } }],
+            "usage": serde_json::from_str::<serde_json::Value>(TURN_USAGE).unwrap_or_default(),
+        } }),
         serde_json::json!({ "type": "user", "timestamp": at, "message": { "role": "user", "content": [
             { "type": "tool_result", "tool_use_id": id, "content": result(first), "is_error": failing(first) }
         ] } }),

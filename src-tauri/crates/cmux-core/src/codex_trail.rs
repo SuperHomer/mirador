@@ -268,6 +268,10 @@ impl CodexStats {
             context: self.context,
             context_window: self.window.or_else(|| self.model.as_deref().and_then(context_window)),
             tool_calls: self.tool_calls,
+            // OpenAI's prices are not known here: its replies are real and
+            // not in a cost, never counted as free.
+            cost_usd: None,
+            unpriced: self.tokens > 0,
             tasks: None,
             started_ms: self.started_ms,
             last_ms: self.last_ms,

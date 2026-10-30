@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { EditorCatalog, SeatWeight, TeamWeight, teamCost } from "../bindings";
+import {
+  EditorCatalog,
+  SeatWeight,
+  TeamWeight,
+  TranscriptSummary,
+  getAgentActivity,
+  teamCost,
+} from "../bindings";
 
 /**
  * The weight of team `team` as its files are saved (`team_cost`), read
@@ -55,4 +62,64 @@ export function usd(d: number): string {
   if (d >= 0.01) return `$${d.toFixed(2)}`;
   if (d > 0 && d < 0.0001) return "<$0.0001";
   return `$${d.toFixed(4)}`;
+}
+
+/** What a cost figure is, for a tooltip or a note beside it. */
+export const SPENT_MEANS =
+  "At API list prices for the tokens its transcripts record. On a Claude subscription it is what this would have cost, not what is billed.";
+
+/** What some transcripts cost together: none when none was priced, and
+ *  whether replies with no known price were left out. */
+export type Spent = { usd: number | null; unpriced: boolean };
+
+export function spentOf(summaries: Pick<TranscriptSummary, "costUsd" | "unpriced">[]): Spent {
+  const priced = summaries.filter((s) => s.costUsd !== null);
+  return {
+    usd: priced.length > 0 ? priced.reduce((sum, s) => sum + s.costUsd!, 0) : null,
+    unpriced: summaries.some((s) => s.unpriced),
+  };
+}
+
+/** "$1.24", "$0.0042", "$1.24+" when some replies had no price, "—" when
+ *  none was priced. */
+export function spentLabel({ usd: dollars, unpriced }: Spent): string {
+  if (dollars === null) return "—";
+  return `${usd(dollars)}${unpriced ? "+" : ""}`;
+}
+
+/** How often a running team's spend is read again. */
+const SPENT_POLL_MS = 5000;
+
+/**
+ * What the agents in `panes` have spent so far, each session with its
+ * subagents, read again every few seconds while any runs. Null with no
+ * pane, or until the first read; a pane whose activity cannot be read
+ * is left out of the sum, as one that reported nothing yet.
+ */
+export function useSpent(panes: string[]): Spent | null {
+  const [spent, setSpent] = useState<Spent | null>(null);
+  const key = panes.join(" ");
+  useEffect(() => {
+    setSpent(null);
+    if (panes.length === 0) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = () => {
+      void Promise.all(panes.map((p) => getAgentActivity(p).catch(() => null)))
+        .then((all) => {
+          if (cancelled) return;
+          const summaries = all.flatMap((a) => (a ? [a.session, ...a.subagents] : []));
+          setSpent(spentOf(summaries));
+        })
+        .finally(() => {
+          if (!cancelled) timer = window.setTimeout(load, SPENT_POLL_MS);
+        });
+    };
+    load();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [key]);
+  return spent;
 }

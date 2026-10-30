@@ -342,6 +342,12 @@ export interface TranscriptSummary {
    *  Claude model for now. */
   contextWindow: number | null;
   toolCalls: number;
+  /** What its replies cost at API list prices, each at its own model's
+   *  rates: on a Claude subscription, what it would have cost, not what is
+   *  billed. Null when no reply could be priced (Codex, always). */
+  costUsd: number | null;
+  /** Some replies had no known price and are not in `costUsd`. */
+  unpriced: boolean;
   /** Null when it keeps no task list. */
   tasks: TaskProgress | null;
   startedMs: number | null;

@@ -1488,8 +1488,16 @@ fn render_agents(agents: &[serde_json::Value]) {
 }
 
 /// An agent's activity: the session's line, then one per subagent with
-/// its state, progress, tokens and how long it ran.
+/// its state, progress, tokens, cost and how long it ran, then what they
+/// cost together.
 fn render_activity(data: &serde_json::Value) {
+    // Cents from a cent up, four decimals below; "-" for none priced, and
+    // a "+" when some replies had no price and are not in it.
+    let dollars = |usd: f64| if usd >= 0.01 { format!("${usd:.2}") } else { format!("${usd:.4}") };
+    let cost = |v: &serde_json::Value| {
+        let more = if v["unpriced"].as_bool() == Some(true) { "+" } else { "" };
+        v["costUsd"].as_f64().map_or("-".to_string(), |usd| format!("{}{more}", dollars(usd)))
+    };
     let tokens = |v: &serde_json::Value| {
         let n = v.as_u64().unwrap_or(0);
         match n {
@@ -1504,9 +1512,10 @@ fn render_activity(data: &serde_json::Value) {
     };
     let s = &data["session"];
     let mut line = format!(
-        "session   {:<5}  {:>6} tok  ctx {:>5}  {}",
+        "session   {:<5}  {:>6} tok  {:>8}  ctx {:>5}  {}",
         tasks(s),
         tokens(&s["tokens"]),
+        cost(s),
         tokens(&s["context"]),
         s["model"].as_str().unwrap_or("-"),
     );
@@ -1524,10 +1533,11 @@ fn render_activity(data: &serde_json::Value) {
             _ => 0,
         };
         println!(
-            "{:<8}  {:<5}  {:>6} tok  ctx {:>5}  {:>2}:{:02}  {}  {}",
+            "{:<8}  {:<5}  {:>6} tok  {:>8}  ctx {:>5}  {:>2}:{:02}  {}  {}",
             a["state"].as_str().unwrap_or("-"),
             tasks(a),
             tokens(&a["tokens"]),
+            cost(a),
             tokens(&a["context"]),
             secs / 60,
             secs % 60,
@@ -1535,6 +1545,16 @@ fn render_activity(data: &serde_json::Value) {
             a["description"].as_str().unwrap_or(""),
         );
     }
+    let all: Vec<&serde_json::Value> = std::iter::once(s).chain(subagents).collect();
+    let priced: Vec<f64> = all.iter().filter_map(|v| v["costUsd"].as_f64()).collect();
+    let unpriced = all.iter().any(|v| v["unpriced"].as_bool() == Some(true));
+    let spent = if priced.is_empty() { "-".to_string() } else { dollars(priced.iter().sum()) };
+    println!(
+        "cost      {spent}{}  at API list prices for the tokens its transcripts record — on a Claude \
+         subscription, what it would have cost, not what is billed{}",
+        if unpriced && !priced.is_empty() { "+" } else { "" },
+        if unpriced { "; some replies had no known price and are not in it" } else { "" },
+    );
 }
 
 /// `mira agent roles`: read from the config file, as the app reads it — no

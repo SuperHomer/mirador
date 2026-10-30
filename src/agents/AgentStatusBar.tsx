@@ -1,5 +1,6 @@
 import { AgentActivity, AgentInfo, HARNESS_LABEL } from "../bindings";
 import { duration, modelName, tokens } from "./ActivityPanel";
+import { SPENT_MEANS, spentLabel, spentOf } from "./teamWeight";
 
 /** Green under half full, yellow to 80%, red past it. */
 export function fullness(pct: number): string {
@@ -90,8 +91,10 @@ export function AgentStatusBar({
                 {window ? ` / ${tokens(window)}` : ""}
               </span>
             </span>
-            <span className="agent-bar-usage">
-              {tokens(session.tokens)} tokens · {duration(session.startedMs, end)}
+            <span className="agent-bar-usage" title={session.costUsd !== null ? SPENT_MEANS : undefined}>
+              {tokens(session.tokens)} tokens
+              {session.costUsd !== null ? ` · ${spentLabel(spentOf([session]))}` : ""} ·{" "}
+              {duration(session.startedMs, end)}
             </span>
           </>
         )

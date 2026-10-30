@@ -100,3 +100,38 @@ fn an_agent_s_trail_shows_what_it_did() {
     assert_eq!(code, 0, "{err}");
     assert!(detail.contains("--- output\nafter-new"), "{detail}");
 }
+
+/// What a Claude Code agent spent, from the usage its transcript records,
+/// through `mira agent activity`: each turn of the fake `claude` costs
+/// $0.00114 at Opus 5.5's list prices.
+#[test]
+fn an_agent_s_activity_says_what_it_cost() {
+    e2e!();
+    let mut sb = Sandbox::new("cost");
+    sb.set_env("E2E_TURN_MS", "300");
+    sb.launch();
+    let shell = sb.first_pane();
+    let agent = sb
+        .request(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(shell.clone()) })
+        .map(|v| v["paneId"].as_str().unwrap().to_string())
+        .unwrap();
+    sb.wait_for("its session", LONG, || sb.events("hooked", &agent).into_iter().next());
+    for n in 1..=2 {
+        let (code, _, err) = sb.mira(Some(&shell), &["agent", "send", &agent, "--wait", "--timeout", "40", &format!("turn {n}")]);
+        assert_eq!(code, 0, "{err}");
+    }
+
+    let (code, out, err) = sb.mira(Some(&shell), &["--json", "agent", "activity", "--pane", &agent]);
+    assert_eq!(code, 0, "{err}");
+    let activity: serde_json::Value = serde_json::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}"));
+    let session = &activity["session"];
+    let cost = session["costUsd"].as_f64().unwrap_or_else(|| panic!("no cost in {out}"));
+    assert!((cost - 2.0 * 0.00114).abs() < 1e-9, "{cost}");
+    assert_eq!(session["unpriced"], false, "{out}");
+
+    let (code, out, err) = sb.mira(Some(&shell), &["agent", "activity", "--pane", &agent]);
+    assert_eq!(code, 0, "{err}");
+    let line = out.lines().find(|l| l.starts_with("session")).unwrap_or_else(|| panic!("no session line in:\n{out}"));
+    assert!(line.contains("$0.0023"), "{line}");
+    assert!(out.lines().any(|l| l.starts_with("cost      $0.0023  at API list prices")), "{out}");
+}

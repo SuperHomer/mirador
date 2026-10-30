@@ -11,6 +11,7 @@ import {
 import { useConfigStore } from "../state/configStore";
 import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { SPENT_MEANS, spentLabel, spentOf } from "./teamWeight";
 
 /** How often the open panel reads the transcripts again. */
 const POLL_MS = 2000;
@@ -144,6 +145,7 @@ export function ActivityPanel() {
   const subagents = activity?.subagents ?? [];
   const totalTokens =
     (session?.tokens ?? 0) + subagents.reduce((sum, s) => sum + s.tokens, 0);
+  const spent = spentOf(session ? [session, ...subagents] : []);
   return (
     <div className="activity-panel" ref={panelRef} tabIndex={-1}>
       <div className="notif-header">
@@ -177,6 +179,15 @@ export function ActivityPanel() {
           <>
             <div className="activity-stats">
               <Stat label="Tokens" value={tokens(totalTokens)} />
+              <Stat
+                label="Cost"
+                value={spentLabel(spent)}
+                title={
+                  spent.unpriced
+                    ? `${SPENT_MEANS} Some replies had no known price and are not counted.`
+                    : SPENT_MEANS
+                }
+              />
               <Stat label="Context" value={tokens(session.context)} />
               <Stat
                 label="Time"
@@ -198,9 +209,9 @@ export function ActivityPanel() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <div className="activity-stat">
+    <div className="activity-stat" title={title}>
       <span className="activity-stat-label">{label}</span>
       <span className="activity-stat-value">{value}</span>
     </div>
@@ -278,7 +289,8 @@ export function SubagentRow({
         </span>
         <span>
           {compact ? "" : `ctx ${tokens(agent.context)} · `}
-          {tokens(agent.tokens)} · {duration(agent.startedMs, end)}
+          {tokens(agent.tokens)}
+          {agent.costUsd !== null ? ` · ${spentLabel(spentOf([agent]))}` : ""} · {duration(agent.startedMs, end)}
         </span>
       </div>
       <Bar tasks={agent.tasks} state={agent.state} color={color} />
