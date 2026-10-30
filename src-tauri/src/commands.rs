@@ -1706,7 +1706,7 @@ pub(crate) struct Launch {
     pub harness: cmux_protocol::Harness,
     pub role: Option<cmux_protocol::AgentRole>,
     pub settings: Option<String>,
-    /// The role's prompt file, for Claude Code.
+    /// The role's prompt file: Claude Code's, or a Codex override.
     pub prompt: Option<String>,
 }
 
@@ -1772,15 +1772,19 @@ pub(crate) fn prepare_launch(
         }
         _ => None,
     };
-    // Claude Code reads a role's prompt from a file; Codex takes it inline.
-    // Written once the role is known to start, so a refused one leaves none.
+    // Claude Code reads a role's prompt from a file; Codex too, through the
+    // shell, where the shell can (`agents::codex_instructions`) — else
+    // inline: ConPTY has no line discipline to cut a long line. Written
+    // once the role is known to start, so a refused one leaves none.
     let prompt_file = match (&role, &prompt) {
-        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(
-            cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p)
-                .map_err(|e| format!("could not write the role's prompt: {e}"))?,
-        ),
+        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p)),
+        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Codex && cmux_core::pty::shell::takes_command_substitution() => {
+            Some(cmux_core::roles::write_codex_prompt(name.unwrap_or(&r.name), p))
+        }
         _ => None,
-    };
+    }
+    .transpose()
+    .map_err(|e| format!("could not write the role's prompt: {e}"))?;
     // The session goes by the member's name; the pane keeps the role's, to
     // find it again on a restore.
     let named = role.clone().map(|r| cmux_protocol::AgentRole { name: name.unwrap_or(&r.name).to_string(), ..r });

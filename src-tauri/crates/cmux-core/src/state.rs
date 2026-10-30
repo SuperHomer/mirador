@@ -52,9 +52,10 @@ pub struct PaneMeta {
     /// role, so a resume passes it again.
     pub agent_settings: Option<String>,
     /// The file holding the role's prompt, and a team member's team
-    /// section (`roles::write_prompt`). Kept, like the settings, so a
-    /// resume passes it again: a conversation keeps its prompt only until
-    /// it is compacted.
+    /// section (`roles::write_prompt`, or a Codex role's
+    /// `roles::write_codex_prompt`). Kept, like the settings, so a resume
+    /// passes it again: a conversation keeps its prompt only until it is
+    /// compacted.
     pub agent_prompt: Option<String>,
     /// Started as an agent (`mira agent new`, the wall, the palette), with
     /// or without a role. It makes the pane an agent from the moment it

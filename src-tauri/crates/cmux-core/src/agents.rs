@@ -481,7 +481,11 @@ pub fn plain_harness(harness: Option<Harness>) -> Result<Harness, String> {
 /// The prompt is the role's whole prompt (its own, then its way of
 /// working's). Claude Code reads it from `prompt_file` when there is one —
 /// a prompt is paragraphs, and a file keeps them — and Codex takes it as
-/// its `developer_instructions`, a TOML string whose newlines are escapes.
+/// its `developer_instructions`, a TOML string whose newlines are escapes:
+/// from `prompt_file`, which then holds the whole override
+/// ([`codex_instructions`]) and is read with `$(…)` — so only for a shell
+/// that takes it (`pty::shell::takes_command_substitution`) — or inline
+/// without one.
 /// `settings_file` holds a Claude Code role to its MCP servers, plugins,
 /// skills and tools (`role_limits`).
 ///
@@ -511,7 +515,7 @@ pub fn launch_command(
         Harness::Codex => "codex",
         _ => "claude",
     });
-    let mut arg = |flag: &str, value: &str| {
+    let arg = |line: &mut String, flag: &str, value: &str| {
         let value = one_line(value);
         if value.is_empty() {
             return;
@@ -525,45 +529,53 @@ pub fn launch_command(
     };
     let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
     if let Some(role) = role {
-        arg("--model", role.model.as_deref().unwrap_or(""));
+        arg(&mut line, "--model", role.model.as_deref().unwrap_or(""));
         if let Some(effort) = &role.effort {
             match harness {
-                Harness::Codex => arg("-c", &format!("model_reasoning_effort={}", toml_string(effort))),
-                _ => arg("--effort", effort),
+                Harness::Codex => arg(&mut line, "-c", &format!("model_reasoning_effort={}", toml_string(effort))),
+                _ => arg(&mut line, "--effort", effort),
             }
         }
         match harness {
             Harness::Codex => {
-                arg("--profile", role.profile.as_deref().unwrap_or(""));
-                if let Some(prompt) = prompt {
-                    arg("-c", &format!("developer_instructions={}", toml_string(prompt)));
+                arg(&mut line, "--profile", role.profile.as_deref().unwrap_or(""));
+                match (prompt, prompt_file) {
+                    // Read by the shell as one word: what is typed stays
+                    // short whatever the prompt's length (`codex_instructions`).
+                    // `command`, so a `cat` aliased to something else is
+                    // not the one run.
+                    (Some(_), Some(file)) => {
+                        line.push_str(&format!(" -c \"$(command cat {})\"", quote(&file.to_string_lossy())))
+                    }
+                    (Some(prompt), None) => arg(&mut line, "-c", &codex_instructions(prompt)),
+                    (None, _) => {}
                 }
             }
             _ => {
                 match (prompt, prompt_file) {
-                    (Some(_), Some(file)) => arg("--append-system-prompt-file", &file.to_string_lossy()),
-                    (Some(prompt), None) => arg("--append-system-prompt", prompt),
+                    (Some(_), Some(file)) => arg(&mut line, "--append-system-prompt-file", &file.to_string_lossy()),
+                    (Some(prompt), None) => arg(&mut line, "--append-system-prompt", prompt),
                     (None, _) => {}
                 }
                 if let Some(file) = settings_file {
-                    arg("--settings", &file.to_string_lossy());
+                    arg(&mut line, "--settings", &file.to_string_lossy());
                 }
-                arg("--name", &role.name);
+                arg(&mut line, "--name", &role.name);
             }
         }
     }
     // Any Codex, a role's or plain, may reach the app.
     if let (Harness::Codex, Some((base, socket))) = (harness, socket) {
-        arg("-c", "default_permissions=\"mirador\"");
-        arg("-c", &format!("permissions.mirador.extends={}", toml_string(base)));
+        arg(&mut line, "-c", "default_permissions=\"mirador\"");
+        arg(&mut line, "-c", &format!("permissions.mirador.extends={}", toml_string(base)));
         let socket = toml_string(&socket.to_string_lossy());
-        arg("-c", &format!("permissions.mirador.network.unix_sockets={{{socket}=\"allow\"}}"));
+        arg(&mut line, "-c", &format!("permissions.mirador.network.unix_sockets={{{socket}=\"allow\"}}"));
         // Network on, but only through the proxy: it lets out the domains
         // the base allows, and the socket above.
-        arg("-c", "permissions.mirador.network.enabled=true");
-        arg("-c", "features.network_proxy=true");
+        arg(&mut line, "-c", "permissions.mirador.network.enabled=true");
+        arg(&mut line, "-c", "features.network_proxy=true");
     }
-    arg("", task.unwrap_or(""));
+    arg(&mut line, "", task.unwrap_or(""));
     line
 }
 
@@ -624,6 +636,17 @@ fn toml_string(text: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// A Codex role's prompt as the `-c` override that sets it. Typed inline
+/// it makes a line as long as the prompt, and a line over 1 KB typed into
+/// a shell is not safe: a tty still in cooked mode — a shell yet to reach
+/// its prompt — holds 1024 bytes of a line and drops the rest, and a
+/// resize while a line editor works through that much input garbles it.
+/// So where the shell can, it goes in a file the shell reads it from
+/// ([`launch_command`]'s `prompt_file`).
+pub fn codex_instructions(prompt: &str) -> String {
+    format!("developer_instructions={}", toml_string(prompt.trim()))
 }
 
 /// The program `harness` runs, which is also how a role file names it.
@@ -1167,20 +1190,34 @@ mod tests {
     fn starts_a_codex_role_with_its_prompt_as_instructions() {
         let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
         let role = AgentRole { name: "dev".into(), harness: Harness::Codex, model: Some("gpt-5".into()), ..Default::default() };
-        let file = std::path::Path::new("/data/prompts/p1.md");
+        // Without a file, inline; the escapes are TOML's.
         assert_eq!(
-            launch_command(Some(&role), Harness::Claude, Some("Line \"one\"\r\n\tC:\\path"), Some(file), None, Some("go"), None, q),
+            launch_command(Some(&role), Harness::Claude, Some("Line \"one\"\r\n\tC:\\path"), None, None, Some("go"), None, q),
             r#"codex --model 'gpt-5' -c 'developer_instructions="Line \"one\"\n\tC:\\path"' 'go'"#
         );
-        // The escapes are TOML's: the value reads back as the prompt.
-        let value: toml::Value = toml::from_str(&format!("v = {}", toml_string("a \"b\"\nc\\d\u{7}"))).unwrap();
-        assert_eq!(value["v"].as_str(), Some("a \"b\"\nc\\d\u{7}"));
+        // With one, the shell reads the override from it, as one word.
+        let file = std::path::Path::new("/data/prompts/dev-1.toml");
+        assert_eq!(
+            launch_command(Some(&role), Harness::Claude, Some("You build."), Some(file), None, Some("go"), None, q),
+            r#"codex --model 'gpt-5' -c "$(command cat '/data/prompts/dev-1.toml')" 'go'"#
+        );
+        // The override reads back as the prompt.
+        let prompt = "a \"b\"\nc\\d\u{7}  e";
+        let value: toml::Table = toml::from_str(&codex_instructions(prompt)).unwrap();
+        assert_eq!(value["developer_instructions"].as_str(), Some(prompt));
         assert_eq!(launch_command(Some(&role), Harness::Claude, None, None, None, None, None, q), "codex --model 'gpt-5'");
         let deep = AgentRole { effort: Some("xhigh".into()), ..role.clone() };
         assert_eq!(
             launch_command(Some(&deep), Harness::Claude, Some("You build."), None, None, None, None, q),
             r#"codex --model 'gpt-5' -c 'model_reasoning_effort="xhigh"' -c 'developer_instructions="You build."'"#
         );
+        // A long prompt makes no long line: a line over 1 KB typed into a
+        // shell is cut or garbled (`codex_instructions`).
+        let long = "Review every step. ".repeat(270);
+        let file = std::path::Path::new("/Users/someone/Library/Application Support/Mirador/prompts/dev-0123456789abcdef.toml");
+        let socket = Some((":workspace", std::path::Path::new("/var/folders/xy/abcdefghijklmnop/T/mira-501.sock")));
+        let line = launch_command(Some(&deep), Harness::Claude, Some(&long), Some(file), None, None, socket, q);
+        assert!(long.len() > 5000 && line.len() < 700, "{} bytes: {line}", line.len());
         // Its profile is the person's own, named as it is.
         let yolo = AgentRole { profile: Some("gpt-6".into()), ..role.clone() };
         assert_eq!(launch_command(Some(&yolo), Harness::Claude, None, None, None, Some("go"), None, q), "codex --model 'gpt-5' --profile 'gpt-6' 'go'");
