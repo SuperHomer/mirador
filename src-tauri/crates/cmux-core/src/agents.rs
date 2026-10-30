@@ -483,8 +483,9 @@ pub fn plain_harness(harness: Option<Harness>) -> Result<Harness, String> {
 /// a prompt is paragraphs, and a file keeps them — and Codex takes it as
 /// its `developer_instructions`, a TOML string whose newlines are escapes:
 /// from `prompt_file`, which then holds the whole override
-/// ([`codex_instructions`]) and is read with `$(…)` — so only a POSIX
-/// shell's (fish's since 3.4) — or inline without one.
+/// ([`codex_instructions`]) and is read with `$(…)` — so only for a shell
+/// that takes it (`pty::shell::takes_command_substitution`) — or inline
+/// without one.
 /// `settings_file` holds a Claude Code role to its MCP servers, plugins,
 /// skills and tools (`role_limits`).
 ///
@@ -642,7 +643,7 @@ fn toml_string(text: &str) -> String {
 /// a shell is not safe: a tty still in cooked mode — a shell yet to reach
 /// its prompt — holds 1024 bytes of a line and drops the rest, and a
 /// resize while a line editor works through that much input garbles it.
-/// So on a POSIX shell it goes in a file the shell reads it from
+/// So where the shell can, it goes in a file the shell reads it from
 /// ([`launch_command`]'s `prompt_file`).
 pub fn codex_instructions(prompt: &str) -> String {
     format!("developer_instructions={}", toml_string(prompt.trim()))

@@ -28,20 +28,24 @@ enum Kind {
 
 impl Kind {
     fn of(program: &str) -> Kind {
-        // Windows paths are backslash-separated whichever host parses them
-        // (this also runs in tests on macOS), so normalize before splitting.
-        let program = program.replace('\\', "/");
-        let stem = Path::new(&program)
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        match stem.as_str() {
+        match stem(program).as_str() {
             "pwsh" | "powershell" => Kind::PowerShell,
             "cmd" => Kind::Cmd,
             // Unknown shells are assumed POSIX-ish: `-c` is near-universal.
             _ => Kind::Posix,
         }
     }
+}
+
+/// The program's name, lowercased, without its directory or extension.
+fn stem(program: &str) -> String {
+    // Windows paths are backslash-separated whichever host parses them
+    // (this also runs in tests on macOS), so normalize before splitting.
+    let program = program.replace('\\', "/");
+    Path::new(&program)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
 }
 
 /// The configured shell (`shell` + `shellArgs` in mirador.json), if any.
@@ -303,13 +307,19 @@ pub fn quote_arg(arg: &str) -> String {
     quote_for(Kind::of(&program), arg)
 }
 
-/// Whether a line typed into a pane goes to a POSIX shell (fish counts):
-/// one that reads `"$(…)"` as a word.
-pub fn is_posix() -> bool {
+/// Whether the shell a line typed into a pane goes to reads `"$(…)"` as
+/// one word holding a command's output.
+pub fn takes_command_substitution() -> bool {
     let program = configured()
         .map(|(shell, _)| shell)
         .unwrap_or_else(platform_default);
-    Kind::of(&program) == Kind::Posix
+    substitutes(&program)
+}
+
+/// The shells known to: not every one [`Kind::Posix`] takes in — Nushell
+/// does not. fish does since 3.4.
+fn substitutes(program: &str) -> bool {
+    matches!(stem(program).as_str(), "sh" | "bash" | "zsh" | "dash" | "ksh" | "fish")
 }
 
 fn quote_for(kind: Kind, arg: &str) -> String {
@@ -338,6 +348,16 @@ mod tests {
         assert_eq!(Kind::of(r"C:\Windows\System32\cmd.exe"), Kind::Cmd);
         assert_eq!(Kind::of("/bin/zsh"), Kind::Posix);
         assert_eq!(Kind::of(r"C:\Program Files\Git\bin\bash.exe"), Kind::Posix);
+    }
+
+    #[test]
+    fn only_known_shells_are_handed_a_command_substitution() {
+        for shell in ["/bin/zsh", "/bin/bash", "/opt/homebrew/bin/fish", "/bin/sh", r"C:\Program Files\Git\bin\bash.exe"] {
+            assert!(substitutes(shell), "{shell}");
+        }
+        for shell in ["/opt/homebrew/bin/nu", r"C:\Program Files\PowerShell\7\pwsh.exe", r"C:\Windows\System32\cmd.exe", "/usr/local/bin/xonsh", ""] {
+            assert!(!substitutes(shell), "{shell}");
+        }
     }
 
     #[test]

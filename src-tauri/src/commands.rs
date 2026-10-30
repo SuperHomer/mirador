@@ -1778,7 +1778,7 @@ pub(crate) fn prepare_launch(
     // once the role is known to start, so a refused one leaves none.
     let prompt_file = match (&role, &prompt) {
         (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p)),
-        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Codex && cmux_core::pty::shell::is_posix() => {
+        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Codex && cmux_core::pty::shell::takes_command_substitution() => {
             Some(cmux_core::roles::write_codex_prompt(name.unwrap_or(&r.name), p))
         }
         _ => None,
