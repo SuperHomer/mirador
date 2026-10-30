@@ -57,6 +57,7 @@ permissions = [
   "allow-set-config-value",
   "allow-start-team",
   "allow-list-teams",
+  "allow-team-cost",
   "allow-team-add",
   "allow-team-restart",
   "allow-task-cards",

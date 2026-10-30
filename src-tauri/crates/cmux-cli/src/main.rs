@@ -254,6 +254,10 @@ enum TeamAction {
     Resume { name: String },
     /// Every save, team's and agent's, newest first.
     Saves,
+    /// What a team this directory sees tells its members, in estimated
+    /// tokens, and the least that costs each turn: a lower bound, with
+    /// what it leaves out.
+    Cost { team: String },
 }
 
 #[derive(Subcommand)]
@@ -847,6 +851,14 @@ fn run(cli: Cli) -> Result<(), String> {
             TeamAction::Save { name } => Request::TeamSave { name, pane_id: own_pane() },
             TeamAction::Resume { name } => Request::TeamResume { name },
             TeamAction::Saves => Request::SaveList,
+            TeamAction::Cost { team } => {
+                let resp = send_request(Request::TeamCost { team, pane_id: own_pane() })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                let weight = resp.data.and_then(|d| serde_json::from_value(d["weight"].clone()).ok());
+                return weight.map(|w| render_team_weight(&w)).ok_or_else(|| "the app sent no team weight".to_string());
+            }
         },
         Command::Task { action } => match action {
             TaskAction::List { all } => Request::TaskList { all, pane_id: own_pane() },
@@ -1407,6 +1419,43 @@ fn defined_teams(json: bool) -> Result<(), String> {
         println!("{line}");
     }
     Ok(())
+}
+
+/// A team's weight, a member per line — name, role, model, tokens, the
+/// floor per turn — then the team's, then what it leaves out.
+fn render_team_weight(w: &cmux_protocol::TeamWeight) {
+    let floor = |usd: Option<f64>| usd.map_or("no price".to_string(), |d| format!("${d:.4} a turn"));
+    for s in &w.seats {
+        let model = s.model.as_deref().unwrap_or("default");
+        println!(
+            "{:<14}  {:<16}  {:<22}  {:>8} tokens  {}",
+            s.name,
+            s.role,
+            model,
+            s.tokens,
+            floor(s.per_turn_floor_usd)
+        );
+    }
+    let unpriced = match w.unpriced {
+        0 => String::new(),
+        1 => " (1 member with no price left out)".to_string(),
+        n => format!(" ({n} members with no price left out)"),
+    };
+    println!(
+        "{:<14}  {:<16}  {:<22}  {:>8} tokens  ${:.4} a turn{unpriced}",
+        w.team,
+        format!("{} members", w.seats.len()),
+        "",
+        w.tokens,
+        w.per_turn_floor_usd
+    );
+    println!(
+        "Tokens are Mirador's prompts to each member, estimated at 4 characters a token; \
+         a turn re-sends them from the prompt cache at least. Not counted: the harness's own \
+         system prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all output. \
+         Prices as of {}.",
+        w.prices_checked
+    );
 }
 
 /// Agents as a table, one per line: pane, status, harness, name (the

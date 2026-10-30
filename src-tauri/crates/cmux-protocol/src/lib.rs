@@ -620,6 +620,13 @@ pub enum Request {
     /// Opens the team save `name` in a tab of its own, each member
     /// resuming its conversation.
     TeamResume { name: String },
+    /// What team `team` — the one `pane_id`'s directory sees — tells its
+    /// members, in tokens, and the least that costs each turn.
+    TeamCost {
+        team: String,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Saves one agent's conversation: `name` as `AgentSend` finds it,
     /// else `pane_id`'s, as `save_as` (what it goes by, by default).
     AgentSave {
@@ -1566,6 +1573,55 @@ pub struct PromptLayer {
     /// The file it comes from, or "written by Mirador".
     pub source: String,
     pub text: String,
+}
+
+/// The weight of a team's prompts: what Mirador adds to each member's
+/// context, as an estimate in tokens, and the least that costs per turn.
+///
+/// A lower bound. Not counted: the harness's own system prompt and tool
+/// definitions, CLAUDE.md, MCP servers' tool schemas, the conversation,
+/// and every output token — all re-sent or paid each turn too, and
+/// usually far more than the team's prompts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamWeight {
+    pub team: String,
+    pub seats: Vec<SeatWeight>,
+    /// Every seat's tokens.
+    pub tokens: u64,
+    /// The priced seats' floors, summed.
+    pub per_turn_floor_usd: f64,
+    /// Seats whose model has no known price, left out of the floor.
+    pub unpriced: u32,
+    /// When the prices were checked (`pricing::PRICES_CHECKED`).
+    pub prices_checked: String,
+}
+
+/// One member's share of [`TeamWeight`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatWeight {
+    /// The member's name: `dev-2` for a role counted twice.
+    pub name: String,
+    pub role: String,
+    pub harness: Harness,
+    /// As the role says it; none for the harness's default.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// What it is told, layer by layer, as the editor shows it.
+    pub layers: Vec<LayerWeight>,
+    pub tokens: u64,
+    /// Those tokens read from the prompt cache, the least a turn re-sends
+    /// them for; none when the model has no known price.
+    pub per_turn_floor_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerWeight {
+    pub kind: PromptLayerKind,
+    pub source: String,
+    pub tokens: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -25,8 +25,8 @@
 use std::path::Path;
 
 use cmux_protocol::{
-    AgentRole, AgentTeam, AgentWay, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SplitDir, TeamFields,
-    TeamMember,
+    AgentRole, AgentTeam, AgentWay, LayerWeight, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SeatWeight,
+    SplitDir, TeamFields, TeamMember, TeamWeight,
 };
 use serde::Deserialize;
 
@@ -298,6 +298,47 @@ pub fn team_way<'a>(catalog: &'a RoleCatalog, team: &AgentTeam, role: &str) -> O
     catalog.ways.iter().find(|w| &w.name == way)
 }
 
+/// What `team` tells its members, in estimated tokens: each seat's layers
+/// — its role's, then its own in the team, the very ones it starts with —
+/// and the least a turn costs to re-send them, read from the prompt cache.
+/// What else a turn sends is not counted (see [`TeamWeight`]). A seat whose
+/// model has no known price has tokens and no floor, and is counted as
+/// unpriced. Fails as starting the team would, on a role it cannot find.
+pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Result<TeamWeight, String> {
+    let all = seats(team);
+    let mut out = Vec::new();
+    for seat in &all {
+        let (role, mut layers) = crate::roles::role_layers(catalog, &seat.role)?;
+        layers.extend(seat_layers(catalog, team, seat, &all, mira));
+        let layers: Vec<LayerWeight> = layers
+            .into_iter()
+            .map(|l| LayerWeight { kind: l.kind, source: l.source, tokens: crate::pricing::estimate_tokens(&l.text) })
+            .collect();
+        let tokens = layers.iter().map(|l| l.tokens).sum();
+        let floor = role.model.as_deref().and_then(crate::pricing::rates).map(|rates| {
+            crate::pricing::cost(rates, crate::pricing::Usage { cache_read: tokens, ..Default::default() })
+        });
+        out.push(SeatWeight {
+            name: seat.name.clone(),
+            role: seat.role.clone(),
+            harness: role.harness,
+            model: role.model,
+            effort: role.effort,
+            layers,
+            tokens,
+            per_turn_floor_usd: floor,
+        });
+    }
+    Ok(TeamWeight {
+        team: team.name.clone(),
+        tokens: out.iter().map(|s| s.tokens).sum(),
+        per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).sum(),
+        unpriced: out.iter().filter(|s| s.per_turn_floor_usd.is_none()).count() as u32,
+        seats: out,
+        prices_checked: crate::pricing::PRICES_CHECKED.to_string(),
+    })
+}
+
 /// The tab a team fills: its panes, `layout` "columns" side by side, "rows"
 /// one above the other, or "grid" (the default) in as many columns as it
 /// takes to keep them square-ish — each with an equal share.
@@ -481,6 +522,81 @@ mod tests {
         let joined = crate::roles::join_layers(&layers);
         assert_eq!(joined, as_launched(&catalog, &bare, &all[0], &all));
         assert!(joined.unwrap().starts_with("# Your team: squad\n\nYou are `dev`, in team `squad`."));
+    }
+
+    #[test]
+    fn a_teams_weight_is_what_each_seat_is_told() {
+        let way = |name: &str, prompt: &str| AgentWay {
+            name: name.into(),
+            prompt: prompt.into(),
+            path: format!("/r/.mirador/ways/{name}.md"),
+            ..Default::default()
+        };
+        let catalog = RoleCatalog {
+            roles: vec![
+                // Follows the team's own way: told it once, as its role's.
+                AgentRole {
+                    prompt: Some("Plan it.".repeat(100)),
+                    model: Some("opus".into()),
+                    way: Some("our-way".into()),
+                    ..role("planner")
+                },
+                AgentRole { prompt: Some("Build it.".into()), model: Some("claude-sonnet-5-5[1m]".into()), ..role("dev") },
+                AgentRole {
+                    harness: cmux_protocol::Harness::Codex,
+                    model: Some("gpt-6-luna".into()),
+                    ..role("reviewer")
+                },
+            ],
+            ways: vec![way("our-way", &"Tests first. ".repeat(50))],
+            ..Default::default()
+        };
+        let t = team(SQUAD);
+        let w = team_weight(&catalog, &t, "mira").unwrap();
+
+        // dev twice is two seats, each counted.
+        let names: Vec<_> = w.seats.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["planner", "dev-1", "dev-2", "gate"]);
+        for s in &w.seats {
+            assert_eq!(s.tokens, s.layers.iter().map(|l| l.tokens).sum::<u64>(), "{}", s.name);
+            assert!(s.layers.iter().all(|l| l.tokens > 0), "{}", s.name);
+        }
+        assert_eq!(w.tokens, w.seats.iter().map(|s| s.tokens).sum::<u64>());
+
+        // The planner's way is the team's: there once, as its role's way,
+        // never again as the team's.
+        use PromptLayerKind::*;
+        let planner = &w.seats[0];
+        assert_eq!(planner.layers.iter().map(|l| l.kind).collect::<Vec<_>>(), [Role, RoleWay, Team, Charter]);
+        let dev = &w.seats[1];
+        assert_eq!(dev.layers.iter().map(|l| l.kind).collect::<Vec<_>>(), [Role, Team, Charter, TeamWay]);
+
+        // The floor is the tokens at the model's cache-read rate.
+        let floor = |s: &SeatWeight, rate: f64| s.tokens as f64 * rate / 1_000_000.0;
+        assert!((planner.per_turn_floor_usd.unwrap() - floor(planner, 0.20)).abs() < 1e-12);
+        assert!((dev.per_turn_floor_usd.unwrap() - floor(dev, 0.20)).abs() < 1e-12);
+        assert_eq!(planner.model.as_deref(), Some("opus"));
+
+        // Codex: tokens, no price, and counted as such.
+        let gate = &w.seats[3];
+        assert_eq!((gate.harness, gate.per_turn_floor_usd), (cmux_protocol::Harness::Codex, None));
+        assert!(gate.tokens > 0);
+        assert_eq!(w.unpriced, 1);
+        let priced: f64 = w.seats[..3].iter().map(|s| s.per_turn_floor_usd.unwrap()).sum();
+        assert!((w.per_turn_floor_usd - priced).abs() < 1e-12);
+        assert_eq!(w.prices_checked, crate::pricing::PRICES_CHECKED);
+
+        // A role with no model runs the harness's default, whose price is
+        // not known either.
+        let mut plain = catalog.clone();
+        plain.roles[1].model = None;
+        let w = team_weight(&plain, &t, "mira").unwrap();
+        assert_eq!((w.seats[1].per_turn_floor_usd, w.unpriced), (None, 3));
+
+        // A role the team names but nobody wrote: as starting would.
+        let mut missing = catalog.clone();
+        missing.roles.retain(|r| r.name != "dev");
+        assert!(team_weight(&missing, &t, "mira").unwrap_err().contains("no role `dev`"));
     }
 
     fn fields_of(t: &AgentTeam) -> TeamFields {

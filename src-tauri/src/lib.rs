@@ -380,6 +380,7 @@ pub fn run() {
             settings::set_config_value,
             teams::start_team,
             teams::list_teams,
+            teams::team_cost,
             teams::team_add,
             teams::team_restart,
             tasks::task_cards,

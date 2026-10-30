@@ -62,6 +62,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "set_config_value",
     "start_team",
     "list_teams",
+    "team_cost",
     "team_add",
     "team_restart",
     "task_cards",

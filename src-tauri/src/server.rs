@@ -368,6 +368,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
+        Request::TeamCost { team, pane_id } => Ok(json!({ "weight": crate::teams::team_cost(app.state(), team, pane_id)? })),
         Request::TaskList { all, pane_id } => Ok(json!({ "cards": crate::tasks::list(&state, all, pane_id)? })),
         Request::TaskAdd { title, to, pane_id, description } => {
             let from = sender(&state, pane_id.as_deref());
