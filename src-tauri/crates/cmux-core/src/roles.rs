@@ -596,6 +596,12 @@ pub fn write_prompt(role: &str, prompt: &str) -> Result<PathBuf, String> {
     write_launch_file(&prompts_dir(), role, "md", prompt)
 }
 
+/// Writes a Codex role's prompt as the override that sets it
+/// ([`crate::agents::codex_instructions`]), named and kept the same way.
+pub fn write_codex_prompt(role: &str, prompt: &str) -> Result<PathBuf, String> {
+    write_launch_file(&prompts_dir(), role, "toml", &crate::agents::codex_instructions(prompt))
+}
+
 /// Writes a role's Claude Code settings ([`crate::role_limits`]), named
 /// the same way. A resumed conversation does not keep them — they are the
 /// process's, not the conversation's — so a restore passes the same file

@@ -235,6 +235,11 @@ mod tests {
             resume_command(&codex, "codex --model 'gpt-6-luna' -c 'developer_instructions=\"You code.\"'"),
             Ok("codex resume 01a16910-50d2-7590-8de0-5e5e7b78b19c --model 'gpt-6-luna' -c 'developer_instructions=\"You code.\"'".into())
         );
+        // A prompt read from a file by the shell is passed again the same way.
+        assert_eq!(
+            resume_command(&codex, r#"codex --model 'gpt-6-luna' -c "$(command cat '/p/coder-1.toml')""#),
+            Ok(r#"codex resume 01a16910-50d2-7590-8de0-5e5e7b78b19c --model 'gpt-6-luna' -c "$(command cat '/p/coder-1.toml')""#.into())
+        );
         assert!(resume_command(&codex, "claude --model 'opus'").is_err(), "not the harness it saved");
         assert!(resume_command(&claude, "claudette").is_err());
         assert!(resume_command(&member("x", Harness::Aider, "a1"), "aider").unwrap_err().contains("Aider"));

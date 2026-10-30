@@ -178,6 +178,39 @@ fn the_built_in_omakase_team_starts_out_of_the_box() {
     assert!(reviewer_line.contains(" reviewer ") && !reviewer_line.contains("omakase-reviewer"), "{listed}");
 }
 
+/// A Codex member's prompt reaches it whole however long it is. Typed
+/// inline, its launch line was as long as its prompt, and over 1 KB a line
+/// typed into a shell is not safe: one still starting, its tty cooked,
+/// keeps 1024 bytes of it — here, behind a slow `.zshrc` — and one resized
+/// while its line editor works through it garbles it.
+#[test]
+fn a_codex_member_gets_its_whole_long_prompt() {
+    e2e!();
+    let mut sb = Sandbox::new("longprompt");
+    std::fs::write(sb.home.join(".zshrc"), "echo starting; sleep 1\n").unwrap();
+    let prompt = "Review every step against the plan, then say APPROVE or CHANGES. ".repeat(80);
+    sb.write(".mirador/roles/coder.md", &format!("---\nharness: codex\nmodel: gpt-6-luna\n---\n{prompt}\n"));
+    sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: coder\n    lead: true\n---\nShip small.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first) });
+    let pane = sb.wait_for("the coder", LONG, || sb.member("coder"))["pane"].as_str().unwrap().to_string();
+    let instructions = |args: &[String]| {
+        let config: toml::Table = toml::from_str(&cmux_e2e::flag(args, "-c").expect("a -c")).unwrap();
+        config["developer_instructions"].as_str().unwrap().to_string()
+    };
+    let started = instructions(&sb.nth_start(&pane, 1));
+    assert!(started.starts_with(prompt.trim()) && started.ends_with("Ship small."), "{started}");
+    assert!(started.len() > 5000);
+
+    // Started again after it exits, from the same file.
+    sb.wait_for("the coder running", LONG, || state(&sb, "coder").filter(|s| s == "running"));
+    sb.type_into(&pane, "/exit\r");
+    sb.wait_for("the coder exited", LONG, || state(&sb, "coder").filter(|s| s == "exited"));
+    sb.call(Request::TeamRestart { members: vec!["coder".into()], pane_id: Some(pane.clone()) });
+    assert_eq!(instructions(&sb.nth_start(&pane, 2)), started);
+}
+
 /// Clearing types each agent's own new-conversation command into it, as a
 /// person typing /clear does: Claude Code's `/clear`, Codex's `/new`. A
 /// team is cleared teammates first and the lead last, and one waiting on

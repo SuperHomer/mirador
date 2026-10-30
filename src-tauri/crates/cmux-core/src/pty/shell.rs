@@ -303,6 +303,15 @@ pub fn quote_arg(arg: &str) -> String {
     quote_for(Kind::of(&program), arg)
 }
 
+/// Whether a line typed into a pane goes to a POSIX shell (fish counts):
+/// one that reads `"$(…)"` as a word.
+pub fn is_posix() -> bool {
+    let program = configured()
+        .map(|(shell, _)| shell)
+        .unwrap_or_else(platform_default);
+    Kind::of(&program) == Kind::Posix
+}
+
 fn quote_for(kind: Kind, arg: &str) -> String {
     match kind {
         // Inside single quotes nothing is special but the quote itself,
