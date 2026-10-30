@@ -23,6 +23,7 @@ import { RolePage } from "./RolePage";
 import { roleFieldsOf } from "./RoleForm";
 import { WayPage } from "./WayPage";
 import { TeamPage } from "./TeamPage";
+import { useTeamWeight } from "./teamWeight";
 import { Confirm, RestartConfirm, restart, teamRuns } from "./teamRestart";
 import { useDiskCheck } from "./useDiskCheck";
 
@@ -188,6 +189,9 @@ export const AgentEditor = memo(function AgentEditor({
   // Bumped to drop the inspector's role edits: it starts again.
   const [roleEpoch, setRoleEpoch] = useState(0);
   const charterRef = useRef<HTMLTextAreaElement>(null);
+  // What the open team, as saved, tells its members; none for one not
+  // saved yet.
+  const weight = useTeamWeight(paneId, sel?.kind === "team" && !isNew ? sel.name : null, cat);
 
   const formMode = form !== null && !raw;
   const dirty = formMode ? JSON.stringify(form) !== formSaved : text !== saved;
@@ -830,6 +834,8 @@ export const AgentEditor = memo(function AgentEditor({
                         selected={member}
                         onSelect={selectMember}
                         charterRef={charterRef}
+                        weight={weight}
+                        dirty={dirty}
                       />
                       {member !== null && form!.members[member] ? (
                         <MemberInspector
@@ -846,6 +852,7 @@ export const AgentEditor = memo(function AgentEditor({
                           index={member}
                           teamReadOnly={readOnly}
                           teamDirty={dirty}
+                          weight={weight.weight}
                           onCatalog={setCat}
                           onRoleDirty={setRoleDirty}
                           onRemove={() => removeMember(member)}

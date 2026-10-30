@@ -6,6 +6,7 @@ import {
   RoleFields,
   RoleSource,
   TeamFields,
+  TeamWeight,
   agentEditorTold,
   agentEditorUsedBy,
   agentFileRead,
@@ -15,6 +16,7 @@ import { useWorkspaceStore } from "../state/workspaceStore";
 import { RoleFieldsEditor, RolePromptEditor, roleFieldsOf } from "./RoleForm";
 import { Confirm, RestartConfirm, restart, teamRuns } from "./teamRestart";
 import { useDiskCheck } from "./useDiskCheck";
+import { tokensLabel } from "./teamWeight";
 
 type Props = {
   paneId: string;
@@ -28,6 +30,8 @@ type Props = {
   teamReadOnly: boolean;
   /** The team form has unsaved edits. */
   teamDirty: boolean;
+  /** The team's weight as saved, for each layer's tokens. */
+  weight: TeamWeight | null;
   onCatalog: (cat: EditorCatalog) => void;
   onRoleDirty: (dirty: boolean) => void;
   /** Asks the editor to remove this member: it asks first when the
@@ -110,8 +114,10 @@ export function MemberInspector(props: Props) {
       .catch(() => setOthers([]));
   }, [refreshed, m.role]);
 
-  // What the member's first seat is told, from the saved files.
+  // What the member's first seat is told, from the saved files, and its
+  // weight: the same layers, in the same order.
   const seats = seatsOf(m.name ?? m.role, m.count);
+  const seatWeight = props.weight?.seats.find((s) => s.name === seats[0]);
   useEffect(() => {
     if (tab !== "told") return;
     agentEditorTold(paneId, team, seats[0])
@@ -327,6 +333,9 @@ export function MemberInspector(props: Props) {
                       <span className="told-layer-source" title={l.source}>
                         {l.source}
                       </span>
+                      {seatWeight?.layers[i] && (
+                        <span className="told-layer-tokens">{tokensLabel(seatWeight.layers[i].tokens)}</span>
+                      )}
                       {edit && (
                         <button className="told-layer-edit" onClick={edit}>
                           Edit
@@ -342,10 +351,12 @@ export function MemberInspector(props: Props) {
             )}
             {told?.prompt && (
               <div className="told-foot">
-                <span title="An estimate: about four characters a token">
-                  ≈ {Math.round(told.prompt.length / 4)} tokens
-                </span>
-                {" · "}
+                {seatWeight && (
+                  <>
+                    <span title="An estimate: about four characters a token">{tokensLabel(seatWeight.tokens)}</span>
+                    {" · "}
+                  </>
+                )}
                 <button
                   onClick={() =>
                     void navigator.clipboard

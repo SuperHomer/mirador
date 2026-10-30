@@ -5670,6 +5670,43 @@ button.tb-line-row:hover {
   color: var(--status-needs-you);
 }
 
+/* What the team's prompts weigh: a figure, a floor, and what they leave
+   out. */
+.team-weight {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.team-weight-figures {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12.5px;
+}
+
+.team-weight-tokens {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.team-weight-floor {
+  color: var(--subtext);
+}
+
+.team-weight-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.team-weight-error {
+  margin: 0;
+  color: var(--status-needs-you);
+  font-size: 11.5px;
+}
+
 .team-add {
   padding: 6px;
   border: 1px dashed var(--overlay);
@@ -6252,6 +6289,11 @@ button.tb-line-row:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--subtext);
+}
+
+.told-layer-tokens {
+  flex-shrink: 0;
+  color: var(--muted);
 }
 
 .told-layer-edit {
