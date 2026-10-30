@@ -5,30 +5,34 @@ import { EditorCatalog, SeatWeight, TeamWeight, teamCost } from "../bindings";
  * The weight of team `team` as its files are saved (`team_cost`), read
  * again whenever the editor's catalog is — after a save, a refresh, or
  * coming back to the pane. Null until it comes; an error for a team
- * that cannot start.
+ * that cannot start. An answer is kept with the team and pane it was
+ * asked for, and given only while those are still the ones shown: going
+ * from one team to another never shows the first one's weight on the
+ * second's page while the second's is on its way.
  */
 export function useTeamWeight(paneId: string, team: string | null, cat: EditorCatalog | null) {
-  const [weight, setWeight] = useState<TeamWeight | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [answer, setAnswer] = useState<{
+    paneId: string;
+    team: string;
+    weight: TeamWeight | null;
+    error: string | null;
+  } | null>(null);
   useEffect(() => {
     if (!team) return;
     let stale = false;
     teamCost(team, paneId)
-      .then((w) => {
-        if (stale) return;
-        setWeight(w);
-        setError(null);
+      .then((weight) => {
+        if (!stale) setAnswer({ paneId, team, weight, error: null });
       })
       .catch((e: unknown) => {
-        if (stale) return;
-        setWeight(null);
-        setError(String(e));
+        if (!stale) setAnswer({ paneId, team, weight: null, error: String(e) });
       });
     return () => {
       stale = true;
     };
   }, [paneId, team, cat]);
-  return team ? { weight, error } : { weight: null, error: null };
+  const current = answer && team && answer.team === team && answer.paneId === paneId ? answer : null;
+  return { weight: current?.weight ?? null, error: current?.error ?? null };
 }
 
 /** The seats of a member of `weight`, as `teams::seats` names them:
