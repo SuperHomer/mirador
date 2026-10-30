@@ -265,8 +265,9 @@ export function SplitLayer({
                 <BrowserPane
                   paneId={p.paneId}
                   url={browser.url}
-                  focused={focused}
+                  focused={focused && !walled}
                   board={board}
+                  walled={walled}
                 />
               ) : graph ? (
                 <GraphPane

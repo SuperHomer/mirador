@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
   agentLabel,
@@ -153,6 +153,13 @@ export const AgentWall = memo(function AgentWall({
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+  // The menu drops over the tiles, where a browser tile's page, a native
+  // webview, would cover it: the page is hidden while it is open (`App`).
+  useEffect(() => {
+    if (!menuOpen) return;
+    useUiStore.getState().setWallMenuOpen(true);
+    return () => useUiStore.getState().setWallMenuOpen(false);
+  }, [menuOpen]);
   const now = useNow(visible);
 
   // The tab's agents in team order, which never moves with status.

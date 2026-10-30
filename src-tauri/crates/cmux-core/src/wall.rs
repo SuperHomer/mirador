@@ -10,7 +10,7 @@
 //!
 //! Beside the agents the wall has the tab's **Tools**: its other panes
 //! that do work — terminals, browsers, diffs, graphs — in pane order. The
-//! Grid's pages hold the agents first, then the tools the wall can draw;
+//! Grid's pages hold the agents first, then the tools;
 //! urgency is the agents' alone, so Focus never picks a tool by itself.
 
 use std::collections::HashMap;
@@ -73,12 +73,6 @@ pub fn tool_kind(meta: Option<&PaneMeta>) -> Option<ToolKind> {
     }
 }
 
-/// Whether the wall draws a tool of this kind as a tile: terminals,
-/// diffs and graphs so far, not a browser yet.
-pub fn on_wall(kind: ToolKind) -> bool {
-    matches!(kind, ToolKind::Terminal | ToolKind::Diff | ToolKind::Graph)
-}
-
 /// `panes` (one tab's, in pane order) that are tools, agents among them:
 /// which panes are agents is known only once the app adds them, and
 /// `fill` drops those.
@@ -94,14 +88,14 @@ pub fn tools(panes: &[String], meta: &HashMap<String, PaneMeta>) -> Vec<WallTool
 
 /// Fills every tab's `wall_urgency` and `wall_pages` from the snapshot's
 /// agents, which come in tab and pane order, and takes them out of its
-/// `wall_tools`. The pages hold the agents, then the tools on the wall.
+/// `wall_tools`. The pages hold the agents, then the tools.
 pub fn fill(snapshot: &mut WorkspaceSnapshot, per_tab: u8) {
     for tab in &mut snapshot.tabs {
         let agents: Vec<&AgentInfo> = snapshot.agents.iter().filter(|a| a.tab_id == tab.id).collect();
         tab.wall_tools.retain(|t| !agents.iter().any(|a| a.pane_id == t.pane_id));
         let mut order = team_order(&agents, tab.team.as_ref());
         tab.wall_urgency = urgency(&agents, &order);
-        order.extend(tab.wall_tools.iter().filter(|t| on_wall(t.kind)).map(|t| t.pane_id.clone()));
+        order.extend(tab.wall_tools.iter().map(|t| t.pane_id.clone()));
         tab.wall_pages = pages(&order, per_tab as usize);
     }
 }
@@ -315,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn only_tools_the_wall_draws_take_a_place_on_its_pages() {
+    fn every_kind_of_tool_follows_the_agents_in_pane_order() {
         let meta = HashMap::from([
             ("1".to_string(), PaneMeta { browser_url: Some("https://example.com".into()), ..Default::default() }),
             ("2".to_string(), PaneMeta { graph_repo: Some("/r".into()), ..Default::default() }),
@@ -323,14 +317,13 @@ mod tests {
         ]);
         let snapshot = filled(5, 1, &meta, 6);
         let tab = &snapshot.tabs[0];
-        // The browser is still a tool in the sidebar, but takes no slot on
-        // the wall; the graph, the diff and the shell follow the agent.
         assert_eq!(tab.wall_tools.len(), 4);
         let of = |kind| tab.wall_tools.iter().find(|t| t.kind == kind).unwrap().pane_id.clone();
         assert_eq!(
             tab.wall_pages,
             vec![vec![
                 snapshot.agents[0].pane_id.clone(),
+                of(ToolKind::Browser),
                 of(ToolKind::Graph),
                 of(ToolKind::Diff),
                 of(ToolKind::Terminal),

@@ -361,7 +361,7 @@ function FocusedToolTile({
               {!shown && <span className="wall-term-missing">shown elsewhere</span>}
             </>
           ) : (
-            <ToolView tool={tool} focused={focused} />
+            <ToolView tool={tool} focused={focused} visible={visible} />
           )}
         </div>
       </div>

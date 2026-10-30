@@ -28,6 +28,13 @@ interface UiStore {
   gridPage: Record<string, number>;
   setGridPage: (tabId: string, page: number) => void;
   setBoardMenuOpen: (open: boolean) => void;
+  /** Browser panes a wall's tile draws now: the only place a walled
+   *  tab's pages are shown (see `App`). Not persisted. */
+  wallBrowsers: string[];
+  setWallBrowser: (paneId: string, shown: boolean) => void;
+  /** A wall's "+ Agent" menu is open, over its tiles. */
+  wallMenuOpen: boolean;
+  setWallMenuOpen: (open: boolean) => void;
   togglePalette: () => void;
   /** Opens the palette on one of its steps. */
   openPalette: (step: string) => void;
@@ -61,6 +68,14 @@ export const useUiStore = create<UiStore>((set) => ({
   setGridPage: (tabId, page) =>
     set((s) => ({ gridPage: { ...s.gridPage, [tabId]: page } })),
   setBoardMenuOpen: (boardMenuOpen) => set({ boardMenuOpen }),
+  wallBrowsers: [],
+  setWallBrowser: (paneId, shown) =>
+    set((s) => {
+      const rest = s.wallBrowsers.filter((p) => p !== paneId);
+      return { wallBrowsers: shown ? [...rest, paneId] : rest };
+    }),
+  wallMenuOpen: false,
+  setWallMenuOpen: (wallMenuOpen) => set({ wallMenuOpen }),
   togglePalette: () =>
     set((s) => ({ paletteOpen: !s.paletteOpen, paletteStep: null, notificationsOpen: false })),
   openPalette: (step) =>

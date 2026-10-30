@@ -312,7 +312,7 @@ function ToolTile({
               {!shown && <span className="wall-term-missing">shown elsewhere</span>}
             </>
           ) : (
-            <ToolView tool={tool} focused={current && tab.focusedPane === pane} />
+            <ToolView tool={tool} focused={current && tab.focusedPane === pane} visible={visible} />
           )}
         </div>
       </div>
