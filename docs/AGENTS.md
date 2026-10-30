@@ -415,21 +415,52 @@ least a turn costs to send them again, read from the prompt cache at the
 model's cache-read price. It is a lower bound: the agent's own system
 prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all
 output are not counted. A team that cannot start is refused, as `team
-start` refuses it. `--json` (`team_cost` from the app):
+start` refuses it. `--json` prints the answer as the socket gives it, the
+weight under `weight` (`team_cost` from the app gives the weight itself);
+here for omakase, its members trimmed to the first:
 
 ```json
 {
-  "team": "omakase",
-  "seats": [
-    {
-      "name": "planner", "role": "omakase-planner", "harness": "claude",
-      "model": "claude-opus-5-5", "effort": null,
-      "layers": [{ "kind": "role", "source": "builtin:roles/omakase-planner.md", "tokens": 460 }, …],
-      "tokens": 1104, "perTurnFloorUsd": 0.00022
-    },
-    { "name": "reviewer", "harness": "codex", "model": "gpt-6-luna", "tokens": 900, "perTurnFloorUsd": null, … }
-  ],
-  "tokens": 2829, "perTurnFloorUsd": 0.00039, "unpriced": 1, "pricesChecked": "2026-10-06"
+  "weight": {
+    "team": "omakase",
+    "seats": [
+      {
+        "name": "planner",
+        "role": "omakase-planner",
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": null,
+        "layers": [
+          {
+            "kind": "role",
+            "source": "builtin:roles/omakase-planner.md",
+            "tokens": 460
+          },
+          {
+            "kind": "team",
+            "source": "written by Mirador",
+            "tokens": 204
+          },
+          {
+            "kind": "charter",
+            "source": "builtin:teams/omakase.md",
+            "tokens": 97
+          },
+          {
+            "kind": "teamWay",
+            "source": "builtin:ways/omakase.md",
+            "tokens": 343
+          }
+        ],
+        "tokens": 1104,
+        "perTurnFloorUsd": 0.0002208
+      }
+    ],
+    "tokens": 2829,
+    "perTurnFloorUsd": 0.0003858,
+    "unpriced": 1,
+    "pricesChecked": "2026-10-06"
+  }
 }
 ```
 
