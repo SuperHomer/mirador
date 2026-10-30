@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { AgentStatus } from "../bindings";
 
-/** All of a wall's agents, or those in one status. */
-export type WallFilter = "all" | AgentStatus;
+/** All of a wall's tiles, the agents in one status, or its tools. */
+export type WallFilter = "all" | AgentStatus | "tools";
 
 interface UiStore {
   paletteOpen: boolean;

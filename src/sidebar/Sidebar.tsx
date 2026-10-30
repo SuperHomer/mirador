@@ -6,7 +6,6 @@ import {
   HARNESS_LABEL,
   agentLabel,
   TabSnapshot,
-  ToolKind,
   WallTool,
   focusPane,
   newTab,
@@ -27,6 +26,7 @@ import { STATUS_LABEL, StatusMark, StatusPips } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
 import { AskingLine } from "../agents/AskingLine";
 import { showOnWall } from "../agents/showOnWall";
+import { ToolMark } from "../agents/ToolMark";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
@@ -213,49 +213,6 @@ function HarnessMark({ harness }: { harness: Harness }) {
   }
 }
 
-/** What a tool is, in the same neutral line as the harness marks. */
-function ToolMark({ kind }: { kind: ToolKind }) {
-  const props = {
-    viewBox: "0 0 16 16",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.5,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-  };
-  switch (kind) {
-    case "terminal":
-      return (
-        <svg {...props}>
-          <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
-          <path d="M4.5 6l2 2-2 2M8.5 10.5h3" />
-        </svg>
-      );
-    case "browser":
-      return (
-        <svg {...props}>
-          <circle cx="8" cy="8" r="6.5" />
-          <path d="M1.5 8h13M8 1.5c-2.2 2.2-2.2 10.8 0 13M8 1.5c2.2 2.2 2.2 10.8 0 13" />
-        </svg>
-      );
-    case "diff":
-      return (
-        <svg {...props}>
-          <path d="M5 2v6M2 5h6M2 12.5h6M10.5 3.5h3.5v9" />
-        </svg>
-      );
-    case "graph":
-      return (
-        <svg {...props}>
-          <circle cx="4" cy="3.5" r="1.5" />
-          <circle cx="4" cy="12.5" r="1.5" />
-          <circle cx="12" cy="6" r="1.5" />
-          <path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5" />
-        </svg>
-      );
-  }
-}
-
 /** The current tab's agents, then its tools, under its row. Mounted only
  *  while there are some to show, and the clock ticks only for agents. */
 function AgentTree({
@@ -270,6 +227,7 @@ function AgentTree({
   const now = useNow(agents.length > 0);
   const click = useConfigStore((s) => s.config?.agentClick ?? "wall");
   const pinned = useUiStore((s) => s.pinned[tab.id]);
+  const onWall = tab.wallPages.flat();
   return (
     <div className="agent-tree">
       {agents.map((agent) => (
@@ -287,21 +245,46 @@ function AgentTree({
         />
       ))}
       {tab.wallTools.map((tool) => (
-        <ToolRow key={tool.paneId} tool={tool} />
+        <ToolRow
+          key={tool.paneId}
+          tabId={tab.id}
+          tool={tool}
+          click={onWall.includes(tool.paneId) ? click : null}
+          shown={
+            click === "wall"
+              ? tab.wall && pinned === tool.paneId
+              : tab.zoomedPane === tool.paneId
+          }
+        />
       ))}
     </div>
   );
 }
 
 /** One tool: what it is and its title, with no status — a tool is not
- *  waiting on anyone. Clicking focuses its pane. */
-function ToolRow({ tool }: { tool: WallTool }) {
+ *  waiting on anyone. Clicking one the wall draws does what clicking an
+ *  agent does; any other, it focuses its pane. */
+function ToolRow({
+  tabId,
+  tool,
+  click,
+  shown,
+}: {
+  tabId: string;
+  tool: WallTool;
+  /** What a click does, as for an agent; null when it is not on the wall. */
+  click: "wall" | "pane" | null;
+  /** It is what the tab shows: pinned on the wall, or the zoomed pane. */
+  shown: boolean;
+}) {
+  const open = () => {
+    if (click === "wall") showOnWall(tabId, tool.paneId);
+    else if (click === "pane") void zoomPane(tool.paneId, true);
+    else void focusPane(tool.paneId);
+  };
+  const classes = ["agent-row", "tool-row", click && shown && (click === "wall" ? "pinned" : "active")];
   return (
-    <div
-      className="agent-row tool-row"
-      onClick={() => void focusPane(tool.paneId)}
-      title={tool.title}
-    >
+    <div className={classes.filter(Boolean).join(" ")} onClick={open} title={tool.title}>
       <div className="agent-line">
         <span className="agent-mark tool-mark">
           <ToolMark kind={tool.kind} />

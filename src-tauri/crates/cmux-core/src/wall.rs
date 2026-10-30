@@ -9,7 +9,9 @@
 //! working, else the idle, then the rest, each group in team order.
 //!
 //! Beside the agents the wall has the tab's **Tools**: its other panes
-//! that do work — terminals, browsers, diffs, graphs — in pane order.
+//! that do work — terminals, browsers, diffs, graphs — in pane order. The
+//! Grid's pages hold the agents first, then the tools the wall can draw;
+//! urgency is the agents' alone, so Focus never picks a tool by itself.
 
 use std::collections::HashMap;
 
@@ -71,6 +73,12 @@ pub fn tool_kind(meta: Option<&PaneMeta>) -> Option<ToolKind> {
     }
 }
 
+/// Whether the wall draws a tool of this kind as a tile. Only terminals
+/// so far: a browser, a diff or a graph is not one yet.
+pub fn on_wall(kind: ToolKind) -> bool {
+    kind == ToolKind::Terminal
+}
+
 /// `panes` (one tab's, in pane order) that are tools, agents among them:
 /// which panes are agents is known only once the app adds them, and
 /// `fill` drops those.
@@ -86,14 +94,15 @@ pub fn tools(panes: &[String], meta: &HashMap<String, PaneMeta>) -> Vec<WallTool
 
 /// Fills every tab's `wall_urgency` and `wall_pages` from the snapshot's
 /// agents, which come in tab and pane order, and takes them out of its
-/// `wall_tools`.
+/// `wall_tools`. The pages hold the agents, then the tools on the wall.
 pub fn fill(snapshot: &mut WorkspaceSnapshot, per_tab: u8) {
     for tab in &mut snapshot.tabs {
         let agents: Vec<&AgentInfo> = snapshot.agents.iter().filter(|a| a.tab_id == tab.id).collect();
-        let order = team_order(&agents, tab.team.as_ref());
-        tab.wall_urgency = urgency(&agents, &order);
-        tab.wall_pages = pages(&order, per_tab as usize);
         tab.wall_tools.retain(|t| !agents.iter().any(|a| a.pane_id == t.pane_id));
+        let mut order = team_order(&agents, tab.team.as_ref());
+        tab.wall_urgency = urgency(&agents, &order);
+        order.extend(tab.wall_tools.iter().filter(|t| on_wall(t.kind)).map(|t| t.pane_id.clone()));
+        tab.wall_pages = pages(&order, per_tab as usize);
     }
 }
 
@@ -190,6 +199,8 @@ mod tests {
         let mut snapshot = crate::state::Workspace::default().snapshot(&std::collections::HashMap::new());
         snapshot.tabs[0].id = "t".into();
         snapshot.tabs[0].team = Some(team(&["b"]));
+        // Its own pane, a shell, is not one of these agents.
+        snapshot.tabs[0].wall_tools.clear();
         let mut other = agent("x", Some(AgentStatus::NeedsYou));
         other.tab_id = "elsewhere".into();
         snapshot.agents = vec![agent("a", Some(AgentStatus::Working)), agent("b", Some(AgentStatus::Idle)), other];
@@ -256,5 +267,64 @@ mod tests {
         snapshot.agents.push(alone);
         fill(&mut snapshot, 4);
         assert!(snapshot.tabs[0].wall_tools.is_empty());
+    }
+
+    /// A tab of `panes`, the first `agents` of them agents, with `meta`.
+    fn filled(panes: usize, agents: usize, meta: &HashMap<String, PaneMeta>, per_tab: u8) -> WorkspaceSnapshot {
+        let mut ws = crate::state::Workspace::default();
+        let mut last = ws.focused_pane();
+        let mut ids = vec![last.clone()];
+        for _ in 1..panes {
+            last = ws.split_pane(&last, cmux_protocol::SplitDir::Row).unwrap();
+            ids.push(last.clone());
+        }
+        let meta: HashMap<String, PaneMeta> =
+            meta.iter().map(|(k, m)| (ids[k.parse::<usize>().unwrap()].clone(), m.clone())).collect();
+        let mut snapshot = ws.snapshot(&meta);
+        let tab = snapshot.tabs[0].id.clone();
+        snapshot.agents = ids[..agents]
+            .iter()
+            .map(|p| AgentInfo { tab_id: tab.clone(), ..agent(p, Some(AgentStatus::Idle)) })
+            .collect();
+        fill(&mut snapshot, per_tab);
+        snapshot
+    }
+
+    #[test]
+    fn terminal_tools_follow_the_agents_on_the_pages() {
+        let snapshot = filled(5, 3, &HashMap::new(), 4);
+        let tab = &snapshot.tabs[0];
+        let agents: Vec<String> = snapshot.agents.iter().map(|a| a.pane_id.clone()).collect();
+        let tools: Vec<String> = tab.wall_tools.iter().map(|t| t.pane_id.clone()).collect();
+        // Three agents and a tool on the first page, the other tool after.
+        let mut first = agents.clone();
+        first.push(tools[0].clone());
+        assert_eq!(tab.wall_pages, vec![first, vec![tools[1].clone()]]);
+        // Focus follows the agents only.
+        assert_eq!(tab.wall_urgency.len(), 3);
+        assert!(tab.wall_urgency.iter().all(|p| agents.contains(p)));
+    }
+
+    #[test]
+    fn a_tab_of_tools_alone_has_pages() {
+        let snapshot = filled(2, 0, &HashMap::new(), 4);
+        let tab = &snapshot.tabs[0];
+        assert_eq!(tab.wall_pages.len(), 1);
+        assert_eq!(tab.wall_pages[0].len(), 2);
+        assert!(tab.wall_urgency.is_empty());
+    }
+
+    #[test]
+    fn only_tools_the_wall_draws_take_a_place_on_its_pages() {
+        let meta = HashMap::from([
+            ("1".to_string(), PaneMeta { browser_url: Some("https://example.com".into()), ..Default::default() }),
+            ("2".to_string(), PaneMeta { graph_repo: Some("/r".into()), ..Default::default() }),
+        ]);
+        let snapshot = filled(4, 1, &meta, 4);
+        let tab = &snapshot.tabs[0];
+        // Still Tools in the sidebar, but no empty slot on the wall.
+        assert_eq!(tab.wall_tools.len(), 3);
+        let terminal = tab.wall_tools.iter().find(|t| t.kind == ToolKind::Terminal).unwrap();
+        assert_eq!(tab.wall_pages, vec![vec![snapshot.agents[0].pane_id.clone(), terminal.pane_id.clone()]]);
     }
 }

@@ -6,6 +6,7 @@ import {
   markPaneRead,
   setWallMode,
   TabSnapshot,
+  WallTool,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
 import { useUiStore, WallFilter } from "../state/uiStore";
@@ -18,6 +19,7 @@ import { elapsed } from "./time";
 import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
 import { SendNextTask } from "./SendNextTask";
+import { ToolMark } from "./ToolMark";
 
 /** Columns and rows of a page, fixed by its size so tiles keep theirs as
  *  agents come and go. */
@@ -25,12 +27,14 @@ const SHAPE: Record<number, string> = { 4: "per-4", 6: "per-6", 9: "per-9" };
 
 /**
  * Grid (20a–20c): the tab's agents in pages of `agentsPerTab`, in team
- * order (`wallPages`, from Rust), every terminal live and full size.
+ * order, then its tools (`wallPages`, from Rust), every terminal live and
+ * full size.
  * A strip of page tabs appears once there is more than one page.
  */
 export function GridLayout({
   tab,
   agents,
+  tools,
   filter,
   unread,
   visible,
@@ -42,6 +46,7 @@ export function GridLayout({
 }: {
   tab: TabSnapshot;
   agents: AgentInfo[];
+  tools: WallTool[];
   filter: WallFilter;
   unread: string[];
   visible: boolean;
@@ -55,7 +60,10 @@ export function GridLayout({
   now: number;
 }) {
   const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
-  const byPane = new Map(agents.map((a) => [a.paneId, a]));
+  const byPane = new Map<string, AgentInfo | WallTool>([
+    ...agents.map((a) => [a.paneId, a] as const),
+    ...tools.map((t) => [t.paneId, t] as const),
+  ]);
   const pages = tab.wallPages.map((page) => page.flatMap((p) => byPane.get(p) ?? []));
   const stored = useUiStore((s) => s.gridPage[tab.id] ?? 0);
   const page = Math.max(0, Math.min(stored, pages.length - 1));
@@ -69,7 +77,10 @@ export function GridLayout({
   // again: a page keeps its agents, and the strip its tabs, whatever the
   // chips say. An agent with no known status is only under All.
   const onPage = pages[page] ?? [];
-  const tiles = filter === "all" ? onPage : onPage.filter((a) => a.status === filter);
+  const tiles =
+    filter === "all"
+      ? onPage
+      : onPage.filter((t) => ("kind" in t ? filter === "tools" : t.status === filter));
   const free = page === pages.length - 1 ? perTab - onPage.length : 0;
   // Where the free space is drawn: one cell cannot follow an L, so it takes
   // the empty rows below the tiles if there are any, else what is left of
@@ -95,9 +106,11 @@ export function GridLayout({
 
   return (
     <div className="grid-layout" ref={gridRef}>
-      {agents.length > perTab && (
+      {pages.length > 1 && (
         <div className="grid-strip">
-          {pages.map((agentsOn, i) => {
+          {pages.map((onIt, i) => {
+            // A pip per agent; a tool has no status to show.
+            const agentsOn = onIt.filter((t): t is AgentInfo => !("kind" in t));
             const asking = agentsOn.filter((a) => a.status === "needsYou").length;
             const classes = ["grid-page", i === page ? "active" : asking > 0 && "asking"];
             return (
@@ -117,20 +130,31 @@ export function GridLayout({
         </div>
       )}
       <div className={`grid-page-tiles ${SHAPE[perTab] ?? "per-4"}`}>
-        {tiles.map((a) => (
-          <GridTile
-            key={a.paneId}
-            tab={tab}
-            agent={a}
-            unread={unread.includes(a.paneId)}
-            visible={visible}
-            current={current}
-            canSend={sendable.has(a.paneId)}
-            now={now}
-          />
-        ))}
+        {tiles.map((t) =>
+          "kind" in t ? (
+            <ToolTile
+              key={t.paneId}
+              tab={tab}
+              tool={t}
+              unread={unread.includes(t.paneId)}
+              visible={visible}
+              current={current}
+            />
+          ) : (
+            <GridTile
+              key={t.paneId}
+              tab={tab}
+              agent={t}
+              unread={unread.includes(t.paneId)}
+              visible={visible}
+              current={current}
+              canSend={sendable.has(t.paneId)}
+              now={now}
+            />
+          ),
+        )}
         {tiles.length === 0 && (
-          <div className="grid-space rows-all">No agents on this page match this filter.</div>
+          <div className="grid-space rows-all">Nothing on this page matches this filter.</div>
         )}
         {tiles.length > 0 && free > 0 && (
           <div className={`grid-space ${space}`}>
@@ -230,6 +254,59 @@ function GridTile({
         onToggleSheet={() => setSheetOpen(!sheetOpen)}
         compact
       />
+    </div>
+  );
+}
+
+/** One tool of the grid: what it is, and its live terminal at full size.
+ *  No status: a tool is not waiting on anyone. */
+function ToolTile({
+  tab,
+  tool,
+  unread,
+  visible,
+  current,
+}: {
+  tab: TabSnapshot;
+  tool: WallTool;
+  unread: boolean;
+  visible: boolean;
+  current: boolean;
+}) {
+  const pane = tool.paneId;
+  const { hostRef, shown } = useLentTerminal(pane, visible, { fit: true });
+  const focus = () => {
+    useUiStore.getState().pinAgent(tab.id, pane);
+    void setWallMode(pane, "focus");
+  };
+  return (
+    <div className={`grid-tile tool${unread ? " unread" : ""}`}>
+      <div className="grid-tile-head">
+        <div className="grid-tile-line">
+          <span className="tool-mark">
+            <ToolMark kind={tool.kind} />
+          </span>
+          <span className="grid-tile-name">{tool.title}</span>
+          <button className="grid-tile-focus" title="Show this tool large, in Focus" onClick={focus}>
+            Focus ›
+          </button>
+        </div>
+      </div>
+      <div className="grid-tile-body">
+        <div
+          className="grid-tile-term"
+          data-pane={pane}
+          onMouseDown={() => {
+            if (unread) void markPaneRead(pane);
+            if (!current) void focusPane(pane);
+          }}
+        >
+          {/* The terminal's element is appended here by `lendTerminal`, so
+              React must own nothing inside it. */}
+          <div className="grid-tile-host" ref={hostRef} />
+          {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+        </div>
+      </div>
     </div>
   );
 }
