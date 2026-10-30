@@ -88,6 +88,10 @@ pub struct TabSnapshot {
     /// `agentsPerTab`; none without agents.
     #[serde(default)]
     pub wall_pages: Vec<Vec<String>>,
+    /// Its panes that are not agents — terminals, browsers, diffs and
+    /// graphs — in pane order: the wall's Tools.
+    #[serde(default)]
+    pub wall_tools: Vec<WallTool>,
     /// Where the tab's frame sits on the board, and its size (derived from
     /// its cards). Card positions are relative to the frame's `x`, `y`.
     #[serde(default)]
@@ -95,6 +99,26 @@ pub struct TabSnapshot {
     /// Every pane's card on the board, in the tab's pane order.
     #[serde(default)]
     pub cards: Vec<CardRect>,
+}
+
+/// A pane of a tab that is not an agent but is worth a place beside them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WallTool {
+    pub pane_id: String,
+    pub kind: ToolKind,
+    /// What the pane is, in a few words, as its card on the board says.
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolKind {
+    /// A shell, a command pane or an SSH pane.
+    Terminal,
+    Browser,
+    Diff,
+    Graph,
 }
 
 /// How the workspace is shown: one tab at a time with its splits, or every

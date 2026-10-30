@@ -41,6 +41,9 @@ export interface TabSnapshot {
   wallUrgency: string[];
   /** Its agents' panes in team order, in pages of `agentsPerTab`. */
   wallPages: string[][];
+  /** Its panes that are not agents — terminals, browsers, diffs, graphs —
+   *  in pane order: the wall's Tools. */
+  wallTools: WallTool[];
   /** The team running in it, when it is a team's tab. */
   team: TeamRun | null;
   /** Its frame on the board; its cards are placed relative to `x`, `y`. */
@@ -48,6 +51,17 @@ export interface TabSnapshot {
   /** Every pane's card, in the tab's pane order. */
   cards: CardRect[];
 }
+
+/** A pane of a tab that is not an agent but is worth a place beside them. */
+export interface WallTool {
+  paneId: string;
+  kind: ToolKind;
+  /** What the pane is, in a few words, as its card on the board says. */
+  title: string;
+}
+
+/** A terminal is a shell, a command pane or an SSH pane. */
+export type ToolKind = "terminal" | "browser" | "diff" | "graph";
 
 /** Tabs one at a time with their splits, or every pane on one board. */
 export type View = "tabs" | "board";

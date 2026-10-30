@@ -830,6 +830,8 @@ impl Workspace {
                         // (`wall::fill`).
                         wall_urgency: Vec::new(),
                         wall_pages: Vec::new(),
+                        // Agents and all; `wall::fill` takes them out.
+                        wall_tools: crate::wall::tools(&layout::pane_ids(&t.root), meta),
                         frame: t.frame_rect(),
                         cards: layout::pane_ids(&t.root)
                             .into_iter()

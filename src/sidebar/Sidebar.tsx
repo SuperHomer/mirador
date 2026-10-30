@@ -6,6 +6,8 @@ import {
   HARNESS_LABEL,
   agentLabel,
   TabSnapshot,
+  WallTool,
+  focusPane,
   newTab,
   zoomPane,
   closeTab,
@@ -24,6 +26,7 @@ import { STATUS_LABEL, StatusMark, StatusPips } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
 import { AskingLine } from "../agents/AskingLine";
 import { showOnWall } from "../agents/showOnWall";
+import { ToolMark } from "../agents/ToolMark";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
@@ -48,7 +51,8 @@ export function Sidebar() {
       {tab && <ViewSwitch view={snapshot.view} tab={tab} accelOf={accelOf} />}
       <div className="sidebar-tabs">
         {/* Tabs, numbered for the tab shortcuts. The current tab's agents
-            hang under its row; any other tab shows a pip per agent. */}
+            and tools hang under its row; any other tab shows a pip per
+            agent. */}
         {snapshot.tabs.map((tab, i) => {
           const agents = tabAgents(snapshot, tab.id);
           const current = tab.id === currentTab;
@@ -60,7 +64,7 @@ export function Sidebar() {
                 active={current && !tab.zoomedPane}
                 pips={current ? [] : agents}
               />
-              {current && agents.length > 0 && (
+              {current && (agents.length > 0 || tab.wallTools.length > 0) && (
                 <AgentTree
                   tab={tab}
                   agents={agents}
@@ -209,8 +213,8 @@ function HarnessMark({ harness }: { harness: Harness }) {
   }
 }
 
-/** The current tab's agents, under its row. Mounted only while there are
- *  some to show, so the clock ticks only then. */
+/** The current tab's agents, then its tools, under its row. Mounted only
+ *  while there are some to show, and the clock ticks only for agents. */
 function AgentTree({
   tab,
   agents,
@@ -220,9 +224,10 @@ function AgentTree({
   agents: AgentInfo[];
   unread: string[];
 }) {
-  const now = useNow(true);
+  const now = useNow(agents.length > 0);
   const click = useConfigStore((s) => s.config?.agentClick ?? "wall");
   const pinned = useUiStore((s) => s.pinned[tab.id]);
+  const onWall = tab.wallPages.flat();
   return (
     <div className="agent-tree">
       {agents.map((agent) => (
@@ -239,6 +244,53 @@ function AgentTree({
           unread={unread.includes(agent.paneId)}
         />
       ))}
+      {tab.wallTools.map((tool) => (
+        <ToolRow
+          key={tool.paneId}
+          tabId={tab.id}
+          tool={tool}
+          click={onWall.includes(tool.paneId) ? click : null}
+          shown={
+            click === "wall"
+              ? tab.wall && pinned === tool.paneId
+              : tab.zoomedPane === tool.paneId
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+/** One tool: what it is and its title, with no status — a tool is not
+ *  waiting on anyone. Clicking one the wall draws does what clicking an
+ *  agent does; any other, it focuses its pane. */
+function ToolRow({
+  tabId,
+  tool,
+  click,
+  shown,
+}: {
+  tabId: string;
+  tool: WallTool;
+  /** What a click does, as for an agent; null when it is not on the wall. */
+  click: "wall" | "pane" | null;
+  /** It is what the tab shows: pinned on the wall, or the zoomed pane. */
+  shown: boolean;
+}) {
+  const open = () => {
+    if (click === "wall") showOnWall(tabId, tool.paneId);
+    else if (click === "pane") void zoomPane(tool.paneId, true);
+    else void focusPane(tool.paneId);
+  };
+  const classes = ["agent-row", "tool-row", click && shown && (click === "wall" ? "pinned" : "active")];
+  return (
+    <div className={classes.filter(Boolean).join(" ")} onClick={open} title={tool.title}>
+      <div className="agent-line">
+        <span className="agent-mark tool-mark">
+          <ToolMark kind={tool.kind} />
+        </span>
+        <span className="agent-name">{tool.title}</span>
+      </div>
     </div>
   );
 }

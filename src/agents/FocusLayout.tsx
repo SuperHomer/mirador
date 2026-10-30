@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { AgentInfo, agentLabel, focusPane, markPaneRead, TabSnapshot } from "../bindings";
+import { AgentInfo, agentLabel, focusPane, markPaneRead, TabSnapshot, WallTool } from "../bindings";
 import { useUiStore, WallFilter } from "../state/uiStore";
 import { getTerminal } from "../terminal/registry";
 import { useAgentActivity } from "./ActivityPanel";
@@ -10,24 +10,32 @@ import { elapsed } from "./time";
 import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
 import { SendNextTask } from "./SendNextTask";
+import { ToolMark } from "./ToolMark";
+import { ToolView } from "./ToolView";
 
 /** How long after the last keystroke into the focused agent Focus may
  *  move to another: never out from under someone typing. */
 const TYPING_GRACE_MS = 2000;
 
 /**
- * The agent Focus shows large: the pinned one while it is in the tab, else
- * the most urgent (`wallUrgency`). A pin or an unpin applies at once; a
- * change in urgency waits until nobody has typed into the focused agent
- * for `TYPING_GRACE_MS`.
+ * What Focus shows large: the pinned agent or tool while it is in the tab,
+ * else the most urgent agent (`wallUrgency`) — never a tool unpinned. A pin
+ * or an unpin applies at once; a change in urgency waits until nobody has
+ * typed into the focused pane for `TYPING_GRACE_MS`.
  */
-function useFocusedAgent(tab: TabSnapshot, agents: AgentInfo[]): AgentInfo | undefined {
+function useFocused(
+  tab: TabSnapshot,
+  agents: AgentInfo[],
+  tools: WallTool[],
+): AgentInfo | WallTool | undefined {
   const pinnedPane = useUiStore((s) => s.pinned[tab.id]);
-  const pin = agents.some((a) => a.paneId === pinnedPane) ? pinnedPane : null;
+  const here = (pane: string | null | undefined) =>
+    agents.some((a) => a.paneId === pane) || tools.some((t) => t.paneId === pane);
+  const pin = here(pinnedPane) ? pinnedPane : null;
   const candidate =
     pin ?? tab.wallUrgency.find((p) => agents.some((a) => a.paneId === p)) ?? agents[0]?.paneId ?? null;
   const [focused, setFocused] = useState(candidate);
-  const present = agents.some((a) => a.paneId === focused);
+  const present = here(focused);
   const typedAt = useRef(0);
   const lastPin = useRef(pin);
   const [tick, recheck] = useReducer((n: number) => n + 1, 0);
@@ -59,18 +67,20 @@ function useFocusedAgent(tab: TabSnapshot, agents: AgentInfo[]): AgentInfo | und
     return () => window.clearTimeout(timer);
   }, [candidate, focused, pin, present, tick]);
 
-  return agents.find((a) => a.paneId === focused);
+  return agents.find((a) => a.paneId === focused) ?? tools.find((t) => t.paneId === focused);
 }
 
 /**
  * Focus (18a): one agent large, with its terminal live and full size, and
  * the others down a rail by status — those that need you, then those at
- * work, as live thumbnails, then the idle as one line each. The chip
- * filter narrows the rail, never the agent shown large.
+ * work, as live thumbnails, then the idle as one line each, then the
+ * tools as live thumbnails too. The chip filter narrows the rail, never
+ * what is shown large.
  */
 export function FocusLayout({
   tab,
   agents,
+  tools,
   filter,
   unread,
   visible,
@@ -81,6 +91,7 @@ export function FocusLayout({
 }: {
   tab: TabSnapshot;
   agents: AgentInfo[];
+  tools: WallTool[];
   filter: WallFilter;
   unread: string[];
   visible: boolean;
@@ -91,7 +102,7 @@ export function FocusLayout({
   sendable: Set<string>;
   now: number;
 }) {
-  const focused = useFocusedAgent(tab, agents);
+  const focused = useFocused(tab, agents, tools);
   const pin = (pane: string) => useUiStore.getState().pinAgent(tab.id, pane);
   const layoutRef = useRef<HTMLDivElement>(null);
 
@@ -127,6 +138,9 @@ export function FocusLayout({
   // Agents with no known status are with the working: there is no telling.
   const working = others.filter((a) => a.status === "working" || !a.status);
   const idle = others.filter((a) => a.status === "idle");
+  const otherTools = tools.filter(
+    (t) => t.paneId !== focusedPane && (filter === "all" || filter === "tools"),
+  );
   const waiting = tab.wallUrgency
     .filter((p) => p !== focusedPane)
     .map((p) => agents.find((a) => a.paneId === p))
@@ -134,7 +148,16 @@ export function FocusLayout({
 
   return (
     <div className="focus-layout" ref={layoutRef}>
-      {focused ? (
+      {focused && "kind" in focused ? (
+        <FocusedToolTile
+          key={focused.paneId}
+          tool={focused}
+          focused={current && tab.focusedPane === focused.paneId}
+          unread={unread.includes(focused.paneId)}
+          visible={visible}
+          current={current}
+        />
+      ) : focused ? (
         <FocusedTile
           key={focused.paneId}
           agent={focused}
@@ -147,12 +170,12 @@ export function FocusLayout({
           now={now}
         />
       ) : (
-        <div />
+        <div className="focus-none">Pick a tool on the right to show it here.</div>
       )}
       <div className="focus-rail">
-        {others.length === 0 && (
+        {others.length === 0 && otherTools.length === 0 && (
           <div className="rail-empty">
-            {agents.length > 1 ? "No other agents match this filter." : "No other agents in this tab."}
+            {agents.length + tools.length > 1 ? "Nothing else matches this filter." : "Nothing else in this tab."}
           </div>
         )}
         {asking.length > 0 && (
@@ -179,6 +202,20 @@ export function FocusLayout({
             {idle.map((a) => (
               <IdleLine key={a.paneId} agent={a} canSend={sendable.has(a.paneId)} now={now} onPick={pin} />
             ))}
+          </section>
+        )}
+        {otherTools.length > 0 && (
+          <section className="rail-section tools">
+            <div className="rail-label">Tools · {otherTools.length}</div>
+            <div className={`rail-grid${otherTools.length >= 2 ? " two" : ""}`}>
+              {otherTools.map((t) =>
+                t.kind === "terminal" ? (
+                  <MiniToolTile key={t.paneId} tool={t} visible={visible} onPick={pin} />
+                ) : (
+                  <ToolLine key={t.paneId} tool={t} onPick={pin} />
+                ),
+              )}
+            </div>
           </section>
         )}
       </div>
@@ -273,6 +310,112 @@ function FocusedTile({
         sheetOpen={sheetOpen}
         onToggleSheet={() => setSheetOpen(!sheetOpen)}
       />
+    </div>
+  );
+}
+
+/** A tool shown large: its live terminal at full size, or the diff or
+ *  graph pane itself, under what it is — none of an agent's status,
+ *  asking line or next task. */
+function FocusedToolTile({
+  tool,
+  focused,
+  unread,
+  visible,
+  current,
+}: {
+  tool: WallTool;
+  /** Its pane is the one the keyboard goes to. */
+  focused: boolean;
+  unread: boolean;
+  visible: boolean;
+  current: boolean;
+}) {
+  const pane = tool.paneId;
+  const terminal = tool.kind === "terminal";
+  const { hostRef, shown } = useLentTerminal(pane, visible && terminal, { fit: true });
+  return (
+    <div className="focus-tile tool">
+      <div className="focus-head">
+        <div className="focus-line">
+          <span className="tool-mark">
+            <ToolMark kind={tool.kind} />
+          </span>
+          <span className="focus-name">{tool.title}</span>
+        </div>
+      </div>
+      <div className="focus-body">
+        <div
+          className="focus-term"
+          data-pane={pane}
+          onMouseDown={() => {
+            if (unread) void markPaneRead(pane);
+            if (!current) void focusPane(pane);
+          }}
+        >
+          {terminal ? (
+            <>
+              {/* The terminal's element is appended here by `lendTerminal`,
+                  so React must own nothing inside it. */}
+              <div className="focus-term-host" ref={hostRef} />
+              {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+            </>
+          ) : (
+            <ToolView tool={tool} focused={focused} visible={visible} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A diff or graph on the rail, in one line, as an idle agent is: scaled
+ * down to a thumbnail it would be unreadable, and each one drawn is
+ * another git diff or log. Clicking it pins it large.
+ */
+function ToolLine({ tool, onPick }: { tool: WallTool; onPick: (pane: string) => void }) {
+  return (
+    <div className="idle-line" title={`Show ${tool.title} large`} onClick={() => onPick(tool.paneId)}>
+      <span className="tool-mark">
+        <ToolMark kind={tool.kind} />
+      </span>
+      <span className="idle-name">{tool.title}</span>
+    </div>
+  );
+}
+
+/** A tool on the rail: its live terminal drawn smaller, as an agent's is,
+ *  under what it is. Clicking it pins it large. */
+function MiniToolTile({
+  tool,
+  visible,
+  onPick,
+}: {
+  tool: WallTool;
+  visible: boolean;
+  onPick: (pane: string) => void;
+}) {
+  const pane = tool.paneId;
+  const { hostRef, shown } = useLentTerminal(pane, visible, { fit: false });
+  const fit = useMiniFit(hostRef);
+  return (
+    <div
+      className="mini-tile tool"
+      title={`Show ${tool.title} large`}
+      onClick={() => onPick(pane)}
+      style={fit.style}
+    >
+      <div className="mini-head">
+        <span className="tool-mark">
+          <ToolMark kind={tool.kind} />
+        </span>
+        <span className="mini-name">{tool.title}</span>
+      </div>
+      <div className="mini-body" ref={fit.bodyRef}>
+        <div className="mini-host" ref={hostRef} />
+        {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+      </div>
     </div>
   );
 }
