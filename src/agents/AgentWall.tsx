@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentInfo,
   agentLabel,
@@ -6,6 +6,7 @@ import {
   setWallMode,
   WallMode,
   TabSnapshot,
+  WallTool,
   WallView,
   taskCards,
 } from "../bindings";
@@ -35,34 +36,43 @@ const FILTERS: [WallFilter, string][] = [
   ["needsYou", "Needs you"],
   ["working", "Working"],
   ["idle", "Idle"],
+  ["tools", "Tools"],
 ];
 
 /**
- * The wall's one row of controls: which agents it shows, by status; then,
- * in Focus, who it shows large and whether that follows whoever needs
- * you; in Grid, how many a page holds; then Focus | Grid, and a new agent.
+ * The wall's one row of controls: which agents it shows, by status, or
+ * its tools; then, in Focus, who it shows large and whether that follows
+ * whoever needs you; in Grid, how many a page holds; then Focus | Grid,
+ * and a new agent.
  */
 function WallToolbar({
   tab,
   agents,
+  tools,
   filter,
   onMode,
   menu,
 }: {
   tab: TabSnapshot;
   agents: AgentInfo[];
+  tools: WallTool[];
   filter: WallFilter;
   onMode: (mode: WallMode) => void;
   menu: React.ReactNode;
 }) {
   const pinnedPane = useUiStore((s) => s.pinned[tab.id]);
   const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
-  const pinned = agents.find((a) => a.paneId === pinnedPane);
-  // Who Focus shows: the pinned agent while it is here, else the most
-  // urgent.
+  const pinned =
+    agents.find((a) => a.paneId === pinnedPane) ?? tools.find((t) => t.paneId === pinnedPane);
+  // Who Focus shows: the pinned agent or tool while it is here, else the
+  // most urgent agent.
   const focus = pinned ?? agents.find((a) => a.paneId === tab.wallUrgency[0]);
   const count = (f: WallFilter) =>
-    f === "all" ? agents.length : agents.filter((a) => a.status === f).length;
+    f === "all"
+      ? agents.length + tools.length
+      : f === "tools"
+        ? tools.length
+        : agents.filter((a) => a.status === f).length;
   return (
     <div className="wall-toolbar">
       {FILTERS.map(([f, label]) => (
@@ -86,13 +96,13 @@ function WallToolbar({
                 useUiStore.getState().pinAgent(tab.id, pinned ? null : focus.paneId)
               }
             >
-              {pinned ? "Unpin" : `Pin ${agentLabel(focus)}`}
+              {pinned ? "Unpin" : `Pin ${"title" in focus ? focus.title : agentLabel(focus)}`}
             </button>
           )}
         </>
       ) : (
         <>
-          <span className="wall-toolbar-label">Agents per tab</span>
+          <span className="wall-toolbar-label">Per page</span>
           <span className="wall-segments">
             {[4, 6, 9].map((n) => (
               <button
@@ -128,8 +138,9 @@ function WallToolbar({
 
 /**
  * A tab's agents' terminals in one grid — Claude Code, Codex, OpenCode, …,
- * drawn in place of the tab's splits. The terminals are the panes' own,
- * lent for as long as the wall is on screen (see `lendTerminal`), so a
+ * and its tools — the shells beside them — drawn in place of the tab's
+ * splits. The terminals are the panes' own, lent for as long as the wall
+ * is on screen (see `lendTerminal`), so a
  * tile is live and takes input — answering a permission prompt from here
  * is the same as in the agent's pane.
  */
@@ -142,6 +153,13 @@ export const AgentWall = memo(function AgentWall({
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+  // The menu drops over the tiles, where a browser tile's page, a native
+  // webview, would cover it: the page is hidden while it is open (`App`).
+  useEffect(() => {
+    if (!menuOpen) return;
+    useUiStore.getState().setWallMenuOpen(true);
+    return () => useUiStore.getState().setWallMenuOpen(false);
+  }, [menuOpen]);
   const now = useNow(visible);
 
   // The tab's agents in team order, which never moves with status.
@@ -155,6 +173,11 @@ export const AgentWall = memo(function AgentWall({
       .flat()
       .flatMap((pane) => byPane.get(pane) ?? []);
   }, [snapshot, shown, tabId]);
+  // Its tools that the wall draws, after the agents on its pages.
+  const tools = useMemo(() => {
+    const byPane = new Map((shown?.wallTools ?? []).map((t) => [t.paneId, t]));
+    return (shown?.wallPages ?? []).flat().flatMap((pane) => byPane.get(pane) ?? []);
+  }, [shown]);
   const filter = useUiStore((s) => s.wallFilter[tabId] ?? "all");
 
   // The tab's cards, once for the wall and only while its agents are on
@@ -185,7 +208,7 @@ export const AgentWall = memo(function AgentWall({
   const handover = useRef<string | null>(null);
   const switchMode = (next: WallMode) => {
     if (!shown || next === mode) return;
-    const held = agents.find((a) => {
+    const held = [...agents, ...tools].find((a) => {
       const el = getTerminal(a.paneId)?.element;
       return el && wallRef.current?.contains(el) && el.contains(document.activeElement);
     });
@@ -208,6 +231,7 @@ export const AgentWall = memo(function AgentWall({
         <WallToolbar
           tab={shown}
           agents={agents}
+          tools={tools}
           filter={filter}
           onMode={switchMode}
           menu={
@@ -230,12 +254,13 @@ export const AgentWall = memo(function AgentWall({
 
       {side === "tasks" ? (
         <TaskBoard tabId={tabId} visible={visible} />
-      ) : agents.length === 0 ? (
+      ) : agents.length === 0 && tools.length === 0 ? (
         shown && <EmptyWall tab={shown} />
       ) : mode === "focus" && shown ? (
         <FocusLayout
           tab={shown}
           agents={agents}
+          tools={tools}
           filter={filter}
           unread={unread}
           visible={visible}
@@ -249,6 +274,7 @@ export const AgentWall = memo(function AgentWall({
           <GridLayout
             tab={shown}
             agents={agents}
+            tools={tools}
             filter={filter}
             unread={unread}
             visible={visible}

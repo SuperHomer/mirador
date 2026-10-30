@@ -613,7 +613,7 @@ export function TabLayer({
     : tab.wallView === "tasks"
       ? "Wall · Tasks"
       : tab.wallMode === "grid"
-        ? `Wall · Grid · ${perTab} per tab`
+        ? `Wall · Grid · ${perTab} per page`
         : "Wall · Focus";
   const waiting = agents.some((a) => a.status === "needsYou");
 

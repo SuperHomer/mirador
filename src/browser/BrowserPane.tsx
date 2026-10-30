@@ -24,6 +24,12 @@ interface Props {
    * shows and hides pages (see `App`).
    */
   board: boolean;
+  /**
+   * Under its tab's wall, which draws it in a tile of its own: that tile
+   * places the page and this one neither reports bounds nor shows it.
+   * As the wall goes off it reports its own rect again.
+   */
+  walled?: boolean;
 }
 
 /**
@@ -31,12 +37,14 @@ interface Props {
  * ours; the page itself is a native child webview that Rust positions over
  * the placeholder div, tracked via ResizeObserver.
  */
-export function BrowserPane({ paneId, url, focused, board }: Props) {
+export function BrowserPane({ paneId, url, focused, board, walled = false }: Props) {
   const placeholderRef = useRef<HTMLDivElement>(null);
   // The page is on screen over the placeholder.
   const [live, setLive] = useState(!board);
   const boardRef = useRef(board);
   boardRef.current = board;
+  const walledRef = useRef(walled);
+  walledRef.current = walled;
   const reportRef = useRef<() => void>(() => {});
   const updateRef = useRef<() => void>(() => {});
   const [draft, setDraft] = useState(url);
@@ -87,6 +95,7 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
 
     let inset = 0;
     const report = () => {
+      if (walledRef.current) return;
       const rect = el.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
       // The page's size is its card's, whatever the board's zoom: a page
@@ -129,6 +138,11 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
       clearInterval(remeasure);
     };
   }, [paneId]);
+  // Back from under the wall: the page is put here at once, not at the
+  // next poll.
+  useEffect(() => {
+    if (!walled) reportRef.current();
+  }, [walled]);
 
   // On the board: shown only at 100%, with the board still, the card wholly
   // in view, and no overlay open. (No card ever covers another: the model
@@ -140,6 +154,9 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
       setLive(true);
       return;
     }
+    // Under the wall the tile has the page: this one says nothing about
+    // it, not even "hidden", which would race the tile's "shown".
+    if (walled) return;
     let last: boolean | null = null;
     let lastAt = "";
     const update = () => {
@@ -161,7 +178,8 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
         !ui.paletteOpen &&
         !ui.notificationsOpen &&
         !ui.activityPane &&
-        !ui.boardMenuOpen;
+        !ui.boardMenuOpen &&
+        !ui.wallMenuOpen;
       // A shown card that moved — its frame dragged, a snapshot placing it
       // anew — takes its page along now, not at the next slow poll.
       const at = `${r.x},${r.y},${r.width},${r.height}`;
@@ -183,7 +201,7 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
       updateRef.current = () => {};
       unsubscribe.forEach((u) => u());
     };
-  }, [board, paneId]);
+  }, [board, paneId, walled]);
   // A snapshot can move the card (or its frame) without a pan: look again
   // after every render. It only measures, and acts on a change.
   useEffect(() => updateRef.current());
@@ -211,7 +229,8 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
     [],
   );
   useEffect(() => {
-    if (!board || live) return;
+    // Under the wall the tile has the page, and its own picture.
+    if (!board || live || walled) return;
     const gen = generation.current;
     const onScreen = () => {
       const r = placeholderRef.current?.getBoundingClientRect();
@@ -265,7 +284,7 @@ export function BrowserPane({ paneId, url, focused, board }: Props) {
       clearInterval(refresh);
       unsubscribe();
     };
-  }, [board, live, url, paneId]);
+  }, [board, live, url, paneId, walled]);
 
   const commit = () => {
     setEditing(false);

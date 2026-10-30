@@ -13,6 +13,9 @@ type Props = {
   paneId: string;
   repo: string;
   focused: boolean;
+  /** Under its tab's wall, which draws it in a tile of its own: it loads
+   *  nothing until the wall goes off, and then loads afresh. */
+  walled?: boolean;
 };
 
 /** Row height in px, and the lane pitch — both fixed so the SVG lines and
@@ -58,7 +61,7 @@ function ago(epochSeconds: number): string {
  * it is told and knows nothing about parents or merges beyond the links it
  * is handed.
  */
-export function GraphPane({ paneId, repo, focused }: Props) {
+export function GraphPane({ paneId, repo, focused, walled = false }: Props) {
   const [rows, setRows] = useState<GraphRow[]>([]);
   const [lanes, setLanes] = useState(1);
   const [truncated, setTruncated] = useState(false);
@@ -90,15 +93,18 @@ export function GraphPane({ paneId, repo, focused }: Props) {
     };
   }, [paneId]);
 
-  useEffect(() => refresh(), [refresh]);
+  useEffect(() => (walled ? undefined : refresh()), [refresh, walled]);
 
   // A commit lands while you are looking at the graph; coming back to the
   // pane is the natural "show me where we are now", as in the diff pane.
+  // Not as the wall goes off: the load above has just run for that.
   const wasFocused = useRef(focused);
+  const wasWalled = useRef(walled);
   useEffect(() => {
-    if (focused && !wasFocused.current) refresh();
+    if (focused && !wasFocused.current && !wasWalled.current) refresh();
     wasFocused.current = focused;
-  }, [focused, refresh]);
+    wasWalled.current = walled;
+  }, [focused, refresh, walled]);
 
   const show = (sha: string) => {
     setSelected(sha);

@@ -28,8 +28,10 @@ downloads, the feature tour and the keybinding reference.
   for its agents' live terminals in one grid — Claude Code, Codex,
   OpenCode, Pi, Gemini CLI, Amp, Aider and more, found by their process —
   each with its role, model and (Claude Code) whether it is working, idle,
-  or waiting on you; type into any of them from there. The same key
-  switches back, and each tab remembers its view across restarts. The
+  or waiting on you; type into any of them from there. The tab's other
+  panes — terminals, browsers, diffs and graphs — come after them as
+  **Tools**, live too, and the sidebar lists them under the tab. The same
+  key switches back, and each tab remembers its view across restarts. The
   sidebar's **Splits · Wall · Tasks · Board** switch turns it over to the
   tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
@@ -600,17 +602,29 @@ the keyboard goes to the focused agent's tile when the wall comes up. A
 new agent from the wall's **+ Agent** — a role of the repository, or
 plain Claude Code or Codex, with an optional first message that also
 becomes its card — splits the tab under the wall and gets a tile. A tab
-with no agents yet shows its roles and teams there instead, ready to
-start. The wall's toolbar shows all its agents or only those that
-need you, are working or are idle, and switches between **Focus** and
-**Grid**. In Grid it sets how many agents a page holds (4, 6 or 9: the
-`agentsPerTab` key), and in Focus it pins the agent shown large or lets
-it follow whoever needs you. Focus shows that agent's terminal large and
+with neither agents nor tools yet shows its roles and teams there
+instead, ready to start.
+
+Beside the agents the wall shows the tab's **tools**: its other panes
+that do work — shells, command and SSH panes, browsers, diffs and graphs
+(not the editor, settings or What's New). A terminal's tile is its real
+terminal, moved there as an agent's is; a diff or graph tile is the pane
+itself; a browser's page sits on its tile while the wall shows it, and
+nowhere else. A tool has no status: it is never chosen by Focus by
+itself, only shown large when you click it or its **Focus ›**.
+
+The wall's toolbar shows everything, only the agents that need you, are
+working or are idle, or only the **Tools**, and switches between
+**Focus** and **Grid**. In Grid it sets how many tiles a page holds
+(**Per page**: 4, 6 or 9, the `agentsPerTab` key), and in Focus it pins
+the agent or tool shown large or lets it follow whoever needs you. Focus shows that agent's terminal large and
 the others down a rail: those that need you and those at work as live
 thumbnails (drawn smaller, never resized), the idle one line each; click
 one to pin it. Following moves only once nobody has typed into the large
-one for two seconds. Grid shows every agent's terminal at full size, a
-page of 4, 6 or 9 at a time, with a tab per page once there are more
+one for two seconds. The tools follow on the rail under **Tools**: a
+terminal as a live thumbnail, a browser, diff or graph as one line. Grid
+shows every agent's terminal at full size, then the tools on the same
+pages, 4, 6 or 9 at a time, with a tab per page once there are more
 than one (each with a pip per agent, and a count when one needs you);
 each tile's **Focus ›** shows it large. Switching between the two keeps
 the keyboard on the agent that had it. Tiles stand in the team's order,
@@ -654,7 +668,10 @@ Claude Code session's, as `claude agents` lists it (given with `--name` or
 Clicking a tab shows the whole tab — Claude beside your dev server, say;
 clicking an agent shows the tab's wall with that agent large (or, with
 `agentClick` set to `"pane"`, the agent's pane alone, filling its tab).
-Each tab's agents are its own: switch tabs and the tree moves with you,
+Under the agents come the tab's tools, each with an icon for what it
+is and its title, and no status; clicking one shows it on the wall as
+an agent's row does (or, with `"pane"`, alone). Each tab's agents are
+its own: switch tabs and the tree moves with you,
 and every other tab shows a pip per agent with its status. The tab
 shortcuts (`mod+1…9`, next and previous tab) go over tabs only, by the
 number beside each. At the sidebar's foot, **Inbox** counts the agents that need you,
@@ -667,8 +684,8 @@ or `mira zoom [pane]` (`--off` for the whole tab again).
 Two keys in `mirador.json` shape the wall. `agentClick` is what clicking
 an agent in the sidebar does: `"wall"` (the default) shows its tab's wall
 in Focus, with that agent large, and `"pane"` shows the agent's pane
-alone, filling its tab. `agentsPerTab` is how many agents a page of the
-wall's Grid layout holds: `4` (the default), `6` or `9`. Any other value
+alone, filling its tab. `agentsPerTab` is how many tiles — agents, then
+tools — a page of the wall's Grid layout holds: `4` (the default), `6` or `9`. Any other value
 of either is ignored for its default.
 
 ```jsonc

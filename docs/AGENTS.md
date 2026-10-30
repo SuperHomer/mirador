@@ -268,7 +268,12 @@ tab of its own: its panes keep running under the wall, `read-screen` and
 `send-input` reach them as before, and the tab remembers the wall, and
 which side of it (agents or tasks, `wallView` in `list-tabs --json`), across
 restarts: turned on again, the wall is on the side it was left on.
-Zooming one agent (`zoom_pane`) leaves the wall.
+Zooming one agent (`zoom_pane`) leaves the wall. The wall also shows the
+tab's tools — its other terminals, browsers, diffs and graphs — after the
+agents: `wallTools` in `list-tabs --json` lists them (`paneId`, `kind`:
+`terminal`, `browser`, `diff` or `graph`, and `title`), and `wallPages`,
+the Grid's pages, holds the agents in team order and then those tools.
+`wallUrgency`, who Focus shows when none is pinned, holds agents only.
 
 A role is a Markdown file — its frontmatter says how it starts, its body is
 its prompt — and may follow a *way of working*, a playbook in `ways/` that

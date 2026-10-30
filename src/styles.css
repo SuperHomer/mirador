@@ -290,6 +290,23 @@ body,
   height: 10px;
 }
 
+/* A tool's kind, as neutral as the harness marks: in the sidebar and on
+   the wall's tool tiles. */
+.tool-mark {
+  flex-shrink: 0;
+  color: var(--subtext);
+}
+
+.tool-mark svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+.tool-row .agent-name {
+  color: var(--subtext);
+}
+
 .agent-status {
   margin-left: auto;
   padding-left: 6px;
@@ -3313,6 +3330,17 @@ button.inbox-update:hover {
   grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
   gap: 6px;
   padding: 6px;
+}
+
+/* A wall of tools alone, none pinned: nothing is shown large by itself. */
+.focus-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--surface);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .focus-tile {

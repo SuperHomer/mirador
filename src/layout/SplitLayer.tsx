@@ -265,14 +265,18 @@ export function SplitLayer({
                 <BrowserPane
                   paneId={p.paneId}
                   url={browser.url}
-                  focused={focused}
+                  focused={focused && !walled}
                   board={board}
+                  walled={walled}
                 />
               ) : graph ? (
                 <GraphPane
                   paneId={p.paneId}
                   repo={graph.repo}
-                  focused={focused}
+                  // Under the wall it is drawn again in a tile: that one
+                  // loads, and is the focused one.
+                  focused={focused && !walled}
+                  walled={walled}
                 />
               ) : news ? (
                 <WhatsNewPane
@@ -286,7 +290,8 @@ export function SplitLayer({
                   paneId={p.paneId}
                   repo={diff.repo}
                   spec={diff.spec}
-                  focused={focused}
+                  focused={focused && !walled}
+                  walled={walled}
                 />
               ) : (
                 <TerminalPane

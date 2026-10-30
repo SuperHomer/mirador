@@ -62,27 +62,32 @@ export default function App() {
   const setConfig = useConfigStore((s) => s.setConfig);
   const paletteOpen = useUiStore((s) => s.paletteOpen);
   const notificationsOpen = useUiStore((s) => s.notificationsOpen);
+  const wallBrowsers = useUiStore((s) => s.wallBrowsers);
+  const wallMenuOpen = useUiStore((s) => s.wallMenuOpen);
   useKeymap();
 
   // Native child webviews float above the host webview: hide the ones on
-  // inactive tabs, and all of them while an overlay is open. On the board
-  // each browser card decides for itself (`BrowserPane`).
+  // inactive tabs, and all of them while an overlay is open. A tab showing
+  // its wall shows only the pages its tiles draw, over those tiles. On the
+  // board each browser card decides for itself (`BrowserPane`).
   useEffect(() => {
     if (!snapshot || snapshot.view === "board") return;
     const activeTab = snapshot.tabs.find((t) => t.id === snapshot.activeTab);
     // A zoomed tab shows one pane; a browser pane zoomed out of view is
     // hidden like one on another tab.
     const activePanes = activeTab
-      ? activeTab.zoomedPane
-        ? [activeTab.zoomedPane]
-        : collectPaneIds(activeTab.root)
+      ? activeTab.wall
+        ? wallBrowsers
+        : activeTab.zoomedPane
+          ? [activeTab.zoomedPane]
+          : collectPaneIds(activeTab.root)
       : [];
-    const overlaysOpen = paletteOpen || notificationsOpen;
+    const overlaysOpen = paletteOpen || notificationsOpen || wallMenuOpen;
     for (const b of snapshot.browserPanes) {
       const visible = !overlaysOpen && activePanes.includes(b.paneId);
       void setBrowserVisible(b.paneId, visible);
     }
-  }, [snapshot, paletteOpen, notificationsOpen]);
+  }, [snapshot, paletteOpen, notificationsOpen, wallBrowsers, wallMenuOpen]);
 
   useEffect(() => {
     let disposed = false;
