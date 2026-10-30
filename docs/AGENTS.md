@@ -413,7 +413,9 @@ pane only if the shell is idle (on macOS and Linux it checks the
 terminal's processes; anything else on it is `busy`), and gives a closed
 member a new pane beside a teammate. `team clear` does `agent clear` for
 each member, teammates first and the lead last, and reports each as
-`cleared`, `not running`, `needs you` or `no harness`. `team add`, `team
+`cleared`, `not running`, `needs you` or `no harness`; `needs you` also
+covers, unless `--force`, a member whose screen shows a numbered menu, or
+no input box after the wait `send` makes. `team add`, `team
 restart` and `team clear` act on the team of the calling pane's tab.
 
 A save is what to make before turning the computer off: running agents
@@ -462,7 +464,12 @@ command still to reach its shell) is waited for, up to the 20 s the app
 gives any agent to show up. Refused: a pane that runs no agent, the
 caller's own pane, a pane whose terminal has not started, an agent that
 has not started within that time, and an agent whose status is `needsYou`
-unless `--force`.
+unless `--force`. Unless `--force`, `send` also reads the agent's screen,
+since a dialog reports no status (Codex's update prompt, an approval,
+Claude Code's own questions). It refuses a numbered menu (`❯ 1. Yes`),
+naming the selected row. For Claude Code or Codex, it waits up to 10 s for
+the input box (`❯ `, `› `), then refuses: without one, the message could
+dismiss a welcome screen and its Enter pick from the menu that follows.
 
 `wait` polls `agent list` once a second and ends on a status that changed
 after it started, or after it saw the agent working — so a wait begun

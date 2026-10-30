@@ -34,6 +34,55 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
     }
 }
 
+/// How long a Claude Code or Codex agent, once running, is given to show
+/// its input box. It draws one within a second or two of starting, and
+/// `wait_started` has waited for it to start already; a screen still
+/// without one is on something of its own (a welcome, a login) that
+/// waiting does not change, so the caller hears so in seconds, not in the
+/// 20 a start is given.
+const INPUT_BOX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Why what is typed must not go into `pane` now, by what its screen shows
+/// (`cmux_core::handoff::showing`): a menu, which the Enter after it would
+/// answer; or, for a harness whose input box Mirador knows, no input box
+/// within [`INPUT_BOX_WAIT`] — the paste might dismiss a welcome screen
+/// and the Enter land on the menu that replaces it. No read outlives that
+/// wait: each is given only the time left. A screen that cannot be read at
+/// all — its terminal not mounted, the read timed out — counts as ready:
+/// refusing then would refuse every send to a tab never shown.
+fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_protocol::Harness>) -> Option<String> {
+    use cmux_core::handoff::Showing;
+    use cmux_protocol::Harness;
+    use std::time::{Duration, Instant};
+    let knows_input_box = matches!(harness, Some(Harness::Claude | Harness::Codex));
+    let no_input_box =
+        || Some("shows no input box yet: it may still be starting, or waiting on a screen of its own — look at its pane".into());
+    let deadline = Instant::now() + INPUT_BOX_WAIT;
+    // Once a screen with neither was read, a read cut short by the
+    // deadline is the wait running out, not an unreadable screen.
+    let mut seen_neither = false;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if seen_neither && left.is_zero() {
+            return no_input_box();
+        }
+        let screen = match crate::server::read_screen(app, pane, None, left.min(Duration::from_secs(5))) {
+            Ok(screen) => screen,
+            Err(_) if seen_neither => return no_input_box(),
+            Err(_) => return None,
+        };
+        match cmux_core::handoff::showing(&screen) {
+            Showing::Choice(row) => return Some(format!("is showing a choice, `{row}`: answer it in its pane")),
+            Showing::Composer => return None,
+            Showing::Neither if !knows_input_box => return None,
+            Showing::Neither => {
+                seen_neither = true;
+                std::thread::sleep(left.min(Duration::from_millis(250)));
+            }
+        }
+    }
+}
+
 /// The agents of `caller`'s tab, by every name they go by.
 fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> {
     let ws = state.workspace.lock().unwrap();
@@ -89,16 +138,24 @@ pub fn send(
             .get(&pane)
             .filter(|m| m.is_agent())
             .ok_or_else(|| format!("{to} runs no agent: a message would run in its shell as a command"))?;
-        Ok::<_, String>(m.status())
+        Ok::<_, String>((m.status(), m.harness()))
     };
-    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
+    cmux_core::handoff::can_receive(status(state)?.0, force).map_err(|e| format!("{to}: {e}"))?;
     if !state.pty.is_running(&pane) {
         return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
     }
     wait_started(state, &pane).map_err(|e| format!("{to}: {e}"))?;
     // As it is once up, not as it was before the wait: still an agent, and
     // perhaps already asking a person something.
-    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
+    let (status, harness) = status(state)?;
+    cmux_core::handoff::can_receive(status, force).map_err(|e| format!("{to}: {e}"))?;
+    // Not read when forced: the answer would not change, and a read can
+    // take seconds.
+    if !force {
+        if let Some(why) = screen_refusal(app, &pane, harness) {
+            return Err(format!("{to} {why}, or send with --force"));
+        }
+    }
     let from = caller.as_deref().and_then(|c| sender(state, c));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
     state.pty.write(&pane, &paste)?;
@@ -114,10 +171,12 @@ pub fn send(
 /// Starts the agent in `pane` on a new conversation, by typing its
 /// harness's command for that. Refused, with what `team clear` reports
 /// and why, for a pane running no agent, one whose terminal has not
-/// started, one waiting on a person unless `force`, and a harness with no
-/// such command. A working agent is not refused: the line waits for its
-/// turn to end, which is how a lead clears itself last.
-pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
+/// started, one waiting on a person, showing a menu or no input box unless
+/// `force` (`screen_refusal`), and a harness with no such command. A working agent is not refused: the
+/// line waits for its turn to end, which is how a lead clears itself last.
+pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
+    use tauri::Manager;
+    let state = &*app.state::<AppState>();
     let agent = |state: &AppState| {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(pane).filter(|m| m.is_agent()).ok_or(("not running", "it runs no agent".to_string()))?;
@@ -131,6 +190,11 @@ pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'st
     // As it is once up, not as it was before the wait.
     let (status, harness) = agent(state)?;
     cmux_core::handoff::can_receive(status, force).map_err(|e| ("needs you", e))?;
+    if !force {
+        if let Some(why) = screen_refusal(app, pane, harness) {
+            return Err(("needs you", format!("it {why}, or clear with --force")));
+        }
+    }
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;
     state.pty.write(pane, line.as_bytes()).map_err(|e| ("not running", e))?;
     // Enter on its own read, as `send` does.
@@ -141,13 +205,15 @@ pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'st
 
 /// `clear_pane` for the agent `name` means from the caller's tab, as
 /// `send` finds it, or the caller itself. Returns its pane.
-pub fn clear(state: &AppState, name: Option<&str>, caller: Option<String>, force: bool) -> Result<String, String> {
+pub fn clear(app: &tauri::AppHandle, name: Option<&str>, caller: Option<String>, force: bool) -> Result<String, String> {
+    use tauri::Manager;
+    let state = &*app.state::<AppState>();
     let pane = match name {
         Some(name) => find(state, name, caller)?,
         None => caller.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane()),
     };
     let label = name.unwrap_or(&pane).to_string();
-    clear_pane(state, &pane, force).map_err(|(_, why)| format!("{label}: {why}"))?;
+    clear_pane(app, &pane, force).map_err(|(_, why)| format!("{label}: {why}"))?;
     Ok(pane)
 }
 

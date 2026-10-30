@@ -349,9 +349,11 @@ pub fn team_restart(
 /// Starts every running member of `pane_id`'s team on a new conversation,
 /// as `agent clear` does one: its teammates first and the lead last, so a
 /// lead that runs this clears itself only once the others are done.
-/// `outcome` is "cleared", or why not: "not running", "needs you", "no
-/// harness".
-pub fn team_clear(state: &AppState, pane_id: Option<&str>, force: bool) -> Result<Vec<Restarted>, String> {
+/// `outcome` is "cleared", or why not: "not running", "needs you" (asking
+/// a person, or showing a menu), "no harness".
+pub fn team_clear(app: &tauri::AppHandle, pane_id: Option<&str>, force: bool) -> Result<Vec<Restarted>, String> {
+    use tauri::Manager;
+    let state = &*app.state::<AppState>();
     let (tab, run) = team_here(state, pane_id)?;
     let mut seats: Vec<&TeamSeat> = run.members.iter().collect();
     seats.sort_by_key(|s| s.lead);
@@ -365,7 +367,7 @@ pub fn team_clear(state: &AppState, pane_id: Option<&str>, force: bool) -> Resul
             let outcome = if !in_tab {
                 "not running"
             } else {
-                crate::handoff::clear_pane(state, &seat.pane, force).map_or_else(|(outcome, _)| outcome, |()| "cleared")
+                crate::handoff::clear_pane(app, &seat.pane, force).map_or_else(|(outcome, _)| outcome, |()| "cleared")
             };
             Restarted { name: seat.name.clone(), pane: seat.pane.clone(), outcome: outcome.to_string() }
         })

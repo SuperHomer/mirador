@@ -165,6 +165,46 @@ pub fn clear_line(harness: Option<cmux_protocol::Harness>) -> Result<&'static st
     }
 }
 
+/// What an agent's screen offers to type into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Showing<'a> {
+    /// Its input box: what is typed goes in as a message.
+    Composer,
+    /// A menu, with this row selected: an Enter would pick it. Such a
+    /// dialog — Codex's update prompt or an approval, Claude Code's own
+    /// questions — sets no status a hook reports.
+    Choice(&'a str),
+    /// Neither: still starting, or a screen of its own (a logo, a
+    /// welcome) that a keypress may turn into something else.
+    Neither,
+}
+
+/// What `screen` shows, judged by its last selection line: a glyph
+/// (Claude Code's `❯`, Codex's `›`, or the ASCII `>` some of Codex's
+/// menus draw) alone or before a space. A menu row has a number, a dot
+/// and a space after it (`❯ 1. Yes`); any other is the input box.
+pub fn showing(screen: &str) -> Showing<'_> {
+    // The last such line, not any: while the input box is up its line
+    // (`❯ `, `› Ask Codex…`) is the last, below past messages echoed as
+    // `› 1. do X`; a dialog takes its place, and then its cursor is the
+    // last.
+    let Some(line) = screen.lines().map(str::trim).rev().find(|l| {
+        let mut chars = l.chars();
+        matches!(chars.next(), Some('❯' | '›' | '>')) && chars.next().is_none_or(char::is_whitespace)
+    }) else {
+        return Showing::Neither;
+    };
+    let mut rest = line.chars();
+    rest.next();
+    let rest = rest.as_str().trim_start();
+    let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    if digits > 0 && rest[digits..].starts_with(". ") {
+        Showing::Choice(line)
+    } else {
+        Showing::Composer
+    }
+}
+
 /// What `mira agent wait` has seen so far, and whether it is done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Wait {
@@ -290,6 +330,282 @@ mod tests {
         let aider = clear_line(Some(Harness::Aider)).unwrap_err();
         assert!(aider.contains("Aider"), "{aider}");
         assert!(clear_line(None).is_err());
+    }
+
+    /// Claude Code after a turn, asking (captured in a pane on this
+    /// machine).
+    const CLAUDE_DIALOG: &str = "\
+⏺ ok
+
+✻ Brewed for 2s · done 5:47 PM
+
+────────────────────────────────────────────────────────────────────────────────
+  Teach auto mode about your environment?
+
+  Auto mode works better when it knows your environment. Takes about a
+  minute.
+
+  ❯ 1. Yes
+";
+
+    /// Claude Code idle: the same turn, then the composer between its
+    /// rules. The past message above it, a numbered line itself, is added.
+    const CLAUDE_IDLE: &str = "\
+❯ 1. say ok
+
+⏺ ok
+
+✻ Brewed for 2s · done 5:47 PM
+
+──────────────────────────────────────────────────────────────────────── lead ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts
+";
+
+    /// Codex 0.165 signing in (rendered in a PTY with an empty CODEX_HOME):
+    /// its cursor is an ASCII `>`.
+    const CODEX_LOGIN: &str = "\
+  Welcome to Codex, OpenAI's command-line coding agent
+
+  Choose how you want to use Codex.
+
+> 1. Sign in with ChatGPT
+     Usage included with Plus, Pro, Business, and Enterprise plans
+  2. Sign in with Device Code
+     Sign in from another device with a one-time code
+  3. Use an OpenAI API key
+     Pay for what you use
+  4. Use Amazon Bedrock
+     Connect using your AWS credentials
+
+  Press enter to continue
+";
+
+    /// Codex's update prompt. Reconstructed, not captured: the text is
+    /// the strings in the Codex 0.165 binary, laid out as its menus are;
+    /// this install only ever showed the banner without a menu.
+    const CODEX_UPDATE: &str = "\
+  ✨ Update available! 0.165.0 -> 0.166.0
+
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  Press enter to continue
+";
+
+    /// Codex asking to run a command. Reconstructed, not captured, from
+    /// the same binary's strings.
+    const CODEX_APPROVAL: &str = "\
+• Running cargo test
+
+  Would you like to run the following command?
+
+  $ cargo test
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `cargo test` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel
+";
+
+    /// Codex 0.165 idle, as rendered in a PTY, with a past message and
+    /// its answer added above the composer.
+    const CODEX_IDLE: &str = "\
+╭──────────────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.165.0)                                   │
+│                                                              │
+│ directory: ~/proj                                            │
+╰──────────────────────────────────────────────────────────────╯
+
+› 1. do X
+
+• ok
+
+› Ask Codex to do anything
+
+  ? for shortcuts
+";
+
+    /// Codex 0.165 starting with no login, its logo drawn and the menu
+    /// below it not yet (rendered in a PTY; what a sandbox caught).
+    const CODEX_WELCOME: &str = "\
+                        ⣀⣀⣤⣤⣤⣤⣤⣄⣀⣀
+                    ⢀⣤⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣦⣀
+                  ⣠⣾⣿⣿⣿⣿⠿⠛⠛⠛⠛⠛⠛⠻⢿⣿⣿⣿⣿⣿⣷⣦
+                ⣠⣾⣿⣿⣿⠟⠉           ⠙⠻⣿⣿⣿⣿⣷⣄
+               ⢠⣿⣿⣿⡿⠁               ⠈⢿⣿⣿⣿⣿⣆
+              ⢠⣿⣿⣿⡟⠁  ⢀⣤⣤⣄            ⠹⣿⣿⣿⣿⡄
+              ⣾⣿⣿⣿⠁   ⢸⣿⣿⣿⣷⡀           ⢹⣿⣿⣿⣷
+             ⢀⣿⣿⣿⡟     ⢻⣿⣿⣿⣷⡄           ⣿⣿⣿⣿⡄
+             ⠘⣿⣿⣿⡇      ⣿⣿⣿⣿⣿           ⣿⣿⣿⣿⡇
+              ⣿⣿⣿⣷     ⣼⣿⣿⣿⡿⠃ ⢀⣀⣀⣀⣀⣀⣀⡀  ⣿⣿⣿⣿⡇
+              ⢽⣿⣿⣿⡆   ⢸⣿⣿⣿⡿⠁ ⢸⣿⣿⣿⣿⣿⣿⣿⣿⡆⢀⣿⣿⣿⣿⠃
+              ⠘⢿⣿⣿⣿⡄   ⠉⠛⠋    ⠉⠛⠛⠛⠛⠛⠛⠛⠁⣸⣿⣿⣿⡿
+               ⠘⣿⣿⣿⣿⣆                ⢀⣼⣿⣿⣿⣿⠃
+                ⠘⢿⣿⣿⣿⣷⣄            ⢀⣤⣾⣿⣿⣿⡿⠃
+                  ⠙⢿⣿⣿⣿⣿⣶⣤⣀⣀   ⣀⣀⣤⣶⣿⣿⣿⣿⣿⠟⠁
+                    ⠉⠛⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠛⠁
+                        ⠉⠛⠻⠿⠿⠿⠿⠿⠿⠟⠛⠋⠁
+";
+
+    /// Codex 0.165 starting logged in (rendered in a PTY): its input box
+    /// is up already, under a header whose `>_` is no glyph.
+    const CODEX_LOADING: &str = "\
+  >_ OpenAI Codex (v0.165.0)
+     loading
+
+
+
+                                             ⣀⣤⣤⣤⣀⣀
+                                          ⣠⣶⣿⣿⣿⣿⣿⣿⣿⣿⣦⣤⣤⣤⣤⣤⣤⡀
+                                        ⢀⣾⣿⣿⠿⠋⠉⠉⢉⣭⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣷⣄
+                                       ⣀⣾⣿⣿⠃ ⣀⣴⣾⣿⣿⡿⠟⠋ ⣀⡀ ⠈⠙⢿⣿⣿⣧
+                                    ⣀⣶⣿⣿⣿⣿⡇ ⢸⣿⣿⡿⠛⠉⢀⣠⣴⣿⣿⣿⣷⣦⣀⠈⢻⣿⣿⡇
+                                   ⣰⣿⣿⡿⢿⣿⣿⡇ ⢸⣿⣿⢀⣤⣶⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣮⣿⣿⡷
+                                  ⢰⣿⣿⡟⠁⢸⣿⣿⡇ ⢸⣿⣿⣿⣿⠿⠿⣿⣿⣿⣦⣄⡀⠈⠛⠿⣿⣿⣿⣧⡀
+                                  ⣾⣿⣿⠃ ⢸⣿⣿⡇ ⢸⣿⣿⠋⠁  ⠈⠙⢻⣿⣿⣿⣶⣤⡀ ⠹⢿⣿⣷⡄
+                                  ⢸⣿⣿⣇ ⠸⣿⣿⣷⣦⣼⣿⣿      ⢸⣿⣿⠻⢿⣿⣿⡇ ⠘⣿⣿⣿
+                                  ⠈⢿⣿⣿⣦⡀⠈⠛⠿⣿⣿⣿⣿⣄⡀  ⢀⣠⣼⣿⣿  ⣿⣿⡇  ⣿⣿⣿⠇
+                                    ⢻⣿⣿⣿⣷⣦⣀⠈⠙⠻⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿  ⣿⣿⡇ ⣠⣿⣿⣿
+                                    ⢸⣿⣿⡿⢿⣿⣿⣿⣦⣠⣴⣿⣿⣿⡿⠟⠋⢸⣿⣿  ⣿⣿⣷⣴⣿⣿⣿⠃
+                                    ⠘⣿⣿⣷ ⠈⠛⢿⣿⣿⣿⠿⠋⠉ ⣠⣴⣿⣿⣿  ⣿⣿⣿⣿⣿⠟⠁
+                                     ⠻⣿⣿⣿⣤⣀ ⠈⠉ ⢀⣤⣶⣿⣿⣿⠿⠟⠁ ⣰⣿⣿⡟⠋⠁
+                                      ⠈⠿⣿⣿⣿⣿⣶⣾⣿⣿⣿⣿⠟⠋⠁  ⣠⣼⣿⣿⡟
+                                         ⠙⠛⠛⠛⠻⠛⢿⣿⣿⣿⣿⣷⣾⣿⣿⣿⡿⠏
+                                                ⠈⠙⠛⠿⠿⠿⠿⠛⠉
+
+
+
+› Ask Codex to do anything
+
+
+  ? for shortcuts
+";
+
+    /// Codex 0.165 idle after a turn: our team's real reviewer, its screen
+    /// read through `mira read-screen` (the bottom of it).
+    const CODEX_AFTER_A_TURN: &str = "\
+• Explored · 1 failed
+  └ Search read-screen-request|readScreen|
+           serialize.*buffer|serialize\\( in src
+    Read registry.ts
+    + Show details
+
+• The readiness checks run without holding app
+  locks, but the advertised 10-second bound needs a
+  closer look: each screen read can itself wait up
+  to five seconds. I’m checking whether the retry
+  loop can exceed that bound before I finalize.
+
+• Explored
+  └ Read server.rs, handoff.rs
+    + Show details
+
+• Ran /Applications/Mirador.app/Contents/MacOS/mir…
+  └ e1ea323e-8fc7-409c-9bac-facfebc8bf64
+    + Show details
+
+• CHANGES sent to the planner: slow screen reads
+  can push the refusal past the stated 10-second
+  bound, and the Codex-while-working case still
+  needs coverage.
+
+  Worked for 50s • 12:53
+
+
+› Ask Codex to do anything
+";
+
+    /// Codex 0.165 mid-turn: our team's real reviewer while it reviewed a
+    /// commit, its screen read through `mira read-screen` by the planner
+    /// (the last 20 lines). The input box stays up under "• Working".
+    const CODEX_WORKING: &str = "\
+  box screen was seen, a read cut short refuses
+  rather than types; the welcome e2e asserts the
+  refusal arrives in [10 s, 12 s). New REAL
+  fixtures: Codex after a turn (your own pane),
+  Claude while working (the planner's pane mid-
+  turn). A Codex-mid-turn capture is being taken
+  from your pane while you review this, and will
+  be added as a fixture. APPROVE or CHANGES via
+  mira agent send planner.
+
+
+• I’ll inspect the timeout changes and the new
+  real-screen fixtures, including whether an
+  interrupted read after seeing a no-input state
+  refuses safely.
+
+• Working (2s • esc to interrupt)
+
+
+› Ask Codex to do anything
+";
+
+    /// Claude Code mid-turn, a tool running: our team's real planner, its
+    /// screen read through `mira read-screen` (the bottom of it). The input
+    /// box stays up while it works.
+    const CLAUDE_WORKING: &str = "\
+⏺ I'm flagging two issues for the worker: the 10-second wait can stretch to nearly 15 seconds since
+  each screen read takes up to 5 seconds and the deadline check happens after the read, and there's no
+  test screen for Codex mid-turn, which risks wrongly blocking a send that would otherwise work.
+
+  Sending the reviewer's two changes to the worker · 29s
+  ⎿  $ /Applications/Mirador.app/Contents/MacOS/mira agent send worker --wait --timeout 590 \"Reviewer
+     CHANGES on ad2b281 (step 3), two things:
+     1) The 10 s bound isn't one: screen_refusal checks the deadline only after each read_screen,
+     which can itself block up to 5 s, so a read started just before 10 s… (27s)
+     (ctrl+b to run in background)
+
+✳ Fluttering… (1m 53s · ↓ 3.7k tokens)
+                                                              ✔ Update installed · /restart to apply
+──────────────────────────────────────────────────────────────────────────────────────────── planner ─
+❯
+";
+
+    #[test]
+    fn sees_a_menu_the_agent_is_showing() {
+        use Showing::Choice;
+        assert_eq!(showing(CLAUDE_DIALOG), Choice("❯ 1. Yes"));
+        assert_eq!(showing(CODEX_LOGIN), Choice("> 1. Sign in with ChatGPT"));
+        assert_eq!(showing(CODEX_UPDATE), Choice("› 1. Update now (runs `npm install -g @openai/codex`)"));
+        assert_eq!(showing(CODEX_APPROVAL), Choice("› 1. Yes, proceed (y)"));
+        // Moved down, the cursor is still the one selection.
+        let second = CODEX_UPDATE.replace("› 1. Update", "  1. Update").replace("  2. Skip\n", "› 2. Skip\n");
+        assert_eq!(showing(&second), Choice("› 2. Skip"));
+    }
+
+    #[test]
+    fn sees_the_input_box_however_it_reads() {
+        use Showing::Composer;
+        assert_eq!(showing(CLAUDE_IDLE), Composer);
+        assert_eq!(showing(&CLAUDE_IDLE.replace("❯ \n", "❯ fix the bug\n")), Composer);
+        assert_eq!(showing(CODEX_IDLE), Composer);
+        assert_eq!(showing(&CODEX_IDLE.replace("› Ask Codex to do anything", "› fix the bug")), Composer);
+        assert_eq!(showing(CODEX_LOADING), Composer);
+        assert_eq!(showing(CODEX_AFTER_A_TURN), Composer);
+        assert_eq!(showing(CODEX_WORKING), Composer);
+        assert_eq!(showing(CLAUDE_WORKING), Composer);
+        // A number that is not a menu row's.
+        assert_eq!(showing("› 2026 was a year\n"), Composer);
+        assert_eq!(showing("› 1.5 seconds\n"), Composer);
+    }
+
+    #[test]
+    fn sees_neither_on_a_screen_with_no_glyph() {
+        use Showing::Neither;
+        assert_eq!(showing(CODEX_WELCOME), Neither);
+        assert_eq!(showing(""), Neither);
+        // Its loading header alone, its input box not drawn: `>_` is no glyph.
+        let header: String = CODEX_LOADING.lines().take(2).map(|l| format!("{l}\n")).collect();
+        assert!(header.contains(">_ OpenAI Codex"), "{header}");
+        assert_eq!(showing(&header), Neither);
+        assert_eq!(showing("yoanmarti@mac mirador % ls\nREADME.md  src\nyoanmarti@mac mirador % "), Neither);
     }
 
     #[test]

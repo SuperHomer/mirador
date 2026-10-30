@@ -185,7 +185,10 @@ sandbox's PATH as `claude` and `codex`, logs how it was started, records
 its session through the real `mira claude-hook`, and echoes input. As
 `claude` it also answers the skills probe (`E2E_SKILLS`), turns each
 message — a bracketed paste is one — into a turn with `prompt-submit` and
-`stop` hooks (`E2E_TURN_MS`), and raises a permission prompt on `!ask`. So a
+`stop` hooks (`E2E_TURN_MS`), and raises a permission prompt on `!ask`.
+As either, it draws an input box when ready for a message (`❯ `, `› `),
+which a send waits for; `!menu` draws a numbered menu no hook reports;
+and `E2E_WELCOME=1` starts it on a welcome screen with no input box. So a
 test needs no login and costs nothing, and the process table sees a real
 `claude` (a shell script would show as `/bin/sh`).
 
