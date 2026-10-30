@@ -29,6 +29,9 @@ interface Props {
   repo: string;
   spec: string;
   focused: boolean;
+  /** Under its tab's wall, which draws it in a tile of its own: it loads
+   *  nothing until the wall goes off, and then loads afresh. */
+  walled?: boolean;
 }
 
 /**
@@ -74,7 +77,7 @@ const STATUS_GLYPH: Record<string, string> = {
  * browser pane this is ordinary DOM in the host webview, so the keymap,
  * focus ring and theme all apply without special handling.
  */
-export function DiffPane({ paneId, repo, spec, focused }: Props) {
+export function DiffPane({ paneId, repo, spec, focused, walled = false }: Props) {
   const [result, setResult] = useState<DiffResult | null>(null);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -118,17 +121,20 @@ export function DiffPane({ paneId, repo, spec, focused }: Props) {
     };
   }, [paneId]);
 
-  useEffect(() => refresh(), [refresh, spec, repo]);
+  useEffect(() => (walled ? undefined : refresh()), [refresh, spec, repo, walled]);
 
   // A working-tree diff goes stale the moment anything writes a file, and
   // the usual writer is the agent in the pane next door. Coming back to
   // the pane is the natural "show me where we are now".
   const live = spec === "worktree" || spec === "staged";
+  // Not as the wall goes off: the load above has just run for that.
   const wasFocused = useRef(focused);
+  const wasWalled = useRef(walled);
   useEffect(() => {
-    if (focused && !wasFocused.current && live) refresh();
+    if (focused && !wasFocused.current && live && !wasWalled.current) refresh();
     wasFocused.current = focused;
-  }, [focused, live, refresh]);
+    wasWalled.current = walled;
+  }, [focused, live, refresh, walled]);
 
   const tree = useMemo(() => buildTree(result?.files ?? []), [result]);
   const eager = useMemo(
