@@ -16,7 +16,9 @@
 //!   A message containing `!ask` raises a permission prompt instead (a
 //!   `permission_prompt` notification) and leaves it up. `/exit` exits.
 //!   `!size` (as either) prints its terminal's size, `stty size`'s rows and
-//!   columns: the size whatever draws the pane last gave its PTY.
+//!   columns: the size whatever draws the pane last gave its PTY. `!menu`
+//!   (as either) draws a numbered menu as its last lines, `❯ 1. Yes`, and
+//!   leaves it up with no hook: a dialog like Codex's update prompt.
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
 //!   Mirador by its hooks as Claude Code's are, gets each turn's prompt
 //!   and one Bash call, `echo` of the message's first line, with its
@@ -263,6 +265,10 @@ fn main() {
         }
         if message.trim() == "!size" {
             let _ = std::process::Command::new("stty").arg("size").status();
+            continue;
+        }
+        if message.contains("!menu") {
+            println!("  Pick one\n  ❯ 1. Yes\n    2. No");
             continue;
         }
         if !claude {

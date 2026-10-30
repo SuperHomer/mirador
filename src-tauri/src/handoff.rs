@@ -34,6 +34,15 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
     }
 }
 
+/// The row a menu on `pane`'s screen has selected, when its agent shows
+/// one (`cmux_core::handoff::choice_on_screen`). A screen that cannot be
+/// read — its terminal not mounted, the read timed out — counts as no
+/// menu: refusing then would refuse every send to a tab never shown.
+fn choice_shown(app: &tauri::AppHandle, pane: &str) -> Option<String> {
+    let screen = crate::server::read_screen(app, pane, None).ok()?;
+    cmux_core::handoff::choice_on_screen(&screen).map(String::from)
+}
+
 /// The agents of `caller`'s tab, by every name they go by.
 fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> {
     let ws = state.workspace.lock().unwrap();
@@ -99,6 +108,10 @@ pub fn send(
     // As it is once up, not as it was before the wait: still an agent, and
     // perhaps already asking a person something.
     cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
+    // A dialog no hook reports, which the Enter below would answer.
+    if let Some(row) = choice_shown(app, &pane).filter(|_| !force) {
+        return Err(format!("{to} is showing a choice, `{row}`: answer it in its pane, or send with --force"));
+    }
     let from = caller.as_deref().and_then(|c| sender(state, c));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
     state.pty.write(&pane, &paste)?;
@@ -114,10 +127,12 @@ pub fn send(
 /// Starts the agent in `pane` on a new conversation, by typing its
 /// harness's command for that. Refused, with what `team clear` reports
 /// and why, for a pane running no agent, one whose terminal has not
-/// started, one waiting on a person unless `force`, and a harness with no
-/// such command. A working agent is not refused: the line waits for its
-/// turn to end, which is how a lead clears itself last.
-pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
+/// started, one waiting on a person or showing a menu unless `force`, and
+/// a harness with no such command. A working agent is not refused: the
+/// line waits for its turn to end, which is how a lead clears itself last.
+pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
+    use tauri::Manager;
+    let state = &*app.state::<AppState>();
     let agent = |state: &AppState| {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(pane).filter(|m| m.is_agent()).ok_or(("not running", "it runs no agent".to_string()))?;
@@ -131,6 +146,9 @@ pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'st
     // As it is once up, not as it was before the wait.
     let (status, harness) = agent(state)?;
     cmux_core::handoff::can_receive(status, force).map_err(|e| ("needs you", e))?;
+    if let Some(row) = choice_shown(app, pane).filter(|_| !force) {
+        return Err(("needs you", format!("it is showing a choice, `{row}`: answer it in its pane, or clear with --force")));
+    }
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;
     state.pty.write(pane, line.as_bytes()).map_err(|e| ("not running", e))?;
     // Enter on its own read, as `send` does.
@@ -141,13 +159,15 @@ pub fn clear_pane(state: &AppState, pane: &str, force: bool) -> Result<(), (&'st
 
 /// `clear_pane` for the agent `name` means from the caller's tab, as
 /// `send` finds it, or the caller itself. Returns its pane.
-pub fn clear(state: &AppState, name: Option<&str>, caller: Option<String>, force: bool) -> Result<String, String> {
+pub fn clear(app: &tauri::AppHandle, name: Option<&str>, caller: Option<String>, force: bool) -> Result<String, String> {
+    use tauri::Manager;
+    let state = &*app.state::<AppState>();
     let pane = match name {
         Some(name) => find(state, name, caller)?,
         None => caller.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane()),
     };
     let label = name.unwrap_or(&pane).to_string();
-    clear_pane(state, &pane, force).map_err(|(_, why)| format!("{label}: {why}"))?;
+    clear_pane(app, &pane, force).map_err(|(_, why)| format!("{label}: {why}"))?;
     Ok(pane)
 }
 

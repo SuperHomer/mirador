@@ -355,7 +355,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentClear { name, pane_id, force } => {
-            let pane = crate::handoff::clear(&state, name.as_deref(), pane_id, force)?;
+            let pane = crate::handoff::clear(app, name.as_deref(), pane_id, force)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentFind { name, pane_id } => {
@@ -409,7 +409,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::SaveList => Ok(json!({ "saves": crate::checkpoints::list() })),
         Request::TeamClear { pane_id, force } => {
-            Ok(json!({ "members": crate::teams::team_clear(&state, pane_id.as_deref(), force)? }))
+            Ok(json!({ "members": crate::teams::team_clear(app, pane_id.as_deref(), force)? }))
         }
         Request::AgentBoard { pane_id } => {
             crate::commands::set_wall_view(app.clone(), app.state(), pane_id, WallView::Tasks)?;
@@ -743,7 +743,7 @@ fn parse_bridge_result(pane: &str, raw: &str) -> Result<Value, String> {
 
 /// Round-trips to the webview: the frontend serializes the pane's buffer
 /// and resolves the pending request. 5s timeout.
-fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>) -> Result<String, String> {
+pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>) -> Result<String, String> {
     let state = app.state::<AppState>();
     // The webview's terminal buffer outlives the PTY, so exited command
     // panes and idle restored panes are still readable — that's exactly

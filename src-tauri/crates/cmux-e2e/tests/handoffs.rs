@@ -139,3 +139,56 @@ fn a_message_sent_before_its_agent_is_up_waits_for_it() {
     let screen = sb.screen(&pane).unwrap_or_default();
     assert!(!screen.contains("command not found"), "the shell ran it:\n{screen}");
 }
+
+/// An agent showing a dialog no hook reports — Codex's update prompt, an
+/// approval, Claude Code's own questions — is not typed into: the Enter
+/// after a message, or after `/clear`, would pick the selected option. In
+/// a live run it accepted Codex's "Update now".
+#[test]
+fn an_agent_showing_a_menu_is_not_typed_into() {
+    e2e!();
+    let mut sb = Sandbox::new("sendmenu");
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(first.clone()),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
+    send(&sb, &first, &pane, "!menu").unwrap();
+    sb.wait_for("the menu", LONG, || sb.screen(&pane).filter(|s| s.contains("❯ 1. Yes")));
+    let before = sb.events("message", &pane).len();
+
+    let refused = send(&sb, &first, &pane, "go on").unwrap_err();
+    assert!(refused.contains("showing a choice") && refused.contains("`❯ 1. Yes`"), "{refused}");
+    let clear = |force| sb.request(Request::AgentClear { name: Some(pane.clone()), pane_id: Some(first.clone()), force });
+    let refused = clear(false).unwrap_err();
+    assert!(refused.contains("showing a choice") && refused.contains("`❯ 1. Yes`"), "{refused}");
+
+    // Forced, each goes through — and is all the agent ever got.
+    sb.request(Request::AgentSend {
+        title: None,
+        to: pane.clone(),
+        message: "yes, go ahead".into(),
+        pane_id: Some(first.clone()),
+        force: true,
+        card: None,
+    })
+    .unwrap();
+    clear(true).unwrap();
+    let got: Vec<String> = sb.wait_for("the forced two", LONG, || {
+        let texts: Vec<String> = sb.events("message", &pane)[before..]
+            .iter()
+            .map(|m| m["text"].as_str().unwrap_or_default().to_string())
+            .collect();
+        (texts.len() >= 2).then_some(texts)
+    });
+    assert_eq!(got, ["yes, go ahead", "/clear"]);
+}
