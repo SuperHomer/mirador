@@ -34,13 +34,41 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
     }
 }
 
-/// The row a menu on `pane`'s screen has selected, when its agent shows
-/// one (`cmux_core::handoff::choice_on_screen`). A screen that cannot be
-/// read — its terminal not mounted, the read timed out — counts as no
-/// menu: refusing then would refuse every send to a tab never shown.
-fn choice_shown(app: &tauri::AppHandle, pane: &str) -> Option<String> {
-    let screen = crate::server::read_screen(app, pane, None).ok()?;
-    cmux_core::handoff::choice_on_screen(&screen).map(String::from)
+/// How long a Claude Code or Codex agent, once running, is given to show
+/// its input box. It draws one within a second or two of starting, and
+/// `wait_started` has waited for it to start already; a screen still
+/// without one is on something of its own (a welcome, a login) that
+/// waiting does not change, so the caller hears so in seconds, not in the
+/// 20 a start is given.
+const INPUT_BOX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Why what is typed must not go into `pane` now, by what its screen shows
+/// (`cmux_core::handoff::showing`): a menu, which the Enter after it would
+/// answer; or, for a harness whose input box Mirador knows, no input box
+/// within [`INPUT_BOX_WAIT`] — the paste might dismiss a welcome screen
+/// and the Enter land on the menu that replaces it. A screen that cannot
+/// be read — its terminal not mounted, the read timed out — counts as
+/// ready: refusing then would refuse every send to a tab never shown.
+fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_protocol::Harness>) -> Option<String> {
+    use cmux_core::handoff::Showing;
+    use cmux_protocol::Harness;
+    let knows_input_box = matches!(harness, Some(Harness::Claude | Harness::Codex));
+    let deadline = std::time::Instant::now() + INPUT_BOX_WAIT;
+    loop {
+        let screen = crate::server::read_screen(app, pane, None).ok()?;
+        match cmux_core::handoff::showing(&screen) {
+            Showing::Choice(row) => return Some(format!("is showing a choice, `{row}`: answer it in its pane")),
+            Showing::Composer => return None,
+            Showing::Neither if !knows_input_box => return None,
+            Showing::Neither if std::time::Instant::now() >= deadline => {
+                return Some(
+                    "shows no input box yet: it may still be starting, or waiting on a screen of its own — look at its pane"
+                        .into(),
+                )
+            }
+            Showing::Neither => std::thread::sleep(std::time::Duration::from_millis(250)),
+        }
+    }
 }
 
 /// The agents of `caller`'s tab, by every name they go by.
@@ -98,22 +126,22 @@ pub fn send(
             .get(&pane)
             .filter(|m| m.is_agent())
             .ok_or_else(|| format!("{to} runs no agent: a message would run in its shell as a command"))?;
-        Ok::<_, String>(m.status())
+        Ok::<_, String>((m.status(), m.harness()))
     };
-    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
+    cmux_core::handoff::can_receive(status(state)?.0, force).map_err(|e| format!("{to}: {e}"))?;
     if !state.pty.is_running(&pane) {
         return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
     }
     wait_started(state, &pane).map_err(|e| format!("{to}: {e}"))?;
     // As it is once up, not as it was before the wait: still an agent, and
     // perhaps already asking a person something.
-    cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
-    // A dialog no hook reports, which the Enter below would answer. Not
-    // read when forced: the answer would not change, and a read can take
-    // seconds.
+    let (status, harness) = status(state)?;
+    cmux_core::handoff::can_receive(status, force).map_err(|e| format!("{to}: {e}"))?;
+    // Not read when forced: the answer would not change, and a read can
+    // take seconds.
     if !force {
-        if let Some(row) = choice_shown(app, &pane) {
-            return Err(format!("{to} is showing a choice, `{row}`: answer it in its pane, or send with --force"));
+        if let Some(why) = screen_refusal(app, &pane, harness) {
+            return Err(format!("{to} {why}, or send with --force"));
         }
     }
     let from = caller.as_deref().and_then(|c| sender(state, c));
@@ -131,8 +159,8 @@ pub fn send(
 /// Starts the agent in `pane` on a new conversation, by typing its
 /// harness's command for that. Refused, with what `team clear` reports
 /// and why, for a pane running no agent, one whose terminal has not
-/// started, one waiting on a person or showing a menu unless `force`, and
-/// a harness with no such command. A working agent is not refused: the
+/// started, one waiting on a person, showing a menu or no input box unless
+/// `force` (`screen_refusal`), and a harness with no such command. A working agent is not refused: the
 /// line waits for its turn to end, which is how a lead clears itself last.
 pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(), (&'static str, String)> {
     use tauri::Manager;
@@ -151,8 +179,8 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
     let (status, harness) = agent(state)?;
     cmux_core::handoff::can_receive(status, force).map_err(|e| ("needs you", e))?;
     if !force {
-        if let Some(row) = choice_shown(app, pane) {
-            return Err(("needs you", format!("it is showing a choice, `{row}`: answer it in its pane, or clear with --force")));
+        if let Some(why) = screen_refusal(app, pane, harness) {
+            return Err(("needs you", format!("it {why}, or clear with --force")));
         }
     }
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;

@@ -165,25 +165,44 @@ pub fn clear_line(harness: Option<cmux_protocol::Harness>) -> Result<&'static st
     }
 }
 
-/// The option a menu on `screen` has selected — `❯ 1. Yes` — when the
-/// agent shows one, else `None`. Such a dialog — Codex's update prompt or
-/// an approval, Claude Code's own questions — sets no status a hook
-/// reports, and an Enter typed into it would pick that option.
-///
-/// A menu row is a selection glyph (Claude Code's `❯`, Codex's `›`, or
-/// the ASCII `>` some of Codex's menus draw) before a number, a dot and a
-/// space.
-pub fn choice_on_screen(screen: &str) -> Option<&str> {
-    // The last glyph line, not any: while the composer is up its prompt
-    // line (`❯ `, `› Ask Codex…`) is the last, below past messages echoed
-    // as `› 1. do X`; a dialog takes the composer's place, and then its
-    // cursor is the last.
-    let line = screen.lines().map(str::trim).rev().find(|l| l.starts_with(['❯', '›', '>']))?;
+/// What an agent's screen offers to type into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Showing<'a> {
+    /// Its input box: what is typed goes in as a message.
+    Composer,
+    /// A menu, with this row selected: an Enter would pick it. Such a
+    /// dialog — Codex's update prompt or an approval, Claude Code's own
+    /// questions — sets no status a hook reports.
+    Choice(&'a str),
+    /// Neither: still starting, or a screen of its own (a logo, a
+    /// welcome) that a keypress may turn into something else.
+    Neither,
+}
+
+/// What `screen` shows, judged by its last selection line: a glyph
+/// (Claude Code's `❯`, Codex's `›`, or the ASCII `>` some of Codex's
+/// menus draw) alone or before a space. A menu row has a number, a dot
+/// and a space after it (`❯ 1. Yes`); any other is the input box.
+pub fn showing(screen: &str) -> Showing<'_> {
+    // The last such line, not any: while the input box is up its line
+    // (`❯ `, `› Ask Codex…`) is the last, below past messages echoed as
+    // `› 1. do X`; a dialog takes its place, and then its cursor is the
+    // last.
+    let Some(line) = screen.lines().map(str::trim).rev().find(|l| {
+        let mut chars = l.chars();
+        matches!(chars.next(), Some('❯' | '›' | '>')) && chars.next().is_none_or(char::is_whitespace)
+    }) else {
+        return Showing::Neither;
+    };
     let mut rest = line.chars();
     rest.next();
     let rest = rest.as_str().trim_start();
     let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-    (digits > 0 && rest[digits..].starts_with(". ")).then_some(line)
+    if digits > 0 && rest[digits..].starts_with(". ") {
+        Showing::Choice(line)
+    } else {
+        Showing::Composer
+    }
 }
 
 /// What `mira agent wait` has seen so far, and whether it is done.
@@ -412,28 +431,97 @@ mod tests {
   ? for shortcuts
 ";
 
+    /// Codex 0.165 starting with no login, its logo drawn and the menu
+    /// below it not yet (rendered in a PTY; what a sandbox caught).
+    const CODEX_WELCOME: &str = "\
+                        ⣀⣀⣤⣤⣤⣤⣤⣄⣀⣀
+                    ⢀⣤⣶⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣶⣦⣀
+                  ⣠⣾⣿⣿⣿⣿⠿⠛⠛⠛⠛⠛⠛⠻⢿⣿⣿⣿⣿⣿⣷⣦
+                ⣠⣾⣿⣿⣿⠟⠉           ⠙⠻⣿⣿⣿⣿⣷⣄
+               ⢠⣿⣿⣿⡿⠁               ⠈⢿⣿⣿⣿⣿⣆
+              ⢠⣿⣿⣿⡟⠁  ⢀⣤⣤⣄            ⠹⣿⣿⣿⣿⡄
+              ⣾⣿⣿⣿⠁   ⢸⣿⣿⣿⣷⡀           ⢹⣿⣿⣿⣷
+             ⢀⣿⣿⣿⡟     ⢻⣿⣿⣿⣷⡄           ⣿⣿⣿⣿⡄
+             ⠘⣿⣿⣿⡇      ⣿⣿⣿⣿⣿           ⣿⣿⣿⣿⡇
+              ⣿⣿⣿⣷     ⣼⣿⣿⣿⡿⠃ ⢀⣀⣀⣀⣀⣀⣀⡀  ⣿⣿⣿⣿⡇
+              ⢽⣿⣿⣿⡆   ⢸⣿⣿⣿⡿⠁ ⢸⣿⣿⣿⣿⣿⣿⣿⣿⡆⢀⣿⣿⣿⣿⠃
+              ⠘⢿⣿⣿⣿⡄   ⠉⠛⠋    ⠉⠛⠛⠛⠛⠛⠛⠛⠁⣸⣿⣿⣿⡿
+               ⠘⣿⣿⣿⣿⣆                ⢀⣼⣿⣿⣿⣿⠃
+                ⠘⢿⣿⣿⣿⣷⣄            ⢀⣤⣾⣿⣿⣿⡿⠃
+                  ⠙⢿⣿⣿⣿⣿⣶⣤⣀⣀   ⣀⣀⣤⣶⣿⣿⣿⣿⣿⠟⠁
+                    ⠉⠛⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠛⠁
+                        ⠉⠛⠻⠿⠿⠿⠿⠿⠿⠟⠛⠋⠁
+";
+
+    /// Codex 0.165 starting logged in (rendered in a PTY): its input box
+    /// is up already, under a header whose `>_` is no glyph.
+    const CODEX_LOADING: &str = "\
+  >_ OpenAI Codex (v0.165.0)
+     loading
+
+
+
+                                             ⣀⣤⣤⣤⣀⣀
+                                          ⣠⣶⣿⣿⣿⣿⣿⣿⣿⣿⣦⣤⣤⣤⣤⣤⣤⡀
+                                        ⢀⣾⣿⣿⠿⠋⠉⠉⢉⣭⣿⣿⣿⣿⣿⠿⣿⣿⣿⣿⣷⣄
+                                       ⣀⣾⣿⣿⠃ ⣀⣴⣾⣿⣿⡿⠟⠋ ⣀⡀ ⠈⠙⢿⣿⣿⣧
+                                    ⣀⣶⣿⣿⣿⣿⡇ ⢸⣿⣿⡿⠛⠉⢀⣠⣴⣿⣿⣿⣷⣦⣀⠈⢻⣿⣿⡇
+                                   ⣰⣿⣿⡿⢿⣿⣿⡇ ⢸⣿⣿⢀⣤⣶⣿⣿⣿⠟⠛⠻⣿⣿⣿⣿⣮⣿⣿⡷
+                                  ⢰⣿⣿⡟⠁⢸⣿⣿⡇ ⢸⣿⣿⣿⣿⠿⠿⣿⣿⣿⣦⣄⡀⠈⠛⠿⣿⣿⣿⣧⡀
+                                  ⣾⣿⣿⠃ ⢸⣿⣿⡇ ⢸⣿⣿⠋⠁  ⠈⠙⢻⣿⣿⣿⣶⣤⡀ ⠹⢿⣿⣷⡄
+                                  ⢸⣿⣿⣇ ⠸⣿⣿⣷⣦⣼⣿⣿      ⢸⣿⣿⠻⢿⣿⣿⡇ ⠘⣿⣿⣿
+                                  ⠈⢿⣿⣿⣦⡀⠈⠛⠿⣿⣿⣿⣿⣄⡀  ⢀⣠⣼⣿⣿  ⣿⣿⡇  ⣿⣿⣿⠇
+                                    ⢻⣿⣿⣿⣷⣦⣀⠈⠙⠻⣿⣿⣿⣶⣶⣿⣿⣿⣿⣿  ⣿⣿⡇ ⣠⣿⣿⣿
+                                    ⢸⣿⣿⡿⢿⣿⣿⣿⣦⣠⣴⣿⣿⣿⡿⠟⠋⢸⣿⣿  ⣿⣿⣷⣴⣿⣿⣿⠃
+                                    ⠘⣿⣿⣷ ⠈⠛⢿⣿⣿⣿⠿⠋⠉ ⣠⣴⣿⣿⣿  ⣿⣿⣿⣿⣿⠟⠁
+                                     ⠻⣿⣿⣿⣤⣀ ⠈⠉ ⢀⣤⣶⣿⣿⣿⠿⠟⠁ ⣰⣿⣿⡟⠋⠁
+                                      ⠈⠿⣿⣿⣿⣿⣶⣾⣿⣿⣿⣿⠟⠋⠁  ⣠⣼⣿⣿⡟
+                                         ⠙⠛⠛⠛⠻⠛⢿⣿⣿⣿⣿⣷⣾⣿⣿⣿⡿⠏
+                                                ⠈⠙⠛⠿⠿⠿⠿⠛⠉
+
+
+
+› Ask Codex to do anything
+
+
+  ? for shortcuts
+";
+
     #[test]
     fn sees_a_menu_the_agent_is_showing() {
-        assert_eq!(choice_on_screen(CLAUDE_DIALOG), Some("❯ 1. Yes"));
-        assert_eq!(choice_on_screen(CODEX_LOGIN), Some("> 1. Sign in with ChatGPT"));
-        assert_eq!(choice_on_screen(CODEX_UPDATE), Some("› 1. Update now (runs `npm install -g @openai/codex`)"));
-        assert_eq!(choice_on_screen(CODEX_APPROVAL), Some("› 1. Yes, proceed (y)"));
+        use Showing::Choice;
+        assert_eq!(showing(CLAUDE_DIALOG), Choice("❯ 1. Yes"));
+        assert_eq!(showing(CODEX_LOGIN), Choice("> 1. Sign in with ChatGPT"));
+        assert_eq!(showing(CODEX_UPDATE), Choice("› 1. Update now (runs `npm install -g @openai/codex`)"));
+        assert_eq!(showing(CODEX_APPROVAL), Choice("› 1. Yes, proceed (y)"));
         // Moved down, the cursor is still the one selection.
         let second = CODEX_UPDATE.replace("› 1. Update", "  1. Update").replace("  2. Skip\n", "› 2. Skip\n");
-        assert_eq!(choice_on_screen(&second), Some("› 2. Skip"));
+        assert_eq!(showing(&second), Choice("› 2. Skip"));
     }
 
     #[test]
-    fn sees_no_menu_in_a_composer_or_a_shell() {
-        assert_eq!(choice_on_screen(CLAUDE_IDLE), None);
-        assert_eq!(choice_on_screen(&CLAUDE_IDLE.replace("❯ \n", "❯ fix the bug\n")), None);
-        assert_eq!(choice_on_screen(CODEX_IDLE), None);
-        assert_eq!(choice_on_screen(&CODEX_IDLE.replace("› Ask Codex to do anything", "› fix the bug")), None);
-        assert_eq!(choice_on_screen("yoanmarti@mac mirador % ls\nREADME.md  src\nyoanmarti@mac mirador % "), None);
-        assert_eq!(choice_on_screen(""), None);
+    fn sees_the_input_box_however_it_reads() {
+        use Showing::Composer;
+        assert_eq!(showing(CLAUDE_IDLE), Composer);
+        assert_eq!(showing(&CLAUDE_IDLE.replace("❯ \n", "❯ fix the bug\n")), Composer);
+        assert_eq!(showing(CODEX_IDLE), Composer);
+        assert_eq!(showing(&CODEX_IDLE.replace("› Ask Codex to do anything", "› fix the bug")), Composer);
+        assert_eq!(showing(CODEX_LOADING), Composer);
         // A number that is not a menu row's.
-        assert_eq!(choice_on_screen("› 2026 was a year\n"), None);
-        assert_eq!(choice_on_screen("› 1.5 seconds\n"), None);
+        assert_eq!(showing("› 2026 was a year\n"), Composer);
+        assert_eq!(showing("› 1.5 seconds\n"), Composer);
+    }
+
+    #[test]
+    fn sees_neither_on_a_screen_with_no_glyph() {
+        use Showing::Neither;
+        assert_eq!(showing(CODEX_WELCOME), Neither);
+        assert_eq!(showing(""), Neither);
+        // Its loading header alone, its input box not drawn: `>_` is no glyph.
+        let header: String = CODEX_LOADING.lines().take(2).map(|l| format!("{l}\n")).collect();
+        assert!(header.contains(">_ OpenAI Codex"), "{header}");
+        assert_eq!(showing(&header), Neither);
+        assert_eq!(showing("yoanmarti@mac mirador % ls\nREADME.md  src\nyoanmarti@mac mirador % "), Neither);
     }
 
     #[test]

@@ -19,6 +19,12 @@
 //!   columns: the size whatever draws the pane last gave its PTY. `!menu`
 //!   (as either) draws a numbered menu as its last lines, `❯ 1. Yes`, and
 //!   leaves it up with no hook: a dialog like Codex's update prompt.
+//!
+//! Ready for a message, either draws its input box as the real ones do,
+//! `❯ ` as `claude` and `› ` as `codex` — Mirador waits for one before it
+//! types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
+//! with no input box until its first input, which only dismisses it: as
+//! Codex's logo waits for a key before its login menu.
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
 //!   Mirador by its hooks as Claude Code's are, gets each turn's prompt
 //!   and one Bash call, `echo` of the message's first line, with its
@@ -229,6 +235,16 @@ fn main() {
     );
 
     println!("fake {kind} ready");
+    let input_box = || {
+        print!("{} ", if claude { '❯' } else { '›' });
+        let _ = std::io::stdout().flush();
+    };
+    let mut welcome = std::env::var("E2E_WELCOME").is_ok_and(|v| v == "1");
+    if welcome {
+        println!("  Welcome to fake {kind}\n  Press any key");
+    } else {
+        input_box();
+    }
     let mut paste: Option<Vec<String>> = None;
     let mut turns = 0;
     let mut sessions = 1;
@@ -263,8 +279,14 @@ fn main() {
         if message.trim() == "/exit" {
             break;
         }
+        if welcome {
+            welcome = false;
+            input_box();
+            continue;
+        }
         if message.trim() == "!size" {
             let _ = std::process::Command::new("stty").arg("size").status();
+            input_box();
             continue;
         }
         if message.contains("!menu") {
@@ -280,6 +302,7 @@ fn main() {
                 rollout_turn(file, turns, &message, turn);
             }
             println!("got: {message}");
+            input_box();
             continue;
         }
         if message.contains("!ask") {
@@ -303,6 +326,7 @@ fn main() {
         println!("done: {}", message.lines().next().unwrap_or_default());
         hook("stop", serde_json::json!({ "session_id": session }));
         log(serde_json::json!({ "event": "turn-done", "pid": pid, "pane": pane }));
+        input_box();
     }
     log(serde_json::json!({ "event": "exit", "pid": pid, "pane": pane }));
 }

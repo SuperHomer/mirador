@@ -192,3 +192,53 @@ fn an_agent_showing_a_menu_is_not_typed_into() {
     });
     assert_eq!(got, ["yes, go ahead", "/clear"]);
 }
+
+/// An agent with no input box yet is not typed into: Codex without a
+/// login shows its logo and waits for a key, and a message sent then
+/// dismissed it, its Enter landing on the login menu that replaced it.
+/// Only once the input box is up does a message go in as one.
+#[test]
+fn an_agent_with_no_input_box_is_not_typed_into() {
+    e2e!();
+    let mut sb = Sandbox::new("sendwelcome");
+    sb.set_env("E2E_WELCOME", "1");
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(first.clone()),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
+    sb.wait_for("the welcome", LONG, || sb.screen(&pane).filter(|s| s.contains("Press any key")));
+
+    let refused = send(&sb, &first, &pane, "hello").unwrap_err();
+    assert!(refused.contains("no input box"), "{refused}");
+    let clear = |force| sb.request(Request::AgentClear { name: Some(pane.clone()), pane_id: Some(first.clone()), force });
+    let refused = clear(false).unwrap_err();
+    assert!(refused.contains("no input box"), "{refused}");
+    assert_eq!(sb.events("message", &pane).len(), 0, "nothing reached it");
+
+    // Forced, it goes through — and, as a key would, dismisses the welcome.
+    sb.request(Request::AgentSend {
+        title: None,
+        to: pane.clone(),
+        message: "hello anyway".into(),
+        pane_id: Some(first.clone()),
+        force: true,
+        card: None,
+    })
+    .unwrap();
+    sb.wait_for("the forced message", LONG, || {
+        sb.events("message", &pane).into_iter().find(|m| m["text"] == "hello anyway")
+    });
+    // Its input box up, a message goes in unforced.
+    send(&sb, &first, &pane, "now for real").unwrap();
+    sb.wait_for("the message", LONG, || sb.events("message", &pane).into_iter().find(|m| m["text"] == "now for real"));
+}
