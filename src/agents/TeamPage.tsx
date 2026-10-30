@@ -4,9 +4,11 @@ import {
   HARNESS_LABEL,
   RoleCatalog,
   TeamFields,
+  TeamWeight,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { STATUS_LABEL, StatusMark } from "./StatusMark";
+import { SPENT_MEANS, Spent, seatsOf, spentLabel, tokensLabel, usd, useSpent } from "./teamWeight";
 
 type Props = {
   name: string;
@@ -19,6 +21,10 @@ type Props = {
   onSelect: (member: number) => void;
   /** The charter's editor, for the inspector's Edit link to focus. */
   charterRef?: Ref<HTMLTextAreaElement>;
+  /** What the team as saved tells its members (`useTeamWeight`). */
+  weight: { weight: TeamWeight | null; error: string | null };
+  /** The form has unsaved edits, which the weight does not count. */
+  dirty: boolean;
 };
 
 /** How much a status wants you, to show a member's most urgent seat. */
@@ -29,7 +35,7 @@ const URGENCY: AgentStatus[] = ["needsYou", "working", "idle"];
  * description, and its charter. Every edit goes to `fields`; saving them
  * into the file is the editor's.
  */
-export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, onSelect, charterRef }: Props) {
+export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, onSelect, charterRef, weight, dirty }: Props) {
   const [adding, setAdding] = useState(false);
   const snapshot = useWorkspaceStore((s) => s.snapshot);
 
@@ -37,13 +43,17 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
   // by its name, the seat names `teams::seats` gives: `dev` twice is
   // `dev-1` and `dev-2`.
   const statusOf = new Map<string, (AgentStatus | null)[]>();
+  // And the panes of those that report what they spend.
+  const running: string[] = [];
   for (const tab of snapshot?.tabs ?? []) {
     if (tab.team?.name !== name) continue;
     for (const seat of tab.team.members) {
       const agent = snapshot?.agents.find((a) => a.paneId === seat.pane);
       if (agent) statusOf.set(seat.name, [...(statusOf.get(seat.name) ?? []), agent.status]);
+      if (agent?.hasActivity) running.push(agent.paneId);
     }
   }
+  const spent = useSpent(running);
   // The most urgent of a member's seats, across every run: undefined when
   // none of them runs, null when running with no status known.
   const seatStatus = (base: string, count: number): AgentStatus | null | undefined => {
@@ -65,6 +75,9 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
           const role = catalog.roles.find((r) => r.name === m.role);
           const problem = role ? role.problem : `no role \`${m.role}\``;
           const status = seatStatus(base, m.count);
+          // All its seats together; none for a member not saved yet.
+          const seats = weight.weight ? seatsOf(weight.weight, base, m.count) : [];
+          const tokens = seats.length > 0 ? seats.reduce((n, s) => n + s.tokens, 0) : null;
           return (
             <button
               key={i}
@@ -89,6 +102,7 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
                   [HARNESS_LABEL[role!.harness], role!.model ?? "default model", role!.effort]
                     .filter(Boolean)
                     .join(" · ")}
+                {!problem && tokens !== null && <span className="team-member-tokens"> · {tokensLabel(tokens)}</span>}
               </span>
             </button>
           );
@@ -122,6 +136,8 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
             + Add member
           </button>
         ))}
+      <div className="team-label">PROMPT WEIGHT</div>
+      <TeamWeightBlock weight={weight} dirty={dirty} spent={running.length > 0 ? spent : null} />
       <div className="team-fields">
         <label>
           <span>Way of working</span>
@@ -176,6 +192,56 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
         value={fields.charter ?? ""}
         onChange={(e) => onChange({ ...fields, charter: e.target.value || null })}
       />
+    </div>
+  );
+}
+
+/**
+ * What the team adds to its members' prompts, in tokens, and the least
+ * that costs a turn — a lower bound, which says what it leaves out.
+ */
+function TeamWeightBlock({
+  weight: { weight, error },
+  dirty,
+  spent,
+}: Pick<Props, "weight" | "dirty"> & { spent: Spent | null }) {
+  const floor = (w: TeamWeight) => {
+    if (w.unpriced === w.seats.length) return "no price";
+    const without =
+      w.unpriced === 0 ? "" : ` · ${w.unpriced} ${w.unpriced === 1 ? "member" : "members"} without a price`;
+    return `≥ ${usd(w.perTurnFloorUsd)} a turn${without}`;
+  };
+  return (
+    <div className="team-weight">
+      {error ? (
+        <p className="team-weight-error">{error}</p>
+      ) : weight ? (
+        <>
+          <div className="team-weight-figures">
+            <span className="team-weight-tokens">{tokensLabel(weight.tokens)}</span>
+            <span className="team-weight-floor">{floor(weight)}</span>
+          </div>
+          <p className="team-weight-note">
+            Mirador's prompts to the members, re-sent from the cache each turn at least. Not counted: each
+            agent's own system prompt and tools (Claude Code's, Codex's), CLAUDE.md, MCP tools, the
+            conversation and its output. Prices as of{" "}
+            {weight.pricesChecked}.
+          </p>
+        </>
+      ) : (
+        <p className="team-weight-note">Weighing…</p>
+      )}
+      {dirty && <p className="team-weight-note">Unsaved changes are not counted.</p>}
+      {spent && (
+        <div className="team-weight-figures" title={SPENT_MEANS}>
+          <span className="team-weight-tokens">Spent so far: {spentLabel(spent)}</span>
+          <span className="team-weight-floor">
+            its running members and their subagents, at API list prices — on a Claude subscription, what
+            it would have cost, not what is billed
+            {spent.unpriced ? "; some replies had no known price and are not in it" : ""}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -105,6 +105,21 @@ pub fn start_team_from(
     Ok(tab)
 }
 
+/// What team `team` — the one `pane_id`'s directory sees — tells its
+/// members, in tokens, and the least that costs per turn
+/// (`teams::team_weight`).
+#[tauri::command]
+pub fn team_cost(state: State<'_, AppState>, team: String, pane_id: Option<String>) -> Result<cmux_protocol::TeamWeight, String> {
+    let cwd = cwd_of(&state, pane_id.as_deref());
+    let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
+    let def = catalog
+        .teams
+        .iter()
+        .find(|t| t.name == team)
+        .ok_or_else(|| format!("no team `{team}` (`mira team list --defined` lists them)"))?;
+    cmux_core::teams::team_weight(&catalog, def, &mira_for_prompt())
+}
+
 /// Every running team, for the frontend.
 #[tauri::command]
 pub fn list_teams(state: State<'_, AppState>) -> Vec<TeamInfo> {

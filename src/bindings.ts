@@ -356,6 +356,12 @@ export interface TranscriptSummary {
    *  Claude model for now. */
   contextWindow: number | null;
   toolCalls: number;
+  /** What its replies cost at API list prices, each at its own model's
+   *  rates: on a Claude subscription, what it would have cost, not what is
+   *  billed. Null when no reply could be priced (Codex, always). */
+  costUsd: number | null;
+  /** Some replies had no known price and are not in `costUsd`. */
+  unpriced: boolean;
   /** Null when it keeps no task list. */
   tasks: TaskProgress | null;
   startedMs: number | null;
@@ -844,6 +850,47 @@ export const startTeam = (
   task: string | null,
   paneId: string | null,
 ) => invoke<string>("start_team", { team, task, paneId });
+
+/** What a team tells its members, in estimated tokens, and the least that
+ *  costs per turn (`cmux_protocol::TeamWeight`). A lower bound: the
+ *  harness's own prompt and tools, CLAUDE.md, MCP tool schemas, the
+ *  conversation and all output are not counted. */
+export interface TeamWeight {
+  team: string;
+  seats: SeatWeight[];
+  tokens: number;
+  /** The priced seats' floors, summed. */
+  perTurnFloorUsd: number;
+  /** Seats whose model has no known price, left out of the floor. */
+  unpriced: number;
+  /** When the prices were checked, as YYYY-MM-DD. */
+  pricesChecked: string;
+}
+
+/** One member's share of a team's weight. */
+export interface SeatWeight {
+  name: string;
+  role: string;
+  harness: Harness;
+  /** As the role says it; null for the harness's default. */
+  model: string | null;
+  effort: string | null;
+  layers: LayerWeight[];
+  tokens: number;
+  /** Those tokens read from the prompt cache each turn; null with no
+   *  known price. */
+  perTurnFloorUsd: number | null;
+}
+
+export interface LayerWeight {
+  kind: PromptLayer["kind"];
+  source: string;
+  tokens: number;
+}
+
+/** The weight of `team`, the one `paneId`'s directory sees. */
+export const teamCost = (team: string, paneId: string | null) =>
+  invoke<TeamWeight>("team_cost", { team, paneId });
 
 /** The settings pane: at most one, showing mirador.json's settings. */
 export interface SettingsPaneInfo {

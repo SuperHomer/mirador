@@ -254,6 +254,10 @@ enum TeamAction {
     Resume { name: String },
     /// Every save, team's and agent's, newest first.
     Saves,
+    /// What a team this directory sees tells its members, in estimated
+    /// tokens, and the least that costs each turn: a lower bound, with
+    /// what it leaves out.
+    Cost { team: String },
 }
 
 #[derive(Subcommand)]
@@ -847,6 +851,14 @@ fn run(cli: Cli) -> Result<(), String> {
             TeamAction::Save { name } => Request::TeamSave { name, pane_id: own_pane() },
             TeamAction::Resume { name } => Request::TeamResume { name },
             TeamAction::Saves => Request::SaveList,
+            TeamAction::Cost { team } => {
+                let resp = send_request(Request::TeamCost { team, pane_id: own_pane() })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                let weight = resp.data.and_then(|d| serde_json::from_value(d["weight"].clone()).ok());
+                return weight.map(|w| render_team_weight(&w)).ok_or_else(|| "the app sent no team weight".to_string());
+            }
         },
         Command::Task { action } => match action {
             TaskAction::List { all } => Request::TaskList { all, pane_id: own_pane() },
@@ -1409,6 +1421,43 @@ fn defined_teams(json: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// A team's weight, a member per line — name, role, model, tokens, the
+/// floor per turn — then the team's, then what it leaves out.
+fn render_team_weight(w: &cmux_protocol::TeamWeight) {
+    let floor = |usd: Option<f64>| usd.map_or("no price".to_string(), |d| format!("${d:.4} a turn"));
+    for s in &w.seats {
+        let model = s.model.as_deref().unwrap_or("default");
+        println!(
+            "{:<14}  {:<16}  {:<22}  {:>8} tokens  {}",
+            s.name,
+            s.role,
+            model,
+            s.tokens,
+            floor(s.per_turn_floor_usd)
+        );
+    }
+    let unpriced = match w.unpriced {
+        0 => String::new(),
+        1 => " (1 member with no price left out)".to_string(),
+        n => format!(" ({n} members with no price left out)"),
+    };
+    println!(
+        "{:<14}  {:<16}  {:<22}  {:>8} tokens  ${:.4} a turn{unpriced}",
+        w.team,
+        format!("{} members", w.seats.len()),
+        "",
+        w.tokens,
+        w.per_turn_floor_usd
+    );
+    println!(
+        "Tokens are Mirador's prompts to each member, estimated at 4 characters a token; \
+         a turn re-sends them from the prompt cache at least. Not counted: the harness's own \
+         system prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all output. \
+         Prices as of {}.",
+        w.prices_checked
+    );
+}
+
 /// Agents as a table, one per line: pane, status, harness, name (the
 /// session's, else the role), model, and what it is blocked on when it is.
 fn render_agents(agents: &[serde_json::Value]) {
@@ -1439,8 +1488,16 @@ fn render_agents(agents: &[serde_json::Value]) {
 }
 
 /// An agent's activity: the session's line, then one per subagent with
-/// its state, progress, tokens and how long it ran.
+/// its state, progress, tokens, cost and how long it ran, then what they
+/// cost together.
 fn render_activity(data: &serde_json::Value) {
+    // Cents from a cent up, four decimals below; "-" for none priced, and
+    // a "+" when some replies had no price and are not in it.
+    let dollars = |usd: f64| if usd >= 0.01 { format!("${usd:.2}") } else { format!("${usd:.4}") };
+    let cost = |v: &serde_json::Value| {
+        let more = if v["unpriced"].as_bool() == Some(true) { "+" } else { "" };
+        v["costUsd"].as_f64().map_or("-".to_string(), |usd| format!("{}{more}", dollars(usd)))
+    };
     let tokens = |v: &serde_json::Value| {
         let n = v.as_u64().unwrap_or(0);
         match n {
@@ -1455,9 +1512,10 @@ fn render_activity(data: &serde_json::Value) {
     };
     let s = &data["session"];
     let mut line = format!(
-        "session   {:<5}  {:>6} tok  ctx {:>5}  {}",
+        "session   {:<5}  {:>6} tok  {:>8}  ctx {:>5}  {}",
         tasks(s),
         tokens(&s["tokens"]),
+        cost(s),
         tokens(&s["context"]),
         s["model"].as_str().unwrap_or("-"),
     );
@@ -1475,10 +1533,11 @@ fn render_activity(data: &serde_json::Value) {
             _ => 0,
         };
         println!(
-            "{:<8}  {:<5}  {:>6} tok  ctx {:>5}  {:>2}:{:02}  {}  {}",
+            "{:<8}  {:<5}  {:>6} tok  {:>8}  ctx {:>5}  {:>2}:{:02}  {}  {}",
             a["state"].as_str().unwrap_or("-"),
             tasks(a),
             tokens(&a["tokens"]),
+            cost(a),
             tokens(&a["context"]),
             secs / 60,
             secs % 60,
@@ -1486,6 +1545,16 @@ fn render_activity(data: &serde_json::Value) {
             a["description"].as_str().unwrap_or(""),
         );
     }
+    let all: Vec<&serde_json::Value> = std::iter::once(s).chain(subagents).collect();
+    let priced: Vec<f64> = all.iter().filter_map(|v| v["costUsd"].as_f64()).collect();
+    let unpriced = all.iter().any(|v| v["unpriced"].as_bool() == Some(true));
+    let spent = if priced.is_empty() { "-".to_string() } else { dollars(priced.iter().sum()) };
+    println!(
+        "cost      {spent}{}  at API list prices for the tokens its transcripts record — on a Claude \
+         subscription, what it would have cost, not what is billed{}",
+        if unpriced && !priced.is_empty() { "+" } else { "" },
+        if unpriced { "; some replies had no known price and are not in it" } else { "" },
+    );
 }
 
 /// `mira agent roles`: read from the config file, as the app reads it — no

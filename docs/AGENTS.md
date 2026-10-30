@@ -380,6 +380,18 @@ For a Codex agent it reads the rollout its process holds open, the one
 output), the last call's context, and the context window Codex itself
 reports. There are no tasks or subagents for Codex.
 
+Each summary in it — the session and every subagent — carries `costUsd`
+and `unpriced`. `costUsd` is what its replies cost at API list prices
+(`pricing.rs`, with the date they were checked), each reply at its own
+model's rates for every token the transcript records: input, cache
+writes, cache reads and output. On a Claude subscription it is what the
+work would have cost, not what is billed. It is `null` when no reply
+could be priced — always for Codex, whose prices are not known — and
+`unpriced` is true when some replies had no known price and are not in
+it. The plain output adds a cost column, with a `+` for a figure that
+leaves replies out, and a closing line with the session and its
+subagents together.
+
 For Claude Code, `agent list` reads what the hooks reported: `working`, `needs-you` (with the
 message, e.g. the tool awaiting permission), `idle`, or `-` before the first
 hook. `--json` adds the cwd, branch and when the status last changed.
@@ -396,9 +408,71 @@ mira team clear [--force]                # every running member on a new convers
 mira team save [name]                    # this team's conversations, as name (the team's by default)
 mira team resume <name>                  # a tab of its own, each member back in its conversation
 mira team saves                          # every save, team's and agent's, newest first
+mira team cost <name> [--json]           # what its prompts weigh, per member, and the least that costs a turn
 mira agent save [name | --pane <id>] [--as <save>]  # one agent's (this pane's by default)
 mira agent resume <save> [--tab]         # beside this pane, or in a new tab
 ```
+
+`team cost` weighs what a team — the one the calling pane's directory
+sees — tells its members: each member's layers, exactly as it starts with
+them, as an estimate in tokens (about four characters a token), and the
+least a turn costs to send them again, read from the prompt cache at the
+model's cache-read price. It is a lower bound: the agent's own system
+prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all
+output are not counted. A team that cannot start is refused, as `team
+start` refuses it. `--json` prints the answer as the socket gives it, the
+weight under `weight` (`team_cost` from the app gives the weight itself);
+here for omakase, its members trimmed to the first:
+
+```json
+{
+  "weight": {
+    "team": "omakase",
+    "seats": [
+      {
+        "name": "planner",
+        "role": "omakase-planner",
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": null,
+        "layers": [
+          {
+            "kind": "role",
+            "source": "builtin:roles/omakase-planner.md",
+            "tokens": 460
+          },
+          {
+            "kind": "team",
+            "source": "written by Mirador",
+            "tokens": 204
+          },
+          {
+            "kind": "charter",
+            "source": "builtin:teams/omakase.md",
+            "tokens": 97
+          },
+          {
+            "kind": "teamWay",
+            "source": "builtin:ways/omakase.md",
+            "tokens": 343
+          }
+        ],
+        "tokens": 1104,
+        "perTurnFloorUsd": 0.0002208
+      }
+    ],
+    "tokens": 2829,
+    "perTurnFloorUsd": 0.0003858,
+    "unpriced": 1,
+    "pricesChecked": "2026-10-06"
+  }
+}
+```
+
+A layer's `kind` is `role`, `roleWay`, `team`, `charter` or `teamWay`. A
+seat's `model` is as its role says it, `null` for the harness's default;
+its `perTurnFloorUsd` is `null` when that model has no known price, and
+`unpriced` counts those seats, which the team's floor leaves out.
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
 config directory's): frontmatter `members` — each a `role`, with an

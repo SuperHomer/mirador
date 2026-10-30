@@ -35,11 +35,15 @@ pub struct Stats {
     tokens: u64,
     context: u64,
     tool_calls: u32,
-    /// The reply being counted, and what it added to `tokens`: Claude Code
-    /// writes one reply as several entries (thinking, text, each tool
-    /// call), each repeating the reply's usage, so a repeat replaces
-    /// rather than adds.
-    reply: Option<(String, u64)>,
+    /// What the priced replies cost, at list prices, and how many replies
+    /// were priced and how many could not be (a model with no price).
+    cost: f64,
+    priced: u32,
+    unpriced: u32,
+    /// The reply being counted, and what it added: Claude Code writes one
+    /// reply as several entries (thinking, text, each tool call), each
+    /// repeating the reply's usage, so a repeat replaces rather than adds.
+    reply: Option<Reply>,
     running: bool,
     /// By task id, in id order.
     tasks: BTreeMap<String, Task>,
@@ -49,6 +53,16 @@ pub struct Stats {
     todos: Option<Vec<Task>>,
     started_ms: Option<u64>,
     last_ms: Option<u64>,
+}
+
+/// A reply's share of a transcript's totals, taken back when a later entry
+/// of the same reply repeats it.
+#[derive(Debug)]
+struct Reply {
+    id: String,
+    tokens: u64,
+    /// None for a model with no known price.
+    cost: Option<f64>,
 }
 
 /// What a [`Cache`] adds a transcript up into, one line at a time.
@@ -95,17 +109,26 @@ impl Stats {
         if usage.is_object() {
             let n = |key: &str| usage[key].as_u64().unwrap_or(0);
             let fresh = n("input_tokens") + n("cache_creation_input_tokens") + n("output_tokens");
+            // At the rates of this reply's own model: a session can switch.
+            let cost = message["model"].as_str().and_then(crate::pricing::rates).map(|rates| {
+                crate::pricing::cost(
+                    rates,
+                    crate::pricing::Usage {
+                        input: n("input_tokens"),
+                        cache_write: n("cache_creation_input_tokens"),
+                        cache_read: n("cache_read_input_tokens"),
+                        output: n("output_tokens"),
+                    },
+                )
+            });
             let id = message["id"].as_str().unwrap_or("").to_string();
-            match &mut self.reply {
-                Some((current, counted)) if !id.is_empty() && *current == id => {
-                    self.tokens = self.tokens - *counted + fresh;
-                    *counted = fresh;
-                }
-                _ => {
-                    self.tokens += fresh;
-                    self.reply = Some((id, fresh));
-                }
+            if let Some(before) = self.reply.take_if(|r| !id.is_empty() && r.id == id) {
+                self.tokens -= before.tokens;
+                self.uncount(before.cost);
             }
+            self.tokens += fresh;
+            self.count(cost);
+            self.reply = Some(Reply { id, tokens: fresh, cost });
             self.context =
                 n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens");
         }
@@ -157,6 +180,26 @@ impl Stats {
         } else {
             message["stop_reason"].as_str().is_none()
         };
+    }
+
+    fn count(&mut self, cost: Option<f64>) {
+        match cost {
+            Some(c) => {
+                self.cost += c;
+                self.priced += 1;
+            }
+            None => self.unpriced += 1,
+        }
+    }
+
+    fn uncount(&mut self, cost: Option<f64>) {
+        match cost {
+            Some(c) => {
+                self.cost -= c;
+                self.priced -= 1;
+            }
+            None => self.unpriced -= 1,
+        }
     }
 
     fn update_task(&mut self, input: &Value) {
@@ -217,6 +260,8 @@ impl Stats {
             context: self.context,
             context_window: self.model.as_deref().and_then(context_window),
             tool_calls: self.tool_calls,
+            cost_usd: (self.priced > 0).then_some(self.cost),
+            unpriced: self.unpriced > 0,
             tasks: self.progress(),
             started_ms: self.started_ms,
             last_ms: self.last_ms,
@@ -446,6 +491,54 @@ mod tests {
         assert_eq!(s.started_ms, Some(1_791_103_769_163));
         assert_eq!(s.last_ms, Some(1_791_103_829_163));
         assert!(stats.running());
+        // Priced once too, at Opus 5.5's rates: 2 in at $4, 1000 cache
+        // writes at $5, 12000 cache reads at $0.20, 50 out at $20, per 1M.
+        let cost = (2.0 * 4.0 + 1000.0 * 5.0 + 12000.0 * 0.20 + 50.0 * 20.0) / 1e6;
+        assert!((s.cost_usd.unwrap() - cost).abs() < 1e-12);
+        assert!(!s.unpriced);
+    }
+
+    fn reply(id: &str, model: &str, usage: &str) -> String {
+        format!(r#"{{"type":"assistant","message":{{"id":"{id}","model":"{model}","content":[{{"type":"text","text":"ok"}}],"stop_reason":"end_turn","usage":{{{usage}}}}}}}"#)
+    }
+
+    #[test]
+    fn prices_each_bucket_at_its_rate() {
+        let cost = |usage: &str| feed(&[&reply("m1", "claude-sonnet-5-5", usage)]).summary().cost_usd.unwrap();
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-12;
+        // Sonnet 5.5: $2 in, $2.50 cache write, $0.20 cache read, $10 out.
+        assert!(close(cost(r#""input_tokens":1000000"#), 2.0));
+        assert!(close(cost(r#""cache_creation_input_tokens":1000000"#), 2.5));
+        assert!(close(cost(r#""cache_read_input_tokens":1000000"#), 0.20));
+        assert!(close(cost(r#""output_tokens":1000000"#), 10.0));
+    }
+
+    #[test]
+    fn prices_each_reply_at_its_own_models_rates() {
+        // `/model` mid-session: Opus 5.5, then Haiku 4.5, a million out each.
+        let out = r#""output_tokens":1000000"#;
+        let s = feed(&[PROMPT, &reply("a", "claude-opus-5-5", out), &reply("b", "claude-haiku-4-5-20251001", out)]).summary();
+        assert!((s.cost_usd.unwrap() - (20.0 + 5.0)).abs() < 1e-9);
+        assert_eq!(s.model.as_deref(), Some("claude-haiku-4-5-20251001"));
+    }
+
+    #[test]
+    fn a_reply_with_no_price_is_flagged_never_free() {
+        let out = r#""output_tokens":1000"#;
+        // Nothing priced: no cost at all, rather than $0.
+        let s = feed(&[&reply("a", "claude-future-9", out)]).summary();
+        assert_eq!((s.cost_usd, s.unpriced, s.tokens), (None, true, 1000));
+        // One priced, one not: the priced one's cost, flagged.
+        let s = feed(&[&reply("a", "claude-opus-5-5", out), &reply("b", "claude-future-9", out)]).summary();
+        assert!((s.cost_usd.unwrap() - 0.02).abs() < 1e-12);
+        assert!(s.unpriced);
+        // A repeat of the unpriced reply, now with a priced model, replaces it.
+        let s = feed(&[&reply("a", "claude-future-9", out), &reply("a", "claude-opus-5-5", out)]).summary();
+        assert!(!s.unpriced);
+        assert!((s.cost_usd.unwrap() - 0.02).abs() < 1e-12);
+        // No replies: no cost and nothing unpriced.
+        let s = Stats::default().summary();
+        assert_eq!((s.cost_usd, s.unpriced), (None, false));
     }
 
     #[test]

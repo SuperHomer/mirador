@@ -644,6 +644,13 @@ pub enum Request {
     /// Opens the team save `name` in a tab of its own, each member
     /// resuming its conversation.
     TeamResume { name: String },
+    /// What team `team` — the one `pane_id`'s directory sees — tells its
+    /// members, in tokens, and the least that costs each turn.
+    TeamCost {
+        team: String,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Saves one agent's conversation: `name` as `AgentSend` finds it,
     /// else `pane_id`'s, as `save_as` (what it goes by, by default).
     AgentSave {
@@ -995,7 +1002,7 @@ pub struct Asking {
 }
 
 /// What one transcript adds up to: the model, the tokens, the tasks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSummary {
     /// The model of its last reply.
@@ -1010,6 +1017,17 @@ pub struct TranscriptSummary {
     #[serde(default)]
     pub context_window: Option<u64>,
     pub tool_calls: u32,
+    /// What its replies cost at API list prices
+    /// (`cmux_core::pricing`), each at its own model's rates and counting
+    /// every token the transcript records, cache reads included. On a
+    /// Claude subscription it is what the session would have cost, not
+    /// what is billed. None when no reply could be priced.
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+    /// Some replies were by a model with no known price, and are not in
+    /// `cost_usd`.
+    #[serde(default)]
+    pub unpriced: bool,
     /// Absent when it keeps no task list.
     pub tasks: Option<TaskProgress>,
     /// Unix millis of its first and latest entries.
@@ -1018,7 +1036,7 @@ pub struct TranscriptSummary {
 }
 
 /// A subagent of a Claude Code session (`Agent` tool), from its transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubagentInfo {
     pub id: String,
@@ -1034,7 +1052,7 @@ pub struct SubagentInfo {
 }
 
 /// What an agent pane's Claude Code session and its subagents are doing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentActivity {
     pub pane_id: String,
@@ -1590,6 +1608,55 @@ pub struct PromptLayer {
     /// The file it comes from, or "written by Mirador".
     pub source: String,
     pub text: String,
+}
+
+/// The weight of a team's prompts: what Mirador adds to each member's
+/// context, as an estimate in tokens, and the least that costs per turn.
+///
+/// A lower bound. Not counted: the harness's own system prompt and tool
+/// definitions, CLAUDE.md, MCP servers' tool schemas, the conversation,
+/// and every output token — all re-sent or paid each turn too, and
+/// usually far more than the team's prompts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamWeight {
+    pub team: String,
+    pub seats: Vec<SeatWeight>,
+    /// Every seat's tokens.
+    pub tokens: u64,
+    /// The priced seats' floors, summed.
+    pub per_turn_floor_usd: f64,
+    /// Seats whose model has no known price, left out of the floor.
+    pub unpriced: u32,
+    /// When the prices were checked (`pricing::PRICES_CHECKED`).
+    pub prices_checked: String,
+}
+
+/// One member's share of [`TeamWeight`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatWeight {
+    /// The member's name: `dev-2` for a role counted twice.
+    pub name: String,
+    pub role: String,
+    pub harness: Harness,
+    /// As the role says it; none for the harness's default.
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// What it is told, layer by layer, as the editor shows it.
+    pub layers: Vec<LayerWeight>,
+    pub tokens: u64,
+    /// Those tokens read from the prompt cache, the least a turn re-sends
+    /// them for; none when the model has no known price.
+    pub per_turn_floor_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerWeight {
+    pub kind: PromptLayerKind,
+    pub source: String,
+    pub tokens: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
