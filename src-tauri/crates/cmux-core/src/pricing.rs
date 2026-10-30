@@ -59,12 +59,13 @@ const ALIASES: &[(&str, &str)] = &[
 ];
 
 /// `model`'s rates: a full id (`claude-opus-5-5`), a dated one
-/// (`claude-haiku-4-5-20251001`), an alias (`opus`), any of them with a
-/// suffix such as `[1m]`. None for a model with no known price.
+/// (`claude-haiku-4-5-20251001`), an alias (`opus`), any of them with
+/// Claude Code's `[1m]` suffix. None for a model with no known price —
+/// any other suffix included, rather than a price for a name half read.
 pub fn rates(model: &str) -> Option<Rates> {
     let mut id = model.trim().to_ascii_lowercase();
-    if let Some(open) = id.find('[') {
-        id.truncate(open);
+    if let Some(base) = id.strip_suffix("[1m]") {
+        id = base.to_string();
     }
     if let Some((_, full)) = ALIASES.iter().find(|(alias, _)| *alias == id) {
         id = full.to_string();
@@ -109,6 +110,7 @@ mod tests {
         assert_eq!(rates(" Opus "), Some(opus));
         assert_eq!(rates("opus[1m]"), Some(opus));
         assert_eq!(rates("claude-opus-5-5[1m]"), Some(opus));
+        assert_eq!(rates("sonnet[1M]"), rates("claude-sonnet-5-5"));
         assert_eq!(rates("claude-opus-5-5-20261001"), Some(opus));
         assert_eq!(rates("sonnet"), rates("claude-sonnet-5-5"));
         assert_eq!(rates("haiku"), rates("claude-haiku-5-5"));
@@ -133,7 +135,21 @@ mod tests {
 
     #[test]
     fn a_model_with_no_known_price_has_none() {
-        for model in ["gpt-6-luna", "gpt-5", "o3", "", "claude-unknown-9", "opus-ish", "claude-opus-5-5-2026"] {
+        for model in [
+            "gpt-6-luna",
+            "gpt-5",
+            "o3",
+            "",
+            "claude-unknown-9",
+            "opus-ish",
+            "claude-opus-5-5-2026",
+            // Only `[1m]` comes off; anything else after a name is not it.
+            "claude-opus-5-5[bogus]",
+            "opus[2m]",
+            "claude-opus-5-5[1m]x",
+            "claude-opus-5-5 extra",
+            "opus[1m][1m]",
+        ] {
             assert_eq!(rates(model), None, "{model}");
         }
     }
