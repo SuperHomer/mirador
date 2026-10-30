@@ -6,6 +6,9 @@ import {
   HARNESS_LABEL,
   agentLabel,
   TabSnapshot,
+  ToolKind,
+  WallTool,
+  focusPane,
   newTab,
   zoomPane,
   closeTab,
@@ -48,7 +51,8 @@ export function Sidebar() {
       {tab && <ViewSwitch view={snapshot.view} tab={tab} accelOf={accelOf} />}
       <div className="sidebar-tabs">
         {/* Tabs, numbered for the tab shortcuts. The current tab's agents
-            hang under its row; any other tab shows a pip per agent. */}
+            and tools hang under its row; any other tab shows a pip per
+            agent. */}
         {snapshot.tabs.map((tab, i) => {
           const agents = tabAgents(snapshot, tab.id);
           const current = tab.id === currentTab;
@@ -60,7 +64,7 @@ export function Sidebar() {
                 active={current && !tab.zoomedPane}
                 pips={current ? [] : agents}
               />
-              {current && agents.length > 0 && (
+              {current && (agents.length > 0 || tab.wallTools.length > 0) && (
                 <AgentTree
                   tab={tab}
                   agents={agents}
@@ -209,8 +213,51 @@ function HarnessMark({ harness }: { harness: Harness }) {
   }
 }
 
-/** The current tab's agents, under its row. Mounted only while there are
- *  some to show, so the clock ticks only then. */
+/** What a tool is, in the same neutral line as the harness marks. */
+function ToolMark({ kind }: { kind: ToolKind }) {
+  const props = {
+    viewBox: "0 0 16 16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.5,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  switch (kind) {
+    case "terminal":
+      return (
+        <svg {...props}>
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+          <path d="M4.5 6l2 2-2 2M8.5 10.5h3" />
+        </svg>
+      );
+    case "browser":
+      return (
+        <svg {...props}>
+          <circle cx="8" cy="8" r="6.5" />
+          <path d="M1.5 8h13M8 1.5c-2.2 2.2-2.2 10.8 0 13M8 1.5c2.2 2.2 2.2 10.8 0 13" />
+        </svg>
+      );
+    case "diff":
+      return (
+        <svg {...props}>
+          <path d="M5 2v6M2 5h6M2 12.5h6M10.5 3.5h3.5v9" />
+        </svg>
+      );
+    case "graph":
+      return (
+        <svg {...props}>
+          <circle cx="4" cy="3.5" r="1.5" />
+          <circle cx="4" cy="12.5" r="1.5" />
+          <circle cx="12" cy="6" r="1.5" />
+          <path d="M4 5v6M12 7.5c0 2.5-3 3-8 3.5" />
+        </svg>
+      );
+  }
+}
+
+/** The current tab's agents, then its tools, under its row. Mounted only
+ *  while there are some to show, and the clock ticks only for agents. */
 function AgentTree({
   tab,
   agents,
@@ -220,7 +267,7 @@ function AgentTree({
   agents: AgentInfo[];
   unread: string[];
 }) {
-  const now = useNow(true);
+  const now = useNow(agents.length > 0);
   const click = useConfigStore((s) => s.config?.agentClick ?? "wall");
   const pinned = useUiStore((s) => s.pinned[tab.id]);
   return (
@@ -239,6 +286,28 @@ function AgentTree({
           unread={unread.includes(agent.paneId)}
         />
       ))}
+      {tab.wallTools.map((tool) => (
+        <ToolRow key={tool.paneId} tool={tool} />
+      ))}
+    </div>
+  );
+}
+
+/** One tool: what it is and its title, with no status — a tool is not
+ *  waiting on anyone. Clicking focuses its pane. */
+function ToolRow({ tool }: { tool: WallTool }) {
+  return (
+    <div
+      className="agent-row tool-row"
+      onClick={() => void focusPane(tool.paneId)}
+      title={tool.title}
+    >
+      <div className="agent-line">
+        <span className="agent-mark tool-mark">
+          <ToolMark kind={tool.kind} />
+        </span>
+        <span className="agent-name">{tool.title}</span>
+      </div>
     </div>
   );
 }

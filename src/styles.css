@@ -290,6 +290,21 @@ body,
   height: 10px;
 }
 
+/* A tool's kind, as neutral as the harness marks. */
+.tool-mark {
+  color: var(--subtext);
+}
+
+.tool-mark svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+.tool-row .agent-name {
+  color: var(--subtext);
+}
+
 .agent-status {
   margin-left: auto;
   padding-left: 6px;
