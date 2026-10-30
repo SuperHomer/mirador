@@ -165,6 +165,27 @@ pub fn clear_line(harness: Option<cmux_protocol::Harness>) -> Result<&'static st
     }
 }
 
+/// The option a menu on `screen` has selected — `❯ 1. Yes` — when the
+/// agent shows one, else `None`. Such a dialog — Codex's update prompt or
+/// an approval, Claude Code's own questions — sets no status a hook
+/// reports, and an Enter typed into it would pick that option.
+///
+/// A menu row is a selection glyph (Claude Code's `❯`, Codex's `›`, or
+/// the ASCII `>` some of Codex's menus draw) before a number, a dot and a
+/// space.
+pub fn choice_on_screen(screen: &str) -> Option<&str> {
+    // The last glyph line, not any: while the composer is up its prompt
+    // line (`❯ `, `› Ask Codex…`) is the last, below past messages echoed
+    // as `› 1. do X`; a dialog takes the composer's place, and then its
+    // cursor is the last.
+    let line = screen.lines().map(str::trim).rev().find(|l| l.starts_with(['❯', '›', '>']))?;
+    let mut rest = line.chars();
+    rest.next();
+    let rest = rest.as_str().trim_start();
+    let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    (digits > 0 && rest[digits..].starts_with(". ")).then_some(line)
+}
+
 /// What `mira agent wait` has seen so far, and whether it is done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Wait {
@@ -290,6 +311,129 @@ mod tests {
         let aider = clear_line(Some(Harness::Aider)).unwrap_err();
         assert!(aider.contains("Aider"), "{aider}");
         assert!(clear_line(None).is_err());
+    }
+
+    /// Claude Code after a turn, asking (captured in a pane on this
+    /// machine).
+    const CLAUDE_DIALOG: &str = "\
+⏺ ok
+
+✻ Brewed for 2s · done 5:47 PM
+
+────────────────────────────────────────────────────────────────────────────────
+  Teach auto mode about your environment?
+
+  Auto mode works better when it knows your environment. Takes about a
+  minute.
+
+  ❯ 1. Yes
+";
+
+    /// Claude Code idle: the same turn, then the composer between its
+    /// rules. The past message above it, a numbered line itself, is added.
+    const CLAUDE_IDLE: &str = "\
+❯ 1. say ok
+
+⏺ ok
+
+✻ Brewed for 2s · done 5:47 PM
+
+──────────────────────────────────────────────────────────────────────── lead ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ? for shortcuts
+";
+
+    /// Codex 0.165 signing in (rendered in a PTY with an empty CODEX_HOME):
+    /// its cursor is an ASCII `>`.
+    const CODEX_LOGIN: &str = "\
+  Welcome to Codex, OpenAI's command-line coding agent
+
+  Choose how you want to use Codex.
+
+> 1. Sign in with ChatGPT
+     Usage included with Plus, Pro, Business, and Enterprise plans
+  2. Sign in with Device Code
+     Sign in from another device with a one-time code
+  3. Use an OpenAI API key
+     Pay for what you use
+  4. Use Amazon Bedrock
+     Connect using your AWS credentials
+
+  Press enter to continue
+";
+
+    /// Codex's update prompt. Reconstructed, not captured: the text is
+    /// the strings in the Codex 0.165 binary, laid out as its menus are;
+    /// this install only ever showed the banner without a menu.
+    const CODEX_UPDATE: &str = "\
+  ✨ Update available! 0.165.0 -> 0.166.0
+
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  Press enter to continue
+";
+
+    /// Codex asking to run a command. Reconstructed, not captured, from
+    /// the same binary's strings.
+    const CODEX_APPROVAL: &str = "\
+• Running cargo test
+
+  Would you like to run the following command?
+
+  $ cargo test
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `cargo test` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel
+";
+
+    /// Codex 0.165 idle, as rendered in a PTY, with a past message and
+    /// its answer added above the composer.
+    const CODEX_IDLE: &str = "\
+╭──────────────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.165.0)                                   │
+│                                                              │
+│ directory: ~/proj                                            │
+╰──────────────────────────────────────────────────────────────╯
+
+› 1. do X
+
+• ok
+
+› Ask Codex to do anything
+
+  ? for shortcuts
+";
+
+    #[test]
+    fn sees_a_menu_the_agent_is_showing() {
+        assert_eq!(choice_on_screen(CLAUDE_DIALOG), Some("❯ 1. Yes"));
+        assert_eq!(choice_on_screen(CODEX_LOGIN), Some("> 1. Sign in with ChatGPT"));
+        assert_eq!(choice_on_screen(CODEX_UPDATE), Some("› 1. Update now (runs `npm install -g @openai/codex`)"));
+        assert_eq!(choice_on_screen(CODEX_APPROVAL), Some("› 1. Yes, proceed (y)"));
+        // Moved down, the cursor is still the one selection.
+        let second = CODEX_UPDATE.replace("› 1. Update", "  1. Update").replace("  2. Skip\n", "› 2. Skip\n");
+        assert_eq!(choice_on_screen(&second), Some("› 2. Skip"));
+    }
+
+    #[test]
+    fn sees_no_menu_in_a_composer_or_a_shell() {
+        assert_eq!(choice_on_screen(CLAUDE_IDLE), None);
+        assert_eq!(choice_on_screen(&CLAUDE_IDLE.replace("❯ \n", "❯ fix the bug\n")), None);
+        assert_eq!(choice_on_screen(CODEX_IDLE), None);
+        assert_eq!(choice_on_screen(&CODEX_IDLE.replace("› Ask Codex to do anything", "› fix the bug")), None);
+        assert_eq!(choice_on_screen("yoanmarti@mac mirador % ls\nREADME.md  src\nyoanmarti@mac mirador % "), None);
+        assert_eq!(choice_on_screen(""), None);
+        // A number that is not a menu row's.
+        assert_eq!(choice_on_screen("› 2026 was a year\n"), None);
+        assert_eq!(choice_on_screen("› 1.5 seconds\n"), None);
     }
 
     #[test]
