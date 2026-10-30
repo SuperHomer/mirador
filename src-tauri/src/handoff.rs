@@ -108,9 +108,13 @@ pub fn send(
     // As it is once up, not as it was before the wait: still an agent, and
     // perhaps already asking a person something.
     cmux_core::handoff::can_receive(status(state)?, force).map_err(|e| format!("{to}: {e}"))?;
-    // A dialog no hook reports, which the Enter below would answer.
-    if let Some(row) = choice_shown(app, &pane).filter(|_| !force) {
-        return Err(format!("{to} is showing a choice, `{row}`: answer it in its pane, or send with --force"));
+    // A dialog no hook reports, which the Enter below would answer. Not
+    // read when forced: the answer would not change, and a read can take
+    // seconds.
+    if !force {
+        if let Some(row) = choice_shown(app, &pane) {
+            return Err(format!("{to} is showing a choice, `{row}`: answer it in its pane, or send with --force"));
+        }
     }
     let from = caller.as_deref().and_then(|c| sender(state, c));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
@@ -146,8 +150,10 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
     // As it is once up, not as it was before the wait.
     let (status, harness) = agent(state)?;
     cmux_core::handoff::can_receive(status, force).map_err(|e| ("needs you", e))?;
-    if let Some(row) = choice_shown(app, pane).filter(|_| !force) {
-        return Err(("needs you", format!("it is showing a choice, `{row}`: answer it in its pane, or clear with --force")));
+    if !force {
+        if let Some(row) = choice_shown(app, pane) {
+            return Err(("needs you", format!("it is showing a choice, `{row}`: answer it in its pane, or clear with --force")));
+        }
     }
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;
     state.pty.write(pane, line.as_bytes()).map_err(|e| ("not running", e))?;
