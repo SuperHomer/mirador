@@ -20,6 +20,7 @@ pub mod ssh;
 pub mod notes;
 pub mod osc;
 pub mod pane_origin;
+pub mod pricing;
 pub mod proc;
 pub mod pty;
 pub mod role_files;
