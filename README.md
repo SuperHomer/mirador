@@ -539,7 +539,25 @@ mira team restart            # start the exited and closed ones again
 mira team restart dev-2      # …or just these
 mira team add reviewer       # another member, beside this pane: reviewer-2
 mira team list --defined     # the teams this directory can start
+mira team cost squad         # what its prompts weigh, per member
 ```
+
+**What a team costs.** Every member carries what Mirador tells it — its
+role's prompt and way of working, then who it is in the team, the charter
+and the team's way — and Claude Code sends that again with every turn.
+`mira team cost squad`, and the **Prompt weight** block on the team's page
+in the editor, count it: each member's tokens (an estimate, about four
+characters a token), the team's total, and the **floor per turn** — those
+tokens read from the prompt cache, at the model's cache-read price. It is
+a lower bound and says so: not counted are the agent's own system prompt
+and tools, CLAUDE.md, MCP tool schemas, the conversation and every output
+token, which usually weigh far more. A member on Codex, or on a model with
+no known price (a role with no `model:` runs the harness's default), has
+tokens and no price, and the team's floor says how many it leaves out. The
+prices are Anthropic's list prices, with the date they were checked. While
+the team runs, the same block adds **Spent so far**: what its members'
+sessions and their subagents have cost (see the status bar, below). The
+page weighs the files as saved; unsaved edits are not counted.
 
 Members hand each other work through Mirador — the prompt each one gets
 says how:
@@ -615,9 +633,17 @@ all of it for the focused agent in a panel. It is read from Claude Code's transc
 hooks point Mirador to, so it needs the integration set up; the CLI
 equivalent is `mira agent activity`. A Codex agent's activity is its
 model, tokens, context and time, read from the session file Codex
-writes; it has no task list or subagents to show. There is no cost
-figure: tokens are what the transcripts record, and a price would be an
-estimate.
+writes; it has no task list or subagents to show.
+
+The activity panel's **Cost**, and the status bar after the tokens, is
+what the session's replies cost: each priced at its own model's list
+price, for every token its transcript records — input, cache writes,
+cache reads and output — with its subagents' in the panel's total. On a
+Claude subscription it is what the work would have cost at API prices,
+not what is billed. A reply by a model with no known price is never
+counted as free: the figure gets a `+` when some replies are left out,
+and shows `—` when none could be priced. Codex sessions show their
+tokens and no cost: OpenAI's prices are not known here.
 
 In the sidebar, every tab is listed as usual, and directly under the tab
 you are on, the agents running in it, each with its status (a "!" square
