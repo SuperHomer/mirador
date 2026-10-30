@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { WallTool } from "../bindings";
+import { setBrowserVisible, WallTool } from "../bindings";
 import { BrowserPane } from "../browser/BrowserPane";
 import { DiffPane } from "../diff/DiffPane";
 import { GraphPane } from "../graph/GraphPane";
@@ -35,6 +35,15 @@ export function ToolView({
     useUiStore.getState().setWallBrowser(tool.paneId, true);
     return () => useUiStore.getState().setWallBrowser(tool.paneId, false);
   }, [shown, tool.paneId]);
+  // On the board the tile's BrowserPane shows the page itself, and the
+  // split's under the wall abstains: as the tile goes — filtered out,
+  // another page — it takes the page down. When the wall goes off this
+  // runs before the split's BrowserPane looks again, so that one wins.
+  const boardPage = !!browser && board;
+  useEffect(() => {
+    if (!boardPage) return;
+    return () => void setBrowserVisible(tool.paneId, false);
+  }, [boardPage, tool.paneId]);
   if (browser) return <BrowserPane paneId={browser.paneId} url={browser.url} focused={focused} board={board} />;
   if (diff) return <DiffPane paneId={diff.paneId} repo={diff.repo} spec={diff.spec} focused={focused} />;
   if (graph) return <GraphPane paneId={graph.paneId} repo={graph.repo} focused={focused} />;

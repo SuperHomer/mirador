@@ -154,6 +154,9 @@ export function BrowserPane({ paneId, url, focused, board, walled = false }: Pro
       setLive(true);
       return;
     }
+    // Under the wall the tile has the page: this one says nothing about
+    // it, not even "hidden", which would race the tile's "shown".
+    if (walled) return;
     let last: boolean | null = null;
     let lastAt = "";
     const update = () => {
@@ -169,7 +172,6 @@ export function BrowserPane({ paneId, url, focused, board, walled = false }: Pro
         r.right <= host.right &&
         r.bottom <= host.bottom;
       const show =
-        !walledRef.current &&
         atFullSize(camera) &&
         !moving &&
         inView &&
