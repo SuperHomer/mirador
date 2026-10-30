@@ -521,6 +521,32 @@ mod tests {
 › Ask Codex to do anything
 ";
 
+    /// Codex 0.165 mid-turn: our team's real reviewer while it reviewed a
+    /// commit, its screen read through `mira read-screen` by the planner
+    /// (the last 20 lines). The input box stays up under "• Working".
+    const CODEX_WORKING: &str = "\
+  box screen was seen, a read cut short refuses
+  rather than types; the welcome e2e asserts the
+  refusal arrives in [10 s, 12 s). New REAL
+  fixtures: Codex after a turn (your own pane),
+  Claude while working (the planner's pane mid-
+  turn). A Codex-mid-turn capture is being taken
+  from your pane while you review this, and will
+  be added as a fixture. APPROVE or CHANGES via
+  mira agent send planner.
+
+
+• I’ll inspect the timeout changes and the new
+  real-screen fixtures, including whether an
+  interrupted read after seeing a no-input state
+  refuses safely.
+
+• Working (2s • esc to interrupt)
+
+
+› Ask Codex to do anything
+";
+
     /// Claude Code mid-turn, a tool running: our team's real planner, its
     /// screen read through `mira read-screen` (the bottom of it). The input
     /// box stays up while it works.
@@ -563,6 +589,7 @@ mod tests {
         assert_eq!(showing(&CODEX_IDLE.replace("› Ask Codex to do anything", "› fix the bug")), Composer);
         assert_eq!(showing(CODEX_LOADING), Composer);
         assert_eq!(showing(CODEX_AFTER_A_TURN), Composer);
+        assert_eq!(showing(CODEX_WORKING), Composer);
         assert_eq!(showing(CLAUDE_WORKING), Composer);
         // A number that is not a menu row's.
         assert_eq!(showing("› 2026 was a year\n"), Composer);
