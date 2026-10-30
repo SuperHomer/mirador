@@ -73,10 +73,10 @@ pub fn tool_kind(meta: Option<&PaneMeta>) -> Option<ToolKind> {
     }
 }
 
-/// Whether the wall draws a tool of this kind as a tile. Only terminals
-/// so far: a browser, a diff or a graph is not one yet.
+/// Whether the wall draws a tool of this kind as a tile: terminals,
+/// diffs and graphs so far, not a browser yet.
 pub fn on_wall(kind: ToolKind) -> bool {
-    kind == ToolKind::Terminal
+    matches!(kind, ToolKind::Terminal | ToolKind::Diff | ToolKind::Graph)
 }
 
 /// `panes` (one tab's, in pane order) that are tools, agents among them:
@@ -319,12 +319,22 @@ mod tests {
         let meta = HashMap::from([
             ("1".to_string(), PaneMeta { browser_url: Some("https://example.com".into()), ..Default::default() }),
             ("2".to_string(), PaneMeta { graph_repo: Some("/r".into()), ..Default::default() }),
+            ("3".to_string(), PaneMeta { diff_repo: Some("/r".into()), diff_spec: Some("worktree".into()), ..Default::default() }),
         ]);
-        let snapshot = filled(4, 1, &meta, 4);
+        let snapshot = filled(5, 1, &meta, 6);
         let tab = &snapshot.tabs[0];
-        // Still Tools in the sidebar, but no empty slot on the wall.
-        assert_eq!(tab.wall_tools.len(), 3);
-        let terminal = tab.wall_tools.iter().find(|t| t.kind == ToolKind::Terminal).unwrap();
-        assert_eq!(tab.wall_pages, vec![vec![snapshot.agents[0].pane_id.clone(), terminal.pane_id.clone()]]);
+        // The browser is still a tool in the sidebar, but takes no slot on
+        // the wall; the graph, the diff and the shell follow the agent.
+        assert_eq!(tab.wall_tools.len(), 4);
+        let of = |kind| tab.wall_tools.iter().find(|t| t.kind == kind).unwrap().pane_id.clone();
+        assert_eq!(
+            tab.wall_pages,
+            vec![vec![
+                snapshot.agents[0].pane_id.clone(),
+                of(ToolKind::Graph),
+                of(ToolKind::Diff),
+                of(ToolKind::Terminal),
+            ]]
+        );
     }
 }

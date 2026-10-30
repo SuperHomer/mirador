@@ -11,6 +11,7 @@ import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
 import { SendNextTask } from "./SendNextTask";
 import { ToolMark } from "./ToolMark";
+import { ToolView } from "./ToolView";
 
 /** How long after the last keystroke into the focused agent Focus may
  *  move to another: never out from under someone typing. */
@@ -151,6 +152,7 @@ export function FocusLayout({
         <FocusedToolTile
           key={focused.paneId}
           tool={focused}
+          focused={current && tab.focusedPane === focused.paneId}
           unread={unread.includes(focused.paneId)}
           visible={visible}
           current={current}
@@ -206,9 +208,13 @@ export function FocusLayout({
           <section className="rail-section tools">
             <div className="rail-label">Tools · {otherTools.length}</div>
             <div className={`rail-grid${otherTools.length >= 2 ? " two" : ""}`}>
-              {otherTools.map((t) => (
-                <MiniToolTile key={t.paneId} tool={t} visible={visible} onPick={pin} />
-              ))}
+              {otherTools.map((t) =>
+                t.kind === "terminal" ? (
+                  <MiniToolTile key={t.paneId} tool={t} visible={visible} onPick={pin} />
+                ) : (
+                  <ToolLine key={t.paneId} tool={t} onPick={pin} />
+                ),
+              )}
             </div>
           </section>
         )}
@@ -308,21 +314,26 @@ function FocusedTile({
   );
 }
 
-/** A tool shown large: its live terminal at full size under what it is —
- *  none of an agent's status, asking line or next task. */
+/** A tool shown large: its live terminal at full size, or the diff or
+ *  graph pane itself, under what it is — none of an agent's status,
+ *  asking line or next task. */
 function FocusedToolTile({
   tool,
+  focused,
   unread,
   visible,
   current,
 }: {
   tool: WallTool;
+  /** Its pane is the one the keyboard goes to. */
+  focused: boolean;
   unread: boolean;
   visible: boolean;
   current: boolean;
 }) {
   const pane = tool.paneId;
-  const { hostRef, shown } = useLentTerminal(pane, visible, { fit: true });
+  const terminal = tool.kind === "terminal";
+  const { hostRef, shown } = useLentTerminal(pane, visible && terminal, { fit: true });
   return (
     <div className="focus-tile tool">
       <div className="focus-head">
@@ -342,12 +353,34 @@ function FocusedToolTile({
             if (!current) void focusPane(pane);
           }}
         >
-          {/* The terminal's element is appended here by `lendTerminal`, so
-              React must own nothing inside it. */}
-          <div className="focus-term-host" ref={hostRef} />
-          {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+          {terminal ? (
+            <>
+              {/* The terminal's element is appended here by `lendTerminal`,
+                  so React must own nothing inside it. */}
+              <div className="focus-term-host" ref={hostRef} />
+              {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+            </>
+          ) : (
+            <ToolView tool={tool} focused={focused} />
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A diff or graph on the rail, in one line, as an idle agent is: scaled
+ * down to a thumbnail it would be unreadable, and each one drawn is
+ * another git diff or log. Clicking it pins it large.
+ */
+function ToolLine({ tool, onPick }: { tool: WallTool; onPick: (pane: string) => void }) {
+  return (
+    <div className="idle-line" title={`Show ${tool.title} large`} onClick={() => onPick(tool.paneId)}>
+      <span className="tool-mark">
+        <ToolMark kind={tool.kind} />
+      </span>
+      <span className="idle-name">{tool.title}</span>
     </div>
   );
 }

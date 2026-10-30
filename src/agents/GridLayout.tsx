@@ -20,6 +20,7 @@ import { AskingLine } from "./AskingLine";
 import { useLentTerminal } from "./useLentTerminal";
 import { SendNextTask } from "./SendNextTask";
 import { ToolMark } from "./ToolMark";
+import { ToolView } from "./ToolView";
 
 /** Columns and rows of a page, fixed by its size so tiles keep theirs as
  *  agents come and go. */
@@ -258,8 +259,9 @@ function GridTile({
   );
 }
 
-/** One tool of the grid: what it is, and its live terminal at full size.
- *  No status: a tool is not waiting on anyone. */
+/** One tool of the grid: what it is, and its live terminal at full size —
+ *  or, for a diff or a graph, the pane itself. No status: a tool is not
+ *  waiting on anyone. */
 function ToolTile({
   tab,
   tool,
@@ -274,7 +276,8 @@ function ToolTile({
   current: boolean;
 }) {
   const pane = tool.paneId;
-  const { hostRef, shown } = useLentTerminal(pane, visible, { fit: true });
+  const terminal = tool.kind === "terminal";
+  const { hostRef, shown } = useLentTerminal(pane, visible && terminal, { fit: true });
   const focus = () => {
     useUiStore.getState().pinAgent(tab.id, pane);
     void setWallMode(pane, "focus");
@@ -301,10 +304,16 @@ function ToolTile({
             if (!current) void focusPane(pane);
           }}
         >
-          {/* The terminal's element is appended here by `lendTerminal`, so
-              React must own nothing inside it. */}
-          <div className="grid-tile-host" ref={hostRef} />
-          {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+          {terminal ? (
+            <>
+              {/* The terminal's element is appended here by `lendTerminal`,
+                  so React must own nothing inside it. */}
+              <div className="grid-tile-host" ref={hostRef} />
+              {!shown && <span className="wall-term-missing">shown elsewhere</span>}
+            </>
+          ) : (
+            <ToolView tool={tool} focused={current && tab.focusedPane === pane} />
+          )}
         </div>
       </div>
     </div>

@@ -272,7 +272,9 @@ export function SplitLayer({
                 <GraphPane
                   paneId={p.paneId}
                   repo={graph.repo}
-                  focused={focused}
+                  // Under the wall it is drawn again in a tile: that one
+                  // is the focused one, and refreshes when focused.
+                  focused={focused && !walled}
                 />
               ) : news ? (
                 <WhatsNewPane
@@ -286,7 +288,7 @@ export function SplitLayer({
                   paneId={p.paneId}
                   repo={diff.repo}
                   spec={diff.spec}
-                  focused={focused}
+                  focused={focused && !walled}
                 />
               ) : (
                 <TerminalPane
