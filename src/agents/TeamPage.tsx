@@ -201,11 +201,23 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
  */
 function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weight" | "dirty">) {
   const [details, setDetails] = useState(false);
-  const floor = (w: TeamWeight) => {
+  // The two prices, each saying what it is in its tooltip.
+  const prices = (w: TeamWeight) => {
     if (w.startUsd === null || w.perTurnFloorUsd === null) return "no price";
     const without =
       w.unpriced === 0 ? "" : ` · ${w.unpriced} ${w.unpriced === 1 ? "member" : "members"} without a price`;
-    return `${priceLabel(w.startUsd, w.perTurnFloorUsd)}${without}`;
+    return (
+      <>
+        <span title="The first turn: Mirador's prompts written to the prompt cache, at each model's cache-write price">
+          ≈ {usd(w.startUsd)} to start
+        </span>
+        {" · "}
+        <span title="Every turn after: the same prompts read back from the cache, at each model's cache-read price. A lower bound.">
+          ≥ {usd(w.perTurnFloorUsd)} a turn
+        </span>
+        {without}
+      </>
+    );
   };
   return (
     <div className="team-weight">
@@ -215,7 +227,7 @@ function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weig
         <>
           <div className="team-weight-figures">
             <span className="team-weight-tokens">{tokensLabel(weight.tokens)}</span>
-            <span className="team-weight-floor">{floor(weight)}</span>
+            <span className="team-weight-floor">{prices(weight)}</span>
             <button className="team-weight-toggle" onClick={() => setDetails(!details)}>
               {details ? "Hide details" : "Details"}
             </button>
@@ -256,9 +268,10 @@ function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weig
           </div>
           {details && <WeightDetails weight={weight} />}
           <p className="team-weight-note">
-            Mirador's prompts to the members, re-sent from the cache each turn at least. Not counted: each
-            agent's own system prompt and tools (Claude Code's, Codex's), CLAUDE.md, MCP tools, the
-            conversation and its output. Prices as of{" "}
+            To start is the first turn, which writes Mirador's prompts to the members into the prompt cache;
+            every turn after reads them back from the cache, at a fraction of the price, which is why a turn
+            costs so much less. Not counted: each agent's own system prompt and tools (Claude Code's,
+            Codex's), CLAUDE.md, MCP tools, the conversation and its output. Prices as of{" "}
             {weight.pricesChecked}.
           </p>
         </>
@@ -405,11 +418,10 @@ function WeightDetails({ weight }: { weight: TeamWeight }) {
         </tfoot>
       </table>
       <p className="team-weight-note">
-        Tokens are estimated at about 4 characters a token. Claude Code sends its whole system prompt again every
-        turn; these parts of it stay the same, so they come from the prompt cache, at the model&apos;s cache-read
-        price{rates.length > 0 ? ` (${rates.join(", ")})` : ""}. The first turn writes them into the cache
-        instead, at 1.25× the input price
-        {weight.startUsd === null ? "." : `: To start, ${usd(weight.startUsd)} for the team.`}
+        Tokens are estimated at about 4 characters a token.
+        {rates.length > 0 ? ` Cache-read prices: ${rates.join(", ")}.` : ""} Writing the cache costs 1.25× the
+        model&apos;s input price
+        {weight.startUsd === null ? "." : `: ${usd(weight.startUsd)} to start the team.`}
       </p>
     </div>
   );

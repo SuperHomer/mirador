@@ -552,12 +552,14 @@ the team's way — and Claude Code sends that again with every turn. The
 estimate counts those tokens for each member and the team (about four
 characters a token) and prices them at each model's list price: **to
 start**, the first turn writing them to the prompt cache at its
-cache-write price, and **per turn** at least, reading them back at its
-cache-read price. Under the totals it sums them **by model** — each
-model's members, tokens and price — and ranks the **heaviest** parts,
-each counted once per member told it: a way of working everyone gets
-weighs its size times the team. **Details** shows every part of every
-member's prompt with its share, and how each price is worked out.
+cache-write price, and **per turn** at least, every turn after reading
+them back at its cache-read price — a fraction of that, which is why a
+turn costs so much less than the start. Under the totals it sums them
+**by model** — each model's members, tokens and price — and ranks the
+**heaviest** parts, each counted once per member told it: a way of
+working everyone gets weighs its size times the team. **Details** shows
+every part of every member's prompt with its share, and how each price
+is worked out.
 
 Both prices are lower bounds and say so: not counted are the agent's own
 system prompt and tools, CLAUDE.md, MCP tool schemas, the conversation
