@@ -1626,7 +1626,10 @@ pub struct TeamWeight {
     pub tokens: u64,
     /// The priced seats' floors, summed.
     pub per_turn_floor_usd: f64,
-    /// Seats whose model has no known price, left out of the floor.
+    /// The priced seats' start costs, summed.
+    pub start_usd: f64,
+    /// Seats whose model has no known price, left out of the floor and
+    /// the start cost.
     pub unpriced: u32,
     /// When the prices were checked (`pricing::PRICES_CHECKED`).
     pub prices_checked: String,
@@ -1652,6 +1655,9 @@ pub struct SeatWeight {
     /// Those tokens read from the prompt cache, the least a turn re-sends
     /// them for; none when the model has no known price.
     pub per_turn_floor_usd: Option<f64>,
+    /// Those tokens written to the prompt cache, which the first turn
+    /// does; none when the model has no known price.
+    pub start_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

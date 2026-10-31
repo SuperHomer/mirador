@@ -861,7 +861,10 @@ export interface TeamWeight {
   tokens: number;
   /** The priced seats' floors, summed. */
   perTurnFloorUsd: number;
-  /** Seats whose model has no known price, left out of the floor. */
+  /** The priced seats' start costs, summed. */
+  startUsd: number;
+  /** Seats whose model has no known price, left out of the floor and the
+   *  start cost. */
   unpriced: number;
   /** When the prices were checked, as YYYY-MM-DD. */
   pricesChecked: string;
@@ -883,6 +886,9 @@ export interface SeatWeight {
   /** Those tokens read from the prompt cache each turn; null with no
    *  known price. */
   perTurnFloorUsd: number | null;
+  /** Those tokens written to the prompt cache, by the first turn; null
+   *  with no known price. */
+  startUsd: number | null;
 }
 
 export interface LayerWeight {

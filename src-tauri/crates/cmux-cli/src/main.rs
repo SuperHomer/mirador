@@ -1424,7 +1424,7 @@ fn defined_teams(json: bool) -> Result<(), String> {
 /// A team's weight, a member per line — name, role, model, tokens, the
 /// floor per turn — then the team's, then what it leaves out.
 fn render_team_weight(w: &cmux_protocol::TeamWeight) {
-    let floor = |usd: Option<f64>| usd.map_or("no price".to_string(), |d| format!("${d:.4} a turn"));
+    let price = |start: f64, floor: f64| format!("≈ ${start:.4} to start, ≥ ${floor:.4} a turn");
     for s in &w.seats {
         let model = s.model.as_deref().unwrap_or("default");
         println!(
@@ -1433,7 +1433,10 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
             s.role,
             model,
             s.tokens,
-            floor(s.per_turn_floor_usd)
+            match (s.start_usd, s.per_turn_floor_usd) {
+                (Some(start), Some(floor)) => price(start, floor),
+                _ => "no price".to_string(),
+            }
         );
     }
     let unpriced = match w.unpriced {
@@ -1442,16 +1445,17 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
         n => format!(" ({n} members with no price left out)"),
     };
     println!(
-        "{:<14}  {:<16}  {:<22}  {:>8} tokens  ${:.4} a turn{unpriced}",
+        "{:<14}  {:<16}  {:<22}  {:>8} tokens  {}{unpriced}",
         w.team,
         format!("{} members", w.seats.len()),
         "",
         w.tokens,
-        w.per_turn_floor_usd
+        price(w.start_usd, w.per_turn_floor_usd)
     );
     println!(
         "Tokens are Mirador's prompts to each member, estimated at 4 characters a token; \
-         a turn re-sends them from the prompt cache at least. Not counted: the harness's own \
+         the first turn writes them to the prompt cache, and every turn reads them back from it \
+         at least. Not counted: the harness's own \
          system prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all output. \
          Prices as of {}.",
         w.prices_checked

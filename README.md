@@ -541,7 +541,7 @@ mira team restart            # start the exited and closed ones again
 mira team restart dev-2      # …or just these
 mira team add reviewer       # another member, beside this pane: reviewer-2
 mira team list --defined     # the teams this directory can start
-mira team cost squad         # what its prompts weigh, per member
+mira team cost squad         # what its prompts weigh, per member, to start and a turn
 ```
 
 **What a team costs.** Every member carries what Mirador tells it — its
@@ -549,13 +549,15 @@ role's prompt and way of working, then who it is in the team, the charter
 and the team's way — and Claude Code sends that again with every turn.
 `mira team cost squad`, and the **Prompt weight** block on the team's page
 in the editor, count it: each member's tokens (an estimate, about four
-characters a token), the team's total, and the **floor per turn** — those
-tokens read from the prompt cache, at the model's cache-read price. It is
-a lower bound and says so: not counted are the agent's own system prompt
+characters a token), the team's total, what they cost **to start** — the
+first turn writes them to the prompt cache, at the model's cache-write
+price — and the **floor per turn**, those tokens read back from the cache
+at its cache-read price. **Details** breaks it down by part and member.
+Both are lower bounds and say so: not counted are the agent's own system prompt
 and tools, CLAUDE.md, MCP tool schemas, the conversation and every output
 token, which usually weigh far more. A member on Codex, or on a model with
 no known price (a role with no `model:` runs the harness's default), has
-tokens and no price, and the team's floor says how many it leaves out. The
+tokens and no price, and the team's figures say how many they leave out. The
 prices are Anthropic's list prices, with the date they were checked. It is
 an estimate made before the team starts; what running members have cost
 is in each one's status bar and activity panel (below). The page weighs

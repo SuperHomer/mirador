@@ -408,16 +408,17 @@ mira team clear [--force]                # every running member on a new convers
 mira team save [name]                    # this team's conversations, as name (the team's by default)
 mira team resume <name>                  # a tab of its own, each member back in its conversation
 mira team saves                          # every save, team's and agent's, newest first
-mira team cost <name> [--json]           # what its prompts weigh, per member, and the least that costs a turn
+mira team cost <name> [--json]           # what its prompts weigh, per member, what that costs to start and a turn
 mira agent save [name | --pane <id>] [--as <save>]  # one agent's (this pane's by default)
 mira agent resume <save> [--tab]         # beside this pane, or in a new tab
 ```
 
 `team cost` weighs what a team — the one the calling pane's directory
 sees — tells its members: each member's layers, exactly as it starts with
-them, as an estimate in tokens (about four characters a token), and the
-least a turn costs to send them again, read from the prompt cache at the
-model's cache-read price. It is a lower bound: the agent's own system
+them, as an estimate in tokens (about four characters a token); what the
+first turn costs to write them to the prompt cache, at the model's
+cache-write price; and the least each turn costs to send them again,
+read from the cache at its cache-read price. Both are lower bounds: the agent's own system
 prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all
 output are not counted. A team that cannot start is refused, as `team
 start` refuses it. `--json` prints the answer as the socket gives it, the
@@ -459,11 +460,13 @@ here for omakase, its members trimmed to the first:
         ],
         "tokens": 1104,
         "cacheReadPerMillion": 0.2,
-        "perTurnFloorUsd": 0.0002208
+        "perTurnFloorUsd": 0.0002208,
+        "startUsd": 0.00552
       }
     ],
     "tokens": 2829,
     "perTurnFloorUsd": 0.0003858,
+    "startUsd": 0.009645,
     "unpriced": 1,
     "pricesChecked": "2026-10-06"
   }
@@ -473,9 +476,10 @@ here for omakase, its members trimmed to the first:
 A layer's `kind` is `role`, `roleWay`, `team`, `charter` or `teamWay`. A
 seat's `model` is as its role says it, `null` for the harness's default;
 its `cacheReadPerMillion` is the model's cache-read price in dollars per
-million tokens, which `perTurnFloorUsd` is worked out at; both are `null`
-when that model has no known price, and
-`unpriced` counts those seats, which the team's floor leaves out.
+million tokens, which `perTurnFloorUsd` is worked out at, and `startUsd`
+the first turn's cache write; all three are `null` when that model has no
+known price, and `unpriced` counts those seats, which the team's floor and
+start cost leave out.
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
 config directory's): frontmatter `members` — each a `role`, with an

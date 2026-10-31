@@ -194,8 +194,9 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
 }
 
 /**
- * What the team adds to its members' prompts, in tokens, and the least
- * that costs a turn — a lower bound, which says what it leaves out.
+ * What the team adds to its members' prompts, in tokens, what writing
+ * them to the cache costs at the start, and the least they cost a turn —
+ * lower bounds, which say what they leave out.
  */
 function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weight" | "dirty">) {
   const [details, setDetails] = useState(false);
@@ -203,7 +204,7 @@ function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weig
     if (w.unpriced === w.seats.length) return "no price";
     const without =
       w.unpriced === 0 ? "" : ` · ${w.unpriced} ${w.unpriced === 1 ? "member" : "members"} without a price`;
-    return `≥ ${usd(w.perTurnFloorUsd)} a turn${without}`;
+    return `≈ ${usd(w.startUsd)} to start · ≥ ${usd(w.perTurnFloorUsd)} a turn${without}`;
   };
   return (
     <div className="team-weight">
@@ -325,13 +326,29 @@ function WeightDetails({ weight }: { weight: TeamWeight }) {
             ))}
             <td>{usd(weight.perTurnFloorUsd)}</td>
           </tr>
+          <tr>
+            <th>To start</th>
+            {weight.seats.map((s) => (
+              <td
+                key={s.name}
+                title={
+                  s.startUsd === null
+                    ? "No known price for this model"
+                    : `The first turn writes its ${count(s.tokens)} tokens to the prompt cache, at ${s.model}'s cache-write price`
+                }
+              >
+                {s.startUsd === null ? "no price" : usd(s.startUsd)}
+              </td>
+            ))}
+            <td>{usd(weight.startUsd)}</td>
+          </tr>
         </tfoot>
       </table>
       <p className="team-weight-note">
         Tokens are estimated at about 4 characters a token. Claude Code sends its whole system prompt again every
         turn; these parts of it stay the same, so they come from the prompt cache, at the model&apos;s cache-read
-        price{rates.length > 0 ? ` (${rates.join(", ")})` : ""}. The first turn writes them into the cache, at
-        1.25× the input price, and costs more.
+        price{rates.length > 0 ? ` (${rates.join(", ")})` : ""}. The first turn writes them into the cache
+        instead, at 1.25× the input price: To start, {usd(weight.startUsd)} for the team.
       </p>
     </div>
   );

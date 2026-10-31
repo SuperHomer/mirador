@@ -300,7 +300,8 @@ pub fn team_way<'a>(catalog: &'a RoleCatalog, team: &AgentTeam, role: &str) -> O
 
 /// What `team` tells its members, in estimated tokens: each seat's layers
 /// — its role's, then its own in the team, the very ones it starts with —
-/// and the least a turn costs to re-send them, read from the prompt cache.
+/// the least a turn costs to re-send them, read from the prompt cache, and
+/// what the first turn costs to write them to it.
 /// What else a turn sends is not counted (see [`TeamWeight`]). A seat whose
 /// model has no known price has tokens and no floor, and is counted as
 /// unpriced. Fails as starting the team would: on a team that cannot
@@ -324,6 +325,9 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
         let floor = rates.map(|rates| {
             crate::pricing::cost(rates, crate::pricing::Usage { cache_read: tokens, ..Default::default() })
         });
+        let start = rates.map(|rates| {
+            crate::pricing::cost(rates, crate::pricing::Usage { cache_write: tokens, ..Default::default() })
+        });
         out.push(SeatWeight {
             name: seat.name.clone(),
             role: seat.role.clone(),
@@ -334,12 +338,14 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
             tokens,
             cache_read_per_million: rates.map(|r| r.cache_read),
             per_turn_floor_usd: floor,
+            start_usd: start,
         });
     }
     Ok(TeamWeight {
         team: team.name.clone(),
         tokens: out.iter().map(|s| s.tokens).sum(),
         per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).sum(),
+        start_usd: out.iter().filter_map(|s| s.start_usd).sum(),
         unpriced: out.iter().filter(|s| s.per_turn_floor_usd.is_none()).count() as u32,
         seats: out,
         prices_checked: crate::pricing::PRICES_CHECKED.to_string(),
@@ -589,11 +595,24 @@ mod tests {
         // Codex: tokens, no price, and counted as such.
         let gate = &w.seats[3];
         assert_eq!((gate.harness, gate.per_turn_floor_usd), (cmux_protocol::Harness::Codex, None));
-        assert_eq!(gate.cache_read_per_million, None);
+        assert_eq!((gate.cache_read_per_million, gate.start_usd), (None, None));
         assert!(gate.tokens > 0);
         assert_eq!(w.unpriced, 1);
         let priced: f64 = w.seats[..3].iter().map(|s| s.per_turn_floor_usd.unwrap()).sum();
         assert!((w.per_turn_floor_usd - priced).abs() < 1e-12);
+
+        // Starting writes the tokens to the cache, at the cache-write rate
+        // (Opus 5.5: 1.25 × $4); the team's start leaves Codex out too.
+        let start = |s: &SeatWeight| s.start_usd.unwrap();
+        assert!((start(planner) - planner.tokens as f64 * 5.0 / 1_000_000.0).abs() < 1e-12);
+        let started: f64 = w.seats[..3].iter().map(start).sum();
+        assert!((w.start_usd - started).abs() < 1e-12);
+        // With a model's default rates, writing is 12.5× reading.
+        let mut haiku = catalog.clone();
+        haiku.roles[1].model = Some("claude-haiku-4-5".into());
+        let dev = &team_weight(&haiku, &t, "mira").unwrap().seats[1];
+        assert!((start(dev) - dev.tokens as f64 * 1.25 / 1_000_000.0).abs() < 1e-12);
+        assert!((start(dev) / dev.per_turn_floor_usd.unwrap() - 12.5).abs() < 1e-9);
         assert_eq!(w.prices_checked, crate::pricing::PRICES_CHECKED);
 
         // A role with no model runs the harness's default, whose price is
@@ -601,7 +620,7 @@ mod tests {
         let mut plain = catalog.clone();
         plain.roles[1].model = None;
         let w = team_weight(&plain, &t, "mira").unwrap();
-        assert_eq!((w.seats[1].per_turn_floor_usd, w.unpriced), (None, 3));
+        assert_eq!((w.seats[1].per_turn_floor_usd, w.seats[1].start_usd, w.unpriced), (None, None, 3));
 
         // A role the team names but nobody wrote: as starting would.
         let mut missing = catalog.clone();
