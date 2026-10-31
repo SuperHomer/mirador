@@ -1,10 +1,140 @@
 /**
- * The agent wall, as a real screenshot rather than a mock: what it shows
- * is other programs' terminals, which no mock would draw faithfully.
+ * The agent wall, as a static mock: a tab of four agents and two tools,
+ * shown as its wall in Grid, beside the sidebar.
+ *
+ * Kept honest to the app, like the other mocks: the sidebar and the wall
+ * are MockAgents.tsx's, drawn from the app's own components. The tab's
+ * agents are nested under it, then its tools; on the wall the agents come
+ * in team order, then the tools, on one page of six. A Claude Code agent
+ * says how it stands and what it asks or works on; the Codex one reports
+ * no status or context, so its mark is the muted ring and its tile says
+ * nothing it could not know. Its terminals' lines are what each program
+ * prints, shortened.
  */
 
-import wallUrl from "../assets/agent-wall.webp";
 import { BothKeys } from "./Keys";
+import { GridWall, MockSidebar, type MockAgent, type MockTab, type MockTool } from "./MockAgents";
+
+/** A shop's checkout, in a tab of its own: one agent waiting on a
+    permission, one working, a Codex one, one idle after its task. */
+const AGENTS: MockAgent[] = [
+  {
+    name: "webhooks",
+    harness: "claude",
+    status: "needsYou",
+    since: "1m",
+    asking: "Bash stripe trigger checkout.session.completed",
+    model: "Sonnet 5.5",
+    context: 44,
+    subagents: 0,
+    lines: [
+      { text: "> handle checkout.session.completed", color: "var(--text)" },
+      { text: "⏺ Update(src/webhooks/stripe.ts)" },
+      { text: "  ⎿ Added 24 lines, removed 2", color: "var(--muted)" },
+      { text: "⏺ Bash(stripe trigger checkout.session.completed)" },
+      { text: "Do you want to proceed?", color: "var(--text)" },
+      { text: "❯ 1. Yes", color: "var(--accent)" },
+      { text: "  2. No, and tell Claude what to do differently" },
+    ],
+  },
+  {
+    name: "tests",
+    harness: "claude",
+    status: "working",
+    since: "3m",
+    task: "Cover refunds in the webhook tests",
+    model: "Opus 5.5",
+    context: 31,
+    subagents: 2,
+    lines: [
+      { text: "⏺ Read(tests/webhooks.test.ts)" },
+      { text: "⏺ Task(Find every refund path)" },
+      { text: "  ⎿ Done (6 tool uses · 41s)", color: "var(--muted)" },
+      { text: "⏺ Update(tests/webhooks.test.ts)" },
+      { text: "✶ Writing refund cases…", color: "var(--accent)" },
+    ],
+  },
+  {
+    name: "codex",
+    harness: "codex",
+    status: null,
+    model: "gpt-6-luna",
+    lines: [
+      { text: "› store order amounts in cents", color: "var(--text)" },
+      { text: "• Ran rg -n amount src/db" },
+      { text: "• Edited src/db/migrations/0012_cents.sql (+18 -0)" },
+      { text: "• Running npm run db:check" },
+    ],
+  },
+  {
+    name: "docs",
+    harness: "claude",
+    status: "idle",
+    since: "6m",
+    task: "Document the webhook secret",
+    model: "Haiku 5.5",
+    context: 18,
+    subagents: 0,
+    lines: [
+      { text: "⏺ Update(README.md)" },
+      { text: "  ⎿ Added 12 lines", color: "var(--muted)" },
+      { text: "⏺ STRIPE_WEBHOOK_SECRET is in the README's setup now.", color: "var(--text)" },
+    ],
+  },
+];
+
+/** The tab's other panes: the dev server and the page it serves. */
+const TOOLS: MockTool[] = [
+  {
+    title: "npm run dev",
+    kind: "terminal",
+    lines: [
+      { text: "> shop@0.4.0 dev" },
+      { text: "> vite --port 3000" },
+      { text: "  VITE v7.1.4  ready in 412 ms", color: "var(--green)" },
+      { text: "  ➜  Local:   http://localhost:3000/", color: "var(--text)" },
+      { text: "12:41:07 [vite] hmr update /src/Checkout.tsx", color: "var(--muted)" },
+    ],
+  },
+  {
+    title: "http://localhost:3000/checkout",
+    kind: "browser",
+    lines: [
+      { text: "‹ ›  ⟳  localhost:3000/checkout", color: "var(--muted)" },
+      { text: "Checkout", color: "var(--text)" },
+      { text: "1 × Trail runner, 42    €129.00" },
+      { text: "Shipping                 €4.90" },
+      { text: "[ Pay €133.90 ]", color: "var(--accent)" },
+    ],
+  },
+];
+
+const TABS: MockTab[] = [
+  { title: "shop", agents: AGENTS, tools: TOOLS, branch: "feat/stripe-webhooks", port: 3000 },
+  { title: "infra", agents: [{ ...AGENTS[3], name: "claude", lines: [] }] },
+];
+
+function WallMockup() {
+  return (
+    <div
+      style={{
+        maxWidth: 1000,
+        margin: "40px auto 0",
+        border: "1px solid var(--surface)",
+        borderRadius: 12,
+        overflow: "hidden",
+        background: "var(--bg)",
+        boxShadow: "0 24px 60px rgba(0,0,0,.5)",
+        textAlign: "left",
+        display: "flex",
+        height: 460,
+      }}
+    >
+      <MockSidebar tabs={TABS} current={0} view="wall" className="agents-sidebar" />
+      <GridWall agents={AGENTS} tools={TOOLS} />
+    </div>
+  );
+}
 
 export default function AgentShowcase() {
   return (
@@ -68,20 +198,7 @@ export default function AgentShowcase() {
         </div>
       </div>
 
-      <img
-        src={wallUrl}
-        alt="The agent wall: four Claude Code sessions working on this repository as a team — an orchestrator directing dev-1 and dev-2 on Sonnet and a planner on Opus — each tile headed by its name, model, branch and status, the planner's two finished subagents listed beside its terminal, and the agents named at the foot of the sidebar."
-        width={1558}
-        height={1047}
-        loading="lazy"
-        style={{
-          display: "block",
-          width: "100%",
-          maxWidth: 1000,
-          height: "auto",
-          margin: "40px auto 0",
-        }}
-      />
+      <WallMockup />
 
       <pre
         className="mono"

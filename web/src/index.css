@@ -98,7 +98,7 @@ button { font-family: inherit; cursor: pointer; }
 
 /* At phone width the hero mock's sidebar becomes its view switch over a
    strip of tabs, over the panes, which stack: side by side, each would be
-   a few characters wide. The teams mock drops its sidebar. */
+   a few characters wide. The teams and agents mocks drop their sidebar. */
 @media (max-width: 600px) {
   .mock-body { flex-direction: column; }
   .ms-sidebar.mock-sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--surface); }
@@ -113,7 +113,8 @@ button { font-family: inherit; cursor: pointer; }
   /* A team's tab shows its focused member alone, picked from the agents row. */
   .mock-agents { display: flex !important; }
   .mock-zoomable .mock-pane:not(.focused) { display: none !important; }
-  .ms-sidebar.teams-sidebar { display: none; }
+  .ms-sidebar.teams-sidebar,
+  .ms-sidebar.agents-sidebar { display: none; }
 }
 
 /* The app's agent chrome as the mocks draw it (MockAgents.tsx), from the
@@ -274,6 +275,19 @@ button { font-family: inherit; cursor: pointer; }
 .ms-tile.mini .ms-tile-term { padding: 4px 8px; font-size: 9.5px; line-height: 1.5; }
 .ms-rail { min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .ms-rail .ms-tile { flex: 1; }
+/* Grid: a page of six, three by two; a tool's mark, as neutral as the
+   harness marks; the toolbar's Per page and Focus | Grid at the right. */
+.ms-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 6px; }
+.ms-grid .ms-standing { margin-left: 0; }
+.ms-tile-focus { margin-left: auto; flex-shrink: 0; font-size: 10px; color: var(--muted); }
+.ms-tile-task { padding: 3px 8px; border-bottom: 1px solid var(--surface); font-size: 10.5px; color: var(--subtext); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-grid .ms-tile-asking { padding: 3px 8px; font-size: 10.5px; }
+.ms-grid .ms-tile-term { padding: 4px 8px; font-size: 9.5px; line-height: 1.5; }
+.ms-tool-mark { flex-shrink: 0; color: var(--subtext); }
+.ms-tool-mark svg { display: block; width: 12px; height: 12px; }
+.ms-agent.tool .ms-agent-name { color: var(--subtext); }
+.ms-wall-label { margin-left: auto; color: var(--muted); }
+.ms-wall-label ~ .ms-segmented { margin-left: 0; }
 
 /* At phone width the wall shows its large agent alone, as a narrow tab
    would leave no room for the rail. */
@@ -281,6 +295,9 @@ button { font-family: inherit; cursor: pointer; }
   .ms-wall-body { grid-template-columns: minmax(0, 1fr); }
   .ms-rail { display: none; }
   .ms-wall-toolbar .ms-filter:not(.selected) { display: none; }
+  /* Grid keeps its first two tiles, one above the other. */
+  .ms-grid { grid-template-columns: minmax(0, 1fr); }
+  .ms-grid > :nth-child(n+3) { display: none; }
 }
 
 /* The task board and Trail mocks (TasksShowcase.tsx), from the app's
