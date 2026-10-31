@@ -706,9 +706,10 @@ hides and shows the sidebar, as `mod+B` does. Then come the tab's name
 and the branch of its focused pane. At its right is **+ New**: a new tab
 (`mod+T`); an agent, with an optional first message, then a role of the
 repository, plain Claude Code or Codex, or a team; a split, right or
-down; a diff; the commit graph; or a browser. Each row runs what its key
-or the palette runs, and shows its shortcut. On the board each frame has
-its own title bar instead.
+down; a diff; the commit graph; or a browser. Each row runs the same
+command as its key or the palette, and shows its shortcut when one is
+bound (the commit graph and a browser have none by default). On the
+board each frame has its own title bar instead.
 
 Any pane can be shown alone that way: *Pane: Toggle Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).
