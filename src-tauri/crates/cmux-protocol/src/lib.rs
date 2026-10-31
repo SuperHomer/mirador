@@ -1632,6 +1632,11 @@ pub struct TeamWeight {
     /// Seats whose model has no known price, left out of the floor and
     /// the start cost.
     pub unpriced: u32,
+    /// The seats grouped by the model they run, heaviest first.
+    pub by_model: Vec<ModelWeight>,
+    /// The parts the team's tokens come from, each file once with every
+    /// seat that is told it, heaviest first.
+    pub heaviest: Vec<PartWeight>,
     /// When the prices were checked (`pricing::PRICES_CHECKED`).
     pub prices_checked: String,
 }
@@ -1659,6 +1664,41 @@ pub struct SeatWeight {
     /// Those tokens written to the prompt cache, which the first turn
     /// does; none when the model has no known price.
     pub start_usd: Option<f64>,
+}
+
+/// The seats of a [`TeamWeight`] that run one model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelWeight {
+    pub harness: Harness,
+    /// As the roles say it; none for the harness's default.
+    pub model: Option<String>,
+    /// Their names, in the team's order.
+    pub seats: Vec<String>,
+    pub tokens: u64,
+    /// None when the model has no known price.
+    pub start_usd: Option<f64>,
+    pub per_turn_floor_usd: Option<f64>,
+}
+
+/// One file's share of a [`TeamWeight`]: every seat told it, together.
+/// What Mirador writes for each seat is one part, though its copies differ.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartWeight {
+    pub kind: PromptLayerKind,
+    /// The file, or "written by Mirador".
+    pub source: String,
+    /// For a role's prompt, the role: roles in mirador.json share one
+    /// source, and are told apart by it.
+    pub role: Option<String>,
+    /// What one copy weighs; none when the copies differ, as Mirador's do.
+    pub tokens_per_copy: Option<u64>,
+    /// How many seats are told it.
+    pub copies: u32,
+    pub tokens: u64,
+    /// Of the team's tokens, from 0 to 1.
+    pub share: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

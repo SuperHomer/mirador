@@ -423,7 +423,7 @@ prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all
 output are not counted. A team that cannot start is refused, as `team
 start` refuses it. `--json` prints the answer as the socket gives it, the
 weight under `weight` (`team_cost` from the app gives the weight itself);
-here for omakase, its members trimmed to the first:
+here for omakase, its members, models and parts trimmed to the first:
 
 ```json
 {
@@ -468,6 +468,27 @@ here for omakase, its members trimmed to the first:
     "perTurnFloorUsd": 0.0003858,
     "startUsd": 0.009645,
     "unpriced": 1,
+    "byModel": [
+      {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "seats": ["planner", "worker"],
+        "tokens": 1929,
+        "startUsd": 0.009645,
+        "perTurnFloorUsd": 0.0003858
+      }
+    ],
+    "heaviest": [
+      {
+        "kind": "teamWay",
+        "source": "builtin:ways/omakase.md",
+        "role": null,
+        "tokensPerCopy": 343,
+        "copies": 3,
+        "tokens": 1029,
+        "share": 0.3637327677624602
+      }
+    ],
     "pricesChecked": "2026-10-06"
   }
 }
@@ -482,6 +503,16 @@ known price, and `unpriced` counts those seats, which the team's floor and
 start cost leave out. The team's `perTurnFloorUsd` and `startUsd` are
 `null` when no member has a price (in v0.1.41 its `perTurnFloorUsd`
 was always a number, `0` then).
+
+`byModel` groups the seats by harness and model (`model` `null` for the
+harness's default), heaviest first: their names, tokens, and start and
+floor summed, `null` for a model with no known price. `heaviest` gives
+each part once, with every seat told it — a way all five members get
+counts five times — heaviest first: its `kind` and `source`, `role` for a
+role's prompt (roles in `mirador.json` share one source), `tokensPerCopy`
+(`null` when the copies differ, as Mirador's own part does), `copies`,
+their `tokens` together, and `share`, of the team's tokens from 0 to 1.
+The plain output ends with both, the five heaviest parts.
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
 config directory's): frontmatter `members` — each a `role`, with an

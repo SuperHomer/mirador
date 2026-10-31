@@ -6468,3 +6468,25 @@ button.tb-line-row:hover {
 .team-weight-share {
   color: var(--muted);
 }
+
+/* A team's weight by model, and its heaviest parts: quiet rows under
+   the totals. */
+.team-weight-rows {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto auto;
+  gap: 2px 12px;
+  font-size: 11.5px;
+  color: var(--subtext);
+  font-variant-numeric: tabular-nums;
+}
+
+.team-weight-rows > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-weight-rows-label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}

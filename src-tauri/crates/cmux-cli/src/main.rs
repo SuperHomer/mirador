@@ -1454,6 +1454,46 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
         w.tokens,
         price(w.start_usd, w.per_turn_floor_usd)
     );
+    println!("\nBy model");
+    for m in &w.by_model {
+        let model = m.model.as_deref().unwrap_or("default");
+        // Claude Code's models name it; any other harness is said.
+        let model = match m.harness {
+            cmux_protocol::Harness::Claude => model.to_string(),
+            h => format!("{model} ({})", format!("{h:?}").to_lowercase()),
+        };
+        println!(
+            "  {:<28}  {:<24}  {:>8} tokens  {}",
+            model,
+            m.seats.join(", "),
+            m.tokens,
+            price(m.start_usd, m.per_turn_floor_usd)
+        );
+    }
+    println!("\nHeaviest");
+    for p in w.heaviest.iter().take(5) {
+        use cmux_protocol::PromptLayerKind::*;
+        let what = match (p.kind, &p.role) {
+            (Role, Some(role)) => format!("role prompt: {role}"),
+            (Role, None) => "role prompt".to_string(),
+            (RoleWay, _) => "role's way".to_string(),
+            (Team, _) => "place in the team".to_string(),
+            (Charter, _) => "charter".to_string(),
+            (TeamWay, _) => "team's way".to_string(),
+        };
+        // Copies of different sizes (Mirador's own part): their average.
+        let each = p.tokens_per_copy.map_or(format!("~{}", p.tokens / p.copies.max(1) as u64), |n| n.to_string());
+        println!(
+            "  {:<32}  {:<34}  {:>5} × {:<2}  {:>8} tokens  {:>3.0}%",
+            what,
+            p.source,
+            each,
+            p.copies,
+            p.tokens,
+            p.share * 100.0
+        );
+    }
+    println!();
     println!(
         "Tokens are Mirador's prompts to each member, estimated at 4 characters a token; \
          the first turn writes them to the prompt cache, and every turn reads them back from it \

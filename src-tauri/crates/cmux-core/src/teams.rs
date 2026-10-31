@@ -25,8 +25,8 @@
 use std::path::Path;
 
 use cmux_protocol::{
-    AgentRole, AgentTeam, AgentWay, LayerWeight, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SeatWeight,
-    SplitDir, TeamFields, TeamMember, TeamWeight,
+    AgentRole, AgentTeam, AgentWay, LayerWeight, ModelWeight, Node, PartWeight, PromptLayer, PromptLayerKind, RoleCatalog,
+    RoleSource, SeatWeight, SplitDir, TeamFields, TeamMember, TeamWeight,
 };
 use serde::Deserialize;
 
@@ -341,9 +341,12 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
             start_usd: start,
         });
     }
+    let tokens: u64 = out.iter().map(|s| s.tokens).sum();
     Ok(TeamWeight {
         team: team.name.clone(),
-        tokens: out.iter().map(|s| s.tokens).sum(),
+        tokens,
+        by_model: by_model(&out),
+        heaviest: heaviest(&out, tokens),
         per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).reduce(|a, b| a + b),
         start_usd: out.iter().filter_map(|s| s.start_usd).reduce(|a, b| a + b),
         unpriced: out.iter().filter(|s| s.per_turn_floor_usd.is_none()).count() as u32,
@@ -382,6 +385,69 @@ pub fn layout(panes: &[String], layout: Option<&str>) -> Node {
             line(SplitDir::Row, columns)
         }
     }
+}
+
+/// `seats` grouped by harness and model, heaviest first, then by model
+/// name: a stable order.
+fn by_model(seats: &[SeatWeight]) -> Vec<ModelWeight> {
+    let mut out: Vec<ModelWeight> = Vec::new();
+    for s in seats {
+        match out.iter_mut().find(|m| m.harness == s.harness && m.model == s.model) {
+            Some(m) => {
+                m.seats.push(s.name.clone());
+                m.tokens += s.tokens;
+                m.start_usd = m.start_usd.zip(s.start_usd).map(|(a, b)| a + b);
+                m.per_turn_floor_usd = m.per_turn_floor_usd.zip(s.per_turn_floor_usd).map(|(a, b)| a + b);
+            }
+            None => out.push(ModelWeight {
+                harness: s.harness,
+                model: s.model.clone(),
+                seats: vec![s.name.clone()],
+                tokens: s.tokens,
+                start_usd: s.start_usd,
+                per_turn_floor_usd: s.per_turn_floor_usd,
+            }),
+        }
+    }
+    out.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.model.cmp(&b.model)));
+    out
+}
+
+/// `seats`' layers grouped by the file they come from (a role's prompt
+/// by its role, since mirador.json's roles share a source), each counted once
+/// per seat told it, heaviest first, then by file: a way every member is
+/// told weighs its size times the members, and that is what shows here.
+fn heaviest(seats: &[SeatWeight], team_tokens: u64) -> Vec<PartWeight> {
+    let mut out: Vec<PartWeight> = Vec::new();
+    for (seat, l) in seats.iter().flat_map(|s| s.layers.iter().map(move |l| (s, l))) {
+        let role = (l.kind == PromptLayerKind::Role).then(|| seat.role.clone());
+        match out.iter_mut().find(|p| p.source == l.source && p.role == role) {
+            Some(p) => {
+                p.copies += 1;
+                p.tokens += l.tokens;
+                p.tokens_per_copy = p.tokens_per_copy.filter(|&n| n == l.tokens);
+                // A team's way is a role's way for a member whose role
+                // follows it: the same file, named for the team.
+                if l.kind == PromptLayerKind::TeamWay {
+                    p.kind = l.kind;
+                }
+            }
+            None => out.push(PartWeight {
+                kind: l.kind,
+                source: l.source.clone(),
+                role,
+                tokens_per_copy: Some(l.tokens),
+                copies: 1,
+                tokens: l.tokens,
+                share: 0.0,
+            }),
+        }
+    }
+    for p in &mut out {
+        p.share = if team_tokens == 0 { 0.0 } else { p.tokens as f64 / team_tokens as f64 };
+    }
+    out.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.source.cmp(&b.source)));
+    out
 }
 
 #[cfg(test)]
@@ -621,6 +687,41 @@ mod tests {
         plain.roles[1].model = None;
         let w = team_weight(&plain, &t, "mira").unwrap();
         assert_eq!((w.seats[1].per_turn_floor_usd, w.seats[1].start_usd, w.unpriced), (None, None, 3));
+
+        // By model: dev's two seats are one entry, priced as both; Codex's
+        // price stays unknown. Heaviest first.
+        let w = team_weight(&catalog, &t, "mira").unwrap();
+        let sonnet = w.by_model.iter().find(|m| m.model.as_deref() == Some("claude-sonnet-5-5[1m]")).unwrap();
+        assert_eq!(sonnet.seats, ["dev-1", "dev-2"]);
+        assert_eq!(sonnet.tokens, w.seats[1].tokens + w.seats[2].tokens);
+        let both = w.seats[1].start_usd.unwrap() + w.seats[2].start_usd.unwrap();
+        assert!((sonnet.start_usd.unwrap() - both).abs() < 1e-12);
+        let codex = w.by_model.iter().find(|m| m.harness == cmux_protocol::Harness::Codex).unwrap();
+        assert_eq!((codex.seats.as_slice(), codex.start_usd, codex.per_turn_floor_usd), (&["gate".to_string()][..], None, None));
+        assert_eq!(w.by_model.len(), 3);
+        assert!(w.by_model.windows(2).all(|p| p[0].tokens >= p[1].tokens));
+        assert_eq!(w.by_model.iter().map(|m| m.tokens).sum::<u64>(), w.tokens);
+
+        // Heaviest: the way, told to all four seats (the planner's as its
+        // role's, under its own heading), outweighs the planner's longer
+        // role prompt, told once.
+        let rank = |f: &dyn Fn(&PartWeight) -> bool| w.heaviest.iter().position(f).unwrap();
+        let (way, plan) = (rank(&|p| p.kind == TeamWay), rank(&|p| p.role.as_deref() == Some("planner")));
+        let (way, plan) = (&w.heaviest[way], &w.heaviest[plan]);
+        assert_eq!(way.copies, 4);
+        assert!(w.seats[1].layers[3].tokens < plan.tokens_per_copy.unwrap());
+        assert!(way.tokens > plan.tokens);
+        assert!(w.heaviest.iter().position(|p| p == way) < w.heaviest.iter().position(|p| p == plan));
+        // Roles in mirador.json share a source, and are still apart: dev's
+        // two seats are one part, the planner's another.
+        let dev = &w.heaviest[rank(&|p| p.role.as_deref() == Some("dev"))];
+        assert_eq!((dev.kind, dev.copies, dev.source.as_str()), (Role, 2, plan.source.as_str()));
+        // What Mirador writes differs per seat: one part, no one size.
+        let ours = w.heaviest.iter().find(|p| p.source == WRITTEN_BY_MIRADOR).unwrap();
+        assert_eq!((ours.kind, ours.copies, ours.tokens_per_copy), (Team, 4, None));
+        assert!(w.heaviest.windows(2).all(|p| p[0].tokens >= p[1].tokens));
+        assert_eq!(w.heaviest.iter().map(|p| p.tokens).sum::<u64>(), w.tokens);
+        assert!((w.heaviest.iter().map(|p| p.share).sum::<f64>() - 1.0).abs() < 1e-9);
 
         // No member priced: the team has no price either, not $0.
         let mut unknown = catalog.clone();

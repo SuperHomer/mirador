@@ -1,7 +1,8 @@
-import { Ref, useState } from "react";
+import { Fragment, Ref, useState } from "react";
 import {
   AgentStatus,
   HARNESS_LABEL,
+  PartWeight,
   PromptLayer,
   RoleCatalog,
   TeamFields,
@@ -204,7 +205,7 @@ function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weig
     if (w.startUsd === null || w.perTurnFloorUsd === null) return "no price";
     const without =
       w.unpriced === 0 ? "" : ` · ${w.unpriced} ${w.unpriced === 1 ? "member" : "members"} without a price`;
-    return `≈ ${usd(w.startUsd)} to start · ≥ ${usd(w.perTurnFloorUsd)} a turn${without}`;
+    return `${priceLabel(w.startUsd, w.perTurnFloorUsd)}${without}`;
   };
   return (
     <div className="team-weight">
@@ -218,6 +219,31 @@ function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weig
             <button className="team-weight-toggle" onClick={() => setDetails(!details)}>
               {details ? "Hide details" : "Details"}
             </button>
+          </div>
+          <div className="team-weight-rows">
+            <span className="team-weight-rows-label">By model</span>
+            {weight.byModel.map((m) => (
+              <Fragment key={`${m.harness} ${m.model}`}>
+                <span title={m.seats.join(", ")}>
+                  {m.model ?? `${HARNESS_LABEL[m.harness]}'s default`} · {m.seats.length}{" "}
+                  {m.seats.length === 1 ? "member" : "members"}
+                </span>
+                <span>{tokensLabel(m.tokens)}</span>
+                <span>{priceLabel(m.startUsd, m.perTurnFloorUsd)}</span>
+              </Fragment>
+            ))}
+          </div>
+          <div className="team-weight-rows">
+            <span className="team-weight-rows-label">Heaviest</span>
+            {weight.heaviest.slice(0, 3).map((p) => (
+              <Fragment key={`${p.source} ${p.role}`}>
+                <span title={p.source}>{partLabel(p)}</span>
+                <span>
+                  {tokensLabel(p.tokens)} · ×{p.copies}
+                </span>
+                <span>{Math.round(p.share * 100)}%</span>
+              </Fragment>
+            ))}
           </div>
           {details && <WeightDetails weight={weight} />}
           <p className="team-weight-note">
@@ -233,6 +259,30 @@ function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weig
       {dirty && <p className="team-weight-note">Unsaved changes are not counted.</p>}
     </div>
   );
+}
+
+/** "≈ $0.0055 to start · ≥ $0.0002 a turn", or "no price". */
+function priceLabel(start: number | null, floor: number | null): string {
+  if (start === null || floor === null) return "no price";
+  return `≈ ${usd(start)} to start · ≥ ${usd(floor)} a turn`;
+}
+
+/** A part by what it is: the role's name for a role's prompt, the file's
+ *  name for a way. */
+function partLabel(p: PartWeight): string {
+  const file = p.source.split("/").pop();
+  switch (p.kind) {
+    case "role":
+      return `${p.role ?? "role"}'s prompt`;
+    case "roleWay":
+      return `way of working ${file}`;
+    case "team":
+      return "place in the team, by Mirador";
+    case "charter":
+      return "charter";
+    case "teamWay":
+      return `team's way ${file}`;
+  }
 }
 
 /** The parts of a member's prompt, in the order it is told them. */

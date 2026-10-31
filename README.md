@@ -552,7 +552,10 @@ in the editor, count it: each member's tokens (an estimate, about four
 characters a token), the team's total, what they cost **to start** — the
 first turn writes them to the prompt cache, at the model's cache-write
 price — and the **floor per turn**, those tokens read back from the cache
-at its cache-read price. **Details** breaks it down by part and member.
+at its cache-read price. Under them come the team's models, each with its
+members, tokens and price, and its three heaviest parts, each counted once
+per member told it: a way of working everyone gets weighs its size times
+the team. **Details** breaks it down by part and member.
 Both are lower bounds and say so: not counted are the agent's own system prompt
 and tools, CLAUDE.md, MCP tool schemas, the conversation and every output
 token, which usually weigh far more. A member on Codex, or on a model with

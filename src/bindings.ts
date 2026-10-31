@@ -867,6 +867,10 @@ export interface TeamWeight {
    *  start cost. */
   unpriced: number;
   /** When the prices were checked, as YYYY-MM-DD. */
+  /** The seats grouped by model, heaviest first. */
+  byModel: ModelWeight[];
+  /** Each part once, every seat told it together, heaviest first. */
+  heaviest: PartWeight[];
   pricesChecked: string;
 }
 
@@ -889,6 +893,33 @@ export interface SeatWeight {
   /** Those tokens written to the prompt cache, by the first turn; null
    *  with no known price. */
   startUsd: number | null;
+}
+
+/** The seats of a team that run one model. */
+export interface ModelWeight {
+  harness: Harness;
+  /** As the roles say it; null for the harness's default. */
+  model: string | null;
+  seats: string[];
+  tokens: number;
+  /** Null when the model has no known price. */
+  startUsd: number | null;
+  perTurnFloorUsd: number | null;
+}
+
+/** One file's share of a team's tokens, every seat told it together. */
+export interface PartWeight {
+  kind: PromptLayer["kind"];
+  /** The file, or "written by Mirador". */
+  source: string;
+  /** For a role's prompt, the role. */
+  role: string | null;
+  /** One copy's tokens; null when the copies differ, as Mirador's do. */
+  tokensPerCopy: number | null;
+  copies: number;
+  tokens: number;
+  /** Of the team's tokens, 0 to 1. */
+  share: number;
 }
 
 export interface LayerWeight {
