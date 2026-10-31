@@ -117,7 +117,8 @@ pub fn team_cost(state: State<'_, AppState>, team: String, pane_id: Option<Strin
         .iter()
         .find(|t| t.name == team)
         .ok_or_else(|| format!("no team `{team}` (`mira team list --defined` lists them)"))?;
-    cmux_core::teams::team_weight(&catalog, def, &mira_for_prompt())
+    let warn_usd = state.config.lock().unwrap().team_cost_warn_usd;
+    cmux_core::teams::team_weight(&catalog, def, &mira_for_prompt(), warn_usd)
 }
 
 /// Every running team, for the frontend.

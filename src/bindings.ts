@@ -681,6 +681,8 @@ export interface ResolvedConfig {
   agentRoles: AgentRole[];
   /** How many agents a page of the wall's Grid layout holds: 4, 6 or 9. */
   agentsPerTab: number;
+  /** What starting a team may cost, in US dollars, before it warns. */
+  teamCostWarnUsd: number;
   agentClick: AgentClick;
   /** Where the app opens the editor, a diff and the commit graph. */
   editorOpensIn: OpensIn;
@@ -859,11 +861,22 @@ export interface TeamWeight {
   team: string;
   seats: SeatWeight[];
   tokens: number;
-  /** The priced seats' floors, summed. */
-  perTurnFloorUsd: number;
-  /** Seats whose model has no known price, left out of the floor. */
+  /** The priced seats' floors, summed; null when no seat is priced. */
+  perTurnFloorUsd: number | null;
+  /** The priced seats' start costs, summed; null when no seat is priced. */
+  startUsd: number | null;
+  /** The limit `startUsd` was judged against (`teamCostWarnUsd`). */
+  warnUsd: number;
+  /** `startUsd` is over `warnUsd`; never with no price. */
+  overBudget: boolean;
+  /** Seats whose model has no known price, left out of the floor and the
+   *  start cost. */
   unpriced: number;
   /** When the prices were checked, as YYYY-MM-DD. */
+  /** The seats grouped by model, heaviest first. */
+  byModel: ModelWeight[];
+  /** Each part once, every seat told it together, heaviest first. */
+  heaviest: PartWeight[];
   pricesChecked: string;
 }
 
@@ -877,9 +890,42 @@ export interface SeatWeight {
   effort: string | null;
   layers: LayerWeight[];
   tokens: number;
+  /** The model's cache-read price, USD per million tokens, the floor is
+   *  worked out at; null with no known price. */
+  cacheReadPerMillion: number | null;
   /** Those tokens read from the prompt cache each turn; null with no
    *  known price. */
   perTurnFloorUsd: number | null;
+  /** Those tokens written to the prompt cache, by the first turn; null
+   *  with no known price. */
+  startUsd: number | null;
+}
+
+/** The seats of a team that run one model. */
+export interface ModelWeight {
+  harness: Harness;
+  /** As the roles say it; null for the harness's default. */
+  model: string | null;
+  seats: string[];
+  tokens: number;
+  /** Null when the model has no known price. */
+  startUsd: number | null;
+  perTurnFloorUsd: number | null;
+}
+
+/** One file's share of a team's tokens, every seat told it together. */
+export interface PartWeight {
+  kind: PromptLayer["kind"];
+  /** The file, or "written by Mirador". */
+  source: string;
+  /** For a role's prompt, the role. */
+  role: string | null;
+  /** One copy's tokens; null when the copies differ, as Mirador's do. */
+  tokensPerCopy: number | null;
+  copies: number;
+  tokens: number;
+  /** Of the team's tokens, 0 to 1. */
+  share: number;
 }
 
 export interface LayerWeight {

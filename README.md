@@ -541,25 +541,47 @@ mira team restart            # start the exited and closed ones again
 mira team restart dev-2      # …or just these
 mira team add reviewer       # another member, beside this pane: reviewer-2
 mira team list --defined     # the teams this directory can start
-mira team cost squad         # what its prompts weigh, per member
+mira team cost squad         # what it costs to start, and a turn, before you start it
 ```
 
-**What a team costs.** Every member carries what Mirador tells it — its
-role's prompt and way of working, then who it is in the team, the charter
-and the team's way — and Claude Code sends that again with every turn.
-`mira team cost squad`, and the **Prompt weight** block on the team's page
-in the editor, count it: each member's tokens (an estimate, about four
-characters a token), the team's total, and the **floor per turn** — those
-tokens read from the prompt cache, at the model's cache-read price. It is
-a lower bound and says so: not counted are the agent's own system prompt
-and tools, CLAUDE.md, MCP tool schemas, the conversation and every output
-token, which usually weigh far more. A member on Codex, or on a model with
-no known price (a role with no `model:` runs the harness's default), has
-tokens and no price, and the team's floor says how many it leaves out. The
-prices are Anthropic's list prices, with the date they were checked. While
-the team runs, the same block adds **Spent so far**: what its members'
-sessions and their subagents have cost (see the status bar, below). The
-page weighs the files as saved; unsaved edits are not counted.
+**What a team costs.** Before you start a team, the **Prompt weight**
+block on its page in the editor, and `mira team cost squad`, estimate
+what it will cost. Every member carries what Mirador tells it — its
+role's prompt and way of working, who it is in the team, the charter and
+the team's way — and Claude Code sends that again with every turn. The
+estimate counts those tokens for each member and the team (about four
+characters a token) and prices them at each model's list price: **to
+start**, the first turn writing them to the prompt cache at its
+cache-write price, and **per turn** at least, every turn after reading
+them back at its cache-read price — a fraction of that, which is why a
+turn costs so much less than the start. Under the totals it sums them
+**by model** — each model's members, tokens and price — and ranks the
+**heaviest** parts, each counted once per member told it: a way of
+working everyone gets weighs its size times the team. **Details** shows
+every part of every member's prompt with its share, and how each price
+is worked out.
+
+Both prices are lower bounds and say so: not counted are the agent's own
+system prompt and tools, CLAUDE.md, MCP tool schemas, the conversation
+and every output token, which usually weigh far more. A member on Codex,
+or on a model with no known price (a role with no `model:` runs the
+harness's default), has tokens and no price; the team's prices leave it
+out and say so, and a team with no priced member has no price at all.
+The prices are Anthropic's list prices, with the date they were checked.
+The page weighs the files as saved, not unsaved edits. What running
+members have actually cost is in each one's status bar and activity
+panel (below).
+
+When starting a team would cost more than `teamCostWarnUsd` in
+`mirador.json` (in dollars, `0.5` by default; anything but a positive
+number is ignored for it), the block and `mira team cost` warn, naming
+the heaviest part as the likeliest thing to trim. A team with no price
+never warns; a partly priced one is judged on its priced members.
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "teamCostWarnUsd": 2 }
+```
 
 Members hand each other work through Mirador — the prompt each one gets
 says how:

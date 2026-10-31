@@ -1424,7 +1424,21 @@ fn defined_teams(json: bool) -> Result<(), String> {
 /// A team's weight, a member per line — name, role, model, tokens, the
 /// floor per turn — then the team's, then what it leaves out.
 fn render_team_weight(w: &cmux_protocol::TeamWeight) {
-    let floor = |usd: Option<f64>| usd.map_or("no price".to_string(), |d| format!("${d:.4} a turn"));
+    let price = |start: Option<f64>, floor: Option<f64>| match (start, floor) {
+        (Some(start), Some(floor)) => format!("≈ ${start:.4} to start, ≥ ${floor:.4} a turn"),
+        _ => "no price".to_string(),
+    };
+    let what = |p: &cmux_protocol::PartWeight| {
+        use cmux_protocol::PromptLayerKind::*;
+        match (p.kind, &p.role) {
+            (Role, Some(role)) => format!("role prompt: {role}"),
+            (Role, None) => "role prompt".to_string(),
+            (RoleWay, _) => "role's way".to_string(),
+            (Team, _) => "place in the team".to_string(),
+            (Charter, _) => "charter".to_string(),
+            (TeamWay, _) => "team's way".to_string(),
+        }
+    };
     for s in &w.seats {
         let model = s.model.as_deref().unwrap_or("default");
         println!(
@@ -1433,25 +1447,74 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
             s.role,
             model,
             s.tokens,
-            floor(s.per_turn_floor_usd)
+            price(s.start_usd, s.per_turn_floor_usd)
         );
     }
+    // With none priced, "no price" says it all.
     let unpriced = match w.unpriced {
         0 => String::new(),
+        n if n as usize == w.seats.len() => String::new(),
         1 => " (1 member with no price left out)".to_string(),
         n => format!(" ({n} members with no price left out)"),
     };
     println!(
-        "{:<14}  {:<16}  {:<22}  {:>8} tokens  ${:.4} a turn{unpriced}",
+        "{:<14}  {:<16}  {:<22}  {:>8} tokens  {}{unpriced}",
         w.team,
         format!("{} members", w.seats.len()),
         "",
         w.tokens,
-        w.per_turn_floor_usd
+        price(w.start_usd, w.per_turn_floor_usd)
     );
+    if let (true, Some(start)) = (w.over_budget, w.start_usd) {
+        let dollars = |usd: f64| if usd >= 0.01 { format!("${usd:.2}") } else { format!("${usd:.4}") };
+        let left_out = match w.unpriced {
+            0 => String::new(),
+            n => format!(" ({n} without a price not counted)"),
+        };
+        let trim = w.heaviest.first().map_or(String::new(), |p| {
+            format!(" Heaviest: {} ({}), {:.0}%.", what(p), p.source, p.share * 100.0)
+        });
+        println!(
+            "\nWarning: ≈ {} to start{left_out}, over your {} limit (teamCostWarnUsd).{trim}",
+            dollars(start),
+            dollars(w.warn_usd)
+        );
+    }
+    println!("\nBy model");
+    for m in &w.by_model {
+        let model = m.model.as_deref().unwrap_or("default");
+        // Claude Code's models name it; any other harness is said.
+        let model = match m.harness {
+            cmux_protocol::Harness::Claude => model.to_string(),
+            h => format!("{model} ({})", format!("{h:?}").to_lowercase()),
+        };
+        println!(
+            "  {:<28}  {:<24}  {:>8} tokens  {}",
+            model,
+            m.seats.join(", "),
+            m.tokens,
+            price(m.start_usd, m.per_turn_floor_usd)
+        );
+    }
+    println!("\nHeaviest");
+    for p in w.heaviest.iter().take(5) {
+        // Copies of different sizes (Mirador's own part): their average.
+        let each = p.tokens_per_copy.map_or(format!("~{}", p.tokens / p.copies.max(1) as u64), |n| n.to_string());
+        println!(
+            "  {:<32}  {:<34}  {:>5} × {:<2}  {:>8} tokens  {:>3.0}%",
+            what(p),
+            p.source,
+            each,
+            p.copies,
+            p.tokens,
+            p.share * 100.0
+        );
+    }
+    println!();
     println!(
         "Tokens are Mirador's prompts to each member, estimated at 4 characters a token; \
-         a turn re-sends them from the prompt cache at least. Not counted: the harness's own \
+         the first turn writes them to the prompt cache, and every turn reads them back from it \
+         at least. Not counted: the harness's own \
          system prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all output. \
          Prices as of {}.",
         w.prices_checked

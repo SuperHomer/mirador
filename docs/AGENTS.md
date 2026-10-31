@@ -408,21 +408,25 @@ mira team clear [--force]                # every running member on a new convers
 mira team save [name]                    # this team's conversations, as name (the team's by default)
 mira team resume <name>                  # a tab of its own, each member back in its conversation
 mira team saves                          # every save, team's and agent's, newest first
-mira team cost <name> [--json]           # what its prompts weigh, per member, and the least that costs a turn
+mira team cost <name> [--json]           # what it costs to start, and a turn: per member, by model, heaviest parts
 mira agent save [name | --pane <id>] [--as <save>]  # one agent's (this pane's by default)
 mira agent resume <save> [--tab]         # beside this pane, or in a new tab
 ```
 
-`team cost` weighs what a team — the one the calling pane's directory
-sees — tells its members: each member's layers, exactly as it starts with
-them, as an estimate in tokens (about four characters a token), and the
-least a turn costs to send them again, read from the prompt cache at the
-model's cache-read price. It is a lower bound: the agent's own system
+`team cost` estimates, before a team starts, what its prompts cost — the
+team the calling pane's directory sees, refused as `team start` would
+refuse it. Each member's layers, exactly as it starts with them, are
+counted in tokens (about four characters a token) and priced at its
+model's list price: what the first turn costs to write them to the prompt
+cache (cache-write price), and the least each turn costs to read them
+back (cache-read price). Both are lower bounds: the agent's own system
 prompt and tools, CLAUDE.md, MCP tool schemas, the conversation and all
-output are not counted. A team that cannot start is refused, as `team
-start` refuses it. `--json` prints the answer as the socket gives it, the
-weight under `weight` (`team_cost` from the app gives the weight itself);
-here for omakase, its members trimmed to the first:
+output are not counted. The plain output gives each member and the
+team; a warning line when the team's start is over `teamCostWarnUsd`
+(the exit code stays 0); the team by model; and its five heaviest parts.
+`--json` prints the answer as the socket gives it, the weight under
+`weight` (`team_cost` from the app gives the weight itself); here for
+omakase, its members, models and parts trimmed to the first:
 
 ```json
 {
@@ -458,12 +462,38 @@ here for omakase, its members trimmed to the first:
           }
         ],
         "tokens": 1104,
-        "perTurnFloorUsd": 0.0002208
+        "cacheReadPerMillion": 0.2,
+        "perTurnFloorUsd": 0.0002208,
+        "startUsd": 0.00552
       }
     ],
     "tokens": 2829,
     "perTurnFloorUsd": 0.0003858,
+    "startUsd": 0.009645,
+    "warnUsd": 0.5,
+    "overBudget": false,
     "unpriced": 1,
+    "byModel": [
+      {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "seats": ["planner", "worker"],
+        "tokens": 1929,
+        "startUsd": 0.009645,
+        "perTurnFloorUsd": 0.0003858
+      }
+    ],
+    "heaviest": [
+      {
+        "kind": "teamWay",
+        "source": "builtin:ways/omakase.md",
+        "role": null,
+        "tokensPerCopy": 343,
+        "copies": 3,
+        "tokens": 1029,
+        "share": 0.3637327677624602
+      }
+    ],
     "pricesChecked": "2026-10-06"
   }
 }
@@ -471,8 +501,27 @@ here for omakase, its members trimmed to the first:
 
 A layer's `kind` is `role`, `roleWay`, `team`, `charter` or `teamWay`. A
 seat's `model` is as its role says it, `null` for the harness's default;
-its `perTurnFloorUsd` is `null` when that model has no known price, and
-`unpriced` counts those seats, which the team's floor leaves out.
+its `cacheReadPerMillion` is the model's cache-read price in dollars per
+million tokens, which `perTurnFloorUsd` is worked out at, and `startUsd`
+is the first turn's cache write; all three are `null` when the model has
+no known price.
+
+The team's `perTurnFloorUsd` and `startUsd` sum its priced seats, and
+`unpriced` counts the seats they leave out; both are `null` when no seat
+has a price (in v0.1.41 `perTurnFloorUsd` was always a number, `0`
+then). `warnUsd` is the limit `startUsd` was held to, the
+`teamCostWarnUsd` setting (0.5 by default), and `overBudget` whether it
+is over it: never for a team with no price, and for one partly priced,
+judged on its priced seats.
+
+`byModel` groups the seats by harness and model (`model` `null` for the
+harness's default), heaviest first: their names, tokens, and start and
+floor summed, `null` for a model with no known price. `heaviest` gives
+each part once, with every seat told it — a way all five members get
+counts five times — heaviest first: its `kind` and `source`, `role` for a
+role's prompt (roles in `mirador.json` share one source), `tokensPerCopy`
+(`null` when the copies differ, as Mirador's own part does), `copies`,
+their `tokens` together, and `share`, of the team's tokens from 0 to 1.
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
 config directory's): frontmatter `members` — each a `role`, with an

@@ -212,12 +212,12 @@ export default function TeamsShowcase() {
           Mirador keeps track of the team across restarts: list it, bring
           back the members that stopped, add one. In the editor a team is a page —
           its members as cards, the selected one’s role and settings beside them, and
-          what it is told, layer by layer, down to the part Mirador writes. The page,
-          or <span className="mono" style={{ color: "var(--text)" }}>mira team cost</span>,
-          counts the tokens the team’s prompts add to each member and the least each
-          turn costs to send them again — a lower bound that says what it leaves
-          out — and, while the team runs, what it has spent so far at API list prices
-          (on a subscription, what it would have cost, not what is billed). One team
+          what it is told, layer by layer, down to the part Mirador writes. Before
+          you start it, the page, or{" "}
+          <span className="mono" style={{ color: "var(--text)" }}>mira team cost</span>,
+          estimates what its prompts cost to start and each turn, model by model, ranks
+          the parts that weigh most — a way every member is told counts once per
+          member — and warns when the start is over your limit. One team
           ships with Mirador:{" "}
           <span className="mono" style={{ color: "var(--text)" }}>omakase</span>, a planner,
           a worker and a reviewer.

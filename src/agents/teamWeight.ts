@@ -4,7 +4,6 @@ import {
   SeatWeight,
   TeamWeight,
   TranscriptSummary,
-  getAgentActivity,
   teamCost,
 } from "../bindings";
 
@@ -85,41 +84,4 @@ export function spentOf(summaries: Pick<TranscriptSummary, "costUsd" | "unpriced
 export function spentLabel({ usd: dollars, unpriced }: Spent): string {
   if (dollars === null) return "—";
   return `${usd(dollars)}${unpriced ? "+" : ""}`;
-}
-
-/** How often a running team's spend is read again. */
-const SPENT_POLL_MS = 5000;
-
-/**
- * What the agents in `panes` have spent so far, each session with its
- * subagents, read again every few seconds while any runs. Null with no
- * pane, or until the first read; a pane whose activity cannot be read
- * is left out of the sum, as one that reported nothing yet.
- */
-export function useSpent(panes: string[]): Spent | null {
-  const [spent, setSpent] = useState<Spent | null>(null);
-  const key = panes.join(" ");
-  useEffect(() => {
-    setSpent(null);
-    if (panes.length === 0) return;
-    let cancelled = false;
-    let timer: number | undefined;
-    const load = () => {
-      void Promise.all(panes.map((p) => getAgentActivity(p).catch(() => null)))
-        .then((all) => {
-          if (cancelled) return;
-          const summaries = all.flatMap((a) => (a ? [a.session, ...a.subagents] : []));
-          setSpent(spentOf(summaries));
-        })
-        .finally(() => {
-          if (!cancelled) timer = window.setTimeout(load, SPENT_POLL_MS);
-        });
-    };
-    load();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [key]);
-  return spent;
 }

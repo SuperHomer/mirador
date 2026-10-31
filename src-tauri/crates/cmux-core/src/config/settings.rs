@@ -62,6 +62,8 @@ pub fn settings() -> Vec<Setting> {
             "Keep terminals running when Mirador quits, and reattach to them next launch. Applies to new panes."),
         setting("agentsPerTab", "Agents", SettingKind::Choice { options: vec![option(json!(4)), option(json!(6)), option(json!(9))] }, "4",
             "How many agents a page of the wall's Grid layout holds."),
+        setting("teamCostWarnUsd", "Agents", Number { min: f64::MIN_POSITIVE, max: f64::MAX }, "0.5",
+            "What starting a team may cost, in US dollars, before its weight in the editor warns."),
         setting("agentClick", "Agents", choice(&["wall", "pane"]), "wall",
             "What clicking an agent in the sidebar does: its tab's wall, or the agent alone."),
         setting("agentRoles", "Agents", ReadOnly, "none",

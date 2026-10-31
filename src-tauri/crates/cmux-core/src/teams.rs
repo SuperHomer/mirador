@@ -25,8 +25,8 @@
 use std::path::Path;
 
 use cmux_protocol::{
-    AgentRole, AgentTeam, AgentWay, LayerWeight, Node, PromptLayer, PromptLayerKind, RoleCatalog, RoleSource, SeatWeight,
-    SplitDir, TeamFields, TeamMember, TeamWeight,
+    AgentRole, AgentTeam, AgentWay, LayerWeight, ModelWeight, Node, PartWeight, PromptLayer, PromptLayerKind, RoleCatalog,
+    RoleSource, SeatWeight, SplitDir, TeamFields, TeamMember, TeamWeight,
 };
 use serde::Deserialize;
 
@@ -300,13 +300,15 @@ pub fn team_way<'a>(catalog: &'a RoleCatalog, team: &AgentTeam, role: &str) -> O
 
 /// What `team` tells its members, in estimated tokens: each seat's layers
 /// — its role's, then its own in the team, the very ones it starts with —
-/// and the least a turn costs to re-send them, read from the prompt cache.
+/// the least a turn costs to re-send them, read from the prompt cache, and
+/// what the first turn costs to write them to it.
 /// What else a turn sends is not counted (see [`TeamWeight`]). A seat whose
 /// model has no known price has tokens and no floor, and is counted as
-/// unpriced. Fails as starting the team would: on a team that cannot
+/// unpriced. The team is over budget when its start costs more than
+/// `warn_usd`, the `teamCostWarnUsd` setting. Fails as starting the team would: on a team that cannot
 /// start, whose weight would be short or none, and on a role it cannot
 /// find.
-pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Result<TeamWeight, String> {
+pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str, warn_usd: f64) -> Result<TeamWeight, String> {
     if let Some(problem) = &team.problem {
         return Err(format!("team `{}`: {problem}", team.name));
     }
@@ -320,8 +322,12 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
             .map(|l| LayerWeight { kind: l.kind, source: l.source, tokens: crate::pricing::estimate_tokens(&l.text) })
             .collect();
         let tokens = layers.iter().map(|l| l.tokens).sum();
-        let floor = role.model.as_deref().and_then(crate::pricing::rates).map(|rates| {
+        let rates = role.model.as_deref().and_then(crate::pricing::rates);
+        let floor = rates.map(|rates| {
             crate::pricing::cost(rates, crate::pricing::Usage { cache_read: tokens, ..Default::default() })
+        });
+        let start = rates.map(|rates| {
+            crate::pricing::cost(rates, crate::pricing::Usage { cache_write: tokens, ..Default::default() })
         });
         out.push(SeatWeight {
             name: seat.name.clone(),
@@ -331,13 +337,22 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
             effort: role.effort,
             layers,
             tokens,
+            cache_read_per_million: rates.map(|r| r.cache_read),
             per_turn_floor_usd: floor,
+            start_usd: start,
         });
     }
+    let tokens: u64 = out.iter().map(|s| s.tokens).sum();
+    let start_usd = out.iter().filter_map(|s| s.start_usd).reduce(|a, b| a + b);
     Ok(TeamWeight {
         team: team.name.clone(),
-        tokens: out.iter().map(|s| s.tokens).sum(),
-        per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).sum(),
+        tokens,
+        by_model: by_model(&out),
+        heaviest: heaviest(&out, tokens),
+        per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).reduce(|a, b| a + b),
+        start_usd,
+        warn_usd,
+        over_budget: start_usd.is_some_and(|s| s > warn_usd),
         unpriced: out.iter().filter(|s| s.per_turn_floor_usd.is_none()).count() as u32,
         seats: out,
         prices_checked: crate::pricing::PRICES_CHECKED.to_string(),
@@ -374,6 +389,69 @@ pub fn layout(panes: &[String], layout: Option<&str>) -> Node {
             line(SplitDir::Row, columns)
         }
     }
+}
+
+/// `seats` grouped by harness and model, heaviest first, then by model
+/// name: a stable order.
+fn by_model(seats: &[SeatWeight]) -> Vec<ModelWeight> {
+    let mut out: Vec<ModelWeight> = Vec::new();
+    for s in seats {
+        match out.iter_mut().find(|m| m.harness == s.harness && m.model == s.model) {
+            Some(m) => {
+                m.seats.push(s.name.clone());
+                m.tokens += s.tokens;
+                m.start_usd = m.start_usd.zip(s.start_usd).map(|(a, b)| a + b);
+                m.per_turn_floor_usd = m.per_turn_floor_usd.zip(s.per_turn_floor_usd).map(|(a, b)| a + b);
+            }
+            None => out.push(ModelWeight {
+                harness: s.harness,
+                model: s.model.clone(),
+                seats: vec![s.name.clone()],
+                tokens: s.tokens,
+                start_usd: s.start_usd,
+                per_turn_floor_usd: s.per_turn_floor_usd,
+            }),
+        }
+    }
+    out.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.model.cmp(&b.model)));
+    out
+}
+
+/// `seats`' layers grouped by the file they come from (a role's prompt
+/// by its role, since mirador.json's roles share a source), each counted once
+/// per seat told it, heaviest first, then by file: a way every member is
+/// told weighs its size times the members, and that is what shows here.
+fn heaviest(seats: &[SeatWeight], team_tokens: u64) -> Vec<PartWeight> {
+    let mut out: Vec<PartWeight> = Vec::new();
+    for (seat, l) in seats.iter().flat_map(|s| s.layers.iter().map(move |l| (s, l))) {
+        let role = (l.kind == PromptLayerKind::Role).then(|| seat.role.clone());
+        match out.iter_mut().find(|p| p.source == l.source && p.role == role) {
+            Some(p) => {
+                p.copies += 1;
+                p.tokens += l.tokens;
+                p.tokens_per_copy = p.tokens_per_copy.filter(|&n| n == l.tokens);
+                // A team's way is a role's way for a member whose role
+                // follows it: the same file, named for the team.
+                if l.kind == PromptLayerKind::TeamWay {
+                    p.kind = l.kind;
+                }
+            }
+            None => out.push(PartWeight {
+                kind: l.kind,
+                source: l.source.clone(),
+                role,
+                tokens_per_copy: Some(l.tokens),
+                copies: 1,
+                tokens: l.tokens,
+                share: 0.0,
+            }),
+        }
+    }
+    for p in &mut out {
+        p.share = if team_tokens == 0 { 0.0 } else { p.tokens as f64 / team_tokens as f64 };
+    }
+    out.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.source.cmp(&b.source)));
+    out
 }
 
 #[cfg(test)]
@@ -557,7 +635,7 @@ mod tests {
             ..Default::default()
         };
         let t = team(SQUAD);
-        let w = team_weight(&catalog, &t, "mira").unwrap();
+        let w = team_weight(&catalog, &t, "mira", 0.5).unwrap();
 
         // dev twice is two seats, each counted.
         let names: Vec<_> = w.seats.iter().map(|s| s.name.as_str()).collect();
@@ -581,27 +659,111 @@ mod tests {
         assert!((planner.per_turn_floor_usd.unwrap() - floor(planner, 0.20)).abs() < 1e-12);
         assert!((dev.per_turn_floor_usd.unwrap() - floor(dev, 0.20)).abs() < 1e-12);
         assert_eq!(planner.model.as_deref(), Some("opus"));
+        // ...and that rate is given, to show how the floor is worked out.
+        assert_eq!(planner.cache_read_per_million, Some(0.20));
 
         // Codex: tokens, no price, and counted as such.
         let gate = &w.seats[3];
         assert_eq!((gate.harness, gate.per_turn_floor_usd), (cmux_protocol::Harness::Codex, None));
+        assert_eq!((gate.cache_read_per_million, gate.start_usd), (None, None));
         assert!(gate.tokens > 0);
         assert_eq!(w.unpriced, 1);
         let priced: f64 = w.seats[..3].iter().map(|s| s.per_turn_floor_usd.unwrap()).sum();
-        assert!((w.per_turn_floor_usd - priced).abs() < 1e-12);
+        assert!((w.per_turn_floor_usd.unwrap() - priced).abs() < 1e-12);
+
+        // Starting writes the tokens to the cache, at the cache-write rate
+        // (Opus 5.5: 1.25 × $4); the team's start leaves Codex out too.
+        let start = |s: &SeatWeight| s.start_usd.unwrap();
+        assert!((start(planner) - planner.tokens as f64 * 5.0 / 1_000_000.0).abs() < 1e-12);
+        let started: f64 = w.seats[..3].iter().map(start).sum();
+        assert!((w.start_usd.unwrap() - started).abs() < 1e-12);
+        // With a model's default rates, writing is 12.5× reading.
+        let mut haiku = catalog.clone();
+        haiku.roles[1].model = Some("claude-haiku-4-5".into());
+        let dev = &team_weight(&haiku, &t, "mira", 0.5).unwrap().seats[1];
+        assert!((start(dev) - dev.tokens as f64 * 1.25 / 1_000_000.0).abs() < 1e-12);
+        assert!((start(dev) / dev.per_turn_floor_usd.unwrap() - 12.5).abs() < 1e-9);
         assert_eq!(w.prices_checked, crate::pricing::PRICES_CHECKED);
 
         // A role with no model runs the harness's default, whose price is
         // not known either.
         let mut plain = catalog.clone();
         plain.roles[1].model = None;
-        let w = team_weight(&plain, &t, "mira").unwrap();
-        assert_eq!((w.seats[1].per_turn_floor_usd, w.unpriced), (None, 3));
+        let w = team_weight(&plain, &t, "mira", 0.5).unwrap();
+        assert_eq!((w.seats[1].per_turn_floor_usd, w.seats[1].start_usd, w.unpriced), (None, None, 3));
+
+        // By model: dev's two seats are one entry, priced as both; Codex's
+        // price stays unknown. Heaviest first.
+        let w = team_weight(&catalog, &t, "mira", 0.5).unwrap();
+        let sonnet = w.by_model.iter().find(|m| m.model.as_deref() == Some("claude-sonnet-5-5[1m]")).unwrap();
+        assert_eq!(sonnet.seats, ["dev-1", "dev-2"]);
+        assert_eq!(sonnet.tokens, w.seats[1].tokens + w.seats[2].tokens);
+        let both = w.seats[1].start_usd.unwrap() + w.seats[2].start_usd.unwrap();
+        assert!((sonnet.start_usd.unwrap() - both).abs() < 1e-12);
+        let codex = w.by_model.iter().find(|m| m.harness == cmux_protocol::Harness::Codex).unwrap();
+        assert_eq!((codex.seats.as_slice(), codex.start_usd, codex.per_turn_floor_usd), (&["gate".to_string()][..], None, None));
+        assert_eq!(w.by_model.len(), 3);
+        assert!(w.by_model.windows(2).all(|p| p[0].tokens >= p[1].tokens));
+        assert_eq!(w.by_model.iter().map(|m| m.tokens).sum::<u64>(), w.tokens);
+
+        // Heaviest: the way, told to all four seats (the planner's as its
+        // role's, under its own heading), outweighs the planner's longer
+        // role prompt, told once.
+        let rank = |f: &dyn Fn(&PartWeight) -> bool| w.heaviest.iter().position(f).unwrap();
+        let (way, plan) = (rank(&|p| p.kind == TeamWay), rank(&|p| p.role.as_deref() == Some("planner")));
+        let (way, plan) = (&w.heaviest[way], &w.heaviest[plan]);
+        assert_eq!(way.copies, 4);
+        assert!(w.seats[1].layers[3].tokens < plan.tokens_per_copy.unwrap());
+        assert!(way.tokens > plan.tokens);
+        assert!(w.heaviest.iter().position(|p| p == way) < w.heaviest.iter().position(|p| p == plan));
+        // Roles in mirador.json share a source, and are still apart: dev's
+        // two seats are one part, the planner's another.
+        let dev = &w.heaviest[rank(&|p| p.role.as_deref() == Some("dev"))];
+        assert_eq!((dev.kind, dev.copies, dev.source.as_str()), (Role, 2, plan.source.as_str()));
+        // What Mirador writes differs per seat: one part, no one size.
+        let ours = w.heaviest.iter().find(|p| p.source == WRITTEN_BY_MIRADOR).unwrap();
+        assert_eq!((ours.kind, ours.copies, ours.tokens_per_copy), (Team, 4, None));
+        assert!(w.heaviest.windows(2).all(|p| p[0].tokens >= p[1].tokens));
+        assert_eq!(w.heaviest.iter().map(|p| p.tokens).sum::<u64>(), w.tokens);
+        assert!((w.heaviest.iter().map(|p| p.share).sum::<f64>() - 1.0).abs() < 1e-9);
+
+        // No member priced: the team has no price either, not $0.
+        let mut unknown = catalog.clone();
+        for r in &mut unknown.roles {
+            r.model = None;
+        }
+        let w = team_weight(&unknown, &t, "mira", 0.5).unwrap();
+        assert_eq!(w.unpriced as usize, w.seats.len());
+        assert_eq!((w.per_turn_floor_usd, w.start_usd), (None, None));
+        assert!(w.tokens > 0);
+        // ...and never warns, however low the limit.
+        assert!(!team_weight(&unknown, &t, "mira", 1e-12).unwrap().over_budget);
+    }
+
+    #[test]
+    fn a_team_warns_when_starting_it_costs_more_than_the_limit() {
+        let catalog = RoleCatalog {
+            roles: vec![
+                AgentRole { prompt: Some("Plan it.".repeat(100)), model: Some("opus".into()), ..role("planner") },
+                AgentRole { model: Some("sonnet".into()), ..role("dev") },
+                // No price: left out of the start the limit is held to.
+                AgentRole { harness: cmux_protocol::Harness::Codex, model: Some("gpt-6-luna".into()), ..role("reviewer") },
+            ],
+            ..Default::default()
+        };
+        let t = team(SQUAD);
+        let weigh = |limit: f64| team_weight(&catalog, &t, "mira", limit).unwrap();
+        let start = weigh(0.5).start_usd.unwrap();
+        assert!((start - weigh(0.5).seats[..3].iter().map(|s| s.start_usd.unwrap()).sum::<f64>()).abs() < 1e-12);
+        for (limit, over) in [(start / 2.0, true), (start * 2.0, false), (start, false)] {
+            let w = weigh(limit);
+            assert_eq!((w.warn_usd, w.over_budget), (limit, over), "limit {limit}, start {start}");
+        }
 
         // A role the team names but nobody wrote: as starting would.
         let mut missing = catalog.clone();
         missing.roles.retain(|r| r.name != "dev");
-        assert!(team_weight(&missing, &t, "mira").unwrap_err().contains("no role `dev`"));
+        assert!(team_weight(&missing, &t, "mira", 0.5).unwrap_err().contains("no role `dev`"));
     }
 
     #[test]
@@ -615,7 +777,7 @@ mod tests {
         let refused = |text: &str| {
             let mut t = team(text);
             t.problem = problem_of(&t, &catalog.roles, &catalog.ways);
-            team_weight(&catalog, &t, "mira").unwrap_err()
+            team_weight(&catalog, &t, "mira", 0.5).unwrap_err()
         };
         assert_eq!(
             refused("---

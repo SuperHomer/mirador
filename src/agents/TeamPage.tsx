@@ -1,14 +1,16 @@
-import { Ref, useState } from "react";
+import { Fragment, Ref, useState } from "react";
 import {
   AgentStatus,
   HARNESS_LABEL,
+  PartWeight,
+  PromptLayer,
   RoleCatalog,
   TeamFields,
   TeamWeight,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { STATUS_LABEL, StatusMark } from "./StatusMark";
-import { SPENT_MEANS, Spent, seatsOf, spentLabel, tokensLabel, usd, useSpent } from "./teamWeight";
+import { seatsOf, tokensLabel, usd } from "./teamWeight";
 
 type Props = {
   name: string;
@@ -43,17 +45,13 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
   // by its name, the seat names `teams::seats` gives: `dev` twice is
   // `dev-1` and `dev-2`.
   const statusOf = new Map<string, (AgentStatus | null)[]>();
-  // And the panes of those that report what they spend.
-  const running: string[] = [];
   for (const tab of snapshot?.tabs ?? []) {
     if (tab.team?.name !== name) continue;
     for (const seat of tab.team.members) {
       const agent = snapshot?.agents.find((a) => a.paneId === seat.pane);
       if (agent) statusOf.set(seat.name, [...(statusOf.get(seat.name) ?? []), agent.status]);
-      if (agent?.hasActivity) running.push(agent.paneId);
     }
   }
-  const spent = useSpent(running);
   // The most urgent of a member's seats, across every run: undefined when
   // none of them runs, null when running with no status known.
   const seatStatus = (base: string, count: number): AgentStatus | null | undefined => {
@@ -137,7 +135,7 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
           </button>
         ))}
       <div className="team-label">PROMPT WEIGHT</div>
-      <TeamWeightBlock weight={weight} dirty={dirty} spent={running.length > 0 ? spent : null} />
+      <TeamWeightBlock weight={weight} dirty={dirty} />
       <div className="team-fields">
         <label>
           <span>Way of working</span>
@@ -197,19 +195,29 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
 }
 
 /**
- * What the team adds to its members' prompts, in tokens, and the least
- * that costs a turn — a lower bound, which says what it leaves out.
+ * What the team adds to its members' prompts, in tokens, what writing
+ * them to the cache costs at the start, and the least they cost a turn —
+ * lower bounds, which say what they leave out.
  */
-function TeamWeightBlock({
-  weight: { weight, error },
-  dirty,
-  spent,
-}: Pick<Props, "weight" | "dirty"> & { spent: Spent | null }) {
-  const floor = (w: TeamWeight) => {
-    if (w.unpriced === w.seats.length) return "no price";
+function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weight" | "dirty">) {
+  const [details, setDetails] = useState(false);
+  // The two prices, each saying what it is in its tooltip.
+  const prices = (w: TeamWeight) => {
+    if (w.startUsd === null || w.perTurnFloorUsd === null) return "no price";
     const without =
       w.unpriced === 0 ? "" : ` · ${w.unpriced} ${w.unpriced === 1 ? "member" : "members"} without a price`;
-    return `≥ ${usd(w.perTurnFloorUsd)} a turn${without}`;
+    return (
+      <>
+        <span title="The first turn: Mirador's prompts written to the prompt cache, at each model's cache-write price">
+          ≈ {usd(w.startUsd)} to start
+        </span>
+        {" · "}
+        <span title="Every turn after: the same prompts read back from the cache, at each model's cache-read price. A lower bound.">
+          ≥ {usd(w.perTurnFloorUsd)} a turn
+        </span>
+        {without}
+      </>
+    );
   };
   return (
     <div className="team-weight">
@@ -219,12 +227,51 @@ function TeamWeightBlock({
         <>
           <div className="team-weight-figures">
             <span className="team-weight-tokens">{tokensLabel(weight.tokens)}</span>
-            <span className="team-weight-floor">{floor(weight)}</span>
+            <span className="team-weight-floor">{prices(weight)}</span>
+            <button className="team-weight-toggle" onClick={() => setDetails(!details)}>
+              {details ? "Hide details" : "Details"}
+            </button>
           </div>
+          {weight.overBudget && weight.startUsd !== null && (
+            <p className="team-weight-error">
+              ≈ {usd(weight.startUsd)} to start
+              {weight.unpriced > 0 ? ` (${weight.unpriced} without a price not counted)` : ""}, over your{" "}
+              {usd(weight.warnUsd)} limit (teamCostWarnUsd).
+              {weight.heaviest[0] &&
+                ` Heaviest: ${partLabel(weight.heaviest[0])}, ${Math.round(weight.heaviest[0].share * 100)}%.`}
+            </p>
+          )}
+          <div className="team-weight-rows">
+            <span className="team-weight-rows-label">By model</span>
+            {weight.byModel.map((m) => (
+              <Fragment key={`${m.harness} ${m.model}`}>
+                <span title={m.seats.join(", ")}>
+                  {m.model ?? `${HARNESS_LABEL[m.harness]}'s default`} · {m.seats.length}{" "}
+                  {m.seats.length === 1 ? "member" : "members"}
+                </span>
+                <span>{tokensLabel(m.tokens)}</span>
+                <span>{priceLabel(m.startUsd, m.perTurnFloorUsd)}</span>
+              </Fragment>
+            ))}
+          </div>
+          <div className="team-weight-rows">
+            <span className="team-weight-rows-label">Heaviest</span>
+            {weight.heaviest.slice(0, 3).map((p) => (
+              <Fragment key={`${p.source} ${p.role}`}>
+                <span title={p.source}>{partLabel(p)}</span>
+                <span>
+                  {tokensLabel(p.tokens)} · ×{p.copies}
+                </span>
+                <span>{Math.round(p.share * 100)}%</span>
+              </Fragment>
+            ))}
+          </div>
+          {details && <WeightDetails weight={weight} />}
           <p className="team-weight-note">
-            Mirador's prompts to the members, re-sent from the cache each turn at least. Not counted: each
-            agent's own system prompt and tools (Claude Code's, Codex's), CLAUDE.md, MCP tools, the
-            conversation and its output. Prices as of{" "}
+            To start is the first turn, which writes Mirador's prompts to the members into the prompt cache;
+            every turn after reads them back from the cache, at a fraction of the price, which is why a turn
+            costs so much less. Not counted: each agent's own system prompt and tools (Claude Code's,
+            Codex's), CLAUDE.md, MCP tools, the conversation and its output. Prices as of{" "}
             {weight.pricesChecked}.
           </p>
         </>
@@ -232,16 +279,150 @@ function TeamWeightBlock({
         <p className="team-weight-note">Weighing…</p>
       )}
       {dirty && <p className="team-weight-note">Unsaved changes are not counted.</p>}
-      {spent && (
-        <div className="team-weight-figures" title={SPENT_MEANS}>
-          <span className="team-weight-tokens">Spent so far: {spentLabel(spent)}</span>
-          <span className="team-weight-floor">
-            its running members and their subagents, at API list prices — on a Claude subscription, what
-            it would have cost, not what is billed
-            {spent.unpriced ? "; some replies had no known price and are not in it" : ""}
-          </span>
-        </div>
-      )}
+    </div>
+  );
+}
+
+/** "≈ $0.0055 to start · ≥ $0.0002 a turn", or "no price". */
+function priceLabel(start: number | null, floor: number | null): string {
+  if (start === null || floor === null) return "no price";
+  return `≈ ${usd(start)} to start · ≥ ${usd(floor)} a turn`;
+}
+
+/** A part by what it is: the role's name for a role's prompt, the file's
+ *  name for a way. */
+function partLabel(p: PartWeight): string {
+  const file = p.source.split("/").pop();
+  switch (p.kind) {
+    case "role":
+      return `${p.role ?? "role"}'s prompt`;
+    case "roleWay":
+      return `way of working ${file}`;
+    case "team":
+      return "place in the team, by Mirador";
+    case "charter":
+      return "charter";
+    case "teamWay":
+      return `team's way ${file}`;
+  }
+}
+
+/** The parts of a member's prompt, in the order it is told them. */
+const PARTS: { kind: PromptLayer["kind"]; label: string }[] = [
+  { kind: "role", label: "Role prompt" },
+  { kind: "roleWay", label: "Role's way of working" },
+  { kind: "team", label: "Its place in the team (by Mirador)" },
+  { kind: "charter", label: "Charter" },
+  { kind: "teamWay", label: "Team's way of working" },
+];
+
+/**
+ * Where a team's tokens come from: each part of what each member is told,
+ * by member, with each part's share of the whole, and how each member's
+ * floor is worked out from its model's price.
+ */
+function WeightDetails({ weight }: { weight: TeamWeight }) {
+  const tokensOf = (layers: TeamWeight["seats"][number]["layers"], kind: PromptLayer["kind"]) =>
+    layers.filter((l) => l.kind === kind).reduce((n, l) => n + l.tokens, 0);
+  const parts = PARTS.filter((p) => weight.seats.some((s) => tokensOf(s.layers, p.kind) > 0));
+  const share = (n: number) => (weight.tokens > 0 ? `${Math.round((n / weight.tokens) * 100)}%` : "");
+  const count = (n: number) => n.toLocaleString("en-US");
+  const price = (d: number | null) => (d === null ? "no price" : usd(d));
+  // Each priced model's cache-read price, once.
+  const rates = [
+    ...new Set(
+      weight.seats.flatMap((s) =>
+        s.cacheReadPerMillion === null ? [] : [`${s.model}: $${s.cacheReadPerMillion} per million`],
+      ),
+    ),
+  ];
+  return (
+    <div className="team-weight-details">
+      <table>
+        <thead>
+          <tr>
+            <th />
+            {weight.seats.map((s) => (
+              <th key={s.name}>
+                {s.name}
+                <span className="team-weight-model">{s.model ?? "default model"}</span>
+              </th>
+            ))}
+            <th>Team</th>
+          </tr>
+        </thead>
+        <tbody>
+          {parts.map((p) => {
+            const all = weight.seats.reduce((n, s) => n + tokensOf(s.layers, p.kind), 0);
+            return (
+              <tr key={p.kind}>
+                <th>{p.label}</th>
+                {weight.seats.map((s) => {
+                  const n = tokensOf(s.layers, p.kind);
+                  const sources = s.layers.filter((l) => l.kind === p.kind).map((l) => l.source);
+                  return (
+                    <td key={s.name} title={sources.join("\n")}>
+                      {n > 0 ? count(n) : "—"}
+                    </td>
+                  );
+                })}
+                <td>
+                  {count(all)} <span className="team-weight-share">{share(all)}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Tokens</th>
+            {weight.seats.map((s) => (
+              <td key={s.name}>
+                {count(s.tokens)} <span className="team-weight-share">{share(s.tokens)}</span>
+              </td>
+            ))}
+            <td>{count(weight.tokens)}</td>
+          </tr>
+          <tr>
+            <th>Per turn, at least</th>
+            {weight.seats.map((s) => (
+              <td
+                key={s.name}
+                title={
+                  s.cacheReadPerMillion === null
+                    ? "No known price for this model"
+                    : `${count(s.tokens)} tokens × $${s.cacheReadPerMillion} per million, its cache-read price`
+                }
+              >
+                {price(s.perTurnFloorUsd)}
+              </td>
+            ))}
+            <td>{price(weight.perTurnFloorUsd)}</td>
+          </tr>
+          <tr>
+            <th>To start</th>
+            {weight.seats.map((s) => (
+              <td
+                key={s.name}
+                title={
+                  s.startUsd === null
+                    ? "No known price for this model"
+                    : `The first turn writes its ${count(s.tokens)} tokens to the prompt cache, at ${s.model}'s cache-write price`
+                }
+              >
+                {price(s.startUsd)}
+              </td>
+            ))}
+            <td>{price(weight.startUsd)}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <p className="team-weight-note">
+        Tokens are estimated at about 4 characters a token.
+        {rates.length > 0 ? ` Cache-read prices: ${rates.join(", ")}.` : ""} Writing the cache costs 1.25× the
+        model&apos;s input price
+        {weight.startUsd === null ? "." : `: ${usd(weight.startUsd)} to start the team.`}
+      </p>
     </div>
   );
 }
