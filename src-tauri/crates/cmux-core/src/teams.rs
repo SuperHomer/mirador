@@ -344,8 +344,8 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
     Ok(TeamWeight {
         team: team.name.clone(),
         tokens: out.iter().map(|s| s.tokens).sum(),
-        per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).sum(),
-        start_usd: out.iter().filter_map(|s| s.start_usd).sum(),
+        per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).reduce(|a, b| a + b),
+        start_usd: out.iter().filter_map(|s| s.start_usd).reduce(|a, b| a + b),
         unpriced: out.iter().filter(|s| s.per_turn_floor_usd.is_none()).count() as u32,
         seats: out,
         prices_checked: crate::pricing::PRICES_CHECKED.to_string(),
@@ -599,14 +599,14 @@ mod tests {
         assert!(gate.tokens > 0);
         assert_eq!(w.unpriced, 1);
         let priced: f64 = w.seats[..3].iter().map(|s| s.per_turn_floor_usd.unwrap()).sum();
-        assert!((w.per_turn_floor_usd - priced).abs() < 1e-12);
+        assert!((w.per_turn_floor_usd.unwrap() - priced).abs() < 1e-12);
 
         // Starting writes the tokens to the cache, at the cache-write rate
         // (Opus 5.5: 1.25 × $4); the team's start leaves Codex out too.
         let start = |s: &SeatWeight| s.start_usd.unwrap();
         assert!((start(planner) - planner.tokens as f64 * 5.0 / 1_000_000.0).abs() < 1e-12);
         let started: f64 = w.seats[..3].iter().map(start).sum();
-        assert!((w.start_usd - started).abs() < 1e-12);
+        assert!((w.start_usd.unwrap() - started).abs() < 1e-12);
         // With a model's default rates, writing is 12.5× reading.
         let mut haiku = catalog.clone();
         haiku.roles[1].model = Some("claude-haiku-4-5".into());
@@ -621,6 +621,16 @@ mod tests {
         plain.roles[1].model = None;
         let w = team_weight(&plain, &t, "mira").unwrap();
         assert_eq!((w.seats[1].per_turn_floor_usd, w.seats[1].start_usd, w.unpriced), (None, None, 3));
+
+        // No member priced: the team has no price either, not $0.
+        let mut unknown = catalog.clone();
+        for r in &mut unknown.roles {
+            r.model = None;
+        }
+        let w = team_weight(&unknown, &t, "mira").unwrap();
+        assert_eq!(w.unpriced as usize, w.seats.len());
+        assert_eq!((w.per_turn_floor_usd, w.start_usd), (None, None));
+        assert!(w.tokens > 0);
 
         // A role the team names but nobody wrote: as starting would.
         let mut missing = catalog.clone();

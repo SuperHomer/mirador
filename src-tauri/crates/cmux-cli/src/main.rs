@@ -1424,7 +1424,10 @@ fn defined_teams(json: bool) -> Result<(), String> {
 /// A team's weight, a member per line — name, role, model, tokens, the
 /// floor per turn — then the team's, then what it leaves out.
 fn render_team_weight(w: &cmux_protocol::TeamWeight) {
-    let price = |start: f64, floor: f64| format!("≈ ${start:.4} to start, ≥ ${floor:.4} a turn");
+    let price = |start: Option<f64>, floor: Option<f64>| match (start, floor) {
+        (Some(start), Some(floor)) => format!("≈ ${start:.4} to start, ≥ ${floor:.4} a turn"),
+        _ => "no price".to_string(),
+    };
     for s in &w.seats {
         let model = s.model.as_deref().unwrap_or("default");
         println!(
@@ -1433,14 +1436,13 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
             s.role,
             model,
             s.tokens,
-            match (s.start_usd, s.per_turn_floor_usd) {
-                (Some(start), Some(floor)) => price(start, floor),
-                _ => "no price".to_string(),
-            }
+            price(s.start_usd, s.per_turn_floor_usd)
         );
     }
+    // With none priced, "no price" says it all.
     let unpriced = match w.unpriced {
         0 => String::new(),
+        n if n as usize == w.seats.len() => String::new(),
         1 => " (1 member with no price left out)".to_string(),
         n => format!(" ({n} members with no price left out)"),
     };

@@ -201,7 +201,7 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
 function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weight" | "dirty">) {
   const [details, setDetails] = useState(false);
   const floor = (w: TeamWeight) => {
-    if (w.unpriced === w.seats.length) return "no price";
+    if (w.startUsd === null || w.perTurnFloorUsd === null) return "no price";
     const without =
       w.unpriced === 0 ? "" : ` · ${w.unpriced} ${w.unpriced === 1 ? "member" : "members"} without a price`;
     return `≈ ${usd(w.startUsd)} to start · ≥ ${usd(w.perTurnFloorUsd)} a turn${without}`;
@@ -255,6 +255,7 @@ function WeightDetails({ weight }: { weight: TeamWeight }) {
   const parts = PARTS.filter((p) => weight.seats.some((s) => tokensOf(s.layers, p.kind) > 0));
   const share = (n: number) => (weight.tokens > 0 ? `${Math.round((n / weight.tokens) * 100)}%` : "");
   const count = (n: number) => n.toLocaleString("en-US");
+  const price = (d: number | null) => (d === null ? "no price" : usd(d));
   // Each priced model's cache-read price, once.
   const rates = [
     ...new Set(
@@ -321,10 +322,10 @@ function WeightDetails({ weight }: { weight: TeamWeight }) {
                     : `${count(s.tokens)} tokens × $${s.cacheReadPerMillion} per million, its cache-read price`
                 }
               >
-                {s.perTurnFloorUsd === null ? "no price" : usd(s.perTurnFloorUsd)}
+                {price(s.perTurnFloorUsd)}
               </td>
             ))}
-            <td>{usd(weight.perTurnFloorUsd)}</td>
+            <td>{price(weight.perTurnFloorUsd)}</td>
           </tr>
           <tr>
             <th>To start</th>
@@ -337,10 +338,10 @@ function WeightDetails({ weight }: { weight: TeamWeight }) {
                     : `The first turn writes its ${count(s.tokens)} tokens to the prompt cache, at ${s.model}'s cache-write price`
                 }
               >
-                {s.startUsd === null ? "no price" : usd(s.startUsd)}
+                {price(s.startUsd)}
               </td>
             ))}
-            <td>{usd(weight.startUsd)}</td>
+            <td>{price(weight.startUsd)}</td>
           </tr>
         </tfoot>
       </table>
@@ -348,7 +349,8 @@ function WeightDetails({ weight }: { weight: TeamWeight }) {
         Tokens are estimated at about 4 characters a token. Claude Code sends its whole system prompt again every
         turn; these parts of it stay the same, so they come from the prompt cache, at the model&apos;s cache-read
         price{rates.length > 0 ? ` (${rates.join(", ")})` : ""}. The first turn writes them into the cache
-        instead, at 1.25× the input price: To start, {usd(weight.startUsd)} for the team.
+        instead, at 1.25× the input price
+        {weight.startUsd === null ? "." : `: To start, ${usd(weight.startUsd)} for the team.`}
       </p>
     </div>
   );

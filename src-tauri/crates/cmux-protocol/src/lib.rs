@@ -1624,10 +1624,11 @@ pub struct TeamWeight {
     pub seats: Vec<SeatWeight>,
     /// Every seat's tokens.
     pub tokens: u64,
-    /// The priced seats' floors, summed.
-    pub per_turn_floor_usd: f64,
-    /// The priced seats' start costs, summed.
-    pub start_usd: f64,
+    /// The priced seats' floors, summed; none when no seat is priced,
+    /// rather than a floor of $0.
+    pub per_turn_floor_usd: Option<f64>,
+    /// The priced seats' start costs, summed; none when no seat is priced.
+    pub start_usd: Option<f64>,
     /// Seats whose model has no known price, left out of the floor and
     /// the start cost.
     pub unpriced: u32,

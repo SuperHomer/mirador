@@ -479,7 +479,9 @@ its `cacheReadPerMillion` is the model's cache-read price in dollars per
 million tokens, which `perTurnFloorUsd` is worked out at, and `startUsd`
 the first turn's cache write; all three are `null` when that model has no
 known price, and `unpriced` counts those seats, which the team's floor and
-start cost leave out.
+start cost leave out. The team's `perTurnFloorUsd` and `startUsd` are
+`null` when no member has a price (in v0.1.41 its `perTurnFloorUsd`
+was always a number, `0` then).
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
 config directory's): frontmatter `members` — each a `role`, with an

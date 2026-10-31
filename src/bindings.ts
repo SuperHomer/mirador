@@ -859,10 +859,10 @@ export interface TeamWeight {
   team: string;
   seats: SeatWeight[];
   tokens: number;
-  /** The priced seats' floors, summed. */
-  perTurnFloorUsd: number;
-  /** The priced seats' start costs, summed. */
-  startUsd: number;
+  /** The priced seats' floors, summed; null when no seat is priced. */
+  perTurnFloorUsd: number | null;
+  /** The priced seats' start costs, summed; null when no seat is priced. */
+  startUsd: number | null;
   /** Seats whose model has no known price, left out of the floor and the
    *  start cost. */
   unpriced: number;
