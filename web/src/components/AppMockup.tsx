@@ -2,7 +2,9 @@
  * The hero's Mirador, as a mock a visitor can click around: three tabs in
  * the sidebar, each with its own panes. No shell runs behind it.
  *
- * Kept honest to the app: a tab row draws what the sidebar's does (index,
+ * Kept honest to the app: the bar over a tab's content, off the board,
+ * draws what TabBar does (MockAgents.tsx); a tab row draws what the
+ * sidebar's does (index,
  * ⚑ for a team, cwd or the last notification, ⎇ branch, PR and port chips,
  * ✳ agent count, unread badge — src/sidebar/Sidebar.tsx), a focused pane
  * has the brighter edge and an agent that wants you the accent ring
@@ -34,7 +36,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import BoardCanvas, { FRAME_GAP, FRAME_W, layout, type Card, type Frame } from "./BoardCanvas";
 import { API_AGENT, MARK, MEMBERS, TEAM_AGENTS } from "./TeamsShowcase";
-import { FocusWall, MockSidebar, StatusBar, type MockAgent, type View } from "./MockAgents";
+import { FocusWall, MockSidebar, MockTabBar, StatusBar, type MockAgent, type View } from "./MockAgents";
 import TermLines, { type Line } from "./TermLines";
 
 type Pane = {
@@ -345,6 +347,7 @@ export default function AppMockup() {
           />
           {/* keyed by the view, so each switch replays the view's entrance */}
           <div key={view} className="mock-view" style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            {view !== "board" && <MockTabBar title={tab.title} branch={tab.branch} />}
             {view === "board" ? (
               <BoardView frames={frames} onCard={(f, c) => fly(shown[f], c)} onTabs={() => setView("splits")} />
             ) : view === "wall" ? (

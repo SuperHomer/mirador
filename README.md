@@ -464,7 +464,7 @@ one, a way nobody wrote.
 Each role is an entry under the palette's *Agents: New Agent…* — Enter on it
 lists plain Claude Code and the roles, to search in turn (Esc or
 Backspace goes back; typing a role's name at the top finds it too, below
-the commands) — an entry in the wall's **+ Agent** menu, and a `mira
+the commands) — an entry in **+ New**, in the bar over the tab, and a `mira
 agent new --role <role> [task…]` target — the roles of the directory you
 are in. Teams (*Agents: Start Team…*) and `~/.ssh/config` hosts (*Pane: SSH…*) are
 listed the same way. The agent opens in a pane
@@ -621,7 +621,7 @@ board draws a walled tab's wall in its frame, in place of its cards. The tiles a
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
 the keyboard goes to the focused agent's tile when the wall comes up. A
-new agent from the wall's **+ Agent** — a role of the repository, or
+new agent from **+ New**, in the bar over the wall — a role of the repository, or
 plain Claude Code or Codex, with an optional first message that also
 becomes its card — splits the tab under the wall and gets a tile. A tab
 with neither agents nor tools yet shows its roles and teams there
@@ -699,6 +699,16 @@ shortcuts (`mod+1…9`, next and previous tab) go over tabs only, by the
 number beside each. At the sidebar's foot, **Inbox** counts the agents that need you,
 across every tab, and opens the notifications; **Commands** opens the
 palette.
+
+Over each tab's content, whatever it shows (its splits, its wall, its
+tasks or one pane zoomed), runs a slim bar. At its left is a button that
+hides and shows the sidebar, as `mod+B` does. Then come the tab's name
+and the branch of its focused pane. At its right is **+ New**: a new tab
+(`mod+T`); an agent, with an optional first message, then a role of the
+repository, plain Claude Code or Codex, or a team; a split, right or
+down; a diff; the commit graph; or a browser. Each row runs what its key
+or the palette runs, and shows its shortcut. On the board each frame has
+its own title bar instead.
 
 Any pane can be shown alone that way: *Pane: Toggle Zoom* in the palette,
 or `mira zoom [pane]` (`--off` for the whole tab again).
