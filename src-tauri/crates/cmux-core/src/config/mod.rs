@@ -716,6 +716,11 @@ mod tests {
         assert_eq!(warn(r#"{ "teamCostWarnUsd": 0.05 }"#), 0.05);
         assert_eq!(warn(r#"{ "teamCostWarnUsd": 0 }"#), 0.5);
         assert_eq!(warn(r#"{ "teamCostWarnUsd": -1 }"#), 0.5);
+        // JSON cannot say these, but a Config built in code can.
+        for n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let cfg = Config { team_cost_warn_usd: Some(n), ..Default::default() };
+            assert_eq!(resolve(&cfg).team_cost_warn_usd, 0.5, "{n}");
+        }
     }
 
     #[test]
