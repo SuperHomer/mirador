@@ -304,10 +304,11 @@ pub fn team_way<'a>(catalog: &'a RoleCatalog, team: &AgentTeam, role: &str) -> O
 /// what the first turn costs to write them to it.
 /// What else a turn sends is not counted (see [`TeamWeight`]). A seat whose
 /// model has no known price has tokens and no floor, and is counted as
-/// unpriced. Fails as starting the team would: on a team that cannot
+/// unpriced. The team is over budget when its start costs more than
+/// `warn_usd`, the `teamCostWarnUsd` setting. Fails as starting the team would: on a team that cannot
 /// start, whose weight would be short or none, and on a role it cannot
 /// find.
-pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Result<TeamWeight, String> {
+pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str, warn_usd: f64) -> Result<TeamWeight, String> {
     if let Some(problem) = &team.problem {
         return Err(format!("team `{}`: {problem}", team.name));
     }
@@ -342,13 +343,16 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
         });
     }
     let tokens: u64 = out.iter().map(|s| s.tokens).sum();
+    let start_usd = out.iter().filter_map(|s| s.start_usd).reduce(|a, b| a + b);
     Ok(TeamWeight {
         team: team.name.clone(),
         tokens,
         by_model: by_model(&out),
         heaviest: heaviest(&out, tokens),
         per_turn_floor_usd: out.iter().filter_map(|s| s.per_turn_floor_usd).reduce(|a, b| a + b),
-        start_usd: out.iter().filter_map(|s| s.start_usd).reduce(|a, b| a + b),
+        start_usd,
+        warn_usd,
+        over_budget: start_usd.is_some_and(|s| s > warn_usd),
         unpriced: out.iter().filter(|s| s.per_turn_floor_usd.is_none()).count() as u32,
         seats: out,
         prices_checked: crate::pricing::PRICES_CHECKED.to_string(),
@@ -631,7 +635,7 @@ mod tests {
             ..Default::default()
         };
         let t = team(SQUAD);
-        let w = team_weight(&catalog, &t, "mira").unwrap();
+        let w = team_weight(&catalog, &t, "mira", 0.5).unwrap();
 
         // dev twice is two seats, each counted.
         let names: Vec<_> = w.seats.iter().map(|s| s.name.as_str()).collect();
@@ -676,7 +680,7 @@ mod tests {
         // With a model's default rates, writing is 12.5× reading.
         let mut haiku = catalog.clone();
         haiku.roles[1].model = Some("claude-haiku-4-5".into());
-        let dev = &team_weight(&haiku, &t, "mira").unwrap().seats[1];
+        let dev = &team_weight(&haiku, &t, "mira", 0.5).unwrap().seats[1];
         assert!((start(dev) - dev.tokens as f64 * 1.25 / 1_000_000.0).abs() < 1e-12);
         assert!((start(dev) / dev.per_turn_floor_usd.unwrap() - 12.5).abs() < 1e-9);
         assert_eq!(w.prices_checked, crate::pricing::PRICES_CHECKED);
@@ -685,12 +689,12 @@ mod tests {
         // not known either.
         let mut plain = catalog.clone();
         plain.roles[1].model = None;
-        let w = team_weight(&plain, &t, "mira").unwrap();
+        let w = team_weight(&plain, &t, "mira", 0.5).unwrap();
         assert_eq!((w.seats[1].per_turn_floor_usd, w.seats[1].start_usd, w.unpriced), (None, None, 3));
 
         // By model: dev's two seats are one entry, priced as both; Codex's
         // price stays unknown. Heaviest first.
-        let w = team_weight(&catalog, &t, "mira").unwrap();
+        let w = team_weight(&catalog, &t, "mira", 0.5).unwrap();
         let sonnet = w.by_model.iter().find(|m| m.model.as_deref() == Some("claude-sonnet-5-5[1m]")).unwrap();
         assert_eq!(sonnet.seats, ["dev-1", "dev-2"]);
         assert_eq!(sonnet.tokens, w.seats[1].tokens + w.seats[2].tokens);
@@ -728,15 +732,38 @@ mod tests {
         for r in &mut unknown.roles {
             r.model = None;
         }
-        let w = team_weight(&unknown, &t, "mira").unwrap();
+        let w = team_weight(&unknown, &t, "mira", 0.5).unwrap();
         assert_eq!(w.unpriced as usize, w.seats.len());
         assert_eq!((w.per_turn_floor_usd, w.start_usd), (None, None));
         assert!(w.tokens > 0);
+        // ...and never warns, however low the limit.
+        assert!(!team_weight(&unknown, &t, "mira", 1e-12).unwrap().over_budget);
+    }
+
+    #[test]
+    fn a_team_warns_when_starting_it_costs_more_than_the_limit() {
+        let catalog = RoleCatalog {
+            roles: vec![
+                AgentRole { prompt: Some("Plan it.".repeat(100)), model: Some("opus".into()), ..role("planner") },
+                AgentRole { model: Some("sonnet".into()), ..role("dev") },
+                // No price: left out of the start the limit is held to.
+                AgentRole { harness: cmux_protocol::Harness::Codex, model: Some("gpt-6-luna".into()), ..role("reviewer") },
+            ],
+            ..Default::default()
+        };
+        let t = team(SQUAD);
+        let weigh = |limit: f64| team_weight(&catalog, &t, "mira", limit).unwrap();
+        let start = weigh(0.5).start_usd.unwrap();
+        assert!((start - weigh(0.5).seats[..3].iter().map(|s| s.start_usd.unwrap()).sum::<f64>()).abs() < 1e-12);
+        for (limit, over) in [(start / 2.0, true), (start * 2.0, false), (start, false)] {
+            let w = weigh(limit);
+            assert_eq!((w.warn_usd, w.over_budget), (limit, over), "limit {limit}, start {start}");
+        }
 
         // A role the team names but nobody wrote: as starting would.
         let mut missing = catalog.clone();
         missing.roles.retain(|r| r.name != "dev");
-        assert!(team_weight(&missing, &t, "mira").unwrap_err().contains("no role `dev`"));
+        assert!(team_weight(&missing, &t, "mira", 0.5).unwrap_err().contains("no role `dev`"));
     }
 
     #[test]
@@ -750,7 +777,7 @@ mod tests {
         let refused = |text: &str| {
             let mut t = team(text);
             t.problem = problem_of(&t, &catalog.roles, &catalog.ways);
-            team_weight(&catalog, &t, "mira").unwrap_err()
+            team_weight(&catalog, &t, "mira", 0.5).unwrap_err()
         };
         assert_eq!(
             refused("---

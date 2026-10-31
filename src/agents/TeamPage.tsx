@@ -220,6 +220,15 @@ function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weig
               {details ? "Hide details" : "Details"}
             </button>
           </div>
+          {weight.overBudget && weight.startUsd !== null && (
+            <p className="team-weight-error">
+              ≈ {usd(weight.startUsd)} to start
+              {weight.unpriced > 0 ? ` (${weight.unpriced} without a price not counted)` : ""}, over your{" "}
+              {usd(weight.warnUsd)} limit (teamCostWarnUsd).
+              {weight.heaviest[0] &&
+                ` Heaviest: ${partLabel(weight.heaviest[0])}, ${Math.round(weight.heaviest[0].share * 100)}%.`}
+            </p>
+          )}
           <div className="team-weight-rows">
             <span className="team-weight-rows-label">By model</span>
             {weight.byModel.map((m) => (

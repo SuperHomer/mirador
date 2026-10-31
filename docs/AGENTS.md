@@ -467,6 +467,8 @@ here for omakase, its members, models and parts trimmed to the first:
     "tokens": 2829,
     "perTurnFloorUsd": 0.0003858,
     "startUsd": 0.009645,
+    "warnUsd": 0.5,
+    "overBudget": false,
     "unpriced": 1,
     "byModel": [
       {
@@ -503,6 +505,12 @@ known price, and `unpriced` counts those seats, which the team's floor and
 start cost leave out. The team's `perTurnFloorUsd` and `startUsd` are
 `null` when no member has a price (in v0.1.41 its `perTurnFloorUsd`
 was always a number, `0` then).
+
+`warnUsd` is the limit the team's `startUsd` was held to, the
+`teamCostWarnUsd` setting (0.5 by default), and `overBudget` whether it
+is over it: never for a team with no price, and for one partly priced,
+judged on the priced members. The plain output then ends its team line
+with a warning naming the heaviest part; the exit code stays 0.
 
 `byModel` groups the seats by harness and model (`model` `null` for the
 harness's default), heaviest first: their names, tokens, and start and

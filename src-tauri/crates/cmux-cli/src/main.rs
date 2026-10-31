@@ -1428,6 +1428,17 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
         (Some(start), Some(floor)) => format!("≈ ${start:.4} to start, ≥ ${floor:.4} a turn"),
         _ => "no price".to_string(),
     };
+    let what = |p: &cmux_protocol::PartWeight| {
+        use cmux_protocol::PromptLayerKind::*;
+        match (p.kind, &p.role) {
+            (Role, Some(role)) => format!("role prompt: {role}"),
+            (Role, None) => "role prompt".to_string(),
+            (RoleWay, _) => "role's way".to_string(),
+            (Team, _) => "place in the team".to_string(),
+            (Charter, _) => "charter".to_string(),
+            (TeamWay, _) => "team's way".to_string(),
+        }
+    };
     for s in &w.seats {
         let model = s.model.as_deref().unwrap_or("default");
         println!(
@@ -1454,6 +1465,21 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
         w.tokens,
         price(w.start_usd, w.per_turn_floor_usd)
     );
+    if let (true, Some(start)) = (w.over_budget, w.start_usd) {
+        let dollars = |usd: f64| if usd >= 0.01 { format!("${usd:.2}") } else { format!("${usd:.4}") };
+        let left_out = match w.unpriced {
+            0 => String::new(),
+            n => format!(" ({n} without a price not counted)"),
+        };
+        let trim = w.heaviest.first().map_or(String::new(), |p| {
+            format!(" Heaviest: {} ({}), {:.0}%.", what(p), p.source, p.share * 100.0)
+        });
+        println!(
+            "\nWarning: ≈ {} to start{left_out}, over your {} limit (teamCostWarnUsd).{trim}",
+            dollars(start),
+            dollars(w.warn_usd)
+        );
+    }
     println!("\nBy model");
     for m in &w.by_model {
         let model = m.model.as_deref().unwrap_or("default");
@@ -1472,20 +1498,11 @@ fn render_team_weight(w: &cmux_protocol::TeamWeight) {
     }
     println!("\nHeaviest");
     for p in w.heaviest.iter().take(5) {
-        use cmux_protocol::PromptLayerKind::*;
-        let what = match (p.kind, &p.role) {
-            (Role, Some(role)) => format!("role prompt: {role}"),
-            (Role, None) => "role prompt".to_string(),
-            (RoleWay, _) => "role's way".to_string(),
-            (Team, _) => "place in the team".to_string(),
-            (Charter, _) => "charter".to_string(),
-            (TeamWay, _) => "team's way".to_string(),
-        };
         // Copies of different sizes (Mirador's own part): their average.
         let each = p.tokens_per_copy.map_or(format!("~{}", p.tokens / p.copies.max(1) as u64), |n| n.to_string());
         println!(
             "  {:<32}  {:<34}  {:>5} × {:<2}  {:>8} tokens  {:>3.0}%",
-            what,
+            what(p),
             p.source,
             each,
             p.copies,

@@ -681,6 +681,8 @@ export interface ResolvedConfig {
   agentRoles: AgentRole[];
   /** How many agents a page of the wall's Grid layout holds: 4, 6 or 9. */
   agentsPerTab: number;
+  /** What starting a team may cost, in US dollars, before it warns. */
+  teamCostWarnUsd: number;
   agentClick: AgentClick;
   /** Where the app opens the editor, a diff and the commit graph. */
   editorOpensIn: OpensIn;
@@ -863,6 +865,10 @@ export interface TeamWeight {
   perTurnFloorUsd: number | null;
   /** The priced seats' start costs, summed; null when no seat is priced. */
   startUsd: number | null;
+  /** The limit `startUsd` was judged against (`teamCostWarnUsd`). */
+  warnUsd: number;
+  /** `startUsd` is over `warnUsd`; never with no price. */
+  overBudget: boolean;
   /** Seats whose model has no known price, left out of the floor and the
    *  start cost. */
   unpriced: number;

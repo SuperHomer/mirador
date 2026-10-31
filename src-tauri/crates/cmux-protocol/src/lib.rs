@@ -1632,6 +1632,11 @@ pub struct TeamWeight {
     /// Seats whose model has no known price, left out of the floor and
     /// the start cost.
     pub unpriced: u32,
+    /// The limit `start_usd` was judged against (`teamCostWarnUsd`).
+    pub warn_usd: f64,
+    /// `start_usd` is over `warn_usd`. Never for a team with no price; a
+    /// partly priced one is judged on what is priced.
+    pub over_budget: bool,
     /// The seats grouped by the model they run, heaviest first.
     pub by_model: Vec<ModelWeight>,
     /// The parts the team's tokens come from, each file once with every
@@ -1844,6 +1849,8 @@ pub struct ResolvedConfig {
     pub agent_roles: Vec<AgentRole>,
     /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
     pub agents_per_tab: u8,
+    /// What starting a team may cost, in US dollars, before it warns.
+    pub team_cost_warn_usd: f64,
     pub agent_click: AgentClick,
     /// Where the app opens the roles, ways and teams editor, a diff and
     /// the commit graph: a tab of its own or a split of the focused pane.

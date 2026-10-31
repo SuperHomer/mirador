@@ -62,6 +62,9 @@ pub struct Config {
     /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
     /// Anything else is 4.
     pub agents_per_tab: Option<u32>,
+    /// What starting a team may cost, in US dollars, before its weight
+    /// warns. Anything but a positive number is the default, 0.5.
+    pub team_cost_warn_usd: Option<f64>,
     /// What clicking an agent in the sidebar does: "wall" (its tab's wall,
     /// in Focus on that agent) or "pane" (the agent alone, filling its
     /// tab). Anything else is "wall". A string rather than `AgentClick`, so
@@ -504,6 +507,7 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             Some(n @ (4 | 6 | 9)) => n as u8,
             _ => 4,
         },
+        team_cost_warn_usd: cfg.team_cost_warn_usd.filter(|n| n.is_finite() && *n > 0.0).unwrap_or(0.5),
         agent_click: match cfg.agent_click.as_deref() {
             Some("pane") => AgentClick::Pane,
             _ => AgentClick::Wall,
@@ -702,6 +706,16 @@ mod tests {
         assert!(set_agents_per_tab_in(&path, 4).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn team_cost_warn_usd_is_a_positive_number() {
+        let warn = |json: &str| resolve(&serde_json::from_str(json).unwrap()).team_cost_warn_usd;
+        assert_eq!(warn("{}"), 0.5);
+        assert_eq!(warn(r#"{ "teamCostWarnUsd": 2 }"#), 2.0);
+        assert_eq!(warn(r#"{ "teamCostWarnUsd": 0.05 }"#), 0.05);
+        assert_eq!(warn(r#"{ "teamCostWarnUsd": 0 }"#), 0.5);
+        assert_eq!(warn(r#"{ "teamCostWarnUsd": -1 }"#), 0.5);
     }
 
     #[test]

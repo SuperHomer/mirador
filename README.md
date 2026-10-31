@@ -566,6 +566,17 @@ an estimate made before the team starts; what running members have cost
 is in each one's status bar and activity panel (below). The page weighs
 the files as saved; unsaved edits are not counted.
 
+When a team costs more to start than `teamCostWarnUsd` in `mirador.json`
+(in dollars, `0.5` by default; anything but a positive number is ignored
+for it), the block and `mira team cost` warn, naming its heaviest part as
+the likeliest thing to trim. A team with no price never warns; one partly
+priced is judged on what is priced, and says what it leaves out.
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "teamCostWarnUsd": 2 }
+```
+
 Members hand each other work through Mirador — the prompt each one gets
 says how:
 
