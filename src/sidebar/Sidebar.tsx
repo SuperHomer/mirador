@@ -8,7 +8,6 @@ import {
   TabSnapshot,
   WallTool,
   focusPane,
-  newTab,
   zoomPane,
   closeTab,
   setActiveTab,
@@ -76,9 +75,6 @@ export function Sidebar() {
         })}
       </div>
       <div className="sidebar-footer">
-        <button className="sidebar-new-tab" onClick={() => void newTab()}>
-          + New tab
-        </button>
         <button
           className={`sidebar-button${waiting > 0 ? " waiting" : ""}`}
           title={
@@ -88,6 +84,10 @@ export function Sidebar() {
           }
           onClick={() => useUiStore.getState().toggleNotifications()}
         >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <path d="M2 9.5 3.8 3h8.4L14 9.5V13H2z" />
+            <path d="M2 9.5h3.5l1 1.5h3l1-1.5H14" />
+          </svg>
           Inbox {waiting}
         </button>
         <button

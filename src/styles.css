@@ -458,31 +458,12 @@ body,
   color: var(--text);
 }
 
-/* The footer's one shrinkable item: on Windows "Ctrl+Shift+K" leaves it
-   little room, and it ellipsizes rather than pushing the buttons out. */
-.sidebar-new-tab {
-  margin-right: auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 3px 4px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--subtext);
-  font-size: 12px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sidebar-new-tab:hover {
-  color: var(--text);
-}
-
+/* Inbox at the left, Commands at the right; neither shrinks, so neither
+   can be the one item a narrow footer squeezes to nothing. */
 .sidebar-footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   padding: 8px;
   border-top: 1px solid var(--surface);
@@ -502,6 +483,14 @@ body,
   font-size: 11px;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* Inbox's tray. */
+.sidebar-button svg {
+  align-self: center;
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
 }
 
 .sidebar-button:hover {
