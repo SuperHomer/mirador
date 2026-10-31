@@ -10,6 +10,7 @@ import {
   tabAgents,
   waitingAgents,
 } from "../bindings";
+import { TabBar } from "./TabBar";
 import { FrameMenu } from "./FrameMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useConfigStore } from "../state/configStore";
@@ -677,6 +678,7 @@ export function TabLayer({
           onClose={() => setMenuAt(null)}
         />
       )}
+      {!board && <TabBar tab={tab} />}
       {children}
     </div>
   );
