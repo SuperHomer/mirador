@@ -9,7 +9,7 @@ import {
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { STATUS_LABEL, StatusMark } from "./StatusMark";
-import { SPENT_MEANS, Spent, seatsOf, spentLabel, tokensLabel, usd, useSpent } from "./teamWeight";
+import { seatsOf, tokensLabel, usd } from "./teamWeight";
 
 type Props = {
   name: string;
@@ -44,17 +44,13 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
   // by its name, the seat names `teams::seats` gives: `dev` twice is
   // `dev-1` and `dev-2`.
   const statusOf = new Map<string, (AgentStatus | null)[]>();
-  // And the panes of those that report what they spend.
-  const running: string[] = [];
   for (const tab of snapshot?.tabs ?? []) {
     if (tab.team?.name !== name) continue;
     for (const seat of tab.team.members) {
       const agent = snapshot?.agents.find((a) => a.paneId === seat.pane);
       if (agent) statusOf.set(seat.name, [...(statusOf.get(seat.name) ?? []), agent.status]);
-      if (agent?.hasActivity) running.push(agent.paneId);
     }
   }
-  const spent = useSpent(running);
   // The most urgent of a member's seats, across every run: undefined when
   // none of them runs, null when running with no status known.
   const seatStatus = (base: string, count: number): AgentStatus | null | undefined => {
@@ -138,7 +134,7 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
           </button>
         ))}
       <div className="team-label">PROMPT WEIGHT</div>
-      <TeamWeightBlock weight={weight} dirty={dirty} spent={running.length > 0 ? spent : null} />
+      <TeamWeightBlock weight={weight} dirty={dirty} />
       <div className="team-fields">
         <label>
           <span>Way of working</span>
@@ -201,11 +197,7 @@ export function TeamPage({ name, fields, onChange, catalog, readOnly, selected, 
  * What the team adds to its members' prompts, in tokens, and the least
  * that costs a turn — a lower bound, which says what it leaves out.
  */
-function TeamWeightBlock({
-  weight: { weight, error },
-  dirty,
-  spent,
-}: Pick<Props, "weight" | "dirty"> & { spent: Spent | null }) {
+function TeamWeightBlock({ weight: { weight, error }, dirty }: Pick<Props, "weight" | "dirty">) {
   const [details, setDetails] = useState(false);
   const floor = (w: TeamWeight) => {
     if (w.unpriced === w.seats.length) return "no price";
@@ -238,16 +230,6 @@ function TeamWeightBlock({
         <p className="team-weight-note">Weighing…</p>
       )}
       {dirty && <p className="team-weight-note">Unsaved changes are not counted.</p>}
-      {spent && (
-        <div className="team-weight-figures" title={SPENT_MEANS}>
-          <span className="team-weight-tokens">Spent so far: {spentLabel(spent)}</span>
-          <span className="team-weight-floor">
-            its running members and their subagents, at API list prices — on a Claude subscription, what
-            it would have cost, not what is billed
-            {spent.unpriced ? "; some replies had no known price and are not in it" : ""}
-          </span>
-        </div>
-      )}
     </div>
   );
 }

@@ -215,9 +215,8 @@ export default function TeamsShowcase() {
           what it is told, layer by layer, down to the part Mirador writes. The page,
           or <span className="mono" style={{ color: "var(--text)" }}>mira team cost</span>,
           counts the tokens the team’s prompts add to each member and the least each
-          turn costs to send them again — a lower bound that says what it leaves
-          out — and, while the team runs, what it has spent so far at API list prices
-          (on a subscription, what it would have cost, not what is billed). One team
+          turn costs to send them again: a lower bound that says what it leaves
+          out. One team
           ships with Mirador:{" "}
           <span className="mono" style={{ color: "var(--text)" }}>omakase</span>, a planner,
           a worker and a reviewer.

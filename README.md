@@ -556,10 +556,10 @@ and tools, CLAUDE.md, MCP tool schemas, the conversation and every output
 token, which usually weigh far more. A member on Codex, or on a model with
 no known price (a role with no `model:` runs the harness's default), has
 tokens and no price, and the team's floor says how many it leaves out. The
-prices are Anthropic's list prices, with the date they were checked. While
-the team runs, the same block adds **Spent so far**: what its members'
-sessions and their subagents have cost (see the status bar, below). The
-page weighs the files as saved; unsaved edits are not counted.
+prices are Anthropic's list prices, with the date they were checked. It is
+an estimate made before the team starts; what running members have cost
+is in each one's status bar and activity panel (below). The page weighs
+the files as saved; unsaved edits are not counted.
 
 Members hand each other work through Mirador — the prompt each one gets
 says how:
