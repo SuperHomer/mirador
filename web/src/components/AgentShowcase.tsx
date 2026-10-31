@@ -36,13 +36,17 @@ export default function AgentShowcase() {
           or waiting on you, and what for. In Focus the agent that needs
           you is drawn large, the rest in a rail beside it, and the wall moves on to
           whoever needs you next unless you pin one; in Grid they come in pages of 4,
-          6 or 9. Each agent’s status bar gives its model and effort, and for Claude
-          Code how full its context is and a sheet of the subagents it started;
-          what a harness does not report, it says so. The wall is a
+          6 or 9. The tab’s other panes come too, after the agents, as Tools —
+          shells, browsers, diffs, graphs, live — each drawn large in Focus when you
+          click it. Each agent’s status bar gives its model and effort, and for Claude
+          Code how full its context is, what the session has cost at API list
+          prices (on a subscription, what it would have cost, not what is billed)
+          and a sheet of the subagents it started; what a harness does not report,
+          it says so. The wall is a
           view of the tab itself, in place of its splits, and each tab remembers which
           it showed. The sidebar’s switch — Splits, Wall, Tasks, Board — picks the
-          view, each tab’s agents listed under it with what they are doing, and a
-          click on one shows it large on its wall.
+          view, each tab’s agents listed under it with what they are doing, then its
+          tools, each with its own icon; a click on one shows it large on its wall.
         </p>
         <div
           style={{
