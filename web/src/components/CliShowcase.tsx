@@ -60,7 +60,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team save <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>       # before you shut down</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team resume <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>     # each back where it was</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team clear<span style={{ color: "var(--muted)" }}>            # a fresh start, lead last</span></div>
-          <div><span style={{ color: "var(--muted)" }}>$</span> mira team cost <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>       # what its prompts weigh</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira team cost <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>       # what it costs to start, and a turn</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent board<span style={{ color: "var(--muted)" }}>           # who is doing what</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent trail <span style={{ color: "var(--mauve)" }}>worker</span><span style={{ color: "var(--muted)" }}>    # what it ran</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
