@@ -40,11 +40,15 @@ export function startTeamStep() {
 }
 
 /**
- * The tab bar's + New popover: a new tab; then an agent — an optional
- * first message, which also becomes the new agent's card, then a role of
- * this repository, or plain Claude Code or Codex, joining the tab by
- * splitting `pane` (under the wall, if it shows); then the panes the
- * palette and the keys open, through the same actions. Closes on a click
+ * The tab bar's + New popover: a terminal — a new tab, or a split; then
+ * an agent — an optional first message, which also becomes the new
+ * agent's card, then a role of this repository, or plain Claude Code or
+ * Codex, joining the tab by splitting `pane` (under the wall, if it
+ * shows); then a diff, the commit graph, a browser. Its rows other than
+ * the agent's run the palette's actions, as the keys do. The message's
+ * input takes the keyboard when the menu opens, below the Terminal rows,
+ * so that typing goes straight to it and Esc, heard on the menu, closes
+ * it. Closes on a click
  * outside, or Esc while it has the keyboard — an Esc typed into a
  * terminal is the terminal's.
  */
@@ -129,7 +133,10 @@ export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }
         }
       }}
     >
+      <div className="agent-menu-label">Terminal</div>
       {item("new_tab", "New tab")}
+      {item("split_right", "Split right")}
+      {item("split_down", "Split down")}
       <div className="agent-menu-sep" />
 
       <label className="agent-menu-label" htmlFor="agent-menu-message">
@@ -197,9 +204,6 @@ export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }
       </div>
 
       <div className="agent-menu-sep" />
-      <div className="agent-menu-label">Terminal</div>
-      {item("split_right", "Split right")}
-      {item("split_down", "Split down")}
       <div className="agent-menu-label">Git</div>
       {item("new_diff_pane", "Diff")}
       {item("commit_graph", "Commit graph")}
