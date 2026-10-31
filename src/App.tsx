@@ -63,7 +63,7 @@ export default function App() {
   const paletteOpen = useUiStore((s) => s.paletteOpen);
   const notificationsOpen = useUiStore((s) => s.notificationsOpen);
   const wallBrowsers = useUiStore((s) => s.wallBrowsers);
-  const wallMenuOpen = useUiStore((s) => s.wallMenuOpen);
+  const newMenuOpen = useUiStore((s) => s.newMenuOpen);
   useKeymap();
 
   // Native child webviews float above the host webview: hide the ones on
@@ -82,12 +82,12 @@ export default function App() {
           ? [activeTab.zoomedPane]
           : collectPaneIds(activeTab.root)
       : [];
-    const overlaysOpen = paletteOpen || notificationsOpen || wallMenuOpen;
+    const overlaysOpen = paletteOpen || notificationsOpen || newMenuOpen;
     for (const b of snapshot.browserPanes) {
       const visible = !overlaysOpen && activePanes.includes(b.paneId);
       void setBrowserVisible(b.paneId, visible);
     }
-  }, [snapshot, paletteOpen, notificationsOpen, wallBrowsers, wallMenuOpen]);
+  }, [snapshot, paletteOpen, notificationsOpen, wallBrowsers, newMenuOpen]);
 
   useEffect(() => {
     let disposed = false;

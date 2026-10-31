@@ -1,5 +1,5 @@
 import { openAgent, openAgentEditor, startTeam, TabSnapshot, toggleAgentWall } from "../bindings";
-import { roleLine, useRoleCatalog } from "./AgentMenu";
+import { roleLine, useRoleCatalog } from "./NewMenu";
 import { opensInTab } from "../state/configStore";
 
 /**

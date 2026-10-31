@@ -179,7 +179,7 @@ export function BrowserPane({ paneId, url, focused, board, walled = false }: Pro
         !ui.notificationsOpen &&
         !ui.activityPane &&
         !ui.boardMenuOpen &&
-        !ui.wallMenuOpen;
+        !ui.newMenuOpen;
       // A shown card that moved — its frame dragged, a snapshot placing it
       // anew — takes its page along now, not at the next slow poll.
       const at = `${r.x},${r.y},${r.width},${r.height}`;
