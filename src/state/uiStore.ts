@@ -32,9 +32,9 @@ interface UiStore {
    *  tab's pages are shown (see `App`). Not persisted. */
   wallBrowsers: string[];
   setWallBrowser: (paneId: string, shown: boolean) => void;
-  /** A wall's "+ Agent" menu is open, over its tiles. */
-  wallMenuOpen: boolean;
-  setWallMenuOpen: (open: boolean) => void;
+  /** The tab bar's "+ New" menu is open, over the tab's panes. */
+  newMenuOpen: boolean;
+  setNewMenuOpen: (open: boolean) => void;
   togglePalette: () => void;
   /** Opens the palette on one of its steps. */
   openPalette: (step: string) => void;
@@ -74,8 +74,8 @@ export const useUiStore = create<UiStore>((set) => ({
       const rest = s.wallBrowsers.filter((p) => p !== paneId);
       return { wallBrowsers: shown ? [...rest, paneId] : rest };
     }),
-  wallMenuOpen: false,
-  setWallMenuOpen: (wallMenuOpen) => set({ wallMenuOpen }),
+  newMenuOpen: false,
+  setNewMenuOpen: (newMenuOpen) => set({ newMenuOpen }),
   togglePalette: () =>
     set((s) => ({ paletteOpen: !s.paletteOpen, paletteStep: null, notificationsOpen: false })),
   openPalette: (step) =>

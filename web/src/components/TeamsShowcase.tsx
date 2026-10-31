@@ -14,7 +14,7 @@
  */
 
 import { type Line } from "./TermLines";
-import { FocusWall, MockSidebar, type MockAgent, type MockTab } from "./MockAgents";
+import { FocusWall, MockSidebar, MockTabBar, type MockAgent, type MockTab } from "./MockAgents";
 
 type Member = { name: string; harness: "claude" | "codex"; lines: Line[] };
 
@@ -111,7 +111,7 @@ export const API_AGENT: MockAgent = {
 /** The sidebar's tabs, the hero's three. */
 const TABS: MockTab[] = [
   { title: "api", agents: [API_AGENT] },
-  { title: "omakase", team: true, agents: TEAM_AGENTS },
+  { title: "omakase", team: true, agents: TEAM_AGENTS, branch: "feat/oauth" },
   { title: "web", agents: [] },
 ];
 
@@ -132,7 +132,10 @@ function TeamMockup() {
       }}
     >
       <MockSidebar tabs={TABS} current={1} view="wall" className="teams-sidebar" />
-      <FocusWall agents={TEAM_AGENTS} large={0} />
+      <div className="ms-content">
+        <MockTabBar title="omakase" branch="feat/oauth" />
+        <FocusWall agents={TEAM_AGENTS} large={0} />
+      </div>
     </div>
   );
 }

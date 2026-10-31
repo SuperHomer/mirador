@@ -1,6 +1,6 @@
 /**
  * The agent wall, as a static mock: a tab of four agents and two tools,
- * shown as its wall in Grid, beside the sidebar.
+ * shown as its wall in Grid, under the tab's bar, beside the sidebar.
  *
  * Kept honest to the app, like the other mocks: the sidebar and the wall
  * are MockAgents.tsx's, drawn from the app's own components. The tab's
@@ -13,7 +13,7 @@
  */
 
 import { BothKeys } from "./Keys";
-import { GridWall, MockSidebar, type MockAgent, type MockTab, type MockTool } from "./MockAgents";
+import { GridWall, MockSidebar, MockTabBar, type MockAgent, type MockTab, type MockTool } from "./MockAgents";
 
 /** A shop's checkout, in a tab of its own: one agent waiting on a
     permission, one working, a Codex one, one idle after its task. */
@@ -131,7 +131,10 @@ function WallMockup() {
       }}
     >
       <MockSidebar tabs={TABS} current={0} view="wall" className="agents-sidebar" />
-      <GridWall agents={AGENTS} tools={TOOLS} />
+      <div className="ms-content">
+        <MockTabBar title="shop" branch="feat/stripe-webhooks" />
+        <GridWall agents={AGENTS} tools={TOOLS} />
+      </div>
     </div>
   );
 }

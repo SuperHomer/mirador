@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef } from "react";
 import {
   AgentInfo,
   agentLabel,
@@ -18,7 +18,6 @@ import { useConfigStore } from "../state/configStore";
 import { getTerminal } from "../terminal/registry";
 import { FocusLayout } from "./FocusLayout";
 import { GridLayout } from "./GridLayout";
-import { AgentMenu } from "./AgentMenu";
 import { EmptyWall } from "./EmptyWall";
 
 type Props = {
@@ -42,8 +41,8 @@ const FILTERS: [WallFilter, string][] = [
 /**
  * The wall's one row of controls: which agents it shows, by status, or
  * its tools; then, in Focus, who it shows large and whether that follows
- * whoever needs you; in Grid, how many a page holds; then Focus | Grid,
- * and a new agent.
+ * whoever needs you; in Grid, how many a page holds; then Focus | Grid.
+ * A new agent comes from the tab bar's + New.
  */
 function WallToolbar({
   tab,
@@ -51,14 +50,12 @@ function WallToolbar({
   tools,
   filter,
   onMode,
-  menu,
 }: {
   tab: TabSnapshot;
   agents: AgentInfo[];
   tools: WallTool[];
   filter: WallFilter;
   onMode: (mode: WallMode) => void;
-  menu: React.ReactNode;
 }) {
   const pinnedPane = useUiStore((s) => s.pinned[tab.id]);
   const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
@@ -130,7 +127,6 @@ function WallToolbar({
           </button>
         ))}
       </span>
-      {menu}
     </div>
   );
 }
@@ -151,15 +147,6 @@ export const AgentWall = memo(function AgentWall({
 }: Props) {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
   const shown = snapshot?.tabs.find((t) => t.id === tabId);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const closeMenu = useCallback(() => setMenuOpen(false), []);
-  // The menu drops over the tiles, where a browser tile's page, a native
-  // webview, would cover it: the page is hidden while it is open (`App`).
-  useEffect(() => {
-    if (!menuOpen) return;
-    useUiStore.getState().setWallMenuOpen(true);
-    return () => useUiStore.getState().setWallMenuOpen(false);
-  }, [menuOpen]);
   const now = useNow(visible);
 
   // The tab's agents in team order, which never moves with status.
@@ -234,21 +221,6 @@ export const AgentWall = memo(function AgentWall({
           tools={tools}
           filter={filter}
           onMode={switchMode}
-          menu={
-            <div className="wall-new">
-              <button
-                className={`wall-new-button${menuOpen ? " open" : ""}`}
-                title="Start an agent in this tab"
-                // The menu remembers which terminal had the keyboard, to
-                // give it back; a click must not move it here first.
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setMenuOpen((o) => !o)}
-              >
-                + Agent ▾
-              </button>
-              {menuOpen && <AgentMenu pane={shown.focusedPane} onClose={closeMenu} />}
-            </div>
-          }
         />
       )}
 

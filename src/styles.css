@@ -458,31 +458,12 @@ body,
   color: var(--text);
 }
 
-/* The footer's one shrinkable item: on Windows "Ctrl+Shift+K" leaves it
-   little room, and it ellipsizes rather than pushing the buttons out. */
-.sidebar-new-tab {
-  margin-right: auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 3px 4px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--subtext);
-  font-size: 12px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sidebar-new-tab:hover {
-  color: var(--text);
-}
-
+/* Inbox at the left, Commands at the right; neither shrinks, so neither
+   can be the one item a narrow footer squeezes to nothing. */
 .sidebar-footer {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   padding: 8px;
   border-top: 1px solid var(--surface);
@@ -502,6 +483,14 @@ body,
   font-size: 11px;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* Inbox's tray. */
+.sidebar-button svg {
+  align-self: center;
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
 }
 
 .sidebar-button:hover {
@@ -565,6 +554,67 @@ body,
 .split-layer {
   position: absolute;
   inset: 0;
+}
+
+/* Off the board a tab's content starts under its bar (TabBar). The layer
+   moves rather than the bar being laid out beside it, so going to the
+   board and back gives no pane a new parent. */
+.tabs-host:not(.board) .split-layer {
+  top: 28px;
+}
+
+.tab-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--surface);
+  background: var(--bg-alt);
+  /* Over the panes below it, which its + New menu drops onto; under the
+     palette and the side panels. */
+  z-index: 15;
+}
+
+.tab-bar-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--subtext);
+  cursor: pointer;
+}
+
+.tab-bar-icon:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tab-bar-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* The bar's one shrinkable item: a long name or branch ellipsizes rather
+   than pushing the buttons out. */
+.tab-bar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--subtext);
 }
 
 .pane-slot {
@@ -2730,7 +2780,7 @@ button.inbox-update:hover {
 }
 
 /* The Agents side's one row of controls: status filters, then Focus's pin
-   or Grid's page size, Focus | Grid, and + Agent. */
+   or Grid's page size, then Focus | Grid. */
 .wall-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -2818,12 +2868,13 @@ button.inbox-update:hover {
   cursor: default;
 }
 
-.wall-new {
+.tab-bar-new {
   position: relative;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
-.wall-new-button {
+.tab-bar-new-button {
   border: 1px solid var(--surface);
   background: transparent;
   color: var(--subtext);
@@ -2833,18 +2884,19 @@ button.inbox-update:hover {
   cursor: pointer;
 }
 
-.wall-new-button:hover {
+.tab-bar-new-button:hover {
   background: var(--surface);
   color: var(--text);
 }
 
-.wall-new-button.open {
+.tab-bar-new-button.open {
   border-color: var(--accent);
   background: var(--tint-hover);
   color: var(--text);
 }
 
-/* + Agent (21c): a first message, then a role or a plain harness. */
+/* + New: a new tab; a first message, then a role or a plain harness; the
+   panes the palette opens. */
 .agent-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -2852,6 +2904,8 @@ button.inbox-update:hover {
   z-index: 20;
   width: 380px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2862,6 +2916,36 @@ button.inbox-update:hover {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   font-size: 12px;
   color: var(--text);
+}
+
+.agent-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-menu-item:hover {
+  background: var(--surface);
+}
+
+.agent-menu-accel {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.agent-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--surface);
 }
 
 .agent-menu-label,
@@ -4132,7 +4216,7 @@ button.inbox-update:hover {
   font-size: 11px;
 }
 
-/* + Card: like + Agent's popover. */
+/* + Card: like + New's popover. */
 .tb-popover {
   position: absolute;
   top: calc(100% + 4px);

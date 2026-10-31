@@ -1,17 +1,20 @@
 /**
  * The app's agent chrome, as the mocks draw it: status marks, the sidebar,
- * an agent's status bar and the wall, in Focus and in Grid. Shared by the
- * hero's mock and the agents and teams sections, which draw the same
- * sidebar.
+ * the bar over a tab's content, an agent's status bar and the wall, in
+ * Focus and in Grid. Shared by the hero's mock and the agents and teams
+ * sections, which draw the same sidebar and bar.
  *
- * Kept honest to the app (src/sidebar/Sidebar.tsx, src/agents/StatusMark.tsx,
- * ToolMark.tsx, AgentStatusBar.tsx, AgentWall.tsx, FocusLayout.tsx and
- * GridLayout.tsx, and their rules in styles.css): the view switch at the
- * top, the current tab's agents nested under it with their mark, name, a
- * grey harness mark, how long in their status and, for one waiting on
- * you, what it asks, then its tools with their kind's mark and title and
- * no status; any other tab's agents as pips; and the footer's + New tab,
- * Inbox with its count, peach while anyone waits, and Commands. Status,
+ * Kept honest to the app (src/sidebar/Sidebar.tsx, src/layout/TabBar.tsx,
+ * src/agents/StatusMark.tsx, ToolMark.tsx, AgentStatusBar.tsx,
+ * AgentWall.tsx, FocusLayout.tsx and GridLayout.tsx, and their rules in
+ * styles.css): the view switch at the top, the current tab's agents
+ * nested under it with their mark, name, a grey harness mark, how long in
+ * their status and, for one waiting on you, what it asks, then its tools
+ * with their kind's mark and title and no status; any other tab's agents
+ * as pips; and the footer's Inbox, a tray and its count, peach while
+ * anyone waits, and Commands. Over a tab's content, though not on the
+ * board, the bar: the sidebar's toggle, the tab's name and branch, and
+ * + New, which is where a new tab or agent comes from. Status,
  * what an agent waits on and its context are Claude Code's: a Codex
  * agent's mark is the muted ring of a status not known, and its status bar
  * says what it does not report. In Grid every tile is full size: an
@@ -244,10 +247,35 @@ export function MockSidebar({
         ))}
       </div>
       <div className="ms-footer">
-        <span className="ms-new-tab">+ New tab</span>
-        <span className={`ms-button${waiting > 0 ? " waiting" : ""}`}>Inbox {waiting}</span>
+        <span className={`ms-button${waiting > 0 ? " waiting" : ""}`}>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+            <path d="M2 9.5 3.8 3h8.4L14 9.5V13H2z" />
+            <path d="M2 9.5h3.5l1 1.5h3l1-1.5H14" />
+          </svg>
+          Inbox {waiting}
+        </span>
         <span className="ms-button">Commands</span>
       </div>
+    </div>
+  );
+}
+
+/** The bar over a tab's content: the sidebar's toggle, the tab's name and
+ *  its focused pane's branch, then + New. */
+export function MockTabBar({ title, branch }: { title: string; branch?: string }) {
+  return (
+    <div className="ms-tab-bar">
+      <span className="ms-tab-bar-icon" role="img" aria-label="Hide sidebar">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+          <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+          <line x1="6" y1="2.5" x2="6" y2="13.5" />
+        </svg>
+      </span>
+      <span className="ms-tab-bar-label">
+        {title}
+        {branch && ` · ⎇ ${branch}`}
+      </span>
+      <span className="ms-tab-bar-new">+ New ▾</span>
     </div>
   );
 }
@@ -375,7 +403,6 @@ export function GridWall({ agents, tools }: { agents: MockAgent[]; tools: MockTo
           <span>Focus</span>
           <span className="selected">Grid</span>
         </span>
-        <span className="ms-button">+ Agent ▾</span>
       </div>
       <div className="ms-grid">
         {agents.map((a) => (

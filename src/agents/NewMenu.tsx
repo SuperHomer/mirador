@@ -9,7 +9,9 @@ import {
   RoleCatalog,
 } from "../bindings";
 import { useUiStore } from "../state/uiStore";
-import { opensInTab } from "../state/configStore";
+import { opensInTab, useConfigStore } from "../state/configStore";
+import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
+import { runAction } from "../keymap/actions";
 
 /** "Claude Code · opus · high": what a role starts. */
 export function roleLine(r: AgentRole): string {
@@ -38,16 +40,30 @@ export function startTeamStep() {
 }
 
 /**
- * The wall's + Agent popover (21c): an optional first message, which also
- * becomes the new agent's card, then a role of this repository, or plain
- * Claude Code or Codex. The agent joins the tab, splitting `pane` under
- * the wall. Closes on a click outside, or Esc while it has the keyboard —
- * an Esc typed into a terminal is the agent's.
+ * The tab bar's + New popover: a terminal — a new tab, or a split; then
+ * an agent — an optional first message, which also becomes the new
+ * agent's card, then a role of this repository, or plain Claude Code or
+ * Codex, joining the tab by splitting `pane` (under the wall, if it
+ * shows); then a diff, the commit graph, a browser. Its rows other than
+ * the agent's run the palette's actions, as the keys do. The message's
+ * input takes the keyboard when the menu opens, below the Terminal rows,
+ * so that typing goes straight to it and Esc, heard on the menu, closes
+ * it. Closes on a click
+ * outside, or Esc while it has the keyboard — an Esc typed into a
+ * terminal is the terminal's.
  */
-export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void }) {
+export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }) {
   const catalog = useRoleCatalog(pane);
   const [message, setMessage] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const accels = acceleratorsByAction(useConfigStore((s) => s.config?.keybindings));
+
+  // Browser pages are native views over the window, and would cover the
+  // menu: they are hidden while it is open (`App`).
+  useEffect(() => {
+    useUiStore.getState().setNewMenuOpen(true);
+    return () => useUiStore.getState().setNewMenuOpen(false);
+  }, []);
 
   // Whatever had the keyboard when the menu opened — read while rendering,
   // before the input's autofocus takes it — gets it back when the menu
@@ -88,6 +104,23 @@ export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void
     void openAgentEditor(pane, opensInTab("editor"));
   };
   const roles = catalog?.roles ?? [];
+  /** A row running the action `id`, as its key or the palette would. */
+  const item = (id: string, label: string) => {
+    const accel = accels.get(id);
+    return (
+      <button
+        className="agent-menu-item"
+        onClick={() => {
+          acted.current = true;
+          onClose();
+          runAction(id);
+        }}
+      >
+        {label}
+        {accel && <span className="agent-menu-accel">{formatAccel(accel)}</span>}
+      </button>
+    );
+  };
 
   return (
     <div
@@ -100,6 +133,12 @@ export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void
         }
       }}
     >
+      <div className="agent-menu-label">Terminal</div>
+      {item("new_tab", "New tab")}
+      {item("split_right", "Split right")}
+      {item("split_down", "Split down")}
+      <div className="agent-menu-sep" />
+
       <label className="agent-menu-label" htmlFor="agent-menu-message">
         First message (optional)
       </label>
@@ -163,6 +202,13 @@ export function AgentMenu({ pane, onClose }: { pane: string; onClose: () => void
         </button>
         <span className="agent-menu-joins">Joins this tab</span>
       </div>
+
+      <div className="agent-menu-sep" />
+      <div className="agent-menu-label">Git</div>
+      {item("new_diff_pane", "Diff")}
+      {item("commit_graph", "Commit graph")}
+      <div className="agent-menu-sep" />
+      {item("new_browser_pane", "Browser")}
     </div>
   );
 }
