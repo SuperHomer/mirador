@@ -6402,3 +6402,69 @@ button.tb-line-row:hover {
   font-size: 11px;
   flex-shrink: 0;
 }
+
+/* Where a team's tokens come from: parts by member. Scrolls sideways
+   rather than squeezing a large team's columns. */
+.team-weight-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.team-weight-toggle:hover {
+  text-decoration: underline;
+}
+
+.team-weight-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.team-weight-details table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-weight-details th,
+.team-weight-details td {
+  padding: 3px 10px 3px 0;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--subtext);
+  font-weight: 400;
+}
+
+.team-weight-details th:first-child {
+  text-align: left;
+}
+
+.team-weight-details thead th {
+  color: var(--text);
+  font-weight: 600;
+  vertical-align: bottom;
+}
+
+.team-weight-details tfoot tr:first-child > * {
+  border-top: 1px solid var(--overlay);
+}
+
+.team-weight-details tfoot th,
+.team-weight-details tfoot td {
+  color: var(--text);
+}
+
+.team-weight-model {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.team-weight-share {
+  color: var(--muted);
+}

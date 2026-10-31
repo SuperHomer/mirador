@@ -877,6 +877,9 @@ export interface SeatWeight {
   effort: string | null;
   layers: LayerWeight[];
   tokens: number;
+  /** The model's cache-read price, USD per million tokens, the floor is
+   *  worked out at; null with no known price. */
+  cacheReadPerMillion: number | null;
   /** Those tokens read from the prompt cache each turn; null with no
    *  known price. */
   perTurnFloorUsd: number | null;

@@ -320,7 +320,8 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
             .map(|l| LayerWeight { kind: l.kind, source: l.source, tokens: crate::pricing::estimate_tokens(&l.text) })
             .collect();
         let tokens = layers.iter().map(|l| l.tokens).sum();
-        let floor = role.model.as_deref().and_then(crate::pricing::rates).map(|rates| {
+        let rates = role.model.as_deref().and_then(crate::pricing::rates);
+        let floor = rates.map(|rates| {
             crate::pricing::cost(rates, crate::pricing::Usage { cache_read: tokens, ..Default::default() })
         });
         out.push(SeatWeight {
@@ -331,6 +332,7 @@ pub fn team_weight(catalog: &RoleCatalog, team: &AgentTeam, mira: &str) -> Resul
             effort: role.effort,
             layers,
             tokens,
+            cache_read_per_million: rates.map(|r| r.cache_read),
             per_turn_floor_usd: floor,
         });
     }
@@ -581,10 +583,13 @@ mod tests {
         assert!((planner.per_turn_floor_usd.unwrap() - floor(planner, 0.20)).abs() < 1e-12);
         assert!((dev.per_turn_floor_usd.unwrap() - floor(dev, 0.20)).abs() < 1e-12);
         assert_eq!(planner.model.as_deref(), Some("opus"));
+        // ...and that rate is given, to show how the floor is worked out.
+        assert_eq!(planner.cache_read_per_million, Some(0.20));
 
         // Codex: tokens, no price, and counted as such.
         let gate = &w.seats[3];
         assert_eq!((gate.harness, gate.per_turn_floor_usd), (cmux_protocol::Harness::Codex, None));
+        assert_eq!(gate.cache_read_per_million, None);
         assert!(gate.tokens > 0);
         assert_eq!(w.unpriced, 1);
         let priced: f64 = w.seats[..3].iter().map(|s| s.per_turn_floor_usd.unwrap()).sum();

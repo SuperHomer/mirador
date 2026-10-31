@@ -1646,6 +1646,9 @@ pub struct SeatWeight {
     /// What it is told, layer by layer, as the editor shows it.
     pub layers: Vec<LayerWeight>,
     pub tokens: u64,
+    /// The model's cache-read price, in US dollars per million tokens,
+    /// which the floor is worked out at; none with no known price.
+    pub cache_read_per_million: Option<f64>,
     /// Those tokens read from the prompt cache, the least a turn re-sends
     /// them for; none when the model has no known price.
     pub per_turn_floor_usd: Option<f64>,

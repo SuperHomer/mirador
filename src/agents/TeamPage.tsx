@@ -2,6 +2,7 @@ import { Ref, useState } from "react";
 import {
   AgentStatus,
   HARNESS_LABEL,
+  PromptLayer,
   RoleCatalog,
   TeamFields,
   TeamWeight,
@@ -205,6 +206,7 @@ function TeamWeightBlock({
   dirty,
   spent,
 }: Pick<Props, "weight" | "dirty"> & { spent: Spent | null }) {
+  const [details, setDetails] = useState(false);
   const floor = (w: TeamWeight) => {
     if (w.unpriced === w.seats.length) return "no price";
     const without =
@@ -220,7 +222,11 @@ function TeamWeightBlock({
           <div className="team-weight-figures">
             <span className="team-weight-tokens">{tokensLabel(weight.tokens)}</span>
             <span className="team-weight-floor">{floor(weight)}</span>
+            <button className="team-weight-toggle" onClick={() => setDetails(!details)}>
+              {details ? "Hide details" : "Details"}
+            </button>
           </div>
+          {details && <WeightDetails weight={weight} />}
           <p className="team-weight-note">
             Mirador's prompts to the members, re-sent from the cache each turn at least. Not counted: each
             agent's own system prompt and tools (Claude Code's, Codex's), CLAUDE.md, MCP tools, the
@@ -242,6 +248,109 @@ function TeamWeightBlock({
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The parts of a member's prompt, in the order it is told them. */
+const PARTS: { kind: PromptLayer["kind"]; label: string }[] = [
+  { kind: "role", label: "Role prompt" },
+  { kind: "roleWay", label: "Role's way of working" },
+  { kind: "team", label: "Its place in the team (by Mirador)" },
+  { kind: "charter", label: "Charter" },
+  { kind: "teamWay", label: "Team's way of working" },
+];
+
+/**
+ * Where a team's tokens come from: each part of what each member is told,
+ * by member, with each part's share of the whole, and how each member's
+ * floor is worked out from its model's price.
+ */
+function WeightDetails({ weight }: { weight: TeamWeight }) {
+  const tokensOf = (layers: TeamWeight["seats"][number]["layers"], kind: PromptLayer["kind"]) =>
+    layers.filter((l) => l.kind === kind).reduce((n, l) => n + l.tokens, 0);
+  const parts = PARTS.filter((p) => weight.seats.some((s) => tokensOf(s.layers, p.kind) > 0));
+  const share = (n: number) => (weight.tokens > 0 ? `${Math.round((n / weight.tokens) * 100)}%` : "");
+  const count = (n: number) => n.toLocaleString("en-US");
+  // Each priced model's cache-read price, once.
+  const rates = [
+    ...new Set(
+      weight.seats.flatMap((s) =>
+        s.cacheReadPerMillion === null ? [] : [`${s.model}: $${s.cacheReadPerMillion} per million`],
+      ),
+    ),
+  ];
+  return (
+    <div className="team-weight-details">
+      <table>
+        <thead>
+          <tr>
+            <th />
+            {weight.seats.map((s) => (
+              <th key={s.name}>
+                {s.name}
+                <span className="team-weight-model">{s.model ?? "default model"}</span>
+              </th>
+            ))}
+            <th>Team</th>
+          </tr>
+        </thead>
+        <tbody>
+          {parts.map((p) => {
+            const all = weight.seats.reduce((n, s) => n + tokensOf(s.layers, p.kind), 0);
+            return (
+              <tr key={p.kind}>
+                <th>{p.label}</th>
+                {weight.seats.map((s) => {
+                  const n = tokensOf(s.layers, p.kind);
+                  const sources = s.layers.filter((l) => l.kind === p.kind).map((l) => l.source);
+                  return (
+                    <td key={s.name} title={sources.join("\n")}>
+                      {n > 0 ? count(n) : "—"}
+                    </td>
+                  );
+                })}
+                <td>
+                  {count(all)} <span className="team-weight-share">{share(all)}</span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Tokens</th>
+            {weight.seats.map((s) => (
+              <td key={s.name}>
+                {count(s.tokens)} <span className="team-weight-share">{share(s.tokens)}</span>
+              </td>
+            ))}
+            <td>{count(weight.tokens)}</td>
+          </tr>
+          <tr>
+            <th>Per turn, at least</th>
+            {weight.seats.map((s) => (
+              <td
+                key={s.name}
+                title={
+                  s.cacheReadPerMillion === null
+                    ? "No known price for this model"
+                    : `${count(s.tokens)} tokens × $${s.cacheReadPerMillion} per million, its cache-read price`
+                }
+              >
+                {s.perTurnFloorUsd === null ? "no price" : usd(s.perTurnFloorUsd)}
+              </td>
+            ))}
+            <td>{usd(weight.perTurnFloorUsd)}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <p className="team-weight-note">
+        Tokens are estimated at about 4 characters a token. Claude Code sends its whole system prompt again every
+        turn; these parts of it stay the same, so they come from the prompt cache, at the model&apos;s cache-read
+        price{rates.length > 0 ? ` (${rates.join(", ")})` : ""}. The first turn writes them into the cache, at
+        1.25× the input price, and costs more.
+      </p>
     </div>
   );
 }

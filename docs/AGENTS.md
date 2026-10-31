@@ -458,6 +458,7 @@ here for omakase, its members trimmed to the first:
           }
         ],
         "tokens": 1104,
+        "cacheReadPerMillion": 0.2,
         "perTurnFloorUsd": 0.0002208
       }
     ],
@@ -471,7 +472,9 @@ here for omakase, its members trimmed to the first:
 
 A layer's `kind` is `role`, `roleWay`, `team`, `charter` or `teamWay`. A
 seat's `model` is as its role says it, `null` for the harness's default;
-its `perTurnFloorUsd` is `null` when that model has no known price, and
+its `cacheReadPerMillion` is the model's cache-read price in dollars per
+million tokens, which `perTurnFloorUsd` is worked out at; both are `null`
+when that model has no known price, and
 `unpriced` counts those seats, which the team's floor leaves out.
 
 A team is `teams/<name>.md` (the repository's `.mirador/teams`, then the
