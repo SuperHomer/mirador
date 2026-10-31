@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { TabSnapshot } from "../bindings";
 import { NewMenu } from "../agents/NewMenu";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
@@ -10,7 +10,7 @@ import { useWorkspaceStore } from "../state/workspaceStore";
  * its own title bar): the sidebar's toggle, then which tab this is and the
  * branch of its focused pane, then + New, for a tab, an agent or a pane.
  */
-export function TabBar({ tab }: { tab: TabSnapshot }) {
+export function TabBar({ tab, current }: { tab: TabSnapshot; current: boolean }) {
   const sidebarVisible = useWorkspaceStore((s) => s.sidebarVisible);
   const accel = acceleratorsByAction(useConfigStore((s) => s.config?.keybindings)).get(
     "toggle_sidebar",
@@ -18,6 +18,13 @@ export function TabBar({ tab }: { tab: TabSnapshot }) {
   const action = sidebarVisible ? "Hide sidebar" : "Show sidebar";
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+  // The menu belongs to the tab on screen. Whatever switches tabs — a key,
+  // the palette, the sidebar, `mira` — changes the snapshot's active tab,
+  // so the menu of a tab gone under another closes, and with it the flag
+  // that hides every browser page. Going to the board unmounts the bar.
+  useEffect(() => {
+    if (!current) setMenuOpen(false);
+  }, [current]);
   return (
     <div className="tab-bar">
       <button
@@ -46,7 +53,7 @@ export function TabBar({ tab }: { tab: TabSnapshot }) {
         >
           + New ▾
         </button>
-        {menuOpen && <NewMenu pane={tab.focusedPane} onClose={closeMenu} />}
+        {menuOpen && current && <NewMenu pane={tab.focusedPane} onClose={closeMenu} />}
       </div>
     </div>
   );

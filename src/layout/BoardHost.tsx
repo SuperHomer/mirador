@@ -678,7 +678,7 @@ export function TabLayer({
           onClose={() => setMenuAt(null)}
         />
       )}
-      {!board && <TabBar tab={tab} />}
+      {!board && <TabBar tab={tab} current={current} />}
       {children}
     </div>
   );
