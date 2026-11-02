@@ -403,6 +403,8 @@ export interface AccountUsage {
   limits: LimitWindow[];
   fiveHours: TokenTotals;
   sevenDays: TokenTotals;
+  /** Signed in, or used lately: false for a harness never used here. */
+  inUse: boolean;
 }
 
 export interface SubagentInfo extends TranscriptSummary {

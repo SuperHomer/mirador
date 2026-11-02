@@ -160,6 +160,7 @@ impl UsageCache {
             plan: plan.filter(|_| login == Login::Subscription),
             email,
             limits: Vec::new(),
+            in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
             seven_days: totals.seven_days,
         }
@@ -199,10 +200,18 @@ impl UsageCache {
             plan: rate_limits["plan_type"].as_str().map(str::to_string),
             email: None,
             limits,
+            in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
             seven_days: totals.seven_days,
         }
     }
+}
+
+/// Whether an account is worth showing at all: signed in, or with tokens
+/// in either window — a key since removed still used them.
+fn in_use(login: Login, totals: &Totals) -> bool {
+    let tokens = |t: &TokenTotals| t.input + t.cache_write + t.cache_read + t.output;
+    login != Login::None || tokens(&totals.five_hours) + tokens(&totals.seven_days) > 0
 }
 
 /// Every session transcript under `projects`, and every one of their
@@ -626,6 +635,20 @@ mod tests {
         assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
         let five_hours = LimitWindow { used_percent: 42.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902) };
         assert_eq!(usage.limits, vec![five_hours]);
+    }
+
+    #[test]
+    fn an_account_is_in_use_when_signed_in_or_used() {
+        let dir = temp_dir("in-use");
+        let none = dir.join("missing.json");
+        // Signed out, nothing used: a harness never used here.
+        assert!(!claude_usage(&none, &dir, false, now()).in_use);
+        // Signed in, nothing used yet.
+        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now()).in_use);
+        // Signed out, but used lately: a key since removed.
+        let line = reply("2026-11-02T11:00:00.000Z", "msg_a", "claude-opus-5-5", 10, 0);
+        write_at(&dir, "projects/-repo/s1.jsonl", &format!("{line}\n"), now());
+        assert!(claude_usage(&none, &dir, false, now()).in_use);
     }
 
     #[test]

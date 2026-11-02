@@ -2196,4 +2196,8 @@ pub struct AccountUsage {
     /// lengths of the plans' own windows.
     pub five_hours: TokenTotals,
     pub seven_days: TokenTotals,
+    /// Signed in, or used lately: false for a harness never used here,
+    /// which the sidebar leaves out.
+    #[serde(default)]
+    pub in_use: bool,
 }

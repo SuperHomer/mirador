@@ -2134,6 +2134,7 @@ mod tests {
             limits: vec![],
             five_hours: TokenTotals { input: 200, output: 750, ..Default::default() },
             seven_days: TokenTotals { cache_read: 1_234_567, ..Default::default() },
+            in_use: true,
         };
         assert_eq!(
             usage_lines(&claude, now),
@@ -2152,6 +2153,7 @@ mod tests {
             ],
             five_hours: TokenTotals { input: 12_300, cost: Some(0.5), ..Default::default() },
             seven_days: TokenTotals { cost: Some(0.0), ..Default::default() },
+            in_use: true,
         };
         assert_eq!(
             usage_lines(&codex, now),

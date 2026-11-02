@@ -228,8 +228,9 @@ const total = (t: TokenTotals) => t.input + t.cacheWrite + t.cacheRead + t.outpu
  * Each harness's account, always in view: read on mount and every minute
  * (through the app's usage cache, so a read costs only what was appended).
  * Nothing shows until the first answer; a refresh keeps the last one up
- * until the next arrives. An account with no login and no tokens — a
- * harness never used here — is left out; the Usage pane still lists it.
+ * until the next arrives. An account not in use (`inUse`, decided in
+ * cmux-core: no login and no tokens, a harness never used here) is left
+ * out; the Usage pane still lists it.
  */
 function UsageSection({ pane }: { pane: string | null }) {
   const [accounts, setAccounts] = useState<AccountUsage[] | null>(null);
@@ -249,9 +250,7 @@ function UsageSection({ pane }: { pane: string | null }) {
       clearInterval(timer);
     };
   }, []);
-  const shown = (accounts ?? []).filter(
-    (a) => a.login !== "none" || total(a.fiveHours) + total(a.sevenDays) > 0,
-  );
+  const shown = (accounts ?? []).filter((a) => a.inUse);
   if (shown.length === 0) return null;
   const toggle = (h: Harness) =>
     setOpen((o) => (o.includes(h) ? o.filter((x) => x !== h) : [...o, h]));
