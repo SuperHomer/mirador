@@ -240,8 +240,9 @@ fn there_is_one_settings_pane() {
     assert_eq!(listed(&sb), [settings], "it comes back as the settings pane, not a shell");
 }
 
-/// `mira usage` reads the accounts from the sandbox's own home, and
-/// `--tab` opens the one usage pane, which draws without taking the page
+/// `mira usage` reads the accounts from the sandbox's own home, the
+/// sidebar's Usage section draws them, and `--tab` opens the one usage
+/// pane, which draws without taking the page
 /// down, is focused again rather than opened twice, and comes back after
 /// a relaunch.
 #[test]
@@ -260,6 +261,12 @@ fn the_usage_pane_opens_once_and_comes_back() {
     std::fs::write(day.join("rollout-2026-11-02T10-00-00-a.jsonl"), format!("{limits}\n")).unwrap();
     sb.launch();
     let first = sb.first_pane();
+    // The sidebar's Usage section draws these accounts from the start: a
+    // throw in it takes the page down, and the terminal stops answering.
+    sb.type_into(&first, "echo sidebar-$((40+2))\r");
+    sb.wait_for("the terminal beside the sidebar's usage", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "sidebar-42"))
+    });
 
     let (code, out, err) = sb.mira(Some(&first), &["usage", "--json"]);
     assert_eq!(code, 0, "{err}");

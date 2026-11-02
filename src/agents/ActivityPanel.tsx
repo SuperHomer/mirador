@@ -30,7 +30,8 @@ export function typeColor(type: string, hues: string[]): string {
 export function tokens(n: number): string {
   if (n < 1000) return `${n}`;
   if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  return `${(n / 1_000_000_000).toFixed(1)}B`;
 }
 
 /** m:ss, or h:mm:ss past the hour. */

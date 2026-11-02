@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  AccountUsage,
   AgentInfo,
   Harness,
   HARNESS_LABEL,
@@ -17,10 +18,13 @@ import {
   tabAgents,
   toggleAgentWall,
   waitingAgents,
+  accountUsage,
+  openUsage,
+  TokenTotals,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
-import { useConfigStore } from "../state/configStore";
+import { opensInTab, useConfigStore } from "../state/configStore";
 import { STATUS_LABEL, StatusMark, StatusPips } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
 import { AskingLine } from "../agents/AskingLine";
@@ -28,6 +32,8 @@ import { showOnWall } from "../agents/showOnWall";
 import { ToolMark } from "../agents/ToolMark";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
+import { fullness } from "../agents/AgentStatusBar";
+import { tokens } from "../agents/ActivityPanel";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
 export function Sidebar() {
@@ -74,6 +80,7 @@ export function Sidebar() {
           );
         })}
       </div>
+      <UsageSection pane={tab?.focusedPane ?? null} />
       <div className="sidebar-footer">
         <button
           className={`sidebar-button${waiting > 0 ? " waiting" : ""}`}
@@ -211,6 +218,144 @@ function HarnessMark({ harness }: { harness: Harness }) {
     default:
       return <>◆</>;
   }
+}
+
+const LOGIN_LABEL = { subscription: "Subscription", apiKey: "API key", none: "Not signed in" };
+
+const total = (t: TokenTotals) => t.input + t.cacheWrite + t.cacheRead + t.output;
+
+/**
+ * Each harness's account, always in view: read on mount and every minute
+ * (through the app's usage cache, so a read costs only what was appended).
+ * Nothing shows until the first answer; a refresh keeps the last one up
+ * until the next arrives. An account with no login and no tokens — a
+ * harness never used here — is left out; the Usage pane still lists it.
+ */
+function UsageSection({ pane }: { pane: string | null }) {
+  const [accounts, setAccounts] = useState<AccountUsage[] | null>(null);
+  const [open, setOpen] = useState<Harness[]>([]);
+  useEffect(() => {
+    // StrictMode mounts twice in dev: the first mount's cleanup clears its
+    // interval, and its late answer is dropped.
+    let live = true;
+    const read = () =>
+      void accountUsage()
+        .then((a) => live && setAccounts(a))
+        .catch(() => {});
+    read();
+    const timer = setInterval(read, 60_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
+  const shown = (accounts ?? []).filter(
+    (a) => a.login !== "none" || total(a.fiveHours) + total(a.sevenDays) > 0,
+  );
+  if (shown.length === 0) return null;
+  const toggle = (h: Harness) =>
+    setOpen((o) => (o.includes(h) ? o.filter((x) => x !== h) : [...o, h]));
+  return (
+    <div className="usage-section">
+      <div className="usage-section-head">Usage</div>
+      {shown.map((a) => (
+        <UsageRow
+          key={a.harness}
+          account={a}
+          open={open.includes(a.harness)}
+          onToggle={() => toggle(a.harness)}
+          onOpenPane={() => void openUsage(pane, opensInTab("editor"))}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** One account: its icon and name, then its most used window, or for an
+ *  account with none its tokens in the last five hours. Opens to the rest. */
+function UsageRow({
+  account: a,
+  open,
+  onToggle,
+  onOpenPane,
+}: {
+  account: AccountUsage;
+  open: boolean;
+  onToggle: () => void;
+  onOpenPane: () => void;
+}) {
+  const worst = a.limits[0];
+  const cost = (t: TokenTotals) => (t.cost !== null ? ` · $${t.cost.toFixed(2)}` : "");
+  return (
+    <div className={`usage-row${open ? " open" : ""}`}>
+      <button className="usage-row-line" onClick={onToggle} aria-expanded={open}>
+        <span className="tab-harness" aria-hidden="true">
+          <HarnessMark harness={a.harness} />
+        </span>
+        <span className="usage-row-name">{HARNESS_LABEL[a.harness]}</span>
+        {a.login === "none" ? (
+          <span className="usage-row-value muted">not signed in</span>
+        ) : worst ? (
+          <>
+            <span className={`agent-bar-meter usage-row-meter ${fullness(worst.usedPercent)}`}>
+              <span style={{ "--fill": `${Math.min(100, worst.usedPercent)}%` } as React.CSSProperties} />
+            </span>
+            <span className={`usage-row-value pct ${fullness(worst.usedPercent)}`}>
+              {Math.round(worst.usedPercent)}%
+            </span>
+          </>
+        ) : (
+          <span className="usage-row-value">
+            {tokens(total(a.fiveHours))}
+            <span className="muted"> · 5h{cost(a.fiveHours)}</span>
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="usage-row-detail">
+          <div className="usage-kv">
+            <span>{LOGIN_LABEL[a.login]}</span>
+            <span>{a.plan ?? ""}</span>
+          </div>
+          {a.limits.map((w) => (
+            <div key={w.windowMinutes} className="usage-kv">
+              <span>
+                {w.name} · {Math.round(w.usedPercent)}%
+              </span>
+              {w.resetsAt !== null && (
+                <span>
+                  resets{" "}
+                  {new Date(w.resetsAt * 1000).toLocaleString(undefined, {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+            </div>
+          ))}
+          <div className="usage-kv">
+            <span>Last 5h</span>
+            <span>
+              {tokens(total(a.fiveHours))}
+              {cost(a.fiveHours)}
+            </span>
+          </div>
+          <div className="usage-kv">
+            <span>Last 7d</span>
+            <span>
+              {tokens(total(a.sevenDays))}
+              {cost(a.sevenDays)}
+            </span>
+          </div>
+          <button className="usage-open" onClick={onOpenPane}>
+            Open Usage pane
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** The current tab's agents, then its tools, under its row. Mounted only

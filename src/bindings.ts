@@ -399,7 +399,7 @@ export interface AccountUsage {
   /** As the harness names it: `claude_max`, `plus`. */
   plan: string | null;
   email: string | null;
-  /** Empty for Claude Code, which keeps none on disk. */
+  /** The most used first; empty for Claude Code, which keeps none on disk. */
   limits: LimitWindow[];
   fiveHours: TokenTotals;
   sevenDays: TokenTotals;

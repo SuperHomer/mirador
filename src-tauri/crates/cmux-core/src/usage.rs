@@ -179,7 +179,10 @@ impl UsageCache {
         };
         let rate_limits = newest_rollout(&codex_home.join("sessions")).and_then(|r| last_rate_limits(&r));
         let rate_limits = rate_limits.unwrap_or(Value::Null);
-        let limits = ["primary", "secondary"].iter().filter_map(|w| limit_window(&rate_limits[w])).collect();
+        let mut limits: Vec<LimitWindow> =
+            ["primary", "secondary"].iter().filter_map(|w| limit_window(&rate_limits[w])).collect();
+        // The most used first: the one a glance at the account should see.
+        limits.sort_by(|a, b| b.used_percent.total_cmp(&a.used_percent));
         // `pricing` has no OpenAI rates, so never a cost.
         let mut totals = Totals::new(now_ms, false);
         let mut rollouts = Vec::new();
@@ -623,6 +626,15 @@ mod tests {
         assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
         let five_hours = LimitWindow { used_percent: 42.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902) };
         assert_eq!(usage.limits, vec![five_hours]);
+    }
+
+    #[test]
+    fn the_most_used_window_comes_first() {
+        let dir = temp_dir("codex-worst");
+        let line = r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":12.0,"window_minutes":300},"secondary":{"used_percent":64.0,"window_minutes":10080}}}}"#;
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{line}\n"));
+        let names: Vec<String> = codex_usage(&dir, false, now()).limits.into_iter().map(|w| w.name).collect();
+        assert_eq!(names, ["weekly", "5h"]);
     }
 
     #[test]

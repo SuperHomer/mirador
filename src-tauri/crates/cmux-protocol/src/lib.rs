@@ -2189,6 +2189,8 @@ pub struct AccountUsage {
     /// The plan as the harness names it (`claude_max`, `plus`).
     pub plan: Option<String>,
     pub email: Option<String>,
+    /// The plan's windows, the most used first. None for Claude Code,
+    /// which keeps none on disk.
     pub limits: Vec<LimitWindow>,
     /// What it used in the last five hours and the last seven days: the
     /// lengths of the plans' own windows.

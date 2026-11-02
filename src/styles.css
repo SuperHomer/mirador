@@ -458,6 +458,132 @@ body,
   color: var(--text);
 }
 
+/* Each account's usage, pinned above the footer. */
+.usage-section {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 6px 6px;
+  border-top: 1px solid var(--surface);
+}
+
+.usage-section-head {
+  padding: 6px 8px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.usage-row {
+  border-radius: 6px;
+}
+
+.usage-row.open {
+  background: var(--surface);
+}
+
+/* Icon, name, then the meter: the meter is the one item that gives way,
+   so the name never ellipsizes to nothing beside it. */
+.usage-row-line {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.usage-row:not(.open) .usage-row-line:hover {
+  background: var(--tint-hover);
+}
+
+.usage-row-name {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.usage-row-meter {
+  flex: 1;
+  min-width: 24px;
+  height: 4px;
+  margin-left: 4px;
+}
+
+.usage-row-value {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-row-meter + .usage-row-value {
+  margin-left: 0;
+}
+
+.usage-row-value.pct {
+  font-weight: 600;
+}
+
+.usage-row-value.pct.low {
+  color: var(--status-idle);
+}
+
+.usage-row-value.pct.mid {
+  color: var(--warn);
+}
+
+.usage-row-value.pct.high {
+  color: var(--danger);
+}
+
+.usage-row-value .muted,
+.usage-row-value.muted {
+  color: var(--muted);
+}
+
+.usage-row-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 8px 8px 28px;
+  font-size: 11px;
+  color: var(--subtext);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage-kv > span:first-child {
+  color: var(--muted);
+}
+
+.usage-open {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 /* Inbox at the left, Commands at the right; neither shrinks, so neither
    can be the one item a narrow footer squeezes to nothing. */
 .sidebar-footer {
