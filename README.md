@@ -82,9 +82,11 @@ downloads, the feature tour and the keybinding reference.
 - **Account usage**, always in the sidebar: a row per Claude Code or
   Codex account you use, its most used limit filling up; open one for its
   plan, reset times and tokens over 5 hours and 7 days, with a cost for
-  Claude Code on an API key where the model's price is known. The Usage
-  pane (`mira usage --tab`, *App: Usage*) and `mira usage` show it in
-  full. Read from the harnesses' own files, never the network
+  Claude Code on an API key where the model's price is known. Claude's
+  plan limits come from Claude Code's status line once `mira hooks setup`
+  wraps it (your own line still shows), or read "limit reached" after a
+  refused request. The Usage pane (`mira usage --tab`, *App: Usage*) and
+  `mira usage` show it in full. Read from local files, never the network
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
   it, reads its console errors — while you watch (`mira browser …`)
