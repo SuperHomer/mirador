@@ -186,14 +186,14 @@ impl UsageCache {
         // that reads as a bill.
         let mut totals = Totals::new(now_ms, login == Login::ApiKey);
         let transcripts = claude_transcripts(&claude_dir.join("projects"), now_ms);
-        let mut refused: Option<Rejection> = None;
+        let mut refused: Vec<Rejection> = Vec::new();
         for transcript in &transcripts {
             let Some(replies) = self.claude.read(transcript) else { continue };
             for c in &replies.counted {
                 totals.add(c.at_ms, c.usage, c.model.as_deref());
             }
-            if let Some(r) = replies.rejected.filter(|r| refused.is_none_or(|o| r.at_ms > o.at_ms)) {
-                refused = Some(r);
+            for r in &replies.rejected {
+                keep_newest(&mut refused, *r);
             }
         }
         // A file last written before the window counts nothing any more.
@@ -201,7 +201,7 @@ impl UsageCache {
         // The windows are the plan's: an API key has none.
         let on_plan = matches!(login, Login::Subscription | Login::PlanOrApiKey);
         let (limits, as_of) =
-            if on_plan { plan_limits(read_claude_limits(limits), refused, now_ms) } else { (Vec::new(), None) };
+            if on_plan { plan_limits(read_claude_limits(limits), &refused, now_ms) } else { (Vec::new(), None) };
         let limits_note = (on_plan && limits.is_empty()).then(|| no_limits_note(claude_dir));
         AccountUsage {
             harness: Harness::Claude,
@@ -263,12 +263,13 @@ impl UsageCache {
     }
 }
 
-/// Claude's plan windows: the status line's snapshot, and a refused
-/// request where the snapshot says nothing newer about its window; when
-/// they were read, the newest of the two used. Most used first.
-fn plan_limits(snapshot: Option<ClaudeLimits>, refused: Option<Rejection>, now_ms: u64) -> (Vec<LimitWindow>, Option<u64>) {
+/// Claude's plan windows: the status line's snapshot, and for each window
+/// a refused request where the snapshot says nothing newer about that
+/// window; when they were read, the newest of those used. Most used first.
+fn plan_limits(snapshot: Option<ClaudeLimits>, refused: &[Rejection], now_ms: u64) -> (Vec<LimitWindow>, Option<u64>) {
     let now_s = now_ms / 1000;
-    let (mut limits, mut as_of) = snapshot.map_or((Vec::new(), None), |s| (s.windows, Some(s.saved_at)));
+    let (mut limits, snapshot_at) = snapshot.map_or((Vec::new(), None), |s| (s.windows, Some(s.saved_at)));
+    let mut as_of = snapshot_at;
     for w in &mut limits {
         // A window that has reset since the snapshot is empty now: its old
         // percentage, shown as current, would say the plan is still that
@@ -277,9 +278,9 @@ fn plan_limits(snapshot: Option<ClaudeLimits>, refused: Option<Rejection>, now_m
             w.used_percent = 0.0;
         }
     }
-    if let Some(r) = refused.filter(|r| r.resets_at > now_s) {
+    for r in refused.iter().filter(|r| r.resets_at > now_s) {
         let known = limits.iter().any(|w| w.window_minutes == r.window_minutes);
-        if !known || as_of.is_none_or(|t| r.at_ms > t) {
+        if !known || snapshot_at.is_none_or(|t| r.at_ms > t) {
             limits.retain(|w| w.window_minutes != r.window_minutes);
             limits.push(LimitWindow {
                 used_percent: 100.0,
@@ -396,8 +397,18 @@ struct Counted {
 struct Replies {
     counted: Vec<Counted>,
     last_id: String,
-    /// The newest request the plan refused, if any.
-    rejected: Option<Rejection>,
+    /// The newest request the plan refused, for each window it named.
+    rejected: Vec<Rejection>,
+}
+
+/// Keeps `r` in `list` unless that window already has a newer refusal:
+/// one per window, so a refusal for one window never hides another's.
+fn keep_newest(list: &mut Vec<Rejection>, r: Rejection) {
+    match list.iter_mut().find(|o| o.window_minutes == r.window_minutes) {
+        Some(o) if r.at_ms >= o.at_ms => *o = r,
+        Some(_) => {}
+        None => list.push(r),
+    }
 }
 
 /// A request Claude's plan refused, as Claude Code logs it with its error:
@@ -446,8 +457,8 @@ impl Feed for Replies {
             return;
         }
         let Some(at_ms) = entry["timestamp"].as_str().and_then(parse_timestamp) else { return };
-        if let Some(r) = rejection(&entry, at_ms).filter(|r| self.rejected.is_none_or(|o| r.at_ms >= o.at_ms)) {
-            self.rejected = Some(r);
+        if let Some(r) = rejection(&entry, at_ms) {
+            keep_newest(&mut self.rejected, r);
         }
         if !message["usage"].is_object() {
             return;
@@ -1063,6 +1074,31 @@ mod tests {
         let shown: Vec<(u64, f64, bool)> = older.limits.iter().map(|w| (w.window_minutes, w.used_percent, w.limit_reached)).collect();
         assert_eq!(shown, [(300, 100.0, true), (10080, 71.0, false)]);
         assert_eq!(older.as_of, Some(now() - HOUR_MS));
+    }
+
+    #[test]
+    fn each_window_keeps_its_own_refusal() {
+        let soon = now() / 1000 + 3600;
+        let week = now() / 1000 + 3 * 86400;
+        // The weekly refused first, the 5h later, each still active.
+        let both = [
+            refusal("2026-11-02T08:00:00.000Z", "seven_day", week),
+            refusal("2026-11-02T11:00:00.000Z", "five_hour", soon),
+        ];
+        let usage = plan_with("limits-two-refusals", None, &both);
+        let mut shown: Vec<(u64, bool)> = usage.limits.iter().map(|w| (w.window_minutes, w.limit_reached)).collect();
+        shown.sort();
+        assert_eq!(shown, [(300, true), (10080, true)]);
+        // The same across two files, the newer 5h one in the other file.
+        let dir = temp_dir("limits-two-files");
+        write_at(&dir, "projects/-repo/a.jsonl", &format!("{}\n", both[0]), now());
+        write_at(&dir, "projects/-repo/b.jsonl", &format!("{}\n", both[1]), now());
+        let across = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
+        assert_eq!(across.limits.iter().filter(|w| w.limit_reached).count(), 2);
+        // A snapshot between the two beats only the older, weekly refusal.
+        let between = plan_with("limits-between", Some((STATUSLINE, now() - 2 * HOUR_MS)), &both);
+        let shown: Vec<(u64, f64, bool)> = between.limits.iter().map(|w| (w.window_minutes, w.used_percent, w.limit_reached)).collect();
+        assert_eq!(shown, [(300, 100.0, true), (10080, 71.0, false)]);
     }
 
     #[cfg(unix)]
