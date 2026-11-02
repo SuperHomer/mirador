@@ -368,6 +368,41 @@ export interface TranscriptSummary {
   lastMs: number | null;
 }
 
+/** How a harness is signed in (`cmux_protocol::Login`). */
+export type Login = "subscription" | "apiKey" | "none";
+
+/** One of a plan's rate-limit windows, as the harness last reported it. */
+export interface LimitWindow {
+  usedPercent: number;
+  /** 300 for five hours, 10080 for a week. */
+  windowMinutes: number;
+  /** Unix seconds; null from older Codex versions. */
+  resetsAt: number | null;
+}
+
+/** Tokens used over a stretch of time, by how each is priced. */
+export interface TokenTotals {
+  input: number;
+  cacheWrite: number;
+  cacheRead: number;
+  output: number;
+  /** At list prices, on an API key only; models with no price add none. */
+  cost: number | null;
+}
+
+/** A harness's account, from its own files (`cmux_protocol::AccountUsage`). */
+export interface AccountUsage {
+  harness: Harness;
+  login: Login;
+  /** As the harness names it: `claude_max`, `plus`. */
+  plan: string | null;
+  email: string | null;
+  /** Empty for Claude Code, which keeps none on disk. */
+  limits: LimitWindow[];
+  fiveHours: TokenTotals;
+  sevenDays: TokenTotals;
+}
+
 export interface SubagentInfo extends TranscriptSummary {
   id: string;
   description: string | null;
@@ -1146,6 +1181,7 @@ export const getAgentTrail = (paneId: string, turns: number | null, sinceMs: num
   invoke<AgentTrail>("get_agent_trail", { paneId, turns, sinceMs });
 export const getTrailDetail = (paneId: string, actionId: string) =>
   invoke<ActionDetail>("get_trail_detail", { paneId, actionId });
+export const accountUsage = () => invoke<AccountUsage[]>("account_usage");
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

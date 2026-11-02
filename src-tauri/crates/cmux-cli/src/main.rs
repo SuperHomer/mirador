@@ -92,6 +92,9 @@ enum Command {
     },
     /// Command-pane run history (what ran, when, exit codes).
     Runs,
+    /// Each harness's account: plan or API key, its limits, and the tokens
+    /// it used in the last 5 hours and 7 days. Read from local files only.
+    Usage,
     /// Drive the built-in browser pane (agents verify web changes here).
     Browser {
         #[command(subcommand)]
@@ -679,6 +682,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Runs => Request::ListRuns,
+        Command::Usage => Request::Usage,
         Command::Diff {
             spec,
             staged,
@@ -1159,6 +1163,12 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 }
             } else if map.contains_key("runs") {
                 render_runs(&data);
+            } else if let Some(accounts) = map.get("accounts") {
+                let accounts: Vec<cmux_protocol::AccountUsage> =
+                    serde_json::from_value(accounts.clone()).map_err(|e| format!("bad response: {e}"))?;
+                for line in accounts.iter().flat_map(|a| usage_lines(a, now_ms() / 1000)) {
+                    println!("{line}");
+                }
             } else if let Some(agents) = map
                 .get("agents")
                 .and_then(|v| v.as_array())
@@ -1813,6 +1823,59 @@ fn render_runs(data: &serde_json::Value) {
     }
 }
 
+/// An account as `mira usage` shows it: who it is, then its limits, then
+/// what it used. `now` is in Unix seconds, as `resets_at` is.
+fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
+    use cmux_protocol::Login;
+    let login = match account.login {
+        Login::Subscription => "subscription",
+        Login::ApiKey => "API key",
+        Login::None => "not signed in",
+    };
+    let plan = account.plan.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
+    let email = account.email.as_deref().map(|e| format!(" · {e}")).unwrap_or_default();
+    let mut lines = vec![format!("{} — {login}{plan}{email}", account.harness.label())];
+    for w in &account.limits {
+        let window = match w.window_minutes {
+            300 => "5h".to_string(),
+            10080 => "weekly".to_string(),
+            43200 => "30 days".to_string(),
+            m => format!("{m}m"),
+        };
+        let resets = match w.resets_at {
+            Some(at) if at > now => format!(", resets in {}", until(at - now)),
+            Some(_) => ", reset since".to_string(),
+            None => String::new(),
+        };
+        lines.push(format!("  {window} {}% used{resets}", w.used_percent.round()));
+    }
+    for (name, t) in [("last 5h", &account.five_hours), ("last 7d", &account.seven_days)] {
+        let cost = t.cost.map(|c| format!(" · ${c:.2}")).unwrap_or_default();
+        lines.push(format!("  {name}: {} tokens{cost}", count(t.input + t.cache_write + t.cache_read + t.output)));
+    }
+    lines
+}
+
+/// How long until a reset, to the two largest units: `3d 4h`, `2h 5m`, `9m`.
+fn until(secs: u64) -> String {
+    let (d, h, m) = (secs / 86400, secs % 86400 / 3600, secs % 3600 / 60);
+    match (d, h) {
+        (0, 0) => format!("{m}m"),
+        (0, _) => format!("{h}h {m}m"),
+        _ => format!("{d}d {h}h"),
+    }
+}
+
+/// A token count short enough to read: `950`, `12.3K`, `7.4M`, `1.0B`.
+fn count(n: u64) -> String {
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..1_000_000 => format!("{:.1}K", n as f64 / 1e3),
+        1_000_000..1_000_000_000 => format!("{:.1}M", n as f64 / 1e6),
+        _ => format!("{:.1}B", n as f64 / 1e9),
+    }
+}
+
 fn render_tabs(data: &serde_json::Value) {
     let active = data["activeTab"].as_str().unwrap_or("");
     for tab in data["tabs"].as_array().unwrap_or(&Vec::new()) {
@@ -2051,6 +2114,53 @@ mod tests {
 
     fn parse(args: &[&str]) -> Command {
         Cli::try_parse_from(["mira"].iter().chain(args)).unwrap_or_else(|e| panic!("{args:?}: {e}")).command
+    }
+
+    #[test]
+    fn usage_shows_who_each_account_is_its_limits_and_what_it_used() {
+        use cmux_protocol::{AccountUsage, Harness, LimitWindow, Login, TokenTotals};
+        let now = 1_800_000_000;
+        let claude = AccountUsage {
+            harness: Harness::Claude,
+            login: Login::Subscription,
+            plan: Some("claude_max".into()),
+            email: Some("you@example.com".into()),
+            limits: vec![],
+            five_hours: TokenTotals { input: 200, output: 750, ..Default::default() },
+            seven_days: TokenTotals { cache_read: 1_234_567, ..Default::default() },
+        };
+        assert_eq!(
+            usage_lines(&claude, now),
+            ["Claude Code — subscription (claude_max) · you@example.com", "  last 5h: 950 tokens", "  last 7d: 1.2M tokens"]
+        );
+        let codex = AccountUsage {
+            harness: Harness::Codex,
+            login: Login::ApiKey,
+            plan: None,
+            email: None,
+            limits: vec![
+                LimitWindow { used_percent: 71.4, window_minutes: 10080, resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59) },
+                LimitWindow { used_percent: 5.0, window_minutes: 300, resets_at: Some(now + 2 * 3600 + 5 * 60) },
+                LimitWindow { used_percent: 90.0, window_minutes: 43200, resets_at: Some(now - 1) },
+                LimitWindow { used_percent: 1.0, window_minutes: 60, resets_at: None },
+            ],
+            five_hours: TokenTotals { input: 12_300, cost: Some(0.5), ..Default::default() },
+            seven_days: TokenTotals { cost: Some(0.0), ..Default::default() },
+        };
+        assert_eq!(
+            usage_lines(&codex, now),
+            [
+                "Codex — API key",
+                "  weekly 71% used, resets in 3d 4h",
+                "  5h 5% used, resets in 2h 5m",
+                "  30 days 90% used, reset since",
+                "  60m 1% used",
+                "  last 5h: 12.3K tokens · $0.50",
+                "  last 7d: 0 tokens · $0.00",
+            ]
+        );
+        let signed_out = AccountUsage { login: Login::None, plan: None, email: None, ..claude };
+        assert_eq!(usage_lines(&signed_out, now)[0], "Claude Code — not signed in");
     }
 
     #[test]

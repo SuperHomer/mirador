@@ -73,6 +73,7 @@ permissions = [
   "allow-get-agent-activity",
   "allow-get-agent-trail",
   "allow-get-trail-detail",
+  "allow-account-usage",
   "allow-mark-pane-read",
   "allow-zoom-pane",
   "allow-load-graph",

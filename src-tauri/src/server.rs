@@ -460,6 +460,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let runs = crate::runs::list(&state);
             Ok(json!({ "runs": runs }))
         }
+        // Every connection has its own thread, so reading the files here
+        // holds up no one else.
+        Request::Usage => Ok(json!({ "accounts": cmux_core::usage::accounts() })),
         Request::BrowserOpen { url, target } => {
             let pane_id = crate::commands::open_browser(
                 app.clone(),

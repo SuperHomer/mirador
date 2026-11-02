@@ -1160,6 +1160,13 @@ pub fn claude_integration_offer() -> bool {
     mira_binary().is_some() && ci::should_offer(&ci::status(), ci::offer_answered())
 }
 
+/// Each harness's account and what it used, read from its own files:
+/// transcripts add up to a few hundred milliseconds, so off the main thread.
+#[tauri::command]
+pub async fn account_usage() -> Result<Vec<cmux_protocol::AccountUsage>, String> {
+    tauri::async_runtime::spawn_blocking(cmux_core::usage::accounts).await.map_err(|e| e.to_string())
+}
+
 /// Sets the integration up: `mira` on PATH (agents and `/mira-diff` call it
 /// by name), then the hooks and the skill (which call it by path). Answers
 /// the offer either way, so a failure is not offered again unasked — the

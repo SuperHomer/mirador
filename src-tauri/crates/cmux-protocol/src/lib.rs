@@ -688,6 +688,9 @@ pub enum Request {
     },
     /// Command-pane run history (the agent activity audit log).
     ListRuns,
+    /// Each harness's account: how it is signed in, its plan's limits, and
+    /// what it used lately, read from its own files.
+    Usage,
     /// Opens a browser pane (split of the focused pane, or a new tab).
     BrowserOpen {
         url: String,

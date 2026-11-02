@@ -78,6 +78,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "get_agent_activity",
     "get_agent_trail",
     "get_trail_detail",
+    "account_usage",
     "mark_pane_read",
     "zoom_pane",
     "load_graph",

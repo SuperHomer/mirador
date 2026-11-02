@@ -773,6 +773,50 @@ turn — each action opening to its input and output. It reads the trail
 again two seconds after each read while it is shown and the window is
 visible.
 
+### Account usage
+
+```bash
+mira usage            # each harness's account, its limits, what it used
+mira usage --json     # the same as data
+```
+
+One block per harness: how it is signed in (a subscription and its plan,
+an API key, or `not signed in`) and the account's email where the
+harness keeps one; then each limit window the plan reports, with how
+much is used and when it resets; then the tokens used in the last 5
+hours and the last 7 days, the plans' own windows, with their cost at
+list prices when the login is an API key. On a plan the cost is left
+out: the list price is not what a plan pays.
+
+```
+Claude Code — subscription (claude_max) · you@example.com
+  last 5h: 7.4M tokens
+  last 7d: 1.0B tokens
+Codex — subscription (plus)
+  weekly 71% used, resets in 3d 4h
+  last 5h: 260.8K tokens
+  last 7d: 82.6M tokens
+```
+
+It never touches the network: everything is read from the harnesses' own
+files, and never a credential — only the shape of the login.
+
+- **Claude Code**: the sign-in in `.claude.json` (in `$CLAUDE_CONFIG_DIR`,
+  else the home directory). `ANTHROPIC_API_KEY` in the app's
+  environment, or an `apiKeyHelper` in `settings.json`, makes it an API
+  key, as Claude Code itself prefers the key. A Claude plan shows tokens,
+  not a percentage of its limits: Claude Code keeps no limits on disk.
+  The tokens are added up from the transcripts under `projects/`,
+  subagents' included.
+- **Codex**: the login in `$CODEX_HOME/auth.json` (`~/.codex`); a key
+  in `OPENAI_API_KEY` counts only when that file holds no login, as
+  Codex prefers its stored one. The limits and the plan are the ones
+  the newest rollout last recorded, so they are as of Codex's last turn.
+  It has no cost: Mirador knows no OpenAI prices.
+
+The app reads its own environment, not a shell's: a key exported in a
+shell's profile is not seen by an app started from the Dock.
+
 ## 7. Workspace control
 
 ```bash
@@ -843,7 +887,7 @@ agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
-agent_trail agent_trail_detail`. Requests are
+agent_trail agent_trail_detail usage`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)
