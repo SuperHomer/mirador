@@ -40,7 +40,8 @@ export function ClaudeBanner() {
         <div className="update-banner-text">
           <span className="update-banner-title">Claude Code integration</span>
           <span className="update-banner-note">
-            Light up tabs when an agent needs you, and add /mira-diff.
+            Light up tabs when an agent needs you, add /mira-diff, and read your
+            plan's limits from Claude Code's status line.
           </span>
         </div>
         <button className="update-banner-action" onClick={() => void run()}>

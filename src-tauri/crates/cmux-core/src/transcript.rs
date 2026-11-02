@@ -110,17 +110,7 @@ impl Stats {
             let n = |key: &str| usage[key].as_u64().unwrap_or(0);
             let fresh = n("input_tokens") + n("cache_creation_input_tokens") + n("output_tokens");
             // At the rates of this reply's own model: a session can switch.
-            let cost = message["model"].as_str().and_then(crate::pricing::rates).map(|rates| {
-                crate::pricing::cost(
-                    rates,
-                    crate::pricing::Usage {
-                        input: n("input_tokens"),
-                        cache_write: n("cache_creation_input_tokens"),
-                        cache_read: n("cache_read_input_tokens"),
-                        output: n("output_tokens"),
-                    },
-                )
-            });
+            let cost = message["model"].as_str().and_then(crate::pricing::rates).map(|rates| crate::pricing::cost(rates, usage_of(usage)));
             let id = message["id"].as_str().unwrap_or("").to_string();
             if let Some(before) = self.reply.take_if(|r| !id.is_empty() && r.id == id) {
                 self.tokens -= before.tokens;
@@ -289,6 +279,17 @@ impl Stats {
     }
 }
 
+/// A reply's `usage`, split by how each kind of token is priced.
+pub(crate) fn usage_of(usage: &Value) -> crate::pricing::Usage {
+    let n = |key: &str| usage[key].as_u64().unwrap_or(0);
+    crate::pricing::Usage {
+        input: n("input_tokens"),
+        cache_write: n("cache_creation_input_tokens"),
+        cache_read: n("cache_read_input_tokens"),
+        output: n("output_tokens"),
+    }
+}
+
 /// How many tokens `model`'s context holds, as far as Mirador can tell.
 ///
 /// A guess for now: Claude Code reports its window only to a statusline
@@ -387,6 +388,12 @@ impl<T: Feed> Cache<T> {
             *offset += complete as u64;
         }
         Some(stats)
+    }
+
+    /// Forgets every file `keep` does not keep, as a caller whose files
+    /// age out of what it reads does.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Path) -> bool) {
+        self.files.retain(|path, _| keep(path));
     }
 
     /// How far into `path` it has read: changes with every line it reads.

@@ -92,6 +92,17 @@ enum Command {
     },
     /// Command-pane run history (what ran, when, exit codes).
     Runs,
+    /// Each harness's account: plan or API key, its limits, and the tokens
+    /// it used in the last 5 hours and 7 days. Read from local files only.
+    /// With --tab or --split, shows the usage pane instead of printing.
+    Usage {
+        /// Open the usage pane in a new tab.
+        #[arg(long, conflicts_with = "split")]
+        tab: bool,
+        /// Open the usage pane as a split of this pane.
+        #[arg(long)]
+        split: bool,
+    },
     /// Drive the built-in browser pane (agents verify web changes here).
     Browser {
         #[command(subcommand)]
@@ -170,8 +181,19 @@ enum Command {
     /// the hook payload from stdin.
     #[command(hide = true)]
     ClaudeHook { event: String },
+    /// Claude Code status line wrapper: keeps the plan's limits Claude Code
+    /// pipes to its status line, then runs the user's own status line
+    /// command, if any, on the same input.
+    #[command(hide = true)]
+    ClaudeStatusline {
+        /// The status line command to run after, with the same stdin.
+        #[arg(long)]
+        run: Option<String>,
+    },
     /// Install or remove the Claude Code integration: the hooks that light
-    /// up Mirador tabs, and the `/mira-diff` slash command.
+    /// up Mirador tabs, the `/mira-diff` slash command, and (on macOS and
+    /// Linux) a wrapper in front of your status line that keeps your
+    /// plan's limits, your own status line still shown.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -679,6 +701,11 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Runs => Request::ListRuns,
+        Command::Usage { tab: false, split: false } => Request::Usage,
+        Command::Usage { tab, .. } => Request::UsageOpen {
+            pane_id: own_pane(),
+            target: if tab { "tab" } else { "split" }.to_string(),
+        },
         Command::Diff {
             spec,
             staged,
@@ -995,6 +1022,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::ClaudeHook { event } => return claude_hook(&event),
+        Command::ClaudeStatusline { run } => claude_statusline(run.as_deref()),
         Command::Hooks { action } => return hooks(&action),
         Command::Install => return install(),
         Command::Quit { end_sessions } => Request::Quit { end_sessions },
@@ -1159,6 +1187,12 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 }
             } else if map.contains_key("runs") {
                 render_runs(&data);
+            } else if let Some(accounts) = map.get("accounts") {
+                let accounts: Vec<cmux_protocol::AccountUsage> =
+                    serde_json::from_value(accounts.clone()).map_err(|e| format!("bad response: {e}"))?;
+                for line in accounts.iter().flat_map(|a| usage_lines(a, now_ms() / 1000)) {
+                    println!("{line}");
+                }
             } else if let Some(agents) = map
                 .get("agents")
                 .and_then(|v| v.as_array())
@@ -1813,6 +1847,65 @@ fn render_runs(data: &serde_json::Value) {
     }
 }
 
+/// An account as `mira usage` shows it: who it is, then its limits, then
+/// what it used. `now` is in Unix seconds, as `resets_at` is.
+fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
+    use cmux_protocol::Login;
+    let login = match account.login {
+        Login::Subscription => "subscription",
+        Login::ApiKey => "API key",
+        Login::PlanOrApiKey => "plan or API key",
+        Login::None => "not signed in",
+    };
+    let plan = account.plan.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
+    let email = account.email.as_deref().map(|e| format!(" · {e}")).unwrap_or_default();
+    let note = account.note.as_deref().map(|n| format!(" · {n}")).unwrap_or_default();
+    let mut lines = vec![format!("{} — {login}{plan}{email}{note}", account.harness.label())];
+    for w in &account.limits {
+        let resets = match w.resets_at {
+            Some(at) if at > now => format!(", resets in {}", until(at - now)),
+            Some(_) => ", reset since".to_string(),
+            None => String::new(),
+        };
+        if w.limit_reached {
+            lines.push(format!("  {} limit reached{resets}", w.name));
+        } else {
+            lines.push(format!("  {} {}% used{resets}", w.name, w.used_percent.round()));
+        }
+    }
+    if let Some(at) = account.as_of.filter(|_| !account.limits.is_empty()) {
+        lines.push(format!("  as of {}", cmux_core::usage::local_clock(at)));
+    }
+    if let Some(note) = &account.limits_note {
+        lines.push(format!("  {note}"));
+    }
+    for (name, t) in [("last 5h", &account.five_hours), ("last 7d", &account.seven_days)] {
+        let cost = t.cost.map(|c| format!(" · ${c:.2}")).unwrap_or_default();
+        lines.push(format!("  {name}: {} tokens{cost}", count(t.input + t.cache_write + t.cache_read + t.output)));
+    }
+    lines
+}
+
+/// How long until a reset, to the two largest units: `3d 4h`, `2h 5m`, `9m`.
+fn until(secs: u64) -> String {
+    let (d, h, m) = (secs / 86400, secs % 86400 / 3600, secs % 3600 / 60);
+    match (d, h) {
+        (0, 0) => format!("{m}m"),
+        (0, _) => format!("{h}h {m}m"),
+        _ => format!("{d}d {h}h"),
+    }
+}
+
+/// A token count short enough to read: `950`, `12.3K`, `7.4M`, `1.0B`.
+fn count(n: u64) -> String {
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..1_000_000 => format!("{:.1}K", n as f64 / 1e3),
+        1_000_000..1_000_000_000 => format!("{:.1}M", n as f64 / 1e6),
+        _ => format!("{:.1}B", n as f64 / 1e9),
+    }
+}
+
 fn render_tabs(data: &serde_json::Value) {
     let active = data["activeTab"].as_str().unwrap_or("");
     for tab in data["tabs"].as_array().unwrap_or(&Vec::new()) {
@@ -1957,6 +2050,42 @@ fn own_job() -> Option<String> {
 
 /// Handles a Claude Code hook event: payload arrives as JSON on stdin.
 /// Never fails loudly — a broken hook must not break Claude Code.
+/// Keeps the limits in what Claude Code pipes to its status line, then
+/// hands the same bytes to the user's own status line command, its output
+/// and exit code passed through. Nothing here may break the status line:
+/// a failure to read, parse or save is silent, and the user's command
+/// runs whatever happened. No socket, no network: one file write.
+fn claude_statusline(run: Option<&str>) -> ! {
+    use std::io::Read;
+    let mut input = Vec::new();
+    let _ = std::io::stdin().read_to_end(&mut input);
+    let _ = cmux_core::usage::save_claude_limits(&cmux_core::usage::claude_limits_path(), &input, now_ms());
+    std::process::exit(run.map_or(0, |command| run_statusline(command, &input)))
+}
+
+/// Runs a status line command with `input` on its stdin and our stdout as
+/// its own; its exit code, or 1 when it could not be run.
+#[cfg(unix)]
+fn run_statusline(command: &str, input: &[u8]) -> i32 {
+    use std::process::{Command, Stdio};
+    let Ok(mut child) = Command::new("sh").arg("-c").arg(command).stdin(Stdio::piped()).spawn() else {
+        return 1;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        // A command that does not read its input closes the pipe early.
+        let _ = stdin.write_all(input);
+    }
+    child.wait().ok().and_then(|s| s.code()).unwrap_or(1)
+}
+
+/// Windows has no `sh`, and which shell Claude Code runs a status line
+/// with there is not known here, so the wrapper runs nothing: Mirador does
+/// not put itself in front of a status line on Windows.
+#[cfg(not(unix))]
+fn run_statusline(_command: &str, _input: &[u8]) -> i32 {
+    0
+}
+
 fn claude_hook(event: &str) -> Result<(), String> {
     let mut input = String::new();
     use std::io::Read;
@@ -2051,6 +2180,84 @@ mod tests {
 
     fn parse(args: &[&str]) -> Command {
         Cli::try_parse_from(["mira"].iter().chain(args)).unwrap_or_else(|e| panic!("{args:?}: {e}")).command
+    }
+
+    #[test]
+    fn usage_shows_who_each_account_is_its_limits_and_what_it_used() {
+        use cmux_protocol::{AccountUsage, Harness, LimitWindow, Login, TokenTotals};
+        let now = 1_800_000_000;
+        let claude = AccountUsage {
+            harness: Harness::Claude,
+            login: Login::Subscription,
+            plan: Some("claude_max".into()),
+            email: Some("you@example.com".into()),
+            note: None,
+            limits: vec![],
+            as_of: None,
+            limits_note: None,
+            five_hours: TokenTotals { input: 200, output: 750, ..Default::default() },
+            seven_days: TokenTotals { cache_read: 1_234_567, ..Default::default() },
+            in_use: true,
+        };
+        assert_eq!(
+            usage_lines(&claude, now),
+            ["Claude Code — subscription (claude_max) · you@example.com", "  last 5h: 950 tokens", "  last 7d: 1.2M tokens"]
+        );
+        let codex = AccountUsage {
+            harness: Harness::Codex,
+            login: Login::ApiKey,
+            plan: None,
+            email: None,
+            note: None,
+            as_of: None,
+            limits_note: None,
+            limits: vec![
+                LimitWindow { used_percent: 71.4, window_minutes: 10080, name: "weekly".into(), resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59), limit_reached: false },
+                LimitWindow { used_percent: 5.0, window_minutes: 300, name: "5h".into(), resets_at: Some(now + 2 * 3600 + 5 * 60), limit_reached: false },
+                LimitWindow { used_percent: 90.0, window_minutes: 43200, name: "30 days".into(), resets_at: Some(now - 1), limit_reached: false },
+                LimitWindow { used_percent: 1.0, window_minutes: 60, name: "60m".into(), resets_at: None, limit_reached: false },
+            ],
+            five_hours: TokenTotals { input: 12_300, cost: Some(0.5), ..Default::default() },
+            seven_days: TokenTotals { cost: Some(0.0), ..Default::default() },
+            in_use: true,
+        };
+        assert_eq!(
+            usage_lines(&codex, now),
+            [
+                "Codex — API key",
+                "  weekly 71% used, resets in 3d 4h",
+                "  5h 5% used, resets in 2h 5m",
+                "  30 days 90% used, reset since",
+                "  60m 1% used",
+                "  last 5h: 12.3K tokens · $0.50",
+                "  last 7d: 0 tokens · $0.00",
+            ]
+        );
+        let declined = AccountUsage { email: None, note: Some("API key in env, declined".into()), ..claude.clone() };
+        assert_eq!(usage_lines(&declined, now)[0], "Claude Code — subscription (claude_max) · API key in env, declined");
+        let either = AccountUsage { login: Login::PlanOrApiKey, email: None, ..claude.clone() };
+        assert_eq!(usage_lines(&either, now)[0], "Claude Code — plan or API key (claude_max)");
+        let at = 1_800_000_000_000;
+        let full = AccountUsage {
+            limits: vec![LimitWindow {
+                used_percent: 100.0,
+                window_minutes: 300,
+                name: "5h".into(),
+                resets_at: Some(now + 3600),
+                limit_reached: true,
+            }],
+            as_of: Some(at),
+            email: None,
+            ..claude.clone()
+        };
+        assert_eq!(
+            usage_lines(&full, now)[1..3],
+            ["  5h limit reached, resets in 1h 0m".to_string(), format!("  as of {}", cmux_core::usage::local_clock(at))]
+        );
+        let how = AccountUsage { limits_note: Some("Limits appear after Claude Code's next reply.".into()), ..claude.clone() };
+        assert_eq!(usage_lines(&how, now)[1], "  Limits appear after Claude Code's next reply.");
+        let signed_out = AccountUsage { login: Login::None, plan: None, email: None, ..claude };
+        assert_eq!(usage_lines(&signed_out, now)[0], "Claude Code — not signed in");
     }
 
     #[test]

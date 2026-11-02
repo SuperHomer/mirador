@@ -16,6 +16,7 @@ import {
   setWallView,
   openAgentEditor,
   openSettings,
+  openUsage,
   openWhatsNew,
   zoomPane,
   setView,
@@ -294,6 +295,14 @@ export const actions: ActionDef[] = [
     // mirador.json's settings: the one pane, wherever it is, or a new one
     // where the editor would open.
     run: () => void openSettings(focusedPane() ?? null, opensInTab("editor")),
+  },
+  {
+    id: "usage",
+    title: "App: Usage",
+    group: "app",
+    // Each harness's account and what it used: the one pane, wherever it
+    // is, or a new one where the editor would open, as Settings does.
+    run: () => void openUsage(focusedPane() ?? null, opensInTab("editor")),
   },
   {
     id: "whats_new",

@@ -240,6 +240,70 @@ fn there_is_one_settings_pane() {
     assert_eq!(listed(&sb), [settings], "it comes back as the settings pane, not a shell");
 }
 
+/// `mira usage` reads the accounts from the sandbox's own home, the
+/// sidebar's Usage section draws them, and `--tab` opens the one usage
+/// pane, which draws without taking the page
+/// down, is focused again rather than opened twice, and comes back after
+/// a relaunch.
+#[test]
+fn the_usage_pane_opens_once_and_comes_back() {
+    e2e!();
+    let mut sb = Sandbox::new("usage");
+    std::fs::write(
+        sb.home.join(".claude.json"),
+        r#"{"oauthAccount":{"organizationType":"claude_max","emailAddress":"e2e@example.com"}}"#,
+    )
+    .unwrap();
+    let day = sb.home.join(".codex/sessions/2026/11/02");
+    std::fs::create_dir_all(&day).unwrap();
+    std::fs::write(sb.home.join(".codex/auth.json"), r#"{"auth_mode":"chatgpt","OPENAI_API_KEY":null}"#).unwrap();
+    let limits = r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":71.0,"window_minutes":10080,"resets_at":4102444800},"secondary":null,"plan_type":"plus"}}}"#;
+    std::fs::write(day.join("rollout-2026-11-02T10-00-00-a.jsonl"), format!("{limits}\n")).unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+    // The sidebar's Usage section draws these accounts from the start: a
+    // throw in it takes the page down, and the terminal stops answering.
+    sb.type_into(&first, "echo sidebar-$((40+2))\r");
+    sb.wait_for("the terminal beside the sidebar's usage", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "sidebar-42"))
+    });
+
+    let (code, out, err) = sb.mira(Some(&first), &["usage", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let accounts: Value = serde_json::from_str(&out).unwrap();
+    let (claude, codex) = (&accounts["accounts"][0], &accounts["accounts"][1]);
+    assert_eq!((&claude["login"], &claude["plan"], &claude["email"]), (&"subscription".into(), &"claude_max".into(), &"e2e@example.com".into()));
+    assert_eq!((&codex["login"], &codex["plan"]), (&"subscription".into(), &"plus".into()));
+    assert_eq!(codex["limits"][0]["name"], "weekly");
+
+    let (code, out, err) = sb.mira(Some(&first), &["usage", "--tab"]);
+    assert_eq!(code, 0, "{err}");
+    let usage = out.trim().to_string();
+    let listed = |sb: &Sandbox| -> Vec<String> {
+        sb.snapshot()["usagePanes"]
+            .as_array()
+            .map(|l| l.iter().filter_map(|u| u["paneId"].as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    sb.wait_for("the usage pane", LONG, || listed(&sb).contains(&usage).then_some(()));
+    assert_eq!(sb.panes(), [first.clone(), usage.clone()]);
+    // A render throw in the pane takes the whole tree down with it: the
+    // terminal in the other tab still answering says the page survived it.
+    sb.type_into(&first, "echo still-$((40+2))\r");
+    sb.wait_for("the terminal beside the usage pane", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
+    });
+
+    let (code, out, err) = sb.mira(Some(&first), &["usage", "--split"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), usage, "the open usage pane again");
+    assert_eq!(listed(&sb), std::slice::from_ref(&usage));
+
+    sb.quit();
+    sb.launch();
+    assert_eq!(listed(&sb), [usage], "it comes back as the usage pane, not a shell");
+}
+
 /// A graph pane is still a graph pane after a relaunch, on the same
 /// repository: it once came back as a plain shell, its repository never
 /// saved in the session.

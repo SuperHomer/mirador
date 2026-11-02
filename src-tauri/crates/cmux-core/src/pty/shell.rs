@@ -11,7 +11,9 @@ use std::path::Path;
 #[cfg(windows)]
 use std::path::PathBuf;
 #[cfg(unix)]
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 use portable_pty::CommandBuilder;
 
@@ -164,8 +166,99 @@ pub fn interactive(cwd: Option<&str>) -> CommandBuilder {
 /// agrees on (fish's `$PATH` is a list, and prints space-separated).
 #[cfg(unix)]
 pub fn interactive_path() -> Option<&'static str> {
-    static PATH: OnceLock<String> = OnceLock::new();
-    cached_path(&PATH, resolve_interactive_path)
+    shell_env().map(|env| env.path.as_str())
+}
+
+/// The shell's environment: remembered, or looked up now. One lookup runs
+/// at a time: a caller arriving while one runs waits for its answer
+/// rather than starting a second shell.
+#[cfg(unix)]
+fn shell_env() -> Option<&'static ShellEnv> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    if let Some(env) = SHELL_ENV.get() {
+        return Some(env);
+    }
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    cached(&SHELL_ENV, resolve_interactive_env)
+}
+
+/// What the interactive shell's environment says, from the one `env` run.
+#[cfg(unix)]
+static SHELL_ENV: OnceLock<ShellEnv> = OnceLock::new();
+
+/// The part of an interactive shell's environment Mirador keeps.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(unix), allow(dead_code))]
+struct ShellEnv {
+    path: String,
+    /// Whether `ANTHROPIC_API_KEY` is set, non-empty: only that, never
+    /// its value. Every pane, and so every Claude Code started in one,
+    /// gets it, though the app itself (launched from the Dock) does not.
+    anthropic_key: bool,
+}
+
+/// Whether the panes' shell sets `ANTHROPIC_API_KEY`, from the same
+/// lookup that finds their PATH. It never waits on the shell: without an
+/// answer yet it says None at once and starts a lookup in the background,
+/// so the next caller has one. Only reading what the startup lookup left
+/// made one slow startup permanent (it missed its deadline, nothing asked
+/// again, the key read as absent for the app's life); running the lookup
+/// in the caller made a slow rc cost every usage read 5 s. None too for a
+/// shell that is not POSIX. Windows has no such lookup (no `-ilc`):
+/// there, None, and the caller goes by its own environment.
+#[cfg(unix)]
+pub fn interactive_anthropic_key() -> Option<bool> {
+    if let Some(env) = SHELL_ENV.get() {
+        return Some(env.anthropic_key);
+    }
+    look_up_in_background();
+    None
+}
+
+/// After a lookup, how long before a background one may run again: a
+/// hung rc file is not re-run on every poll.
+#[cfg(unix)]
+const RETRY_GAP: Duration = Duration::from_secs(60);
+
+/// When a background lookup may start: none running, and none started
+/// within the gap.
+#[cfg(unix)]
+struct Gate {
+    in_flight: bool,
+    last: Option<Instant>,
+}
+
+#[cfg(unix)]
+impl Gate {
+    /// Whether to start one at `now`, marking it started if so.
+    fn begin(&mut self, now: Instant) -> bool {
+        if self.in_flight || self.last.is_some_and(|t| now.saturating_duration_since(t) < RETRY_GAP) {
+            return false;
+        }
+        self.in_flight = true;
+        self.last = Some(now);
+        true
+    }
+}
+
+#[cfg(unix)]
+static GATE: Mutex<Gate> = Mutex::new(Gate { in_flight: false, last: None });
+
+/// Starts one lookup off the caller's thread, if the gate lets it.
+#[cfg(unix)]
+fn look_up_in_background() {
+    if !GATE.lock().unwrap_or_else(|e| e.into_inner()).begin(Instant::now()) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let _ = shell_env();
+        GATE.lock().unwrap_or_else(|e| e.into_inner()).in_flight = false;
+    });
+}
+
+#[cfg(not(unix))]
+pub fn interactive_anthropic_key() -> Option<bool> {
+    None
 }
 
 /// Memoizes a *successful* lookup only.
@@ -178,15 +271,12 @@ pub fn interactive_path() -> Option<&'static str> {
 /// found", for a binary that pane's own shell finds fine. A failure is
 /// now just a miss: the next command pane asks again.
 #[cfg(unix)]
-fn cached_path(
-    cache: &'static OnceLock<String>,
-    resolve: impl FnOnce() -> Option<String>,
-) -> Option<&'static str> {
-    if let Some(path) = cache.get() {
-        return Some(path.as_str());
+fn cached<T>(cache: &'static OnceLock<T>, resolve: impl FnOnce() -> Option<T>) -> Option<&'static T> {
+    if let Some(found) = cache.get() {
+        return Some(found);
     }
     let resolved = resolve()?;
-    Some(cache.get_or_init(|| resolved).as_str())
+    Some(cache.get_or_init(|| resolved))
 }
 
 /// Resolves the PATH ahead of the first command pane, off the main
@@ -195,19 +285,15 @@ fn cached_path(
 /// which is also when a restored agent pane wants to rerun.
 #[cfg(unix)]
 pub fn warm_interactive_path() {
-    std::thread::spawn(|| {
-        let _ = interactive_path();
-    });
+    look_up_in_background();
 }
 
 #[cfg(not(unix))]
 pub fn warm_interactive_path() {}
 
 #[cfg(unix)]
-fn resolve_interactive_path() -> Option<String> {
+fn resolve_interactive_env() -> Option<ShellEnv> {
     use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
-
     let (shell, _) = configured().unwrap_or_else(|| (platform_default(), Vec::new()));
     if Kind::of(&shell) != Kind::Posix {
         return None;
@@ -238,11 +324,24 @@ fn resolve_interactive_path() -> Option<String> {
         }
     }
     let out = child.wait_with_output().ok()?;
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .find_map(|line| line.strip_prefix("PATH="))
-        .map(str::to_string)
-        .filter(|p| !p.is_empty())
+    parse_env(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `env`'s output, read for the PATH (none, or an empty one, is no
+/// answer) and for whether `ANTHROPIC_API_KEY` has a value. The key's
+/// value is looked at only to see that it is not empty, and not kept.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn parse_env(out: &str) -> Option<ShellEnv> {
+    let mut path = None;
+    let mut anthropic_key = false;
+    for line in out.lines() {
+        if let Some(p) = line.strip_prefix("PATH=") {
+            path = Some(p.to_string());
+        } else if let Some(key) = line.strip_prefix("ANTHROPIC_API_KEY=") {
+            anthropic_key = !key.is_empty();
+        }
+    }
+    Some(ShellEnv { path: path.filter(|p| !p.is_empty())?, anthropic_key })
 }
 
 /// The same shell, running one command line.
@@ -386,6 +485,7 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static CACHE: OnceLock<String> = OnceLock::new();
+        let cached_path = |cache, resolve| cached(cache, resolve).map(String::as_str);
         static CALLS: AtomicUsize = AtomicUsize::new(0);
 
         let flaky = || {
@@ -405,6 +505,22 @@ mod tests {
         assert_eq!(CALLS.load(Ordering::SeqCst), 2, "a hit must not re-resolve");
     }
 
+    /// A background lookup starts only when none is running and none
+    /// started within the gap: a slow or hung rc file is run at most once
+    /// a minute, however often usage asks.
+    #[cfg(unix)]
+    #[test]
+    fn a_background_lookup_waits_for_the_last_and_for_the_gap() {
+        let t0 = Instant::now();
+        let mut gate = Gate { in_flight: false, last: None };
+        assert!(gate.begin(t0), "the first one starts");
+        assert!(!gate.begin(t0 + Duration::from_secs(1)), "not while it runs");
+        gate.in_flight = false;
+        assert!(!gate.begin(t0 + Duration::from_secs(30)), "not within the gap of the last");
+        assert!(gate.begin(t0 + RETRY_GAP), "one after the gap");
+        assert!(!gate.begin(t0 + RETRY_GAP * 3), "and again not while that one runs");
+    }
+
     /// The whole point: a tool on the interactive PATH must be reachable.
     #[cfg(target_os = "macos")]
     #[test]
@@ -413,6 +529,17 @@ mod tests {
             return; // no usable login shell on this machine
         };
         assert!(path.contains('/'), "got: {path:?}");
+    }
+
+    #[test]
+    fn the_shells_env_says_whether_an_anthropic_key_is_set() {
+        let key = |line: &str| parse_env(&format!("HOME=/h\nPATH=/usr/bin:/opt/x\n{line}\nTERM=x\n")).map(|e| e.anthropic_key);
+        assert_eq!(key("ANTHROPIC_API_KEY=sk-test-123"), Some(true));
+        assert_eq!(key("ANTHROPIC_API_KEY="), Some(false));
+        assert_eq!(key("OTHER=1"), Some(false));
+        // The PATH is still what the lookup is for: without one, no answer.
+        assert_eq!(parse_env("ANTHROPIC_API_KEY=sk-test\n"), None);
+        assert_eq!(parse_env("PATH=/usr/bin\n").map(|e| e.path), Some("/usr/bin".to_string()));
     }
 
     #[test]

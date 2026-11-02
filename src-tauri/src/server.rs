@@ -460,6 +460,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let runs = crate::runs::list(&state);
             Ok(json!({ "runs": runs }))
         }
+        // Every connection has its own thread, so reading the files here
+        // holds up no one else; the cache makes all but the first read
+        // only what was appended.
+        Request::Usage => Ok(json!({ "accounts": state.usage.lock().unwrap().accounts() })),
+        Request::UsageOpen { pane_id, target } => {
+            let pane = crate::commands::open_usage(app.clone(), app.state(), pane_id, target == "tab")?;
+            Ok(json!({ "paneId": pane }))
+        }
         Request::BrowserOpen { url, target } => {
             let pane_id = crate::commands::open_browser(
                 app.clone(),

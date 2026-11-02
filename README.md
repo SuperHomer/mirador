@@ -79,6 +79,14 @@ downloads, the feature tour and the keybinding reference.
   can't; elsewhere the card shows the URL
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
+- **Account usage**, always in the sidebar: a row per Claude Code or
+  Codex account you use, its most used limit filling up; open one for its
+  plan, reset times and tokens over 5 hours and 7 days, with a cost for
+  Claude Code on an API key where the model's price is known. Claude's
+  plan limits come from Claude Code's status line once `mira hooks setup`
+  wraps it (your own line still shows), or read "limit reached" after a
+  refused request. The Usage pane (`mira usage --tab`, *App: Usage*) and
+  `mira usage` show it in full. Read from local files, never the network
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
   it, reads its console errors — while you watch (`mira browser …`)
@@ -94,8 +102,10 @@ downloads, the feature tour and the keybinding reference.
   `tokyo-night`, `gruvbox-dark`, `nord`), configurable keybindings,
   command palette (`mod+K`)
 - **Claude Code integration**: lights up tabs when your agent needs you,
-  enables per-pane session resume, and adds a `/mira-diff` skill for
-  reviewing the turn's work. Mirador offers to set it up on first launch
+  enables per-pane session resume, adds a `/mira-diff` skill for
+  reviewing the turn's work, and (macOS, Linux) wraps your status line to
+  keep your plan's limits, your own line still shown. Mirador offers to
+  set it up on first launch
   when it finds Claude Code (or: palette → *Set Up Claude Code
   Integration*, or `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are

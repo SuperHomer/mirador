@@ -53,6 +53,19 @@ A launch that finds hooks from an earlier version, which installed fewer
 events, adds the missing ones — calling the same `mira` the hooks already
 call.
 
+On macOS and Linux it also puts `mira claude-statusline` in front of your
+`statusLine`, because the status line is the only place Claude Code tells
+your plan's limits (`rate_limits`): the wrapper keeps the latest in
+`claude-limits.json` in Mirador's data directory, then runs your own
+status line command with the same input, so what you see is unchanged. Your
+command becomes `"<mira>" claude-statusline --run '<your command>'`, kept
+whole in one quoted argument, its other keys (`padding`, …) untouched;
+`mira hooks remove` puts it back exactly. With no status line of your own,
+setup adds the bare wrapper, which prints nothing; remove takes it out. A
+status line that is not a `command` is left as it is. Windows is skipped:
+Claude Code runs status lines there through Git Bash or PowerShell, and
+the wrapper does not run your command on Windows.
+
 `/mira-diff` is the human's side of `mira diff`: typing it in a Claude Code
 pane opens the same review surface, with the same arguments. It sets
 `disable-model-invocation`, because an agent that wants a diff pane should
@@ -773,6 +786,76 @@ turn — each action opening to its input and output. It reads the trail
 again two seconds after each read while it is shown and the window is
 visible.
 
+### Account usage
+
+```bash
+mira usage            # each harness's account, its limits, what it used
+mira usage --json     # the same as data
+mira usage --tab      # the usage pane, in a tab of its own
+mira usage --split    # ...or as a split of this pane
+```
+
+One block per harness: how it is signed in (a subscription and its plan,
+an API key, `plan or API key` when that cannot be told, or `not signed
+in`) and the account's email where the
+harness keeps one; then each limit window the plan reports, with how
+much is used and when it resets; then the tokens used in the last 5
+hours and the last 7 days, the plans' own windows, with their cost at
+list prices when the login is an API key. On a plan the cost is left
+out: the list price is not what a plan pays.
+
+```
+Claude Code — subscription (claude_max) · you@example.com
+  weekly 64% used, resets in 2d 3h
+  5h 23% used, resets in 1h 40m
+  as of 14:52
+  last 5h: 7.4M tokens
+  last 7d: 1.0B tokens
+Codex — subscription (plus)
+  weekly 71% used, resets in 3d 4h
+  last 5h: 260.8K tokens
+  last 7d: 82.6M tokens
+```
+
+It never touches the network: everything is read from the harnesses' own
+files, and never a credential — only the shape of the login.
+
+- **Claude Code**: the sign-in in `.claude.json` (in `$CLAUDE_CONFIG_DIR`,
+  else the home directory). An `apiKeyHelper` in `settings.json` makes
+  it an API key. `ANTHROPIC_API_KEY` in the app's environment does only
+  if you said yes to it: Claude Code asks once and keeps the answer in
+  `.claude.json` (`customApiKeyResponses`), of which only how many keys
+  were approved and rejected is read. Approved: an API key. Declined: the
+  plan, with `API key in env, declined`. Both, for different keys: `plan
+  or API key`. Never asked: an API key, as Claude Code will offer it.
+  Whether the key is set is asked of the panes' login shell (the one
+  `-ilc env` run that finds their PATH, done in the background) as well
+  as the app's own environment, so a Dock launch sees a key `.zshrc`
+  exports; on Windows, the app's environment only. A plan's limits are
+  the 5-hour and weekly windows Claude Code last gave its status line,
+  which the wrapper `mira hooks setup` installs keeps (see section 2),
+  "as of" when it did; a window whose reset has passed since reads 0%.
+  A request the plan refused, logged in a transcript, shows its window
+  as `limit reached` until it resets, unless the status line spoke
+  later. With no limits yet, the account says how to get them: run
+  `mira hooks setup`, or wait for Claude Code's next reply once the
+  wrapper is in. An API key has no plan limits. The tokens are added up
+  from the transcripts under `projects/`, subagents' included.
+- **Codex**: the login in `$CODEX_HOME/auth.json` (`~/.codex`); a key
+  in `OPENAI_API_KEY` counts only when that file holds no login, as
+  Codex prefers its stored one. The limits and the plan are the ones
+  the newest rollout last recorded, so they are as of Codex's last turn.
+  It has no cost: Mirador knows no OpenAI prices.
+
+Codex's limits are "as of" the rollout line that carried them.
+
+The usage pane (also *App: Usage* in the palette) shows the same, a card
+per account with a bar per limit window. It reads the files when it
+opens and on its Refresh button, never on a timer. As with the settings
+pane there is only one: when one is open, in any tab, it is focused and
+its pane id printed, whatever the flags say. It comes back after a
+relaunch and reads the files again.
+
 ## 7. Workspace control
 
 ```bash
@@ -843,7 +926,7 @@ agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
-agent_trail agent_trail_detail`. Requests are
+agent_trail agent_trail_detail usage usage_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

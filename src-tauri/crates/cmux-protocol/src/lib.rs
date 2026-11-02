@@ -263,6 +263,9 @@ pub struct WorkspaceSnapshot {
     /// Settings panes: at most one, showing mirador.json's settings.
     #[serde(default)]
     pub settings_panes: Vec<SettingsPane>,
+    /// Usage panes: at most one, showing each harness's account.
+    #[serde(default)]
+    pub usage_panes: Vec<UsagePane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -688,6 +691,16 @@ pub enum Request {
     },
     /// Command-pane run history (the agent activity audit log).
     ListRuns,
+    /// Each harness's account: how it is signed in, its plan's limits, and
+    /// what it used lately, read from its own files.
+    Usage,
+    /// Shows the usage pane, or opens one: a split of `pane_id`, or a tab
+    /// with `target` "tab".
+    UsageOpen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+    },
     /// Opens a browser pane (split of the focused pane, or a new tab).
     BrowserOpen {
         url: String,
@@ -2035,6 +2048,13 @@ pub struct SettingsPane {
     pub path: String,
 }
 
+/// A pane showing each harness's account and what it used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsagePane {
+    pub pane_id: String,
+}
+
 /// A pane showing a commit graph, and the repository it reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2115,4 +2135,85 @@ pub struct DiffResult {
     /// Header line: "uncommitted changes", a commit subject, a range.
     pub label: String,
     pub files: Vec<DiffFile>,
+}
+
+/// How a harness is signed in, which is what its usage is billed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Login {
+    /// A plan's account (Claude Pro/Max, ChatGPT): usage counts against
+    /// the plan's limits.
+    Subscription,
+    /// An API key: usage is billed per token.
+    ApiKey,
+    /// A plan's account and an environment key Claude Code was told both
+    /// yes and no about, for different keys: either may be what is billed.
+    PlanOrApiKey,
+    /// Not signed in, or nothing says how.
+    None,
+}
+
+/// One of a plan's rate-limit windows, as the harness last reported it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitWindow {
+    pub used_percent: f64,
+    /// How long the window is: 300 for five hours, 10080 for a week.
+    pub window_minutes: u64,
+    /// What to call it: `5h`, `weekly` (`cmux_core::usage::window_name`).
+    #[serde(default)]
+    pub name: String,
+    /// When it resets, in Unix seconds. Older Codex versions wrote none.
+    #[serde(default)]
+    pub resets_at: Option<u64>,
+    /// Known only from a request the plan refused: the window is full.
+    #[serde(default)]
+    pub limit_reached: bool,
+}
+
+/// The tokens an account used over a stretch of time, by how each is
+/// priced (as `cmux_core::pricing::Usage` splits them).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenTotals {
+    pub input: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
+    pub output: u64,
+    /// At list prices, for an API key only: on a plan the dollars are not
+    /// what is paid. Models with no known price add tokens and no cost.
+    pub cost: Option<f64>,
+}
+
+/// What a harness's account is, read from its own files
+/// (`cmux_core::usage`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsage {
+    pub harness: Harness,
+    pub login: Login,
+    /// The plan as the harness names it (`claude_max`, `plus`).
+    pub plan: Option<String>,
+    pub email: Option<String>,
+    /// What else the login says: "API key in env, declined".
+    #[serde(default)]
+    pub note: Option<String>,
+    /// The plan's windows, the most used first. Claude Code's come from
+    /// its status line (`mira claude-statusline`) or a refused request.
+    pub limits: Vec<LimitWindow>,
+    /// Unix millis of what the limits were read from: Claude's status line
+    /// snapshot or refusal, Codex's rollout line.
+    #[serde(default)]
+    pub as_of: Option<u64>,
+    /// Why a plan shows no limits, and how to get them.
+    #[serde(default)]
+    pub limits_note: Option<String>,
+    /// What it used in the last five hours and the last seven days: the
+    /// lengths of the plans' own windows.
+    pub five_hours: TokenTotals,
+    pub seven_days: TokenTotals,
+    /// Signed in, or used lately: false for a harness never used here,
+    /// which the sidebar leaves out.
+    #[serde(default)]
+    pub in_use: bool,
 }

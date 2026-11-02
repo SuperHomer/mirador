@@ -71,6 +71,9 @@ pub struct SessionPane {
     pub agent_editor: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub settings: bool,
+    /// Usage pane: it comes back empty and reads the files again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub usage: bool,
     /// Graph pane: the repository it draws, and the diff pane it
     /// retargets when a commit is clicked (ignored if that pane is gone).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -199,6 +202,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_wall: false,
                         agent_editor: m.is_some_and(|m| m.agent_editor),
                         settings: m.is_some_and(|m| m.settings),
+                        usage: m.is_some_and(|m| m.usage),
                         graph_repo: m.and_then(|m| m.graph_repo.clone()),
                         graph_diff_pane: m.and_then(|m| m.graph_diff_pane.clone()),
                         whats_new: m.and_then(|m| m.whats_new.clone()),
@@ -322,6 +326,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_prompt: p.agent_prompt,
                     agent_editor: p.agent_editor,
                     settings: p.settings,
+                    usage: p.usage,
                     graph_repo: p.graph_repo,
                     graph_diff_pane: p.graph_diff_pane,
                     whats_new: p.whats_new,
@@ -617,6 +622,20 @@ mod tests {
         assert_eq!(rmeta[&news].whats_new_since.as_deref(), Some("0.1.35"));
         // A plain shell's entry gains none of them.
         assert!(!json.contains("\"graph_repo\":null") && !json.contains("whats_new\":null"));
+    }
+
+    #[test]
+    fn a_usage_pane_comes_back_as_one() {
+        let mut ws = Workspace::default();
+        let shell = ws.focused_pane();
+        let usage = ws.split_pane(&shell, SplitDir::Row).unwrap();
+        let meta = HashMap::from([(usage.clone(), PaneMeta { usage: true, ..Default::default() })]);
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        let (_, rmeta) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert!(rmeta[&usage].usage);
+        assert!(!rmeta.get(&shell).is_some_and(|m| m.usage));
+        // A shell's entry does not say it is not one.
+        assert_eq!(json.matches("\"usage\"").count(), 1);
     }
 
     #[test]
