@@ -94,7 +94,15 @@ enum Command {
     Runs,
     /// Each harness's account: plan or API key, its limits, and the tokens
     /// it used in the last 5 hours and 7 days. Read from local files only.
-    Usage,
+    /// With --tab or --split, shows the usage pane instead of printing.
+    Usage {
+        /// Open the usage pane in a new tab.
+        #[arg(long, conflicts_with = "split")]
+        tab: bool,
+        /// Open the usage pane as a split of this pane.
+        #[arg(long)]
+        split: bool,
+    },
     /// Drive the built-in browser pane (agents verify web changes here).
     Browser {
         #[command(subcommand)]
@@ -682,7 +690,11 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::Runs => Request::ListRuns,
-        Command::Usage => Request::Usage,
+        Command::Usage { tab: false, split: false } => Request::Usage,
+        Command::Usage { tab, .. } => Request::UsageOpen {
+            pane_id: own_pane(),
+            target: if tab { "tab" } else { "split" }.to_string(),
+        },
         Command::Diff {
             spec,
             staged,
@@ -1836,18 +1848,12 @@ fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
     let email = account.email.as_deref().map(|e| format!(" · {e}")).unwrap_or_default();
     let mut lines = vec![format!("{} — {login}{plan}{email}", account.harness.label())];
     for w in &account.limits {
-        let window = match w.window_minutes {
-            300 => "5h".to_string(),
-            10080 => "weekly".to_string(),
-            43200 => "30 days".to_string(),
-            m => format!("{m}m"),
-        };
         let resets = match w.resets_at {
             Some(at) if at > now => format!(", resets in {}", until(at - now)),
             Some(_) => ", reset since".to_string(),
             None => String::new(),
         };
-        lines.push(format!("  {window} {}% used{resets}", w.used_percent.round()));
+        lines.push(format!("  {} {}% used{resets}", w.name, w.used_percent.round()));
     }
     for (name, t) in [("last 5h", &account.five_hours), ("last 7d", &account.seven_days)] {
         let cost = t.cost.map(|c| format!(" · ${c:.2}")).unwrap_or_default();
@@ -2139,10 +2145,10 @@ mod tests {
             plan: None,
             email: None,
             limits: vec![
-                LimitWindow { used_percent: 71.4, window_minutes: 10080, resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59) },
-                LimitWindow { used_percent: 5.0, window_minutes: 300, resets_at: Some(now + 2 * 3600 + 5 * 60) },
-                LimitWindow { used_percent: 90.0, window_minutes: 43200, resets_at: Some(now - 1) },
-                LimitWindow { used_percent: 1.0, window_minutes: 60, resets_at: None },
+                LimitWindow { used_percent: 71.4, window_minutes: 10080, name: "weekly".into(), resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59) },
+                LimitWindow { used_percent: 5.0, window_minutes: 300, name: "5h".into(), resets_at: Some(now + 2 * 3600 + 5 * 60) },
+                LimitWindow { used_percent: 90.0, window_minutes: 43200, name: "30 days".into(), resets_at: Some(now - 1) },
+                LimitWindow { used_percent: 1.0, window_minutes: 60, name: "60m".into(), resets_at: None },
             ],
             five_hours: TokenTotals { input: 12_300, cost: Some(0.5), ..Default::default() },
             seven_days: TokenTotals { cost: Some(0.0), ..Default::default() },

@@ -778,6 +778,8 @@ visible.
 ```bash
 mira usage            # each harness's account, its limits, what it used
 mira usage --json     # the same as data
+mira usage --tab      # the usage pane, in a tab of its own
+mira usage --split    # ...or as a split of this pane
 ```
 
 One block per harness: how it is signed in (a subscription and its plan,
@@ -816,6 +818,13 @@ files, and never a credential — only the shape of the login.
 
 The app reads its own environment, not a shell's: a key exported in a
 shell's profile is not seen by an app started from the Dock.
+
+The usage pane (also *App: Usage* in the palette) shows the same, a card
+per account with a bar per limit window. It reads the files when it
+opens and on its Refresh button, never on a timer. As with the settings
+pane there is only one: when one is open, in any tab, it is focused and
+its pane id printed, whatever the flags say. It comes back after a
+relaunch and reads the files again.
 
 ## 7. Workspace control
 
@@ -887,7 +896,7 @@ agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
-agent_trail agent_trail_detail usage`. Requests are
+agent_trail agent_trail_detail usage usage_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

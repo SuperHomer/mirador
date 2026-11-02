@@ -119,6 +119,13 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .map(|(pane, _)| cmux_protocol::SettingsPane { pane_id: pane.clone(), path: path.clone() })
             .collect()
     };
+    snapshot.usage_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter(|(_, m)| m.usage)
+            .map(|(pane, _)| cmux_protocol::UsagePane { pane_id: pane.clone() })
+            .collect()
+    };
     snapshot.agents = agent_infos(state);
     let per_tab = state.config.lock().unwrap().agents_per_tab;
     cmux_core::wall::fill(&mut snapshot, per_tab);
@@ -1158,6 +1165,38 @@ fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<Str
 pub fn claude_integration_offer() -> bool {
     use cmux_core::claude_integration as ci;
     mira_binary().is_some() && ci::should_offer(&ci::status(), ci::offer_answered())
+}
+
+/// Shows the usage pane if one is open, in whatever tab: it shows every
+/// account there is, so a second would only show them twice. Otherwise
+/// opens one, a split of `pane_id` (the focused pane when absent) or a
+/// tab of its own.
+#[tauri::command]
+pub fn open_usage(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+) -> Result<String, String> {
+    if let Some(pane) = show_existing_pane(&app, &state, |m| m.usage) {
+        return Ok(pane);
+    }
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let pane = if tab {
+        state.workspace.lock().unwrap().new_tab().1
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, cmux_protocol::SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    state.meta.lock().unwrap().entry(pane.clone()).or_default().usage = true;
+    emit_workspace(&app);
+    Ok(pane)
 }
 
 /// Each harness's account and what it used, read from its own files:

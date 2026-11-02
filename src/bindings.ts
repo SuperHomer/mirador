@@ -376,6 +376,8 @@ export interface LimitWindow {
   usedPercent: number;
   /** 300 for five hours, 10080 for a week. */
   windowMinutes: number;
+  /** What to call it, by its length: `5h`, `weekly`, `30 days`. */
+  name: string;
   /** Unix seconds; null from older Codex versions. */
   resetsAt: number | null;
 }
@@ -642,6 +644,7 @@ export interface WorkspaceSnapshot {
   graphPanes: GraphPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
+  usagePanes: UsagePaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;
@@ -973,6 +976,11 @@ export interface LayerWeight {
 export const teamCost = (team: string, paneId: string | null) =>
   invoke<TeamWeight>("team_cost", { team, paneId });
 
+/** The usage pane: at most one, showing each harness's account. */
+export interface UsagePaneInfo {
+  paneId: string;
+}
+
 /** The settings pane: at most one, showing mirador.json's settings. */
 export interface SettingsPaneInfo {
   paneId: string;
@@ -1182,6 +1190,9 @@ export const getAgentTrail = (paneId: string, turns: number | null, sinceMs: num
 export const getTrailDetail = (paneId: string, actionId: string) =>
   invoke<ActionDetail>("get_trail_detail", { paneId, actionId });
 export const accountUsage = () => invoke<AccountUsage[]>("account_usage");
+/** Shows the usage pane, or opens one beside `paneId` or in a tab. */
+export const openUsage = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_usage", { paneId, tab });
 export const loadGraph = (paneId: string, limit: number | null = null) =>
   invoke<GraphResult>("load_graph", { paneId, limit });
 export const graphShowCommit = (paneId: string, sha: string) =>

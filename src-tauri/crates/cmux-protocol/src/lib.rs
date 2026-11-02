@@ -263,6 +263,9 @@ pub struct WorkspaceSnapshot {
     /// Settings panes: at most one, showing mirador.json's settings.
     #[serde(default)]
     pub settings_panes: Vec<SettingsPane>,
+    /// Usage panes: at most one, showing each harness's account.
+    #[serde(default)]
+    pub usage_panes: Vec<UsagePane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -691,6 +694,13 @@ pub enum Request {
     /// Each harness's account: how it is signed in, its plan's limits, and
     /// what it used lately, read from its own files.
     Usage,
+    /// Shows the usage pane, or opens one: a split of `pane_id`, or a tab
+    /// with `target` "tab".
+    UsageOpen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+    },
     /// Opens a browser pane (split of the focused pane, or a new tab).
     BrowserOpen {
         url: String,
@@ -2038,6 +2048,13 @@ pub struct SettingsPane {
     pub path: String,
 }
 
+/// A pane showing each harness's account and what it used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsagePane {
+    pub pane_id: String,
+}
+
 /// A pane showing a commit graph, and the repository it reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2140,6 +2157,9 @@ pub struct LimitWindow {
     pub used_percent: f64,
     /// How long the window is: 300 for five hours, 10080 for a week.
     pub window_minutes: u64,
+    /// What to call it: `5h`, `weekly` (`cmux_core::usage::window_name`).
+    #[serde(default)]
+    pub name: String,
     /// When it resets, in Unix seconds. Older Codex versions wrote none.
     #[serde(default)]
     pub resets_at: Option<u64>,

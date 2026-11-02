@@ -6025,6 +6025,98 @@ button.tb-line-row:hover {
   cursor: pointer;
 }
 
+.usage-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.usage-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-alt);
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* Wraps rather than shrinks: with the name the only item that could give
+   way, it would collapse to nothing (see the diff header). */
+.usage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.usage-harness {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.usage-login {
+  color: var(--subtext);
+}
+
+.usage-email {
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.usage-limit,
+.usage-total {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.usage-limit-name,
+.usage-total-name {
+  flex-shrink: 0;
+  width: 84px;
+  color: var(--subtext);
+}
+
+.usage-bar {
+  flex: 1;
+  min-width: 60px;
+  margin-top: 0;
+}
+
+.usage-bar-fill {
+  background: var(--accent);
+}
+
+.usage-limit-used {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.usage-muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.usage-limit .usage-muted {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .editor-menu-anchor {
   position: relative;
   flex-shrink: 0;

@@ -186,6 +186,7 @@ export default function App() {
               graphPanes={snapshot.graphPanes}
               agentEditorPanes={snapshot.agentEditorPanes ?? []}
               settingsPanes={snapshot.settingsPanes ?? []}
+              usagePanes={snapshot.usagePanes ?? []}
             />
           </TabLayer>
         ))}

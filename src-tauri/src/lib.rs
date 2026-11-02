@@ -397,6 +397,7 @@ pub fn run() {
             commands::get_agent_trail,
             commands::get_trail_detail,
             commands::account_usage,
+            commands::open_usage,
             commands::mark_pane_read,
             commands::zoom_pane,
             commands::load_graph,

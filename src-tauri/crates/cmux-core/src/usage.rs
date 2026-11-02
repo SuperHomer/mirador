@@ -289,11 +289,24 @@ fn last_rate_limits(rollout: &Path) -> Option<Value> {
 }
 
 fn limit_window(w: &Value) -> Option<LimitWindow> {
+    let window_minutes = w["window_minutes"].as_u64()?;
     Some(LimitWindow {
         used_percent: w["used_percent"].as_f64()?,
-        window_minutes: w["window_minutes"].as_u64()?,
+        window_minutes,
+        name: window_name(window_minutes),
         resets_at: w["resets_at"].as_u64(),
     })
+}
+
+/// A limit window by its length, as the plans name theirs: `5h`,
+/// `weekly`, `30 days`, else its minutes.
+pub fn window_name(minutes: u64) -> String {
+    match minutes {
+        300 => "5h".to_string(),
+        10080 => "weekly".to_string(),
+        43200 => "30 days".to_string(),
+        m => format!("{m}m"),
+    }
 }
 
 /// Every harness's account, from where each keeps it on this machine.
@@ -494,7 +507,13 @@ mod tests {
         assert_eq!(usage.plan.as_deref(), Some("plus"));
         // The sign-in Codex stored wins over a key in the environment.
         assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
-        assert_eq!(usage.limits, vec![LimitWindow { used_percent: 42.5, window_minutes: 300, resets_at: Some(1795590902) }]);
+        let five_hours = LimitWindow { used_percent: 42.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902) };
+        assert_eq!(usage.limits, vec![five_hours]);
+    }
+
+    #[test]
+    fn a_window_is_named_by_its_length() {
+        assert_eq!([300, 10080, 43200, 60].map(window_name), ["5h", "weekly", "30 days", "60m"]);
     }
 
     #[test]
