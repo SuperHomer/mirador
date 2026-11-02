@@ -11,7 +11,9 @@ use std::path::Path;
 #[cfg(windows)]
 use std::path::PathBuf;
 #[cfg(unix)]
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 use portable_pty::CommandBuilder;
 
@@ -164,7 +166,20 @@ pub fn interactive(cwd: Option<&str>) -> CommandBuilder {
 /// agrees on (fish's `$PATH` is a list, and prints space-separated).
 #[cfg(unix)]
 pub fn interactive_path() -> Option<&'static str> {
-    cached(&SHELL_ENV, resolve_interactive_env).map(|env| env.path.as_str())
+    shell_env().map(|env| env.path.as_str())
+}
+
+/// The shell's environment: remembered, or looked up now. One lookup runs
+/// at a time: a caller arriving while one runs waits for its answer
+/// rather than starting a second shell.
+#[cfg(unix)]
+fn shell_env() -> Option<&'static ShellEnv> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    if let Some(env) = SHELL_ENV.get() {
+        return Some(env);
+    }
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    cached(&SHELL_ENV, resolve_interactive_env)
 }
 
 /// What the interactive shell's environment says, from the one `env` run.
@@ -183,22 +198,62 @@ struct ShellEnv {
 }
 
 /// Whether the panes' shell sets `ANTHROPIC_API_KEY`, from the same
-/// lookup that finds their PATH: a remembered answer, or the lookup run
-/// now when none has succeeded yet. Only reading what the lookup left
-/// made one slow startup permanent — the warm-up missed its deadline, and
-/// nothing asked again until a command pane did, so the key read as
-/// absent for the app's whole life. None for a shell that is not POSIX,
-/// or a lookup that fails again. It can run the shell (up to 5 s), so it
-/// is for a thread that may block. Windows has no such lookup (no
-/// `-ilc`): there, None, and the caller goes by its own environment.
+/// lookup that finds their PATH. It never waits on the shell: without an
+/// answer yet it says None at once and starts a lookup in the background,
+/// so the next caller has one. Only reading what the startup lookup left
+/// made one slow startup permanent (it missed its deadline, nothing asked
+/// again, the key read as absent for the app's life); running the lookup
+/// in the caller made a slow rc cost every usage read 5 s. None too for a
+/// shell that is not POSIX. Windows has no such lookup (no `-ilc`):
+/// there, None, and the caller goes by its own environment.
 #[cfg(unix)]
 pub fn interactive_anthropic_key() -> Option<bool> {
-    anthropic_key(&SHELL_ENV, resolve_interactive_env)
+    if let Some(env) = SHELL_ENV.get() {
+        return Some(env.anthropic_key);
+    }
+    look_up_in_background();
+    None
+}
+
+/// After a lookup, how long before a background one may run again: a
+/// hung rc file is not re-run on every poll.
+#[cfg(unix)]
+const RETRY_GAP: Duration = Duration::from_secs(60);
+
+/// When a background lookup may start: none running, and none started
+/// within the gap.
+#[cfg(unix)]
+struct Gate {
+    in_flight: bool,
+    last: Option<Instant>,
 }
 
 #[cfg(unix)]
-fn anthropic_key(cache: &'static OnceLock<ShellEnv>, resolve: impl FnOnce() -> Option<ShellEnv>) -> Option<bool> {
-    cached(cache, resolve).map(|env| env.anthropic_key)
+impl Gate {
+    /// Whether to start one at `now`, marking it started if so.
+    fn begin(&mut self, now: Instant) -> bool {
+        if self.in_flight || self.last.is_some_and(|t| now.saturating_duration_since(t) < RETRY_GAP) {
+            return false;
+        }
+        self.in_flight = true;
+        self.last = Some(now);
+        true
+    }
+}
+
+#[cfg(unix)]
+static GATE: Mutex<Gate> = Mutex::new(Gate { in_flight: false, last: None });
+
+/// Starts one lookup off the caller's thread, if the gate lets it.
+#[cfg(unix)]
+fn look_up_in_background() {
+    if !GATE.lock().unwrap_or_else(|e| e.into_inner()).begin(Instant::now()) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let _ = shell_env();
+        GATE.lock().unwrap_or_else(|e| e.into_inner()).in_flight = false;
+    });
 }
 
 #[cfg(not(unix))]
@@ -230,9 +285,7 @@ fn cached<T>(cache: &'static OnceLock<T>, resolve: impl FnOnce() -> Option<T>) -
 /// which is also when a restored agent pane wants to rerun.
 #[cfg(unix)]
 pub fn warm_interactive_path() {
-    std::thread::spawn(|| {
-        let _ = interactive_path();
-    });
+    look_up_in_background();
 }
 
 #[cfg(not(unix))]
@@ -241,8 +294,6 @@ pub fn warm_interactive_path() {}
 #[cfg(unix)]
 fn resolve_interactive_env() -> Option<ShellEnv> {
     use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
-
     let (shell, _) = configured().unwrap_or_else(|| (platform_default(), Vec::new()));
     if Kind::of(&shell) != Kind::Posix {
         return None;
@@ -454,25 +505,20 @@ mod tests {
         assert_eq!(CALLS.load(Ordering::SeqCst), 2, "a hit must not re-resolve");
     }
 
-    /// The bug a slow startup left: the warm-up's lookup missed its
-    /// deadline, and the key was only ever read from what it left, so it
-    /// read as absent from then on. A miss must be asked again.
+    /// A background lookup starts only when none is running and none
+    /// started within the gap: a slow or hung rc file is run at most once
+    /// a minute, however often usage asks.
     #[cfg(unix)]
     #[test]
-    fn the_key_is_looked_up_again_after_a_missed_lookup() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        static CACHE: OnceLock<ShellEnv> = OnceLock::new();
-        static CALLS: AtomicUsize = AtomicUsize::new(0);
-        let slow_then_fine = || match CALLS.fetch_add(1, Ordering::SeqCst) {
-            0 => None,
-            _ => Some(ShellEnv { path: "/usr/bin".into(), anthropic_key: true }),
-        };
-
-        assert_eq!(anthropic_key(&CACHE, slow_then_fine), None);
-        assert_eq!(anthropic_key(&CACHE, slow_then_fine), Some(true));
-        assert_eq!(anthropic_key(&CACHE, slow_then_fine), Some(true));
-        assert_eq!(CALLS.load(Ordering::SeqCst), 2, "an answer is kept, a miss is not");
+    fn a_background_lookup_waits_for_the_last_and_for_the_gap() {
+        let t0 = Instant::now();
+        let mut gate = Gate { in_flight: false, last: None };
+        assert!(gate.begin(t0), "the first one starts");
+        assert!(!gate.begin(t0 + Duration::from_secs(1)), "not while it runs");
+        gate.in_flight = false;
+        assert!(!gate.begin(t0 + Duration::from_secs(30)), "not within the gap of the last");
+        assert!(gate.begin(t0 + RETRY_GAP), "one after the gap");
+        assert!(!gate.begin(t0 + RETRY_GAP * 3), "and again not while that one runs");
     }
 
     /// The whole point: a tool on the interactive PATH must be reachable.
