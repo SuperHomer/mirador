@@ -1251,7 +1251,9 @@ pub fn repair_claude_hooks() {
         ci::HookState::Missing | ci::HookState::Installed => return,
     };
     let Some(mira) = mira else { return };
-    match ci::hooks(ci::Action::Setup, &mira) {
+    // Repair, not Setup: a status line of the user's is wrapped only by an
+    // explicit setup, whose offer says so.
+    match ci::hooks(ci::Action::Repair, &mira) {
         Ok(_) => eprintln!("mirador: Claude Code hooks updated to call {}", mira.display()),
         Err(e) => eprintln!("mirador: could not repair the Claude Code hooks: {e}"),
     }

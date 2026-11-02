@@ -150,6 +150,11 @@ fn read_settings(path: &Path) -> Result<serde_json::Value, String> {
 pub enum Action {
     Setup,
     Remove,
+    /// What the app does by itself when the hooks call a `mira` that moved
+    /// or installed fewer events: Setup, but a status line is only ever
+    /// re-pointed when it is already ours, never wrapped. Wrapping one is
+    /// for an explicit setup, whose offer says it will.
+    Repair,
 }
 
 /// Installs (or removes) the hooks and the skill under `~/.claude`, the
@@ -177,7 +182,7 @@ fn hooks_at(path: &Path, action: Action, mira: &Path) -> Result<Vec<String>, Str
     let mut done = Vec::new();
 
     match action {
-        Action::Setup => {
+        Action::Setup | Action::Repair => {
             for (hook_event, cli_event) in HOOK_EVENTS {
                 let entries = hooks_obj
                     .as_object_mut()
@@ -227,12 +232,10 @@ fn hooks_at(path: &Path, action: Action, mira: &Path) -> Result<Vec<String>, Str
 }
 
 /// What a status line command is to us: our wrapper, with the user's own
-/// command it runs if any, or something else.
+/// command it runs if any, or anything else, theirs.
 #[derive(Debug, PartialEq, Eq)]
 enum StatusLine {
     Ours(Option<String>),
-    /// Ours, but not in a form we wrote: left alone.
-    OursUnreadable,
     Theirs,
 }
 
@@ -247,15 +250,26 @@ fn status_line_command(mira: &Path, inner: Option<&str>) -> String {
     }
 }
 
-/// Reads a status line command back: ours by the subcommand's name,
-/// whatever path or name calls `mira`, as `is_our_hook` does.
+/// Reads a status line command back. Ours only in the exact form
+/// `status_line_command` writes: a quoted `mira`, at any path, then
+/// `claude-statusline`, then nothing, or `--run` and one quoted word that
+/// is the rest of the command. A command that merely mentions
+/// `claude-statusline` is the user's.
 fn read_status_line(command: &str) -> StatusLine {
-    let Some((_, rest)) = command.split_once(" claude-statusline") else { return StatusLine::Theirs };
-    match rest.strip_prefix(" --run ") {
-        _ if rest.is_empty() => StatusLine::Ours(None),
-        Some(quoted) => sh_unquote(quoted).map_or(StatusLine::OursUnreadable, |inner| StatusLine::Ours(Some(inner))),
-        None => StatusLine::OursUnreadable,
-    }
+    let ours = || {
+        let exe = quoted_executable(command)?;
+        if exe.file_stem()? != "mira" {
+            return None;
+        }
+        // Past the executable's closing quote.
+        let after = &command[command[1..].find('"')? + 2..];
+        let rest = after.strip_prefix(" claude-statusline")?;
+        if rest.is_empty() {
+            return Some(None);
+        }
+        sh_unquote(rest.strip_prefix(" --run ")?).map(Some)
+    };
+    ours().map_or(StatusLine::Theirs, StatusLine::Ours)
 }
 
 /// `s` as one POSIX shell word: single quotes, each `'` in it as `'\''`.
@@ -277,7 +291,7 @@ fn sh_unquote(word: &str) -> Option<String> {
 fn status_line(settings: &mut serde_json::Value, action: Action, mira: &Path) -> Vec<String> {
     let Some(obj) = settings.as_object_mut() else { return Vec::new() };
     let Some(line) = obj.get_mut("statusLine") else {
-        if action == Action::Remove {
+        if action != Action::Setup {
             return Vec::new();
         }
         obj.insert(
@@ -291,8 +305,7 @@ fn status_line(settings: &mut serde_json::Value, action: Action, mira: &Path) ->
         return if action == Action::Setup { vec!["statusLine left as is".into()] } else { Vec::new() };
     };
     match (action, read_status_line(command)) {
-        (_, StatusLine::OursUnreadable) => vec!["statusLine left as is".into()],
-        (Action::Setup, StatusLine::Ours(inner)) => {
+        (Action::Setup | Action::Repair, StatusLine::Ours(inner)) => {
             line["command"] = status_line_command(mira, inner.as_deref()).into();
             vec!["updated statusLine".into()]
         }
@@ -308,7 +321,7 @@ fn status_line(settings: &mut serde_json::Value, action: Action, mira: &Path) ->
             obj.remove("statusLine");
             vec!["removed statusLine".into()]
         }
-        (Action::Remove, StatusLine::Theirs) => Vec::new(),
+        (Action::Remove | Action::Repair, StatusLine::Theirs) => Vec::new(),
     }
 }
 
@@ -359,7 +372,7 @@ fn skill_at(skills_dir: &Path, action: Action) -> Result<Vec<String>, String> {
     let mut done = Vec::new();
 
     match action {
-        Action::Setup => {
+        Action::Setup | Action::Repair => {
             if ours == Some(false) {
                 done.push(format!("kept your own {} (not installed by Mirador)", path.display()));
                 return Ok(done);
@@ -566,6 +579,61 @@ mod tests {
         assert_eq!(command, status_line_command(&moved, Some(THEIR_LINE)));
         hooks_at(&path, Action::Remove, &moved).unwrap();
         assert_eq!(read(&path)["statusLine"]["command"], THEIR_LINE);
+    }
+
+    /// The app's own repair, run with no one asking: it re-points our
+    /// wrapper at a moved `mira`, and never wraps the user's line, which
+    /// only an explicit setup (whose offer says so) may do.
+    #[cfg(unix)]
+    #[test]
+    fn repair_follows_our_wrapper_and_never_wraps_theirs() {
+        let dir = temp_dir("line-repair");
+        let path = dir.join("settings.json");
+        let mira = fake_mira(&dir);
+        with_line(&path, serde_json::json!({ "type": "command", "command": THEIR_LINE }));
+        let before = std::fs::read_to_string(&path).unwrap();
+        hooks_at(&path, Action::Repair, &mira).unwrap();
+        assert_eq!(read(&path)["statusLine"], serde_json::json!({ "type": "command", "command": THEIR_LINE }));
+        assert!(read(&path)["hooks"]["Stop"].is_array(), "the hooks are repaired");
+        assert_ne!(std::fs::read_to_string(&path).unwrap(), before);
+
+        let old = dir.join("Old App").join("mira");
+        with_line(&path, serde_json::json!({ "type": "command", "command": status_line_command(&old, Some(THEIR_LINE)) }));
+        hooks_at(&path, Action::Repair, &mira).unwrap();
+        assert_eq!(read(&path)["statusLine"]["command"], status_line_command(&mira, Some(THEIR_LINE)));
+
+        // With no status line at all, repair adds none.
+        std::fs::write(&path, "{}").unwrap();
+        hooks_at(&path, Action::Repair, &mira).unwrap();
+        assert!(read(&path).get("statusLine").is_none());
+    }
+
+    /// Only the exact form we write is ours: a command that merely
+    /// mentions the subcommand is the user's, wrapped and given back whole.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_mentions_claude_statusline_is_theirs() {
+        let mira = PathBuf::from("/opt/Mirador/mira");
+        let lookalikes = [
+            "echo claude-statusline --run 'x'".to_string(),
+            "\"/usr/bin/env\" claude-statusline".to_string(),
+            format!("{} --verbose", status_line_command(&mira, None)),
+            format!("{}; date", status_line_command(&mira, Some("echo hi"))),
+        ];
+        for theirs in lookalikes {
+            assert_eq!(read_status_line(&theirs), StatusLine::Theirs, "{theirs}");
+            let dir = temp_dir("line-lookalike");
+            let path = dir.join("settings.json");
+            with_line(&path, serde_json::json!({ "type": "command", "command": theirs }));
+            hooks_at(&path, Action::Repair, &mira).unwrap();
+            assert_eq!(read(&path)["statusLine"]["command"], theirs.as_str(), "repair leaves it");
+            hooks_at(&path, Action::Setup, &mira).unwrap();
+            assert_eq!(read(&path)["statusLine"]["command"], status_line_command(&mira, Some(&theirs)));
+            hooks_at(&path, Action::Remove, &mira).unwrap();
+            assert_eq!(read(&path)["statusLine"]["command"], theirs.as_str(), "back byte for byte");
+        }
+        assert_eq!(read_status_line(&status_line_command(&mira, Some("a b"))), StatusLine::Ours(Some("a b".into())));
+        assert_eq!(read_status_line(&status_line_command(&mira, None)), StatusLine::Ours(None));
     }
 
     #[test]
