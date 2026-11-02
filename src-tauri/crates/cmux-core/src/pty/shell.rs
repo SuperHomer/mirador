@@ -164,8 +164,36 @@ pub fn interactive(cwd: Option<&str>) -> CommandBuilder {
 /// agrees on (fish's `$PATH` is a list, and prints space-separated).
 #[cfg(unix)]
 pub fn interactive_path() -> Option<&'static str> {
-    static PATH: OnceLock<String> = OnceLock::new();
-    cached_path(&PATH, resolve_interactive_path)
+    cached(&SHELL_ENV, resolve_interactive_env).map(|env| env.path.as_str())
+}
+
+/// What the interactive shell's environment says, from the one `env` run.
+#[cfg(unix)]
+static SHELL_ENV: OnceLock<ShellEnv> = OnceLock::new();
+
+/// The part of an interactive shell's environment Mirador keeps.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(unix), allow(dead_code))]
+struct ShellEnv {
+    path: String,
+    /// Whether `ANTHROPIC_API_KEY` is set, non-empty: only that, never
+    /// its value. Every pane, and so every Claude Code started in one,
+    /// gets it, though the app itself (launched from the Dock) does not.
+    anthropic_key: bool,
+}
+
+/// Whether the panes' shell sets `ANTHROPIC_API_KEY`, as of the lookup
+/// that found their PATH; None until that has run, or for a shell that is
+/// not POSIX. It never runs the shell itself. Windows has no such lookup
+/// (no `-ilc`): there, None, and the caller goes by its own environment.
+#[cfg(unix)]
+pub fn interactive_anthropic_key() -> Option<bool> {
+    SHELL_ENV.get().map(|env| env.anthropic_key)
+}
+
+#[cfg(not(unix))]
+pub fn interactive_anthropic_key() -> Option<bool> {
+    None
 }
 
 /// Memoizes a *successful* lookup only.
@@ -178,15 +206,12 @@ pub fn interactive_path() -> Option<&'static str> {
 /// found", for a binary that pane's own shell finds fine. A failure is
 /// now just a miss: the next command pane asks again.
 #[cfg(unix)]
-fn cached_path(
-    cache: &'static OnceLock<String>,
-    resolve: impl FnOnce() -> Option<String>,
-) -> Option<&'static str> {
-    if let Some(path) = cache.get() {
-        return Some(path.as_str());
+fn cached<T>(cache: &'static OnceLock<T>, resolve: impl FnOnce() -> Option<T>) -> Option<&'static T> {
+    if let Some(found) = cache.get() {
+        return Some(found);
     }
     let resolved = resolve()?;
-    Some(cache.get_or_init(|| resolved).as_str())
+    Some(cache.get_or_init(|| resolved))
 }
 
 /// Resolves the PATH ahead of the first command pane, off the main
@@ -204,7 +229,7 @@ pub fn warm_interactive_path() {
 pub fn warm_interactive_path() {}
 
 #[cfg(unix)]
-fn resolve_interactive_path() -> Option<String> {
+fn resolve_interactive_env() -> Option<ShellEnv> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
@@ -238,11 +263,24 @@ fn resolve_interactive_path() -> Option<String> {
         }
     }
     let out = child.wait_with_output().ok()?;
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .find_map(|line| line.strip_prefix("PATH="))
-        .map(str::to_string)
-        .filter(|p| !p.is_empty())
+    parse_env(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `env`'s output, read for the PATH (none, or an empty one, is no
+/// answer) and for whether `ANTHROPIC_API_KEY` has a value. The key's
+/// value is looked at only to see that it is not empty, and not kept.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn parse_env(out: &str) -> Option<ShellEnv> {
+    let mut path = None;
+    let mut anthropic_key = false;
+    for line in out.lines() {
+        if let Some(p) = line.strip_prefix("PATH=") {
+            path = Some(p.to_string());
+        } else if let Some(key) = line.strip_prefix("ANTHROPIC_API_KEY=") {
+            anthropic_key = !key.is_empty();
+        }
+    }
+    Some(ShellEnv { path: path.filter(|p| !p.is_empty())?, anthropic_key })
 }
 
 /// The same shell, running one command line.
@@ -386,6 +424,7 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static CACHE: OnceLock<String> = OnceLock::new();
+        let cached_path = |cache, resolve| cached(cache, resolve).map(String::as_str);
         static CALLS: AtomicUsize = AtomicUsize::new(0);
 
         let flaky = || {
@@ -413,6 +452,17 @@ mod tests {
             return; // no usable login shell on this machine
         };
         assert!(path.contains('/'), "got: {path:?}");
+    }
+
+    #[test]
+    fn the_shells_env_says_whether_an_anthropic_key_is_set() {
+        let key = |line: &str| parse_env(&format!("HOME=/h\nPATH=/usr/bin:/opt/x\n{line}\nTERM=x\n")).map(|e| e.anthropic_key);
+        assert_eq!(key("ANTHROPIC_API_KEY=sk-test-123"), Some(true));
+        assert_eq!(key("ANTHROPIC_API_KEY="), Some(false));
+        assert_eq!(key("OTHER=1"), Some(false));
+        // The PATH is still what the lookup is for: without one, no answer.
+        assert_eq!(parse_env("ANTHROPIC_API_KEY=sk-test\n"), None);
+        assert_eq!(parse_env("PATH=/usr/bin\n").map(|e| e.path), Some("/usr/bin".to_string()));
     }
 
     #[test]

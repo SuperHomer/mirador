@@ -133,7 +133,12 @@ impl UsageCache {
         let claude_config = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
         let claude_json = claude_config.as_deref().unwrap_or(&home).join(".claude.json");
         let claude_dir = claude_config.unwrap_or_else(|| home.join(".claude"));
-        let api_key_in_env = std::env::var_os("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty());
+        // The key Claude Code sees is its pane's: the interactive shell's
+        // environment, which a Dock-launched app does not inherit, or the
+        // app's own, which its panes do. On Windows the shell's is never
+        // known (no `-ilc` lookup), so the app's own decides.
+        let api_key_in_env = crate::pty::shell::interactive_anthropic_key() == Some(true)
+            || std::env::var_os("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty());
         let codex_home = std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from);
         let openai_key_in_env = std::env::var_os("OPENAI_API_KEY").is_some_and(|v| !v.is_empty());
         let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
