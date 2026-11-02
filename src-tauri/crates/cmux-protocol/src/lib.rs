@@ -2116,3 +2116,41 @@ pub struct DiffResult {
     pub label: String,
     pub files: Vec<DiffFile>,
 }
+
+/// How a harness is signed in, which is what its usage is billed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Login {
+    /// A plan's account (Claude Pro/Max, ChatGPT): usage counts against
+    /// the plan's limits.
+    Subscription,
+    /// An API key: usage is billed per token.
+    ApiKey,
+    /// Not signed in, or nothing says how.
+    None,
+}
+
+/// One of a plan's rate-limit windows, as the harness last reported it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitWindow {
+    pub used_percent: f64,
+    /// How long the window is: 300 for five hours, 10080 for a week.
+    pub window_minutes: u64,
+    /// When it resets, in Unix seconds. Older Codex versions wrote none.
+    #[serde(default)]
+    pub resets_at: Option<u64>,
+}
+
+/// What a harness's account is, read from its own files
+/// (`cmux_core::usage`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsage {
+    pub harness: Harness,
+    pub login: Login,
+    /// The plan as the harness names it (`claude_max`, `plus`).
+    pub plan: Option<String>,
+    pub email: Option<String>,
+    pub limits: Vec<LimitWindow>,
+}

@@ -32,5 +32,6 @@ pub mod teams;
 pub mod trail;
 pub mod transcript;
 pub mod transport;
+pub mod usage;
 pub mod wall;
 pub mod worktree;
