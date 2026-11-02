@@ -43,7 +43,7 @@ use std::time::UNIX_EPOCH;
 
 use cmux_protocol::{AccountUsage, Harness, LimitWindow, Login, TokenTotals};
 use serde::de::IgnoredAny;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::codex_trail::newest_rollout;
@@ -419,6 +419,75 @@ pub fn window_name(minutes: u64) -> String {
     }
 }
 
+/// Claude Code's plan windows, as its status line last saw them.
+///
+/// Claude Code writes its limits nowhere on disk, but since 2.1.80 it
+/// pipes them to the `statusLine` command, as `rate_limits.five_hour` and
+/// `rate_limits.seven_day`, each `{used_percentage, resets_at}` — on a
+/// Pro, Max or Ultra plan, after the first response, either window
+/// possibly absent. `mira claude-statusline`, put in front of the user's
+/// own status line, keeps the last of them in this snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClaudeLimits {
+    pub windows: Vec<LimitWindow>,
+    /// Unix millis of the status line that carried them.
+    pub saved_at: u64,
+}
+
+/// Where the snapshot is kept.
+pub fn claude_limits_path() -> PathBuf {
+    crate::session::data_dir().join("claude-limits.json")
+}
+
+/// The plan windows in a status line's JSON, five hours first; none for
+/// input that does not parse or carries no `rate_limits`. `resets_at` is
+/// read as Unix seconds, or as an RFC 3339 time.
+pub fn statusline_windows(input: &[u8]) -> Vec<LimitWindow> {
+    let Ok(json) = serde_json::from_slice::<Value>(input) else { return Vec::new() };
+    let limits = &json["rate_limits"];
+    [("five_hour", 300), ("seven_day", 10080)]
+        .into_iter()
+        .filter_map(|(key, window_minutes)| {
+            let w = &limits[key];
+            let resets_at = w["resets_at"]
+                .as_u64()
+                .or_else(|| w["resets_at"].as_str().and_then(parse_timestamp).map(|ms| ms / 1000));
+            Some(LimitWindow {
+                used_percent: w["used_percentage"].as_f64()?,
+                window_minutes,
+                name: window_name(window_minutes),
+                resets_at,
+            })
+        })
+        .collect()
+}
+
+/// Keeps the windows in `input` as the snapshot at `path`, when it has
+/// any; otherwise the snapshot there stays as it was. Every Claude Code
+/// session's status line writes here, and the last write wins: they all
+/// see the same account, so the newest is the truest. Written to a file
+/// of this process's own and renamed over the snapshot, so a reader never
+/// sees half of one and two sessions writing at once never share a file.
+pub fn save_claude_limits(path: &Path, input: &[u8], now_ms: u64) -> std::io::Result<bool> {
+    let windows = statusline_windows(input);
+    if windows.is_empty() {
+        return Ok(false);
+    }
+    let bytes = serde_json::to_vec(&ClaudeLimits { windows, saved_at: now_ms })?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(true)
+}
+
+/// The snapshot at `path`, if there is one that parses.
+pub fn read_claude_limits(path: &Path) -> Option<ClaudeLimits> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,6 +809,48 @@ mod tests {
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{line}\n"));
         let names: Vec<String> = codex_usage(&dir, false, now()).limits.into_iter().map(|w| w.name).collect();
         assert_eq!(names, ["weekly", "5h"]);
+    }
+
+    const STATUSLINE: &str = r#"{"model":{"id":"claude-opus-5-5"},"rate_limits":{
+        "five_hour":{"used_percentage":23.5,"resets_at":1795590902},
+        "seven_day":{"used_percentage":71,"resets_at":"2026-11-05T08:00:00.000Z"}}}"#;
+
+    #[test]
+    fn a_status_line_gives_both_windows() {
+        let windows = statusline_windows(STATUSLINE.as_bytes());
+        let seven_day_reset = parse_timestamp("2026-11-05T08:00:00.000Z").unwrap() / 1000;
+        assert_eq!(
+            windows,
+            [
+                LimitWindow { used_percent: 23.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902) },
+                LimitWindow { used_percent: 71.0, window_minutes: 10080, name: "weekly".into(), resets_at: Some(seven_day_reset) },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_window_may_be_absent() {
+        let only_week = r#"{"rate_limits":{"seven_day":{"used_percentage":12}}}"#;
+        let windows = statusline_windows(only_week.as_bytes());
+        assert_eq!(windows.len(), 1);
+        assert_eq!((windows[0].window_minutes, windows[0].resets_at), (10080, None));
+    }
+
+    #[test]
+    fn a_status_line_without_limits_keeps_the_snapshot() {
+        let dir = temp_dir("statusline-keep");
+        let path = dir.join("claude-limits.json");
+        assert!(save_claude_limits(&path, STATUSLINE.as_bytes(), 1).unwrap());
+        let saved = read_claude_limits(&path).unwrap();
+        assert_eq!((saved.windows.len(), saved.saved_at), (2, 1));
+        // An API-key session, or before the first response: no rate_limits.
+        assert!(!save_claude_limits(&path, br#"{"model":{"id":"claude-opus-5-5"}}"#, 2).unwrap());
+        // Not JSON at all.
+        assert!(!save_claude_limits(&path, b"{not json", 3).unwrap());
+        assert_eq!(read_claude_limits(&path), Some(saved));
+        // Nothing left beside it.
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, ["claude-limits.json"]);
     }
 
     #[test]

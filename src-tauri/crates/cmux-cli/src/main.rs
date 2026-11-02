@@ -181,6 +181,15 @@ enum Command {
     /// the hook payload from stdin.
     #[command(hide = true)]
     ClaudeHook { event: String },
+    /// Claude Code status line wrapper: keeps the plan's limits Claude Code
+    /// pipes to its status line, then runs the user's own status line
+    /// command, if any, on the same input.
+    #[command(hide = true)]
+    ClaudeStatusline {
+        /// The status line command to run after, with the same stdin.
+        #[arg(long)]
+        run: Option<String>,
+    },
     /// Install or remove the Claude Code integration: the hooks that light
     /// up Mirador tabs, and the `/mira-diff` slash command.
     Hooks {
@@ -1011,6 +1020,7 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::ClaudeHook { event } => return claude_hook(&event),
+        Command::ClaudeStatusline { run } => claude_statusline(run.as_deref()),
         Command::Hooks { action } => return hooks(&action),
         Command::Install => return install(),
         Command::Quit { end_sessions } => Request::Quit { end_sessions },
@@ -2028,6 +2038,42 @@ fn own_job() -> Option<String> {
 
 /// Handles a Claude Code hook event: payload arrives as JSON on stdin.
 /// Never fails loudly — a broken hook must not break Claude Code.
+/// Keeps the limits in what Claude Code pipes to its status line, then
+/// hands the same bytes to the user's own status line command, its output
+/// and exit code passed through. Nothing here may break the status line:
+/// a failure to read, parse or save is silent, and the user's command
+/// runs whatever happened. No socket, no network: one file write.
+fn claude_statusline(run: Option<&str>) -> ! {
+    use std::io::Read;
+    let mut input = Vec::new();
+    let _ = std::io::stdin().read_to_end(&mut input);
+    let _ = cmux_core::usage::save_claude_limits(&cmux_core::usage::claude_limits_path(), &input, now_ms());
+    std::process::exit(run.map_or(0, |command| run_statusline(command, &input)))
+}
+
+/// Runs a status line command with `input` on its stdin and our stdout as
+/// its own; its exit code, or 1 when it could not be run.
+#[cfg(unix)]
+fn run_statusline(command: &str, input: &[u8]) -> i32 {
+    use std::process::{Command, Stdio};
+    let Ok(mut child) = Command::new("sh").arg("-c").arg(command).stdin(Stdio::piped()).spawn() else {
+        return 1;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        // A command that does not read its input closes the pipe early.
+        let _ = stdin.write_all(input);
+    }
+    child.wait().ok().and_then(|s| s.code()).unwrap_or(1)
+}
+
+/// Windows has no `sh`, and which shell Claude Code runs a status line
+/// with there is not known here, so the wrapper runs nothing: Mirador does
+/// not put itself in front of a status line on Windows.
+#[cfg(not(unix))]
+fn run_statusline(_command: &str, _input: &[u8]) -> i32 {
+    0
+}
+
 fn claude_hook(event: &str) -> Result<(), String> {
     let mut input = String::new();
     use std::io::Read;
