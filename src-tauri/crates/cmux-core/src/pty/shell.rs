@@ -182,13 +182,23 @@ struct ShellEnv {
     anthropic_key: bool,
 }
 
-/// Whether the panes' shell sets `ANTHROPIC_API_KEY`, as of the lookup
-/// that found their PATH; None until that has run, or for a shell that is
-/// not POSIX. It never runs the shell itself. Windows has no such lookup
-/// (no `-ilc`): there, None, and the caller goes by its own environment.
+/// Whether the panes' shell sets `ANTHROPIC_API_KEY`, from the same
+/// lookup that finds their PATH: a remembered answer, or the lookup run
+/// now when none has succeeded yet. Only reading what the lookup left
+/// made one slow startup permanent — the warm-up missed its deadline, and
+/// nothing asked again until a command pane did, so the key read as
+/// absent for the app's whole life. None for a shell that is not POSIX,
+/// or a lookup that fails again. It can run the shell (up to 5 s), so it
+/// is for a thread that may block. Windows has no such lookup (no
+/// `-ilc`): there, None, and the caller goes by its own environment.
 #[cfg(unix)]
 pub fn interactive_anthropic_key() -> Option<bool> {
-    SHELL_ENV.get().map(|env| env.anthropic_key)
+    anthropic_key(&SHELL_ENV, resolve_interactive_env)
+}
+
+#[cfg(unix)]
+fn anthropic_key(cache: &'static OnceLock<ShellEnv>, resolve: impl FnOnce() -> Option<ShellEnv>) -> Option<bool> {
+    cached(cache, resolve).map(|env| env.anthropic_key)
 }
 
 #[cfg(not(unix))]
@@ -442,6 +452,27 @@ mod tests {
         // And a success is memoized: no third shell is ever spawned.
         assert_eq!(cached_path(&CACHE, flaky), Some("/usr/bin:/opt/real"));
         assert_eq!(CALLS.load(Ordering::SeqCst), 2, "a hit must not re-resolve");
+    }
+
+    /// The bug a slow startup left: the warm-up's lookup missed its
+    /// deadline, and the key was only ever read from what it left, so it
+    /// read as absent from then on. A miss must be asked again.
+    #[cfg(unix)]
+    #[test]
+    fn the_key_is_looked_up_again_after_a_missed_lookup() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static CACHE: OnceLock<ShellEnv> = OnceLock::new();
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let slow_then_fine = || match CALLS.fetch_add(1, Ordering::SeqCst) {
+            0 => None,
+            _ => Some(ShellEnv { path: "/usr/bin".into(), anthropic_key: true }),
+        };
+
+        assert_eq!(anthropic_key(&CACHE, slow_then_fine), None);
+        assert_eq!(anthropic_key(&CACHE, slow_then_fine), Some(true));
+        assert_eq!(anthropic_key(&CACHE, slow_then_fine), Some(true));
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2, "an answer is kept, a miss is not");
     }
 
     /// The whole point: a tool on the interactive PATH must be reachable.
