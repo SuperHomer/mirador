@@ -79,6 +79,12 @@ downloads, the feature tour and the keybinding reference.
   can't; elsewhere the card shows the URL
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
+- **Usage pane** (`mira usage --tab`, or *App: Usage* in the palette):
+  your Claude Code and Codex accounts — a plan or an API key, Codex's
+  limit windows and when they reset, and the tokens each used in the last
+  5 hours and 7 days, with their cost on an API key. Read from the
+  harnesses' own files, never the network; bare `mira usage` prints the
+  same
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
   it, reads its console errors — while you watch (`mira browser …`)
