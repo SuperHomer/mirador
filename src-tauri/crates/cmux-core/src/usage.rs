@@ -19,8 +19,10 @@
 //! used only when that file holds no login at all — the opposite of
 //! Claude Code, whose key wins. Its limits are in its rollouts:
 //! each `event_msg` `token_count` carries the `rate_limits` the server
-//! last sent, a `primary` and a `secondary` window and the `plan_type`.
-//! The newest rollout's last such line is the latest word.
+//! last sent for one bucket, told apart by `limit_id` (`codex`,
+//! `premium`, …): a `primary` and a `secondary` window, either possibly
+//! null, and the `plan_type`. A bucket's newest line with a window is its
+//! latest word; the account's limits are every bucket's.
 //!
 //! What each used over the plans' windows (five hours, seven days) is
 //! added up from the same files: Claude Code's transcripts
@@ -37,7 +39,6 @@
 //! whether a key is set. Nothing here is a documented format: every field
 //! is optional, and a line that does not parse is skipped.
 
-use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -46,13 +47,8 @@ use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::codex_trail::newest_rollout;
 use crate::pricing::Usage;
 use crate::transcript::{parse_timestamp, subagent_dir, usage_of, Cache, Feed};
-
-/// How much of a rollout's end is read for its limits: every turn writes
-/// them, so the last one is near the end, and rollouts grow to megabytes.
-const ROLLOUT_TAIL: u64 = 256 * 1024;
 
 const FIVE_HOURS_MS: u64 = 5 * 3600 * 1000;
 const SEVEN_DAYS_MS: u64 = 7 * 24 * 3600 * 1000;
@@ -231,26 +227,41 @@ impl UsageCache {
             _ if api_key_in_env => Login::ApiKey,
             _ => Login::None,
         };
-        let last = newest_rollout(&codex_home.join("sessions")).and_then(|r| last_rate_limits(&r));
-        let (rate_limits, as_of) = last.unwrap_or((Value::Null, None));
-        let mut limits: Vec<LimitWindow> =
-            ["primary", "secondary"].iter().filter_map(|w| limit_window(&rate_limits[w])).collect();
-        // The most used first: the one a glance at the account should see.
-        limits.sort_by(|a, b| b.used_percent.total_cmp(&a.used_percent));
         // `pricing` has no OpenAI rates, so never a cost.
         let mut totals = Totals::new(now_ms, false);
         let mut rollouts = Vec::new();
         recent_files(&codex_home.join("sessions"), now_ms, 3, &mut rollouts);
+        // By name, which is when each started: on a tie in time, the later
+        // rollout's word is the latest.
+        rollouts.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        let mut buckets: Vec<Bucket> = Vec::new();
+        let mut any_plan: Option<(u64, String)> = None;
         for rollout in &rollouts {
-            for c in self.codex.read(rollout).map_or(&[][..], |r| &r.counted) {
+            let Some(calls) = self.codex.read(rollout) else { continue };
+            for c in &calls.counted {
                 totals.add(c.at_ms, c.usage, None);
+            }
+            for b in &calls.buckets {
+                keep_bucket(&mut buckets, b.clone());
+            }
+            if let Some(p) = calls.plan.clone().filter(|(at, _)| any_plan.as_ref().is_none_or(|(t, _)| at >= t)) {
+                any_plan = Some(p);
             }
         }
         self.codex.retain(|p| rollouts.iter().any(|r| r == p));
+        let as_of = buckets.iter().map(|b| b.at_ms).max().filter(|&t| t > 0);
+        let limits = bucket_limits(&buckets);
+        // The plan of a line that carried limits, before one that did not.
+        let plan = buckets
+            .iter()
+            .filter(|b| b.plan.is_some())
+            .max_by_key(|b| b.at_ms)
+            .and_then(|b| b.plan.clone())
+            .or(any_plan.map(|(_, p)| p));
         AccountUsage {
             harness: Harness::Codex,
             login,
-            plan: rate_limits["plan_type"].as_str().map(str::to_string),
+            plan,
             email: None,
             note: None,
             limits,
@@ -478,17 +489,75 @@ impl Feed for Replies {
 #[derive(Default)]
 struct Calls {
     counted: Vec<Counted>,
+    /// Each limit bucket's newest line that had a window.
+    buckets: Vec<Bucket>,
+    /// The newest `plan_type` any line gave, and when.
+    plan: Option<(u64, String)>,
+}
+
+/// One bucket of Codex's limits as its newest line with a window gave it:
+/// its `limit_id` (None for a line without one, a bucket of its own), its
+/// windows, the plan, and the line's time (0 when it had none).
+#[derive(Debug, Clone, PartialEq)]
+struct Bucket {
+    id: Option<String>,
+    at_ms: u64,
+    windows: Vec<LimitWindow>,
+    plan: Option<String>,
+}
+
+/// Keeps `b` unless its bucket already has a newer line.
+fn keep_bucket(list: &mut Vec<Bucket>, b: Bucket) {
+    match list.iter_mut().find(|o| o.id == b.id) {
+        Some(o) if b.at_ms >= o.at_ms => *o = b,
+        Some(_) => {}
+        None => list.push(b),
+    }
+}
+
+/// Every bucket's windows, the most used first. A window length two
+/// buckets both carry is named by its bucket ("premium 30 days"), but for
+/// `codex`, the main one.
+fn bucket_limits(buckets: &[Bucket]) -> Vec<LimitWindow> {
+    let all = buckets.iter().flat_map(|b| b.windows.iter().map(move |w| (b.id.as_deref(), w)));
+    let shared = |minutes: u64| buckets.iter().filter(|b| b.windows.iter().any(|w| w.window_minutes == minutes)).count() > 1;
+    let mut limits: Vec<LimitWindow> = all
+        .map(|(id, w)| match id {
+            Some(id) if id != "codex" && shared(w.window_minutes) => LimitWindow { name: format!("{id} {}", w.name), ..w.clone() },
+            _ => w.clone(),
+        })
+        .collect();
+    limits.sort_by(|a, b| b.used_percent.total_cmp(&a.used_percent));
+    limits
 }
 
 impl Feed for Calls {
     fn feed(&mut self, line: &str) {
         let Ok(entry) = serde_json::from_str::<Value>(line) else { return };
         let p = &entry["payload"];
-        let last = &p["info"]["last_token_usage"];
-        if entry["type"] != "event_msg" || p["type"] != "token_count" || !last.is_object() {
+        if entry["type"] != "event_msg" || p["type"] != "token_count" {
             return;
         }
-        let Some(at_ms) = entry["timestamp"].as_str().and_then(parse_timestamp) else { return };
+        let time = entry["timestamp"].as_str().and_then(parse_timestamp);
+        let limits = &p["rate_limits"];
+        if limits.is_object() {
+            let plan = limits["plan_type"].as_str().map(str::to_string);
+            let at_ms = time.unwrap_or(0);
+            if let Some(plan) = plan.clone().filter(|_| self.plan.as_ref().is_none_or(|(t, _)| at_ms >= *t)) {
+                self.plan = Some((at_ms, plan));
+            }
+            // A line for a bucket with no window says nothing about it.
+            let windows: Vec<LimitWindow> = ["primary", "secondary"].iter().filter_map(|w| limit_window(&limits[w])).collect();
+            if !windows.is_empty() {
+                let id = limits["limit_id"].as_str().map(str::to_string);
+                keep_bucket(&mut self.buckets, Bucket { id, at_ms, windows, plan });
+            }
+        }
+        let last = &p["info"]["last_token_usage"];
+        if !last.is_object() {
+            return;
+        }
+        let Some(at_ms) = time else { return };
         let n = |key: &str| last[key].as_u64().unwrap_or(0);
         let usage = Usage {
             input: n("input_tokens").saturating_sub(n("cached_input_tokens")),
@@ -498,26 +567,6 @@ impl Feed for Calls {
         };
         self.counted.push(Counted { at_ms, model: None, usage });
     }
-}
-
-/// The `rate_limits` of the last `token_count` in the end of `rollout`
-/// that has any (one sent with none, a turn's first count, says nothing),
-/// and that line's time.
-fn last_rate_limits(rollout: &Path) -> Option<(Value, Option<u64>)> {
-    let mut file = std::fs::File::open(rollout).ok()?;
-    let len = file.metadata().ok()?.len();
-    let start = len.saturating_sub(ROLLOUT_TAIL);
-    file.seek(SeekFrom::Start(start)).ok()?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).ok()?;
-    // Read from the middle, the first line is a piece of one.
-    let whole = if start > 0 { bytes.iter().position(|&b| b == b'\n').map_or(bytes.len(), |i| i + 1) } else { 0 };
-    bytes[whole..].rsplit(|&b| b == b'\n').find_map(|line| {
-        let entry = serde_json::from_slice::<Value>(line).ok()?;
-        let p = &entry["payload"];
-        (entry["type"] == "event_msg" && p["type"] == "token_count" && p["rate_limits"].is_object())
-            .then(|| (p["rate_limits"].clone(), entry["timestamp"].as_str().and_then(parse_timestamp)))
-    })
 }
 
 fn limit_window(w: &Value) -> Option<LimitWindow> {
@@ -912,9 +961,9 @@ mod tests {
         };
         let old = limits(99.0);
         write(&dir, "sessions/2026/10/31/rollout-2026-10-31T09-00-00-a.jsonl", &format!("{old}\n"));
-        // Longer than the tail read, so it starts in the middle of a line.
+        // A line that is not JSON is skipped.
         let rollout = [
-            "x".repeat(ROLLOUT_TAIL as usize),
+            "x".repeat(1000),
             limits(10.0),
             limits(42.5),
             r#"{"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":null}}"#.into(),
@@ -1122,6 +1171,59 @@ mod tests {
         let line = r#"{"timestamp":"2026-11-02T11:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":5,"window_minutes":300}}}}"#;
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{line}\n"));
         assert_eq!(codex_usage(&dir, false, now()).as_of, Some(now() - HOUR_MS));
+    }
+
+    /// A `token_count` line at `at` for the bucket `id`, its primary
+    /// window `primary` (a JSON value, possibly null), on `plan`.
+    fn bucket_line(at: &str, id: &str, primary: &str, plan: &str) -> String {
+        format!(
+            r#"{{"timestamp":"{at}","type":"event_msg","payload":{{"type":"token_count","info":null,"rate_limits":{{"limit_id":"{id}","primary":{primary},"secondary":null,"plan_type":"{plan}"}}}}}}"#
+        )
+    }
+
+    const THIRTY_DAYS_98: &str = r#"{"used_percent":98.0,"window_minutes":43200,"resets_at":1795590902}"#;
+
+    #[test]
+    fn a_bucket_with_no_window_hides_no_other() {
+        let dir = temp_dir("codex-buckets");
+        // As Codex writes them now: the codex bucket, then a premium one
+        // with both windows null, which names another plan.
+        let lines = [
+            bucket_line("2026-11-02T11:00:00.000Z", "codex", THIRTY_DAYS_98, "go"),
+            bucket_line("2026-11-02T11:00:01.000Z", "premium", "null", "plus"),
+        ];
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{}\n", lines.join("\n")));
+        let usage = codex_usage(&dir, false, now());
+        let shown: Vec<(&str, f64)> = usage.limits.iter().map(|w| (w.name.as_str(), w.used_percent)).collect();
+        assert_eq!(shown, [("30 days", 98.0)]);
+        assert_eq!((usage.as_of, usage.plan.as_deref()), (Some(now() - HOUR_MS), Some("go")));
+    }
+
+    #[test]
+    fn two_buckets_with_the_same_window_are_both_shown_named() {
+        let dir = temp_dir("codex-two-buckets");
+        let premium = r#"{"used_percent":40.0,"window_minutes":43200}"#;
+        let lines = [
+            bucket_line("2026-11-02T11:00:00.000Z", "codex", THIRTY_DAYS_98, "go"),
+            bucket_line("2026-11-02T11:00:01.000Z", "premium", premium, "go"),
+        ];
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{}\n", lines.join("\n")));
+        let shown: Vec<(String, f64)> = codex_usage(&dir, false, now()).limits.into_iter().map(|w| (w.name, w.used_percent)).collect();
+        assert_eq!(shown, [("30 days".to_string(), 98.0), ("premium 30 days".to_string(), 40.0)]);
+    }
+
+    #[test]
+    fn a_rollout_with_no_limits_yet_leaves_the_previous_ones() {
+        let dir = temp_dir("codex-fallback");
+        let earlier = bucket_line("2026-11-02T10:00:00.000Z", "codex", THIRTY_DAYS_98, "go");
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{earlier}\n"));
+        // A session on its first turn: tokens, no limits yet.
+        let first_turn = r#"{"timestamp":"2026-11-02T11:30:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":1}},"rate_limits":null}}"#;
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T11-29-00-b.jsonl", &format!("{first_turn}\n"));
+        let usage = codex_usage(&dir, false, now());
+        assert_eq!(usage.limits.iter().map(|w| w.used_percent).collect::<Vec<_>>(), [98.0]);
+        assert_eq!(usage.as_of, Some(now() - 2 * HOUR_MS));
+        assert_eq!(usage.five_hours.input, 10, "the new rollout still counts its tokens");
     }
 
     #[test]
