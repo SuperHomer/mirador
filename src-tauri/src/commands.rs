@@ -1199,11 +1199,14 @@ pub fn open_usage(
     Ok(pane)
 }
 
-/// Each harness's account and what it used, read from its own files:
-/// transcripts add up to a few hundred milliseconds, so off the main thread.
+/// Each harness's account and what it used, read from its own files
+/// through the shared cache: the first read goes through a week of
+/// transcripts, so off the main thread; later ones read what was appended.
 #[tauri::command]
-pub async fn account_usage() -> Result<Vec<cmux_protocol::AccountUsage>, String> {
-    tauri::async_runtime::spawn_blocking(cmux_core::usage::accounts).await.map_err(|e| e.to_string())
+pub async fn account_usage(app: AppHandle) -> Result<Vec<cmux_protocol::AccountUsage>, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().usage.lock().unwrap().accounts())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Sets the integration up: `mira` on PATH (agents and `/mira-diff` call it

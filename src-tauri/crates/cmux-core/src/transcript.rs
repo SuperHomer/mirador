@@ -390,6 +390,12 @@ impl<T: Feed> Cache<T> {
         Some(stats)
     }
 
+    /// Forgets every file `keep` does not keep, as a caller whose files
+    /// age out of what it reads does.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Path) -> bool) {
+        self.files.retain(|path, _| keep(path));
+    }
+
     /// How far into `path` it has read: changes with every line it reads.
     pub fn consumed(&self, path: &Path) -> Option<u64> {
         self.files.get(path).map(|(offset, _)| *offset)

@@ -24,7 +24,10 @@
 //! (`projects/<project>/<session>.jsonl` and its subagents', which bill
 //! too) by each reply's `usage` and `timestamp`, and Codex's rollouts by
 //! each `token_count`'s `info.last_token_usage`. A file last written
-//! before the longer window is not opened.
+//! before the longer window is not opened. A [`UsageCache`] keeps what
+//! each file's lines counted and reads only what was appended since, so
+//! reading every minute costs a directory listing and the new lines; the
+//! windows are summed from those at each read.
 //!
 //! Only the shape of a login is read, never a credential: the key and the
 //! tokens are skipped while parsing, and the environment is only asked
@@ -42,7 +45,7 @@ use serde_json::Value;
 
 use crate::codex_trail::newest_rollout;
 use crate::pricing::Usage;
-use crate::transcript::{parse_timestamp, subagent_dir, usage_of};
+use crate::transcript::{parse_timestamp, subagent_dir, usage_of, Cache, Feed};
 
 /// How much of a rollout's end is read for its limits: every turn writes
 /// them, so the last one is near the end, and rollouts grow to megabytes.
@@ -91,66 +94,111 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
 /// transcripts under `claude_dir`, `api_key_in_env` being whether
 /// `ANTHROPIC_API_KEY` is set and `now_ms` the time the windows end.
 pub fn claude_usage(claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
-    let account = read_json::<ClaudeJson>(claude_json).oauth_account;
-    let helper = read_json::<ClaudeSettings>(&claude_dir.join("settings.json")).api_key_helper.is_some();
-    let login = if api_key_in_env || helper {
-        Login::ApiKey
-    } else if account.is_some() {
-        Login::Subscription
-    } else {
-        Login::None
-    };
-    let (plan, email) = account.map_or((None, None), |a| (a.organization_type, a.email_address));
-    // On a plan the list price is not what is paid: no cost, not a cost
-    // that reads as a bill.
-    let mut totals = Totals::new(now_ms, login == Login::ApiKey);
-    for transcript in claude_transcripts(&claude_dir.join("projects"), now_ms) {
-        totals.add_transcript(&transcript);
-    }
-    AccountUsage {
-        harness: Harness::Claude,
-        login,
-        // A plan that is not what usage is billed to would mislead.
-        plan: plan.filter(|_| login == Login::Subscription),
-        email,
-        limits: Vec::new(),
-        five_hours: totals.five_hours,
-        seven_days: totals.seven_days,
-    }
+    UsageCache::default().claude(claude_json, claude_dir, api_key_in_env, now_ms)
 }
 
 /// Codex's account, from `auth.json` under `codex_home` and the limits in
 /// its newest rollout, `api_key_in_env` being whether `OPENAI_API_KEY` is
 /// set and `now_ms` the time the windows end.
 pub fn codex_usage(codex_home: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
-    let auth = read_json::<CodexAuth>(&codex_home.join("auth.json"));
-    // Codex prefers the login it stored over a key in the environment.
-    let login = match auth.auth_mode.as_deref() {
-        _ if auth.api_key.is_some() => Login::ApiKey,
-        Some("apikey") => Login::ApiKey,
-        Some("chatgpt") => Login::Subscription,
-        None if auth.tokens.is_some() => Login::Subscription,
-        _ if api_key_in_env => Login::ApiKey,
-        _ => Login::None,
-    };
-    let rate_limits = newest_rollout(&codex_home.join("sessions")).and_then(|r| last_rate_limits(&r));
-    let rate_limits = rate_limits.unwrap_or(Value::Null);
-    let limits = ["primary", "secondary"].iter().filter_map(|w| limit_window(&rate_limits[w])).collect();
-    // `pricing` has no OpenAI rates, so never a cost.
-    let mut totals = Totals::new(now_ms, false);
-    let mut rollouts = Vec::new();
-    recent_files(&codex_home.join("sessions"), now_ms, 3, &mut rollouts);
-    for rollout in rollouts {
-        totals.add_rollout(&rollout);
+    UsageCache::default().codex(codex_home, api_key_in_env, now_ms)
+}
+
+/// What every recent transcript and rollout counted, kept between reads:
+/// a file is read again only from where the last read stopped, or from
+/// its start once it shrank.
+#[derive(Default)]
+pub struct UsageCache {
+    claude: Cache<Replies>,
+    codex: Cache<Calls>,
+}
+
+impl UsageCache {
+    /// Every harness's account, from where each keeps it on this machine.
+    pub fn accounts(&mut self) -> Vec<AccountUsage> {
+        let home = crate::config::home_dir().map(PathBuf::from).unwrap_or_default();
+        let claude_config = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+        let claude_json = claude_config.as_deref().unwrap_or(&home).join(".claude.json");
+        let claude_dir = claude_config.unwrap_or_else(|| home.join(".claude"));
+        let api_key_in_env = std::env::var_os("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty());
+        let codex_home = std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from);
+        let openai_key_in_env = std::env::var_os("OPENAI_API_KEY").is_some_and(|v| !v.is_empty());
+        let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        vec![
+            self.claude(&claude_json, &claude_dir, api_key_in_env, now_ms),
+            self.codex(&codex_home, openai_key_in_env, now_ms),
+        ]
     }
-    AccountUsage {
-        harness: Harness::Codex,
-        login,
-        plan: rate_limits["plan_type"].as_str().map(str::to_string),
-        email: None,
-        limits,
-        five_hours: totals.five_hours,
-        seven_days: totals.seven_days,
+
+    /// [`claude_usage`], reading only what changed since the last call.
+    pub fn claude(&mut self, claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
+        let account = read_json::<ClaudeJson>(claude_json).oauth_account;
+        let helper = read_json::<ClaudeSettings>(&claude_dir.join("settings.json")).api_key_helper.is_some();
+        let login = if api_key_in_env || helper {
+            Login::ApiKey
+        } else if account.is_some() {
+            Login::Subscription
+        } else {
+            Login::None
+        };
+        let (plan, email) = account.map_or((None, None), |a| (a.organization_type, a.email_address));
+        // On a plan the list price is not what is paid: no cost, not a cost
+        // that reads as a bill.
+        let mut totals = Totals::new(now_ms, login == Login::ApiKey);
+        let transcripts = claude_transcripts(&claude_dir.join("projects"), now_ms);
+        for transcript in &transcripts {
+            for c in self.claude.read(transcript).map_or(&[][..], |r| &r.counted) {
+                totals.add(c.at_ms, c.usage, c.model.as_deref());
+            }
+        }
+        // A file last written before the window counts nothing any more.
+        self.claude.retain(|p| transcripts.iter().any(|t| t == p));
+        AccountUsage {
+            harness: Harness::Claude,
+            login,
+            // A plan that is not what usage is billed to would mislead.
+            plan: plan.filter(|_| login == Login::Subscription),
+            email,
+            limits: Vec::new(),
+            five_hours: totals.five_hours,
+            seven_days: totals.seven_days,
+        }
+    }
+
+    /// [`codex_usage`], reading only what changed since the last call.
+    pub fn codex(&mut self, codex_home: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
+        let auth = read_json::<CodexAuth>(&codex_home.join("auth.json"));
+        // Codex prefers the login it stored over a key in the environment.
+        let login = match auth.auth_mode.as_deref() {
+            _ if auth.api_key.is_some() => Login::ApiKey,
+            Some("apikey") => Login::ApiKey,
+            Some("chatgpt") => Login::Subscription,
+            None if auth.tokens.is_some() => Login::Subscription,
+            _ if api_key_in_env => Login::ApiKey,
+            _ => Login::None,
+        };
+        let rate_limits = newest_rollout(&codex_home.join("sessions")).and_then(|r| last_rate_limits(&r));
+        let rate_limits = rate_limits.unwrap_or(Value::Null);
+        let limits = ["primary", "secondary"].iter().filter_map(|w| limit_window(&rate_limits[w])).collect();
+        // `pricing` has no OpenAI rates, so never a cost.
+        let mut totals = Totals::new(now_ms, false);
+        let mut rollouts = Vec::new();
+        recent_files(&codex_home.join("sessions"), now_ms, 3, &mut rollouts);
+        for rollout in &rollouts {
+            for c in self.codex.read(rollout).map_or(&[][..], |r| &r.counted) {
+                totals.add(c.at_ms, c.usage, None);
+            }
+        }
+        self.codex.retain(|p| rollouts.iter().any(|r| r == p));
+        AccountUsage {
+            harness: Harness::Codex,
+            login,
+            plan: rate_limits["plan_type"].as_str().map(str::to_string),
+            email: None,
+            limits,
+            five_hours: totals.five_hours,
+            seven_days: totals.seven_days,
+        }
     }
 }
 
@@ -217,55 +265,71 @@ impl Totals {
             }
         }
     }
+}
 
-    /// A Claude Code transcript's replies. One reply is written as several
-    /// entries in a row, each repeating its usage, so as in
-    /// `transcript::Stats` an entry with the last one's message id
-    /// replaces it rather than adding to it.
-    fn add_transcript(&mut self, path: &Path) {
-        let Ok(text) = std::fs::read_to_string(path) else { return };
-        let mut last: Option<(String, u64, Usage, Option<String>)> = None;
-        for line in text.lines() {
-            let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
-            let message = &entry["message"];
-            // Entries Claude Code adds for itself, left out as Stats does.
-            let meta = entry["isMeta"].as_bool() == Some(true);
-            if meta || entry["type"] != "assistant" || !message["usage"].is_object() {
-                continue;
-            }
-            let Some(at) = entry["timestamp"].as_str().and_then(parse_timestamp) else { continue };
-            let id = message["id"].as_str().unwrap_or("").to_string();
-            if let Some((_, at, usage, model)) = last.take_if(|before| id.is_empty() || before.0 != id) {
-                self.add(at, usage, model.as_deref());
-            }
-            last = Some((id, at, usage_of(&message["usage"]), message["model"].as_str().map(str::to_string)));
+/// A line's share of the totals: what it used, and when, and on which
+/// model, which prices it.
+struct Counted {
+    at_ms: u64,
+    model: Option<String>,
+    usage: Usage,
+}
+
+/// A Claude Code transcript's replies. One reply is written as several
+/// entries in a row, each repeating its usage, so as in
+/// `transcript::Stats` an entry with the last one's message id replaces
+/// it rather than adding to it — across reads too, since the last id is
+/// kept with the replies.
+#[derive(Default)]
+struct Replies {
+    counted: Vec<Counted>,
+    last_id: String,
+}
+
+impl Feed for Replies {
+    fn feed(&mut self, line: &str) {
+        let Ok(entry) = serde_json::from_str::<Value>(line) else { return };
+        let message = &entry["message"];
+        // Entries Claude Code adds for itself, left out as Stats does.
+        let meta = entry["isMeta"].as_bool() == Some(true);
+        if meta || entry["type"] != "assistant" || !message["usage"].is_object() {
+            return;
         }
-        if let Some((_, at, usage, model)) = last {
-            self.add(at, usage, model.as_deref());
+        let Some(at_ms) = entry["timestamp"].as_str().and_then(parse_timestamp) else { return };
+        let id = message["id"].as_str().unwrap_or("").to_string();
+        if !id.is_empty() && id == self.last_id {
+            self.counted.pop();
         }
+        let model = message["model"].as_str().map(str::to_string);
+        self.counted.push(Counted { at_ms, model, usage: usage_of(&message["usage"]) });
+        self.last_id = id;
     }
+}
 
-    /// A Codex rollout's model calls. Its `input_tokens` include the
-    /// cached ones, which are split out to be counted as cache reads.
-    fn add_rollout(&mut self, path: &Path) {
-        let Ok(text) = std::fs::read_to_string(path) else { return };
-        for line in text.lines() {
-            let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
-            let p = &entry["payload"];
-            let last = &p["info"]["last_token_usage"];
-            if entry["type"] != "event_msg" || p["type"] != "token_count" || !last.is_object() {
-                continue;
-            }
-            let Some(at) = entry["timestamp"].as_str().and_then(parse_timestamp) else { continue };
-            let n = |key: &str| last[key].as_u64().unwrap_or(0);
-            let usage = Usage {
-                input: n("input_tokens").saturating_sub(n("cached_input_tokens")),
-                cache_write: n("cache_write_input_tokens"),
-                cache_read: n("cached_input_tokens"),
-                output: n("output_tokens"),
-            };
-            self.add(at, usage, None);
+/// A Codex rollout's model calls. Its `input_tokens` include the cached
+/// ones, which are split out to be counted as cache reads.
+#[derive(Default)]
+struct Calls {
+    counted: Vec<Counted>,
+}
+
+impl Feed for Calls {
+    fn feed(&mut self, line: &str) {
+        let Ok(entry) = serde_json::from_str::<Value>(line) else { return };
+        let p = &entry["payload"];
+        let last = &p["info"]["last_token_usage"];
+        if entry["type"] != "event_msg" || p["type"] != "token_count" || !last.is_object() {
+            return;
         }
+        let Some(at_ms) = entry["timestamp"].as_str().and_then(parse_timestamp) else { return };
+        let n = |key: &str| last[key].as_u64().unwrap_or(0);
+        let usage = Usage {
+            input: n("input_tokens").saturating_sub(n("cached_input_tokens")),
+            cache_write: n("cache_write_input_tokens"),
+            cache_read: n("cached_input_tokens"),
+            output: n("output_tokens"),
+        };
+        self.counted.push(Counted { at_ms, model: None, usage });
     }
 }
 
@@ -309,25 +373,10 @@ pub fn window_name(minutes: u64) -> String {
     }
 }
 
-/// Every harness's account, from where each keeps it on this machine.
-pub fn accounts() -> Vec<AccountUsage> {
-    let home = crate::config::home_dir().map(PathBuf::from).unwrap_or_default();
-    let claude_config = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
-    let claude_json = claude_config.as_deref().unwrap_or(&home).join(".claude.json");
-    let claude_dir = claude_config.unwrap_or_else(|| home.join(".claude"));
-    let api_key_in_env = std::env::var_os("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty());
-    let codex_home = std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from);
-    let openai_key_in_env = std::env::var_os("OPENAI_API_KEY").is_some_and(|v| !v.is_empty());
-    let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    vec![
-        claude_usage(&claude_json, &claude_dir, api_key_in_env, now_ms),
-        codex_usage(&codex_home, openai_key_in_env, now_ms),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mira-usage-{}-{name}", std::process::id()));
@@ -384,7 +433,8 @@ mod tests {
         .join("\n");
         write_at(dir, "projects/-repo/s1.jsonl", &session, now());
         let subagent = reply("2026-11-02T11:30:00.000Z", "msg_d", "claude-opus-5-5", 5, 0);
-        write_at(dir, "projects/-repo/s1/subagents/agent-x.jsonl", &subagent, now());
+        // Every line ends: a line still being written is not counted yet.
+        write_at(dir, "projects/-repo/s1/subagents/agent-x.jsonl", &format!("{subagent}\n"), now());
         let old = reply("2026-11-02T11:00:00.000Z", "msg_e", "claude-opus-5-5", 7777, 0);
         write_at(dir, "projects/-repo/old.jsonl", &old, now() - 8 * DAY_MS);
     }
@@ -450,6 +500,70 @@ mod tests {
 
     const OAUTH: &str = r#"{"oauthAccount":{"billingType":"stripe_subscription","organizationType":"claude_max",
         "userRateLimitTier":null,"emailAddress":"dev@example.com"}}"#;
+
+    /// One session's five-hour input, read through `cache`.
+    fn input_5h(cache: &mut UsageCache, dir: &Path, now_ms: u64) -> (u64, u64) {
+        let usage = cache.claude(&dir.join(".claude.json"), dir, false, now_ms);
+        (usage.five_hours.input, usage.seven_days.input)
+    }
+
+    #[test]
+    fn a_second_read_counts_only_what_was_appended() {
+        let dir = temp_dir("cache-append");
+        let path = dir.join("projects/-repo/s1.jsonl");
+        let first = reply("2026-11-02T11:00:00.000Z", "msg_a", "claude-opus-5-5", 100, 0);
+        write_at(&dir, "projects/-repo/s1.jsonl", &format!("{first}\n"), now());
+        let mut cache = UsageCache::default();
+        assert_eq!(input_5h(&mut cache, &dir, now()), (100, 100));
+        let read = cache.claude.consumed(&path).unwrap();
+
+        // A new reply, and another entry of it repeating its usage: the
+        // repeat replaces it, though the two came in different reads.
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(file, "{}", reply("2026-11-02T11:30:00.000Z", "msg_b", "claude-opus-5-5", 20, 0)).unwrap();
+        assert_eq!(input_5h(&mut cache, &dir, now()), (120, 120));
+        writeln!(file, "{}", reply("2026-11-02T11:30:01.000Z", "msg_b", "claude-opus-5-5", 25, 0)).unwrap();
+        assert_eq!(input_5h(&mut cache, &dir, now()), (125, 125));
+        // Read on from where it stopped, not from the start.
+        assert!(cache.claude.consumed(&path).unwrap() > read);
+    }
+
+    #[test]
+    fn a_rewritten_transcript_is_counted_again() {
+        let dir = temp_dir("cache-shrunk");
+        let two = [
+            reply("2026-11-02T11:00:00.000Z", "msg_a", "claude-opus-5-5", 100, 0),
+            reply("2026-11-02T11:10:00.000Z", "msg_b", "claude-opus-5-5", 200, 0),
+        ]
+        .join("\n");
+        write_at(&dir, "projects/-repo/s1.jsonl", &format!("{two}\n"), now());
+        let mut cache = UsageCache::default();
+        assert_eq!(input_5h(&mut cache, &dir, now()), (300, 300));
+        let one = reply("2026-11-02T11:20:00.000Z", "msg_c", "claude-opus-5-5", 7, 0);
+        write_at(&dir, "projects/-repo/s1.jsonl", &format!("{one}\n"), now());
+        assert_eq!(input_5h(&mut cache, &dir, now()), (7, 7));
+    }
+
+    #[test]
+    fn a_reply_leaves_the_windows_as_time_passes_without_a_new_read() {
+        let dir = temp_dir("cache-ages");
+        let lines = [
+            reply("2026-10-26T15:00:00.000Z", "msg_a", "claude-opus-5-5", 1000, 0),
+            reply("2026-11-02T11:00:00.000Z", "msg_b", "claude-opus-5-5", 10, 0),
+        ]
+        .join("\n");
+        let path = write_at(&dir, "projects/-repo/s1.jsonl", &format!("{lines}\n"), now());
+        let mut cache = UsageCache::default();
+        assert_eq!(input_5h(&mut cache, &dir, now()), (10, 1010));
+        let read = cache.claude.consumed(&path);
+        // Six hours on: the newer reply is out of five hours, the older
+        // one out of seven days, and nothing more was read.
+        assert_eq!(input_5h(&mut cache, &dir, now() + 6 * 3600 * 1000), (0, 10));
+        assert_eq!(cache.claude.consumed(&path), read);
+        // Eight days on, the file itself is too old and is forgotten.
+        assert_eq!(input_5h(&mut cache, &dir, now() + 8 * DAY_MS), (0, 0));
+        assert_eq!(cache.claude.consumed(&path), None);
+    }
 
     #[test]
     fn a_claude_sign_in_is_a_subscription_with_its_plan() {

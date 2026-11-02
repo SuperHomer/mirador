@@ -461,8 +461,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "runs": runs }))
         }
         // Every connection has its own thread, so reading the files here
-        // holds up no one else.
-        Request::Usage => Ok(json!({ "accounts": cmux_core::usage::accounts() })),
+        // holds up no one else; the cache makes all but the first read
+        // only what was appended.
+        Request::Usage => Ok(json!({ "accounts": state.usage.lock().unwrap().accounts() })),
         Request::UsageOpen { pane_id, target } => {
             let pane = crate::commands::open_usage(app.clone(), app.state(), pane_id, target == "tab")?;
             Ok(json!({ "paneId": pane }))
