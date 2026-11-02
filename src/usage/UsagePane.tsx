@@ -91,11 +91,10 @@ function Account({ account }: { account: AccountUsage }) {
       {account.limits.map((w) => (
         <Limit key={w.windowMinutes} limit={w} />
       ))}
-      {account.harness === "claude" && account.login === "subscription" && (
-        <div className="usage-muted">
-          Claude Code keeps no limits on disk, so this shows tokens, not % of your plan.
-        </div>
+      {account.asOf !== null && account.limits.length > 0 && (
+        <div className="usage-muted">as of {clock(account.asOf)}</div>
       )}
+      {account.limitsNote && <div className="usage-muted">{account.limitsNote}</div>}
       <Totals name="Last 5 hours" totals={account.fiveHours} />
       <Totals name="Last 7 days" totals={account.sevenDays} />
     </section>
@@ -113,7 +112,7 @@ function Limit({ limit: w }: { limit: LimitWindow }) {
           style={{ width: `${Math.min(100, Math.max(0, w.usedPercent))}%` }}
         />
       </div>
-      <span className="usage-limit-used">{used}% used</span>
+      <span className="usage-limit-used">{w.limitReached ? "limit reached" : `${used}% used`}</span>
       {w.resetsAt !== null && (
         <span className="usage-muted">
           resets{" "}
@@ -128,6 +127,11 @@ function Limit({ limit: w }: { limit: LimitWindow }) {
       )}
     </div>
   );
+}
+
+/** A time of day on this machine's clock: `14:52`. */
+export function clock(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 function Totals({ name, totals: t }: { name: string; totals: TokenTotals }) {

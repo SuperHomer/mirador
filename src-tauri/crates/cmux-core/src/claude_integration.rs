@@ -272,6 +272,15 @@ fn read_status_line(command: &str) -> StatusLine {
     ours().map_or(StatusLine::Theirs, StatusLine::Ours)
 }
 
+/// Whether the status line in the settings file at `settings` is our
+/// wrapper: what makes Claude Code's plan limits reach Mirador.
+pub fn status_line_installed(settings: &Path) -> bool {
+    let settings = read_settings(settings).unwrap_or_default();
+    let line = &settings["statusLine"];
+    line["type"] == "command"
+        && line["command"].as_str().is_some_and(|c| matches!(read_status_line(c), StatusLine::Ours(_)))
+}
+
 /// `s` as one POSIX shell word: single quotes, each `'` in it as `'\''`.
 fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))

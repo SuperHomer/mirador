@@ -1867,7 +1867,17 @@ fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
             Some(_) => ", reset since".to_string(),
             None => String::new(),
         };
-        lines.push(format!("  {} {}% used{resets}", w.name, w.used_percent.round()));
+        if w.limit_reached {
+            lines.push(format!("  {} limit reached{resets}", w.name));
+        } else {
+            lines.push(format!("  {} {}% used{resets}", w.name, w.used_percent.round()));
+        }
+    }
+    if let Some(at) = account.as_of.filter(|_| !account.limits.is_empty()) {
+        lines.push(format!("  as of {}", cmux_core::usage::local_clock(at)));
+    }
+    if let Some(note) = &account.limits_note {
+        lines.push(format!("  {note}"));
     }
     for (name, t) in [("last 5h", &account.five_hours), ("last 7d", &account.seven_days)] {
         let cost = t.cost.map(|c| format!(" · ${c:.2}")).unwrap_or_default();
@@ -2183,6 +2193,8 @@ mod tests {
             email: Some("you@example.com".into()),
             note: None,
             limits: vec![],
+            as_of: None,
+            limits_note: None,
             five_hours: TokenTotals { input: 200, output: 750, ..Default::default() },
             seven_days: TokenTotals { cache_read: 1_234_567, ..Default::default() },
             in_use: true,
@@ -2197,11 +2209,13 @@ mod tests {
             plan: None,
             email: None,
             note: None,
+            as_of: None,
+            limits_note: None,
             limits: vec![
-                LimitWindow { used_percent: 71.4, window_minutes: 10080, name: "weekly".into(), resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59) },
-                LimitWindow { used_percent: 5.0, window_minutes: 300, name: "5h".into(), resets_at: Some(now + 2 * 3600 + 5 * 60) },
-                LimitWindow { used_percent: 90.0, window_minutes: 43200, name: "30 days".into(), resets_at: Some(now - 1) },
-                LimitWindow { used_percent: 1.0, window_minutes: 60, name: "60m".into(), resets_at: None },
+                LimitWindow { used_percent: 71.4, window_minutes: 10080, name: "weekly".into(), resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59), limit_reached: false },
+                LimitWindow { used_percent: 5.0, window_minutes: 300, name: "5h".into(), resets_at: Some(now + 2 * 3600 + 5 * 60), limit_reached: false },
+                LimitWindow { used_percent: 90.0, window_minutes: 43200, name: "30 days".into(), resets_at: Some(now - 1), limit_reached: false },
+                LimitWindow { used_percent: 1.0, window_minutes: 60, name: "60m".into(), resets_at: None, limit_reached: false },
             ],
             five_hours: TokenTotals { input: 12_300, cost: Some(0.5), ..Default::default() },
             seven_days: TokenTotals { cost: Some(0.0), ..Default::default() },
@@ -2223,6 +2237,25 @@ mod tests {
         assert_eq!(usage_lines(&declined, now)[0], "Claude Code — subscription (claude_max) · API key in env, declined");
         let either = AccountUsage { login: Login::PlanOrApiKey, email: None, ..claude.clone() };
         assert_eq!(usage_lines(&either, now)[0], "Claude Code — plan or API key (claude_max)");
+        let at = 1_800_000_000_000;
+        let full = AccountUsage {
+            limits: vec![LimitWindow {
+                used_percent: 100.0,
+                window_minutes: 300,
+                name: "5h".into(),
+                resets_at: Some(now + 3600),
+                limit_reached: true,
+            }],
+            as_of: Some(at),
+            email: None,
+            ..claude.clone()
+        };
+        assert_eq!(
+            usage_lines(&full, now)[1..3],
+            ["  5h limit reached, resets in 1h 0m".to_string(), format!("  as of {}", cmux_core::usage::local_clock(at))]
+        );
+        let how = AccountUsage { limits_note: Some("Limits appear after Claude Code's next reply.".into()), ..claude.clone() };
+        assert_eq!(usage_lines(&how, now)[1], "  Limits appear after Claude Code's next reply.");
         let signed_out = AccountUsage { login: Login::None, plan: None, email: None, ..claude };
         assert_eq!(usage_lines(&signed_out, now)[0], "Claude Code — not signed in");
     }

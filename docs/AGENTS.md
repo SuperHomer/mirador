@@ -806,6 +806,9 @@ out: the list price is not what a plan pays.
 
 ```
 Claude Code — subscription (claude_max) · you@example.com
+  weekly 64% used, resets in 2d 3h
+  5h 23% used, resets in 1h 40m
+  as of 14:52
   last 5h: 7.4M tokens
   last 7d: 1.0B tokens
 Codex — subscription (plus)
@@ -825,19 +828,26 @@ files, and never a credential — only the shape of the login.
   were approved and rejected is read. Approved: an API key. Declined: the
   plan, with `API key in env, declined`. Both, for different keys: `plan
   or API key`. Never asked: an API key, as Claude Code will offer it.
-  The same app can answer differently from a Dock launch and from a
-  shell that exports the key. A Claude plan shows tokens,
-  not a percentage of its limits: Claude Code keeps no limits on disk.
-  The tokens are added up from the transcripts under `projects/`,
-  subagents' included.
+  Whether the key is set is asked of the panes' login shell (the one
+  `-ilc env` run that finds their PATH, done in the background) as well
+  as the app's own environment, so a Dock launch sees a key `.zshrc`
+  exports; on Windows, the app's environment only. A plan's limits are
+  the 5-hour and weekly windows Claude Code last gave its status line,
+  which the wrapper `mira hooks setup` installs keeps (see section 2),
+  "as of" when it did; a window whose reset has passed since reads 0%.
+  A request the plan refused, logged in a transcript, shows its window
+  as `limit reached` until it resets, unless the status line spoke
+  later. With no limits yet, the account says how to get them: run
+  `mira hooks setup`, or wait for Claude Code's next reply once the
+  wrapper is in. An API key has no plan limits. The tokens are added up
+  from the transcripts under `projects/`, subagents' included.
 - **Codex**: the login in `$CODEX_HOME/auth.json` (`~/.codex`); a key
   in `OPENAI_API_KEY` counts only when that file holds no login, as
   Codex prefers its stored one. The limits and the plan are the ones
   the newest rollout last recorded, so they are as of Codex's last turn.
   It has no cost: Mirador knows no OpenAI prices.
 
-The app reads its own environment, not a shell's: a key exported in a
-shell's profile is not seen by an app started from the Dock.
+Codex's limits are "as of" the rollout line that carried them.
 
 The usage pane (also *App: Usage* in the palette) shows the same, a card
 per account with a bar per limit window. It reads the files when it

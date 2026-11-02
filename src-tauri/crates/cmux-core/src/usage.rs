@@ -106,8 +106,9 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
 /// Claude Code's account, from its `.claude.json`, and its settings and
 /// transcripts under `claude_dir`, `api_key_in_env` being whether
 /// `ANTHROPIC_API_KEY` is set and `now_ms` the time the windows end.
-pub fn claude_usage(claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
-    UsageCache::default().claude(claude_json, claude_dir, api_key_in_env, now_ms)
+/// The plan's windows come from the status line's snapshot at `limits`.
+pub fn claude_usage(claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64, limits: &Path) -> AccountUsage {
+    UsageCache::default().claude(claude_json, claude_dir, api_key_in_env, now_ms, limits)
 }
 
 /// Codex's account, from `auth.json` under `codex_home` and the limits in
@@ -143,13 +144,20 @@ impl UsageCache {
         let openai_key_in_env = std::env::var_os("OPENAI_API_KEY").is_some_and(|v| !v.is_empty());
         let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         vec![
-            self.claude(&claude_json, &claude_dir, api_key_in_env, now_ms),
+            self.claude(&claude_json, &claude_dir, api_key_in_env, now_ms, &claude_limits_path()),
             self.codex(&codex_home, openai_key_in_env, now_ms),
         ]
     }
 
     /// [`claude_usage`], reading only what changed since the last call.
-    pub fn claude(&mut self, claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
+    pub fn claude(
+        &mut self,
+        claude_json: &Path,
+        claude_dir: &Path,
+        api_key_in_env: bool,
+        now_ms: u64,
+        limits: &Path,
+    ) -> AccountUsage {
         let json = read_json::<ClaudeJson>(claude_json);
         let account = json.oauth_account;
         let helper = read_json::<ClaudeSettings>(&claude_dir.join("settings.json")).api_key_helper.is_some();
@@ -178,13 +186,23 @@ impl UsageCache {
         // that reads as a bill.
         let mut totals = Totals::new(now_ms, login == Login::ApiKey);
         let transcripts = claude_transcripts(&claude_dir.join("projects"), now_ms);
+        let mut refused: Option<Rejection> = None;
         for transcript in &transcripts {
-            for c in self.claude.read(transcript).map_or(&[][..], |r| &r.counted) {
+            let Some(replies) = self.claude.read(transcript) else { continue };
+            for c in &replies.counted {
                 totals.add(c.at_ms, c.usage, c.model.as_deref());
+            }
+            if let Some(r) = replies.rejected.filter(|r| refused.is_none_or(|o| r.at_ms > o.at_ms)) {
+                refused = Some(r);
             }
         }
         // A file last written before the window counts nothing any more.
         self.claude.retain(|p| transcripts.iter().any(|t| t == p));
+        // The windows are the plan's: an API key has none.
+        let on_plan = matches!(login, Login::Subscription | Login::PlanOrApiKey);
+        let (limits, as_of) =
+            if on_plan { plan_limits(read_claude_limits(limits), refused, now_ms) } else { (Vec::new(), None) };
+        let limits_note = (on_plan && limits.is_empty()).then(|| no_limits_note(claude_dir));
         AccountUsage {
             harness: Harness::Claude,
             login,
@@ -192,7 +210,9 @@ impl UsageCache {
             plan: plan.filter(|_| matches!(login, Login::Subscription | Login::PlanOrApiKey)),
             email,
             note,
-            limits: Vec::new(),
+            limits,
+            as_of,
+            limits_note,
             in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
             seven_days: totals.seven_days,
@@ -211,8 +231,8 @@ impl UsageCache {
             _ if api_key_in_env => Login::ApiKey,
             _ => Login::None,
         };
-        let rate_limits = newest_rollout(&codex_home.join("sessions")).and_then(|r| last_rate_limits(&r));
-        let rate_limits = rate_limits.unwrap_or(Value::Null);
+        let last = newest_rollout(&codex_home.join("sessions")).and_then(|r| last_rate_limits(&r));
+        let (rate_limits, as_of) = last.unwrap_or((Value::Null, None));
         let mut limits: Vec<LimitWindow> =
             ["primary", "secondary"].iter().filter_map(|w| limit_window(&rate_limits[w])).collect();
         // The most used first: the one a glance at the account should see.
@@ -234,10 +254,56 @@ impl UsageCache {
             email: None,
             note: None,
             limits,
+            as_of,
+            limits_note: None,
             in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
             seven_days: totals.seven_days,
         }
+    }
+}
+
+/// Claude's plan windows: the status line's snapshot, and a refused
+/// request where the snapshot says nothing newer about its window; when
+/// they were read, the newest of the two used. Most used first.
+fn plan_limits(snapshot: Option<ClaudeLimits>, refused: Option<Rejection>, now_ms: u64) -> (Vec<LimitWindow>, Option<u64>) {
+    let now_s = now_ms / 1000;
+    let (mut limits, mut as_of) = snapshot.map_or((Vec::new(), None), |s| (s.windows, Some(s.saved_at)));
+    for w in &mut limits {
+        // A window that has reset since the snapshot is empty now: its old
+        // percentage, shown as current, would say the plan is still that
+        // full until the next status line.
+        if w.resets_at.is_some_and(|at| at <= now_s) {
+            w.used_percent = 0.0;
+        }
+    }
+    if let Some(r) = refused.filter(|r| r.resets_at > now_s) {
+        let known = limits.iter().any(|w| w.window_minutes == r.window_minutes);
+        if !known || as_of.is_none_or(|t| r.at_ms > t) {
+            limits.retain(|w| w.window_minutes != r.window_minutes);
+            limits.push(LimitWindow {
+                used_percent: 100.0,
+                window_minutes: r.window_minutes,
+                name: window_name(r.window_minutes),
+                resets_at: Some(r.resets_at),
+                limit_reached: true,
+            });
+            as_of = Some(as_of.map_or(r.at_ms, |t| t.max(r.at_ms)));
+        }
+    }
+    limits.sort_by(|a, b| b.used_percent.total_cmp(&a.used_percent));
+    (limits, as_of)
+}
+
+/// Why a Claude plan shows no limits, and what gets them: the status line
+/// wrapper, or, once it is there, Claude Code's next reply.
+fn no_limits_note(claude_dir: &Path) -> String {
+    if cfg!(windows) {
+        "Claude Code's plan limits are not read on Windows.".into()
+    } else if crate::claude_integration::status_line_installed(&claude_dir.join("settings.json")) {
+        "Limits appear after Claude Code's next reply.".into()
+    } else {
+        "Run mira hooks setup (or Set up in the banner) to read your plan's limits from Claude Code's status line.".into()
     }
 }
 
@@ -330,6 +396,44 @@ struct Counted {
 struct Replies {
     counted: Vec<Counted>,
     last_id: String,
+    /// The newest request the plan refused, if any.
+    rejected: Option<Rejection>,
+}
+
+/// A request Claude's plan refused, as Claude Code logs it with its error:
+/// the window that is full, and when it resets (Unix seconds).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Rejection {
+    at_ms: u64,
+    window_minutes: u64,
+    resets_at: u64,
+}
+
+/// The refusal an entry carries: `apiErrorParams.rate_limit_info`, or a
+/// `quotaLimits` beside it, with `status` "rejected", `rateLimitType`
+/// five_hour or seven_day, and `resetsAt`. Not seen in a transcript here;
+/// every field optional, as everywhere in this file.
+fn rejection(entry: &Value, at_ms: u64) -> Option<Rejection> {
+    let params = &entry["apiErrorParams"];
+    let info = [&params["rate_limit_info"], &params["quotaLimits"], &entry["quotaLimits"]]
+        .into_iter()
+        .find(|v| v.is_object())?;
+    if info["status"] != "rejected" {
+        return None;
+    }
+    let window_minutes = match info["rateLimitType"].as_str()? {
+        "five_hour" => 300,
+        "seven_day" => 10080,
+        _ => return None,
+    };
+    Some(Rejection { at_ms, window_minutes, resets_at: epoch_secs(&info["resetsAt"])? })
+}
+
+/// A time as Unix seconds: given in seconds, in millis, or as RFC 3339.
+fn epoch_secs(v: &Value) -> Option<u64> {
+    v.as_u64()
+        .map(|n| if n > 1_000_000_000_000 { n / 1000 } else { n })
+        .or_else(|| v.as_str().and_then(parse_timestamp).map(|ms| ms / 1000))
 }
 
 impl Feed for Replies {
@@ -338,10 +442,16 @@ impl Feed for Replies {
         let message = &entry["message"];
         // Entries Claude Code adds for itself, left out as Stats does.
         let meta = entry["isMeta"].as_bool() == Some(true);
-        if meta || entry["type"] != "assistant" || !message["usage"].is_object() {
+        if meta || entry["type"] != "assistant" {
             return;
         }
         let Some(at_ms) = entry["timestamp"].as_str().and_then(parse_timestamp) else { return };
+        if let Some(r) = rejection(&entry, at_ms).filter(|r| self.rejected.is_none_or(|o| r.at_ms >= o.at_ms)) {
+            self.rejected = Some(r);
+        }
+        if !message["usage"].is_object() {
+            return;
+        }
         let id = message["id"].as_str().unwrap_or("").to_string();
         if !id.is_empty() && id == self.last_id {
             self.counted.pop();
@@ -380,8 +490,9 @@ impl Feed for Calls {
 }
 
 /// The `rate_limits` of the last `token_count` in the end of `rollout`
-/// that has any: one sent with none (a turn's first count) says nothing.
-fn last_rate_limits(rollout: &Path) -> Option<Value> {
+/// that has any (one sent with none, a turn's first count, says nothing),
+/// and that line's time.
+fn last_rate_limits(rollout: &Path) -> Option<(Value, Option<u64>)> {
     let mut file = std::fs::File::open(rollout).ok()?;
     let len = file.metadata().ok()?.len();
     let start = len.saturating_sub(ROLLOUT_TAIL);
@@ -394,7 +505,7 @@ fn last_rate_limits(rollout: &Path) -> Option<Value> {
         let entry = serde_json::from_slice::<Value>(line).ok()?;
         let p = &entry["payload"];
         (entry["type"] == "event_msg" && p["type"] == "token_count" && p["rate_limits"].is_object())
-            .then(|| p["rate_limits"].clone())
+            .then(|| (p["rate_limits"].clone(), entry["timestamp"].as_str().and_then(parse_timestamp)))
     })
 }
 
@@ -405,7 +516,25 @@ fn limit_window(w: &Value) -> Option<LimitWindow> {
         window_minutes,
         name: window_name(window_minutes),
         resets_at: w["resets_at"].as_u64(),
+        limit_reached: false,
     })
+}
+
+/// `ms` (Unix millis) as a time of day on this machine's clock: `14:52`.
+/// Windows has no `localtime_r` here, so it says the time in UTC.
+pub fn local_clock(ms: u64) -> String {
+    let secs = (ms / 1000) as i64;
+    #[cfg(unix)]
+    {
+        let t = secs as libc::time_t;
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        // SAFETY: both pointers are to locals that outlive the call.
+        if !unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+            return format!("{:02}:{:02}", tm.tm_hour, tm.tm_min);
+        }
+    }
+    let day = secs.rem_euclid(86_400);
+    format!("{:02}:{:02} UTC", day / 3600, day % 3600 / 60)
 }
 
 /// A limit window by its length, as the plans name theirs: `5h`,
@@ -449,14 +578,12 @@ pub fn statusline_windows(input: &[u8]) -> Vec<LimitWindow> {
         .into_iter()
         .filter_map(|(key, window_minutes)| {
             let w = &limits[key];
-            let resets_at = w["resets_at"]
-                .as_u64()
-                .or_else(|| w["resets_at"].as_str().and_then(parse_timestamp).map(|ms| ms / 1000));
             Some(LimitWindow {
                 used_percent: w["used_percentage"].as_f64()?,
                 window_minutes,
                 name: window_name(window_minutes),
-                resets_at,
+                resets_at: epoch_secs(&w["resets_at"]),
+                limit_reached: false,
             })
         })
         .collect()
@@ -492,6 +619,11 @@ pub fn read_claude_limits(path: &Path) -> Option<ClaudeLimits> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// A snapshot path with nothing there: the tests never read the real one.
+    fn no_snapshot() -> PathBuf {
+        std::env::temp_dir().join(format!("mira-usage-{}-none/claude-limits.json", std::process::id()))
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mira-usage-{}-{name}", std::process::id()));
@@ -558,7 +690,7 @@ mod tests {
     fn claude_totals_count_each_reply_once_by_its_own_time() {
         let dir = temp_dir("claude-totals");
         claude_projects(&dir);
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now());
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
         let (five, seven) = (&usage.five_hours, &usage.seven_days);
         // The repeated reply at its last entry's usage, and the subagent's.
         assert_eq!((five.input, five.output), (105, 10));
@@ -573,7 +705,7 @@ mod tests {
     fn claude_totals_on_an_api_key_cost_the_priced_replies() {
         let dir = temp_dir("claude-cost");
         claude_projects(&dir);
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, true, now());
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, true, now(), &no_snapshot());
         let opus = crate::pricing::rates("claude-opus-5-5").unwrap();
         let priced = crate::pricing::cost(opus, Usage { input: 105, output: 10, ..Default::default() });
         // The unknown model's tokens are counted, with no cost.
@@ -618,7 +750,7 @@ mod tests {
 
     /// One session's five-hour input, read through `cache`.
     fn input_5h(cache: &mut UsageCache, dir: &Path, now_ms: u64) -> (u64, u64) {
-        let usage = cache.claude(&dir.join(".claude.json"), dir, false, now_ms);
+        let usage = cache.claude(&dir.join(".claude.json"), dir, false, now_ms, &no_snapshot());
         (usage.five_hours.input, usage.seven_days.input)
     }
 
@@ -683,7 +815,7 @@ mod tests {
     #[test]
     fn a_claude_sign_in_is_a_subscription_with_its_plan() {
         let dir = temp_dir("claude-sub");
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now());
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
         assert_eq!(usage.login, Login::Subscription);
         assert_eq!(usage.plan.as_deref(), Some("claude_max"));
         assert_eq!(usage.email.as_deref(), Some("dev@example.com"));
@@ -701,17 +833,17 @@ mod tests {
     fn an_approved_env_key_wins_over_a_claude_sign_in() {
         let dir = temp_dir("claude-key");
         let json = write(&dir, ".claude.json", &oauth_with(r#""abcdefghij0123456789""#, ""));
-        let usage = claude_usage(&json, &dir, true, now());
+        let usage = claude_usage(&json, &dir, true, now(), &no_snapshot());
         assert_eq!((usage.login, usage.plan, usage.note), (Login::ApiKey, None, None));
         // Without the key in the environment, the approval is moot.
-        assert_eq!(claude_usage(&json, &dir, false, now()).login, Login::Subscription);
+        assert_eq!(claude_usage(&json, &dir, false, now(), &no_snapshot()).login, Login::Subscription);
     }
 
     #[test]
     fn a_declined_env_key_leaves_the_plan_with_a_note() {
         let dir = temp_dir("claude-declined");
         let json = write(&dir, ".claude.json", &oauth_with("", r#""abcdefghij0123456789""#));
-        let usage = claude_usage(&json, &dir, true, now());
+        let usage = claude_usage(&json, &dir, true, now(), &no_snapshot());
         assert_eq!(usage.login, Login::Subscription);
         assert_eq!(usage.plan.as_deref(), Some("claude_max"));
         assert_eq!(usage.note.as_deref(), Some("API key in env, declined"));
@@ -719,14 +851,14 @@ mod tests {
         assert_eq!(usage.five_hours.cost, None);
         // Declined with no sign-in: nothing is billed at all.
         let alone = write(&dir, "alone.json", r#"{"customApiKeyResponses":{"approved":[],"rejected":["x"]}}"#);
-        assert_eq!(claude_usage(&alone, &dir, true, now()).login, Login::None);
+        assert_eq!(claude_usage(&alone, &dir, true, now(), &no_snapshot()).login, Login::None);
     }
 
     #[test]
     fn a_key_both_approved_and_rejected_is_plan_or_key() {
         let dir = temp_dir("claude-both");
         let json = write(&dir, ".claude.json", &oauth_with(r#""a""#, r#""b""#));
-        let usage = claude_usage(&json, &dir, true, now());
+        let usage = claude_usage(&json, &dir, true, now(), &no_snapshot());
         assert_eq!((usage.login, usage.plan.as_deref()), (Login::PlanOrApiKey, Some("claude_max")));
         assert_eq!(usage.five_hours.cost, None);
     }
@@ -735,9 +867,9 @@ mod tests {
     fn a_key_never_asked_about_is_taken_as_a_key() {
         let dir = temp_dir("claude-unasked");
         let json = write(&dir, ".claude.json", OAUTH);
-        assert_eq!(claude_usage(&json, &dir, true, now()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&json, &dir, true, now(), &no_snapshot()).login, Login::ApiKey);
         let empty = write(&dir, "empty.json", &oauth_with("", ""));
-        assert_eq!(claude_usage(&empty, &dir, true, now()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&empty, &dir, true, now(), &no_snapshot()).login, Login::ApiKey);
     }
 
     #[test]
@@ -745,17 +877,17 @@ mod tests {
         let dir = temp_dir("claude-helper");
         let json = write(&dir, ".claude.json", &oauth_with("", r#""b""#));
         write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
-        assert_eq!(claude_usage(&json, &dir, false, now()).login, Login::ApiKey);
-        assert_eq!(claude_usage(&json, &dir, true, now()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&json, &dir, false, now(), &no_snapshot()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&json, &dir, true, now(), &no_snapshot()).login, Login::ApiKey);
     }
 
     #[test]
     fn claude_signed_out_or_missing_is_no_login() {
         let dir = temp_dir("claude-none");
-        let out = claude_usage(&write(&dir, ".claude.json", r#"{"hasCompletedOnboarding":true}"#), &dir, false, now());
+        let out = claude_usage(&write(&dir, ".claude.json", r#"{"hasCompletedOnboarding":true}"#), &dir, false, now(), &no_snapshot());
         assert_eq!((out.login, out.plan, out.email), (Login::None, None, None));
-        assert_eq!(claude_usage(&dir.join("missing.json"), &dir, false, now()).login, Login::None);
-        assert_eq!(claude_usage(&write(&dir, "bad.json", "{not json"), &dir, false, now()).login, Login::None);
+        assert_eq!(claude_usage(&dir.join("missing.json"), &dir, false, now(), &no_snapshot()).login, Login::None);
+        assert_eq!(claude_usage(&write(&dir, "bad.json", "{not json"), &dir, false, now(), &no_snapshot()).login, Login::None);
     }
 
     #[test]
@@ -784,7 +916,7 @@ mod tests {
         assert_eq!(usage.plan.as_deref(), Some("plus"));
         // The sign-in Codex stored wins over a key in the environment.
         assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
-        let five_hours = LimitWindow { used_percent: 42.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902) };
+        let five_hours = LimitWindow { used_percent: 42.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902), limit_reached: false };
         assert_eq!(usage.limits, vec![five_hours]);
     }
 
@@ -793,13 +925,13 @@ mod tests {
         let dir = temp_dir("in-use");
         let none = dir.join("missing.json");
         // Signed out, nothing used: a harness never used here.
-        assert!(!claude_usage(&none, &dir, false, now()).in_use);
+        assert!(!claude_usage(&none, &dir, false, now(), &no_snapshot()).in_use);
         // Signed in, nothing used yet.
-        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now()).in_use);
+        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot()).in_use);
         // Signed out, but used lately: a key since removed.
         let line = reply("2026-11-02T11:00:00.000Z", "msg_a", "claude-opus-5-5", 10, 0);
         write_at(&dir, "projects/-repo/s1.jsonl", &format!("{line}\n"), now());
-        assert!(claude_usage(&none, &dir, false, now()).in_use);
+        assert!(claude_usage(&none, &dir, false, now(), &no_snapshot()).in_use);
     }
 
     #[test]
@@ -822,8 +954,8 @@ mod tests {
         assert_eq!(
             windows,
             [
-                LimitWindow { used_percent: 23.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902) },
-                LimitWindow { used_percent: 71.0, window_minutes: 10080, name: "weekly".into(), resets_at: Some(seven_day_reset) },
+                LimitWindow { used_percent: 23.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902), limit_reached: false },
+                LimitWindow { used_percent: 71.0, window_minutes: 10080, name: "weekly".into(), resets_at: Some(seven_day_reset), limit_reached: false },
             ]
         );
     }
@@ -851,6 +983,116 @@ mod tests {
         // Nothing left beside it.
         let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
         assert_eq!(names, ["claude-limits.json"]);
+    }
+
+    /// A refusal the way the fallback reads one: an assistant entry at
+    /// `at`, its `apiErrorParams.rate_limit_info` rejected for `window`.
+    fn refusal(at: &str, window: &str, resets_at: u64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "timestamp": at,
+            "isApiErrorMessage": true,
+            "apiErrorParams": { "rate_limit_info": { "status": "rejected", "rateLimitType": window, "resetsAt": resets_at } },
+            "message": { "id": "err", "content": [] },
+        })
+        .to_string()
+    }
+
+    /// Signed in on a plan, with `snapshot` (status line JSON) saved at
+    /// `saved_at` and `transcript` lines: Claude's account then.
+    fn plan_with(name: &str, snapshot: Option<(&str, u64)>, transcript: &[String]) -> AccountUsage {
+        let dir = temp_dir(name);
+        let limits = dir.join("data/claude-limits.json");
+        if let Some((json, saved_at)) = snapshot {
+            assert!(save_claude_limits(&limits, json.as_bytes(), saved_at).unwrap());
+        }
+        if !transcript.is_empty() {
+            write_at(&dir, "projects/-repo/s1.jsonl", &format!("{}\n", transcript.join("\n")), now());
+        }
+        claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &limits)
+    }
+
+    const HOUR_MS: u64 = 3600 * 1000;
+
+    #[test]
+    fn the_status_lines_snapshot_gives_claudes_limits() {
+        let usage = plan_with("limits-snapshot", Some((STATUSLINE, now() - HOUR_MS)), &[]);
+        let shown: Vec<(&str, f64, bool)> = usage.limits.iter().map(|w| (w.name.as_str(), w.used_percent, w.limit_reached)).collect();
+        assert_eq!(shown, [("weekly", 71.0, false), ("5h", 23.5, false)], "most used first");
+        assert_eq!((usage.as_of, usage.limits_note), (Some(now() - HOUR_MS), None));
+    }
+
+    #[test]
+    fn a_window_that_has_reset_since_reads_empty() {
+        let passed = format!(r#"{{"rate_limits":{{"five_hour":{{"used_percentage":88,"resets_at":{}}}}}}}"#, now() / 1000 - 60);
+        let usage = plan_with("limits-reset", Some((&passed, now() - 2 * HOUR_MS)), &[]);
+        assert_eq!((usage.limits[0].used_percent, usage.limits[0].resets_at), (0.0, Some(now() / 1000 - 60)));
+    }
+
+    #[test]
+    fn an_api_key_has_no_plan_limits() {
+        let dir = temp_dir("limits-key");
+        let limits = dir.join("claude-limits.json");
+        save_claude_limits(&limits, STATUSLINE.as_bytes(), now()).unwrap();
+        write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &limits);
+        assert_eq!((usage.login, usage.limits.len(), usage.as_of, usage.limits_note), (Login::ApiKey, 0, None, None));
+    }
+
+    #[test]
+    fn a_refused_request_shows_its_window_full() {
+        let resets = now() / 1000 + 3600;
+        let usage = plan_with("limits-refused", None, &[refusal("2026-11-02T11:00:00.000Z", "five_hour", resets)]);
+        let w = &usage.limits[0];
+        assert_eq!((w.window_minutes, w.used_percent, w.limit_reached, w.resets_at), (300, 100.0, true, Some(resets)));
+        assert_eq!(usage.as_of, Some(now() - HOUR_MS));
+        // One whose reset has passed says nothing any more.
+        let stale = plan_with("limits-refused-old", None, &[refusal("2026-11-02T06:00:00.000Z", "five_hour", now() / 1000 - 1)]);
+        assert!(stale.limits.is_empty());
+    }
+
+    #[test]
+    fn the_newer_of_snapshot_and_refusal_wins() {
+        let refused = [refusal("2026-11-02T11:00:00.000Z", "five_hour", now() / 1000 + 3600)];
+        // The status line spoke after the refusal: its 5h stands.
+        let newer = plan_with("limits-newer-snapshot", Some((STATUSLINE, now() - HOUR_MS / 2)), &refused);
+        let five = newer.limits.iter().find(|w| w.window_minutes == 300).unwrap();
+        assert_eq!((five.used_percent, five.limit_reached), (23.5, false));
+        // The refusal came after: the 5h is full, the weekly still the snapshot's.
+        let older = plan_with("limits-older-snapshot", Some((STATUSLINE, now() - 2 * HOUR_MS)), &refused);
+        let shown: Vec<(u64, f64, bool)> = older.limits.iter().map(|w| (w.window_minutes, w.used_percent, w.limit_reached)).collect();
+        assert_eq!(shown, [(300, 100.0, true), (10080, 71.0, false)]);
+        assert_eq!(older.as_of, Some(now() - HOUR_MS));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_plan_with_no_limits_says_how_to_get_them() {
+        let none = plan_with("limits-note", None, &[]);
+        assert_eq!(
+            none.limits_note.as_deref(),
+            Some("Run mira hooks setup (or Set up in the banner) to read your plan's limits from Claude Code's status line.")
+        );
+        let dir = temp_dir("limits-note-ours");
+        let ours = format!(r#"{{"statusLine":{{"type":"command","command":"\"{}\" claude-statusline"}}}}"#, dir.join("mira").display());
+        write(&dir, "settings.json", &ours);
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
+        assert_eq!(usage.limits_note.as_deref(), Some("Limits appear after Claude Code's next reply."));
+    }
+
+    #[test]
+    fn codex_limits_are_as_of_their_rollout_line() {
+        let dir = temp_dir("codex-as-of");
+        let line = r#"{"timestamp":"2026-11-02T11:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":5,"window_minutes":300}}}}"#;
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{line}\n"));
+        assert_eq!(codex_usage(&dir, false, now()).as_of, Some(now() - HOUR_MS));
+    }
+
+    #[test]
+    fn a_clock_reads_hours_and_minutes() {
+        let clock = local_clock(now());
+        let hm = clock.trim_end_matches(" UTC");
+        assert!(hm.len() == 5 && hm.as_bytes()[2] == b':' && hm.replace(':', "").bytes().all(|b| b.is_ascii_digit()), "{clock}");
     }
 
     #[test]

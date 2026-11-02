@@ -34,6 +34,7 @@ import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { UpdateBanner } from "../update/UpdateBanner";
 import { fullness } from "../agents/AgentStatusBar";
 import { tokens } from "../agents/ActivityPanel";
+import { clock } from "../usage/UsagePane";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 
 export function Sidebar() {
@@ -325,7 +326,7 @@ function UsageRow({
           {a.limits.map((w) => (
             <div key={w.windowMinutes} className="usage-kv">
               <span>
-                {w.name} · {Math.round(w.usedPercent)}%
+                {w.name} · {w.limitReached ? "limit reached" : `${Math.round(w.usedPercent)}%`}
               </span>
               {w.resetsAt !== null && (
                 <span>
@@ -340,6 +341,8 @@ function UsageRow({
               )}
             </div>
           ))}
+          {a.asOf !== null && a.limits.length > 0 && <div className="usage-note">as of {clock(a.asOf)}</div>}
+          {a.limitsNote && <div className="usage-note">{a.limitsNote}</div>}
           <div className="usage-kv">
             <span>Last 5h</span>
             <span>

@@ -380,6 +380,8 @@ export interface LimitWindow {
   name: string;
   /** Unix seconds; null from older Codex versions. */
   resetsAt: number | null;
+  /** Known from a request the plan refused: the window is full. */
+  limitReached: boolean;
 }
 
 /** Tokens used over a stretch of time, by how each is priced. */
@@ -403,6 +405,10 @@ export interface AccountUsage {
   note: string | null;
   /** The most used first; empty for Claude Code, which keeps none on disk. */
   limits: LimitWindow[];
+  /** Unix millis of what the limits were read from. */
+  asOf: number | null;
+  /** Why a plan shows no limits, and how to get them. */
+  limitsNote: string | null;
   fiveHours: TokenTotals;
   sevenDays: TokenTotals;
   /** Signed in, or used lately: false for a harness never used here. */

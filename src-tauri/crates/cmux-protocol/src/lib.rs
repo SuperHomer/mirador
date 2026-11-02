@@ -2166,6 +2166,9 @@ pub struct LimitWindow {
     /// When it resets, in Unix seconds. Older Codex versions wrote none.
     #[serde(default)]
     pub resets_at: Option<u64>,
+    /// Known only from a request the plan refused: the window is full.
+    #[serde(default)]
+    pub limit_reached: bool,
 }
 
 /// The tokens an account used over a stretch of time, by how each is
@@ -2195,9 +2198,16 @@ pub struct AccountUsage {
     /// What else the login says: "API key in env, declined".
     #[serde(default)]
     pub note: Option<String>,
-    /// The plan's windows, the most used first. None for Claude Code,
-    /// which keeps none on disk.
+    /// The plan's windows, the most used first. Claude Code's come from
+    /// its status line (`mira claude-statusline`) or a refused request.
     pub limits: Vec<LimitWindow>,
+    /// Unix millis of what the limits were read from: Claude's status line
+    /// snapshot or refusal, Codex's rollout line.
+    #[serde(default)]
+    pub as_of: Option<u64>,
+    /// Why a plan shows no limits, and how to get them.
+    #[serde(default)]
+    pub limits_note: Option<String>,
     /// What it used in the last five hours and the last seven days: the
     /// lengths of the plans' own windows.
     pub five_hours: TokenTotals,
