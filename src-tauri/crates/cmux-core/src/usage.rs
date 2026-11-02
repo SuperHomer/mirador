@@ -250,7 +250,11 @@ impl UsageCache {
         }
         self.codex.retain(|p| rollouts.iter().any(|r| r == p));
         let as_of = buckets.iter().map(|b| b.at_ms).max().filter(|&t| t > 0);
-        let limits = bucket_limits(&buckets);
+        let mut limits = bucket_limits(&buckets);
+        // A bucket can come from an older rollout, from before its reset.
+        empty_if_reset(&mut limits, now_ms / 1000);
+        // The most used first: the one a glance at the account should see.
+        limits.sort_by(|a, b| b.used_percent.total_cmp(&a.used_percent));
         // The plan of a line that carried limits, before one that did not.
         let plan = buckets
             .iter()
@@ -281,14 +285,7 @@ fn plan_limits(snapshot: Option<ClaudeLimits>, refused: &[Rejection], now_ms: u6
     let now_s = now_ms / 1000;
     let (mut limits, snapshot_at) = snapshot.map_or((Vec::new(), None), |s| (s.windows, Some(s.saved_at)));
     let mut as_of = snapshot_at;
-    for w in &mut limits {
-        // A window that has reset since the snapshot is empty now: its old
-        // percentage, shown as current, would say the plan is still that
-        // full until the next status line.
-        if w.resets_at.is_some_and(|at| at <= now_s) {
-            w.used_percent = 0.0;
-        }
-    }
+    empty_if_reset(&mut limits, now_s);
     for r in refused.iter().filter(|r| r.resets_at > now_s) {
         let known = limits.iter().any(|w| w.window_minutes == r.window_minutes);
         if !known || snapshot_at.is_none_or(|t| r.at_ms > t) {
@@ -305,6 +302,16 @@ fn plan_limits(snapshot: Option<ClaudeLimits>, refused: &[Rejection], now_ms: u6
     }
     limits.sort_by(|a, b| b.used_percent.total_cmp(&a.used_percent));
     (limits, as_of)
+}
+
+/// Empties each window whose reset has passed by `now_s`: what was read
+/// about it came before the reset, and its old percentage, shown as
+/// current, would say the plan is still that full until the harness says
+/// otherwise — for Claude, its next status line; for Codex, its next turn.
+fn empty_if_reset(limits: &mut [LimitWindow], now_s: u64) {
+    for w in limits.iter_mut().filter(|w| w.resets_at.is_some_and(|at| at <= now_s)) {
+        w.used_percent = 0.0;
+    }
 }
 
 /// Why a Claude plan shows no limits, and what gets them: the status line
@@ -515,19 +522,18 @@ fn keep_bucket(list: &mut Vec<Bucket>, b: Bucket) {
     }
 }
 
-/// Every bucket's windows, the most used first. A window length two
+/// Every bucket's windows. A window length two
 /// buckets both carry is named by its bucket ("premium 30 days"), but for
 /// `codex`, the main one.
 fn bucket_limits(buckets: &[Bucket]) -> Vec<LimitWindow> {
     let all = buckets.iter().flat_map(|b| b.windows.iter().map(move |w| (b.id.as_deref(), w)));
     let shared = |minutes: u64| buckets.iter().filter(|b| b.windows.iter().any(|w| w.window_minutes == minutes)).count() > 1;
-    let mut limits: Vec<LimitWindow> = all
+    let limits: Vec<LimitWindow> = all
         .map(|(id, w)| match id {
             Some(id) if id != "codex" && shared(w.window_minutes) => LimitWindow { name: format!("{id} {}", w.name), ..w.clone() },
             _ => w.clone(),
         })
         .collect();
-    limits.sort_by(|a, b| b.used_percent.total_cmp(&a.used_percent));
     limits
 }
 
@@ -1210,6 +1216,17 @@ mod tests {
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{}\n", lines.join("\n")));
         let shown: Vec<(String, f64)> = codex_usage(&dir, false, now()).limits.into_iter().map(|w| (w.name, w.used_percent)).collect();
         assert_eq!(shown, [("30 days".to_string(), 98.0), ("premium 30 days".to_string(), 40.0)]);
+    }
+
+    #[test]
+    fn a_codex_window_that_has_reset_since_reads_empty() {
+        let dir = temp_dir("codex-reset");
+        let reset = now() / 1000 - 60;
+        let full = format!(r#"{{"used_percent":100.0,"window_minutes":43200,"resets_at":{reset}}}"#);
+        let line = bucket_line("2026-10-28T10:00:00.000Z", "codex", &full, "go");
+        write(&dir, "sessions/2026/10/28/rollout-2026-10-28T09-00-00-a.jsonl", &format!("{line}\n"));
+        let limits = codex_usage(&dir, false, now()).limits;
+        assert_eq!((limits[0].used_percent, limits[0].resets_at), (0.0, Some(reset)));
     }
 
     #[test]
