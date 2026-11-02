@@ -2142,6 +2142,20 @@ pub struct LimitWindow {
     pub resets_at: Option<u64>,
 }
 
+/// The tokens an account used over a stretch of time, by how each is
+/// priced (as `cmux_core::pricing::Usage` splits them).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenTotals {
+    pub input: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
+    pub output: u64,
+    /// At list prices, for an API key only: on a plan the dollars are not
+    /// what is paid. Models with no known price add tokens and no cost.
+    pub cost: Option<f64>,
+}
+
 /// What a harness's account is, read from its own files
 /// (`cmux_core::usage`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2153,4 +2167,8 @@ pub struct AccountUsage {
     pub plan: Option<String>,
     pub email: Option<String>,
     pub limits: Vec<LimitWindow>,
+    /// What it used in the last five hours and the last seven days: the
+    /// lengths of the plans' own windows.
+    pub five_hours: TokenTotals,
+    pub seven_days: TokenTotals,
 }

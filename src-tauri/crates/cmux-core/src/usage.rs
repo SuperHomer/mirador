@@ -19,6 +19,13 @@
 //! last sent, a `primary` and a `secondary` window and the `plan_type`.
 //! The newest rollout's last such line is the latest word.
 //!
+//! What each used over the plans' windows (five hours, seven days) is
+//! added up from the same files: Claude Code's transcripts
+//! (`projects/<project>/<session>.jsonl` and its subagents', which bill
+//! too) by each reply's `usage` and `timestamp`, and Codex's rollouts by
+//! each `token_count`'s `info.last_token_usage`. A file last written
+//! before the longer window is not opened.
+//!
 //! Only the shape of a login is read, never a credential: the key and the
 //! tokens are skipped while parsing, and the environment is only asked
 //! whether a key is set. Nothing here is a documented format: every field
@@ -26,17 +33,23 @@
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
-use cmux_protocol::{AccountUsage, Harness, LimitWindow, Login};
+use cmux_protocol::{AccountUsage, Harness, LimitWindow, Login, TokenTotals};
 use serde::de::IgnoredAny;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::codex_trail::newest_rollout;
+use crate::pricing::Usage;
+use crate::transcript::{parse_timestamp, subagent_dir, usage_of};
 
 /// How much of a rollout's end is read for its limits: every turn writes
 /// them, so the last one is near the end, and rollouts grow to megabytes.
 const ROLLOUT_TAIL: u64 = 256 * 1024;
+
+const FIVE_HOURS_MS: u64 = 5 * 3600 * 1000;
+const SEVEN_DAYS_MS: u64 = 7 * 24 * 3600 * 1000;
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -74,11 +87,12 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
     std::fs::read(path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
 }
 
-/// Claude Code's account, from its `.claude.json` and `settings.json`,
-/// `api_key_in_env` being whether `ANTHROPIC_API_KEY` is set.
-pub fn claude_usage(claude_json: &Path, settings: &Path, api_key_in_env: bool) -> AccountUsage {
+/// Claude Code's account, from its `.claude.json`, and its settings and
+/// transcripts under `claude_dir`, `api_key_in_env` being whether
+/// `ANTHROPIC_API_KEY` is set and `now_ms` the time the windows end.
+pub fn claude_usage(claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
     let account = read_json::<ClaudeJson>(claude_json).oauth_account;
-    let helper = read_json::<ClaudeSettings>(settings).api_key_helper.is_some();
+    let helper = read_json::<ClaudeSettings>(&claude_dir.join("settings.json")).api_key_helper.is_some();
     let login = if api_key_in_env || helper {
         Login::ApiKey
     } else if account.is_some() {
@@ -87,6 +101,12 @@ pub fn claude_usage(claude_json: &Path, settings: &Path, api_key_in_env: bool) -
         Login::None
     };
     let (plan, email) = account.map_or((None, None), |a| (a.organization_type, a.email_address));
+    // On a plan the list price is not what is paid: no cost, not a cost
+    // that reads as a bill.
+    let mut totals = Totals::new(now_ms, login == Login::ApiKey);
+    for transcript in claude_transcripts(&claude_dir.join("projects"), now_ms) {
+        totals.add_transcript(&transcript);
+    }
     AccountUsage {
         harness: Harness::Claude,
         login,
@@ -94,13 +114,15 @@ pub fn claude_usage(claude_json: &Path, settings: &Path, api_key_in_env: bool) -
         plan: plan.filter(|_| login == Login::Subscription),
         email,
         limits: Vec::new(),
+        five_hours: totals.five_hours,
+        seven_days: totals.seven_days,
     }
 }
 
 /// Codex's account, from `auth.json` under `codex_home` and the limits in
 /// its newest rollout, `api_key_in_env` being whether `OPENAI_API_KEY` is
-/// set.
-pub fn codex_usage(codex_home: &Path, api_key_in_env: bool) -> AccountUsage {
+/// set and `now_ms` the time the windows end.
+pub fn codex_usage(codex_home: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
     let auth = read_json::<CodexAuth>(&codex_home.join("auth.json"));
     // Codex prefers the login it stored over a key in the environment.
     let login = match auth.auth_mode.as_deref() {
@@ -114,12 +136,134 @@ pub fn codex_usage(codex_home: &Path, api_key_in_env: bool) -> AccountUsage {
     let rate_limits = newest_rollout(&codex_home.join("sessions")).and_then(|r| last_rate_limits(&r));
     let rate_limits = rate_limits.unwrap_or(Value::Null);
     let limits = ["primary", "secondary"].iter().filter_map(|w| limit_window(&rate_limits[w])).collect();
+    // `pricing` has no OpenAI rates, so never a cost.
+    let mut totals = Totals::new(now_ms, false);
+    let mut rollouts = Vec::new();
+    recent_files(&codex_home.join("sessions"), now_ms, 3, &mut rollouts);
+    for rollout in rollouts {
+        totals.add_rollout(&rollout);
+    }
     AccountUsage {
         harness: Harness::Codex,
         login,
         plan: rate_limits["plan_type"].as_str().map(str::to_string),
         email: None,
         limits,
+        five_hours: totals.five_hours,
+        seven_days: totals.seven_days,
+    }
+}
+
+/// Every session transcript under `projects`, and every one of their
+/// subagents', last written within seven days of `now_ms`.
+fn claude_transcripts(projects: &Path, now_ms: u64) -> Vec<PathBuf> {
+    let mut sessions = Vec::new();
+    for project in std::fs::read_dir(projects).into_iter().flatten().flatten() {
+        recent_files(&project.path(), now_ms, 0, &mut sessions);
+    }
+    let mut subagents = Vec::new();
+    for session in &sessions {
+        recent_files(&subagent_dir(session), now_ms, 0, &mut subagents);
+    }
+    sessions.extend(subagents);
+    sessions
+}
+
+/// The `.jsonl` files in `dir`, and in its directories `depth` levels
+/// down, last written within seven days of `now_ms`.
+fn recent_files(dir: &Path, now_ms: u64, depth: u32, found: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            if depth > 0 {
+                recent_files(&path, now_ms, depth - 1, found);
+            }
+        } else if path.extension().is_some_and(|e| e == "jsonl") {
+            let modified = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+            if modified.is_some_and(|m| m.as_millis() as u64 + SEVEN_DAYS_MS >= now_ms) {
+                found.push(path);
+            }
+        }
+    }
+}
+
+/// Both windows' totals, added up one usage at a time.
+struct Totals {
+    now_ms: u64,
+    five_hours: TokenTotals,
+    seven_days: TokenTotals,
+}
+
+impl Totals {
+    fn new(now_ms: u64, priced: bool) -> Self {
+        let empty = TokenTotals { cost: priced.then_some(0.0), ..Default::default() };
+        Self { now_ms, five_hours: empty.clone(), seven_days: empty }
+    }
+
+    /// `usage` at `at_ms`, costing what `model`'s rates say when known.
+    fn add(&mut self, at_ms: u64, usage: Usage, model: Option<&str>) {
+        let age = self.now_ms.saturating_sub(at_ms);
+        let cost = model.and_then(crate::pricing::rates).map_or(0.0, |rates| crate::pricing::cost(rates, usage));
+        for (window, totals) in [(FIVE_HOURS_MS, &mut self.five_hours), (SEVEN_DAYS_MS, &mut self.seven_days)] {
+            if age <= window {
+                totals.input += usage.input;
+                totals.cache_write += usage.cache_write;
+                totals.cache_read += usage.cache_read;
+                totals.output += usage.output;
+                if let Some(total) = &mut totals.cost {
+                    *total += cost;
+                }
+            }
+        }
+    }
+
+    /// A Claude Code transcript's replies. One reply is written as several
+    /// entries in a row, each repeating its usage, so as in
+    /// `transcript::Stats` an entry with the last one's message id
+    /// replaces it rather than adding to it.
+    fn add_transcript(&mut self, path: &Path) {
+        let Ok(text) = std::fs::read_to_string(path) else { return };
+        let mut last: Option<(String, u64, Usage, Option<String>)> = None;
+        for line in text.lines() {
+            let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
+            let message = &entry["message"];
+            if entry["type"] != "assistant" || !message["usage"].is_object() {
+                continue;
+            }
+            let Some(at) = entry["timestamp"].as_str().and_then(parse_timestamp) else { continue };
+            let id = message["id"].as_str().unwrap_or("").to_string();
+            if let Some((_, at, usage, model)) = last.take_if(|before| id.is_empty() || before.0 != id) {
+                self.add(at, usage, model.as_deref());
+            }
+            last = Some((id, at, usage_of(&message["usage"]), message["model"].as_str().map(str::to_string)));
+        }
+        if let Some((_, at, usage, model)) = last {
+            self.add(at, usage, model.as_deref());
+        }
+    }
+
+    /// A Codex rollout's model calls. Its `input_tokens` include the
+    /// cached ones, which are split out to be counted as cache reads.
+    fn add_rollout(&mut self, path: &Path) {
+        let Ok(text) = std::fs::read_to_string(path) else { return };
+        for line in text.lines() {
+            let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
+            let p = &entry["payload"];
+            let last = &p["info"]["last_token_usage"];
+            if entry["type"] != "event_msg" || p["type"] != "token_count" || !last.is_object() {
+                continue;
+            }
+            let Some(at) = entry["timestamp"].as_str().and_then(parse_timestamp) else { continue };
+            let n = |key: &str| last[key].as_u64().unwrap_or(0);
+            let usage = Usage {
+                input: n("input_tokens").saturating_sub(n("cached_input_tokens")),
+                cache_write: n("cache_write_input_tokens"),
+                cache_read: n("cached_input_tokens"),
+                output: n("output_tokens"),
+            };
+            self.add(at, usage, None);
+        }
     }
 }
 
@@ -155,11 +299,15 @@ pub fn accounts() -> Vec<AccountUsage> {
     let home = crate::config::home_dir().map(PathBuf::from).unwrap_or_default();
     let claude_config = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
     let claude_json = claude_config.as_deref().unwrap_or(&home).join(".claude.json");
-    let settings = claude_config.unwrap_or_else(|| home.join(".claude")).join("settings.json");
+    let claude_dir = claude_config.unwrap_or_else(|| home.join(".claude"));
     let api_key_in_env = std::env::var_os("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty());
     let codex_home = std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from);
     let openai_key_in_env = std::env::var_os("OPENAI_API_KEY").is_some_and(|v| !v.is_empty());
-    vec![claude_usage(&claude_json, &settings, api_key_in_env), codex_usage(&codex_home, openai_key_in_env)]
+    let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    vec![
+        claude_usage(&claude_json, &claude_dir, api_key_in_env, now_ms),
+        codex_usage(&codex_home, openai_key_in_env, now_ms),
+    ]
 }
 
 #[cfg(test)]
@@ -180,13 +328,116 @@ mod tests {
         path
     }
 
+    /// When the tests' windows end: 2026-11-02T12:00:00Z.
+    fn now() -> u64 {
+        parse_timestamp("2026-11-02T12:00:00.000Z").unwrap()
+    }
+
+    /// `write`, last modified at `ms`: the windows go by the file's time,
+    /// not the clock the test runs at.
+    fn write_at(dir: &Path, rel: &str, text: &str, ms: u64) -> PathBuf {
+        let path = write(dir, rel, text);
+        let at = UNIX_EPOCH + std::time::Duration::from_millis(ms);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(at).unwrap();
+        path
+    }
+
+    const DAY_MS: u64 = 24 * 3600 * 1000;
+
+    fn reply(at: &str, id: &str, model: &str, input: u64, output: u64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "timestamp": at,
+            "message": { "id": id, "model": model, "usage": { "input_tokens": input, "output_tokens": output } },
+        })
+        .to_string()
+    }
+
+    /// A session an hour ago (one reply written as two entries) and two
+    /// days ago (a model with no price), a reply too old for either window,
+    /// a subagent's reply, and a file last written eight days ago.
+    fn claude_projects(dir: &Path) {
+        let session = [
+            reply("2026-11-02T11:00:00.000Z", "msg_a", "claude-opus-5-5", 100, 1),
+            reply("2026-11-02T11:00:01.000Z", "msg_a", "claude-opus-5-5", 100, 10),
+            reply("2026-10-31T12:00:00.000Z", "msg_b", "claude-unknown-9", 1000, 0),
+            reply("2026-10-25T12:00:00.000Z", "msg_c", "claude-opus-5-5", 9999, 0),
+            r#"{"type":"user","timestamp":"2026-11-02T11:00:02.000Z","message":{"content":"hi"}}"#.into(),
+        ]
+        .join("\n");
+        write_at(dir, "projects/-repo/s1.jsonl", &session, now());
+        let subagent = reply("2026-11-02T11:30:00.000Z", "msg_d", "claude-opus-5-5", 5, 0);
+        write_at(dir, "projects/-repo/s1/subagents/agent-x.jsonl", &subagent, now());
+        let old = reply("2026-11-02T11:00:00.000Z", "msg_e", "claude-opus-5-5", 7777, 0);
+        write_at(dir, "projects/-repo/old.jsonl", &old, now() - 8 * DAY_MS);
+    }
+
+    #[test]
+    fn claude_totals_count_each_reply_once_by_its_own_time() {
+        let dir = temp_dir("claude-totals");
+        claude_projects(&dir);
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now());
+        let (five, seven) = (&usage.five_hours, &usage.seven_days);
+        // The repeated reply at its last entry's usage, and the subagent's.
+        assert_eq!((five.input, five.output), (105, 10));
+        // Plus the reply two days ago; not the one eight days ago, nor the
+        // old file's.
+        assert_eq!((seven.input, seven.output), (1105, 10));
+        // On a plan, no dollars.
+        assert_eq!((five.cost, seven.cost), (None, None));
+    }
+
+    #[test]
+    fn claude_totals_on_an_api_key_cost_the_priced_replies() {
+        let dir = temp_dir("claude-cost");
+        claude_projects(&dir);
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, true, now());
+        let opus = crate::pricing::rates("claude-opus-5-5").unwrap();
+        let priced = crate::pricing::cost(opus, Usage { input: 105, output: 10, ..Default::default() });
+        // The unknown model's tokens are counted, with no cost.
+        assert_eq!(usage.seven_days.input, 1105);
+        for cost in [usage.five_hours.cost, usage.seven_days.cost] {
+            assert!((cost.unwrap() - priced).abs() < 1e-12, "{cost:?}");
+        }
+    }
+
+    #[test]
+    fn codex_totals_add_up_each_model_call() {
+        let dir = temp_dir("codex-totals");
+        let count = |at: &str, input: u64, cached: u64, output: u64| {
+            serde_json::json!({
+                "timestamp": at,
+                "type": "event_msg",
+                "payload": { "type": "token_count", "info": { "last_token_usage": {
+                    "input_tokens": input, "cached_input_tokens": cached, "output_tokens": output,
+                } } },
+            })
+            .to_string()
+        };
+        let rollout = [
+            count("2026-11-02T11:00:00.000Z", 1000, 600, 50),
+            r#"{"timestamp":"2026-11-02T11:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":null}}"#.into(),
+            count("2026-11-02T06:00:00.000Z", 200, 0, 20),
+            count("2026-10-25T12:00:00.000Z", 9999, 0, 0),
+        ]
+        .join("\n");
+        write_at(&dir, "sessions/2026/11/02/rollout-2026-11-02T06-00-00-a.jsonl", &rollout, now());
+        let old = count("2026-11-02T11:00:00.000Z", 7777, 0, 0);
+        write_at(&dir, "sessions/2026/10/20/rollout-2026-10-20T06-00-00-b.jsonl", &old, now() - 8 * DAY_MS);
+        let usage = codex_usage(&dir, false, now());
+        let five = &usage.five_hours;
+        assert_eq!((five.input, five.cache_read, five.output, five.cost), (400, 600, 50, None));
+        let seven = &usage.seven_days;
+        assert_eq!((seven.input, seven.cache_read, seven.output, seven.cost), (600, 600, 70, None));
+    }
+
     const OAUTH: &str = r#"{"oauthAccount":{"billingType":"stripe_subscription","organizationType":"claude_max",
         "userRateLimitTier":null,"emailAddress":"dev@example.com"}}"#;
 
     #[test]
     fn a_claude_sign_in_is_a_subscription_with_its_plan() {
         let dir = temp_dir("claude-sub");
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir.join("settings.json"), false);
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now());
         assert_eq!(usage.login, Login::Subscription);
         assert_eq!(usage.plan.as_deref(), Some("claude_max"));
         assert_eq!(usage.email.as_deref(), Some("dev@example.com"));
@@ -197,22 +448,20 @@ mod tests {
     fn an_api_key_wins_over_a_claude_sign_in() {
         let dir = temp_dir("claude-key");
         let json = write(&dir, ".claude.json", OAUTH);
-        let none = dir.join("settings.json");
-        let from_env = claude_usage(&json, &none, true);
+        let from_env = claude_usage(&json, &dir, true, now());
         assert_eq!(from_env.login, Login::ApiKey);
         assert_eq!(from_env.plan, None);
-        let helper = write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
-        assert_eq!(claude_usage(&json, &helper, false).login, Login::ApiKey);
+        write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
+        assert_eq!(claude_usage(&json, &dir, false, now()).login, Login::ApiKey);
     }
 
     #[test]
     fn claude_signed_out_or_missing_is_no_login() {
         let dir = temp_dir("claude-none");
-        let settings = dir.join("settings.json");
-        let out = claude_usage(&write(&dir, ".claude.json", r#"{"hasCompletedOnboarding":true}"#), &settings, false);
+        let out = claude_usage(&write(&dir, ".claude.json", r#"{"hasCompletedOnboarding":true}"#), &dir, false, now());
         assert_eq!((out.login, out.plan, out.email), (Login::None, None, None));
-        assert_eq!(claude_usage(&dir.join("missing.json"), &settings, false).login, Login::None);
-        assert_eq!(claude_usage(&write(&dir, "bad.json", "{not json"), &settings, false).login, Login::None);
+        assert_eq!(claude_usage(&dir.join("missing.json"), &dir, false, now()).login, Login::None);
+        assert_eq!(claude_usage(&write(&dir, "bad.json", "{not json"), &dir, false, now()).login, Login::None);
     }
 
     #[test]
@@ -236,11 +485,11 @@ mod tests {
         ]
         .join("\n");
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-b.jsonl", &rollout);
-        let usage = codex_usage(&dir, false);
+        let usage = codex_usage(&dir, false, now());
         assert_eq!(usage.login, Login::Subscription);
         assert_eq!(usage.plan.as_deref(), Some("plus"));
         // The sign-in Codex stored wins over a key in the environment.
-        assert_eq!(codex_usage(&dir, true).login, Login::Subscription);
+        assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
         assert_eq!(usage.limits, vec![LimitWindow { used_percent: 42.5, window_minutes: 300, resets_at: Some(1795590902) }]);
     }
 
@@ -248,28 +497,28 @@ mod tests {
     fn codex_on_a_key_is_an_api_key() {
         let dir = temp_dir("codex-key");
         write(&dir, "auth.json", r#"{"auth_mode":"apikey"}"#);
-        assert_eq!(codex_usage(&dir, false).login, Login::ApiKey);
+        assert_eq!(codex_usage(&dir, false, now()).login, Login::ApiKey);
         // A stored key is a key whatever the mode says.
         write(&dir, "auth.json", r#"{"OPENAI_API_KEY":"sk-test"}"#);
-        let usage = codex_usage(&dir, false);
+        let usage = codex_usage(&dir, false, now());
         assert_eq!((usage.login, usage.limits), (Login::ApiKey, vec![]));
     }
 
     #[test]
     fn codex_uses_a_key_from_the_environment_only_with_no_login_stored() {
         let dir = temp_dir("codex-env");
-        assert_eq!(codex_usage(&dir, true).login, Login::ApiKey);
+        assert_eq!(codex_usage(&dir, true, now()).login, Login::ApiKey);
         write(&dir, "auth.json", r#"{"auth_mode":null,"OPENAI_API_KEY":null,"tokens":null}"#);
-        assert_eq!(codex_usage(&dir, true).login, Login::ApiKey);
+        assert_eq!(codex_usage(&dir, true, now()).login, Login::ApiKey);
         // An older Codex's sign-in: tokens, no mode.
         write(&dir, "auth.json", r#"{"tokens":{"id_token":"x"}}"#);
-        assert_eq!(codex_usage(&dir, true).login, Login::Subscription);
+        assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
     }
 
     #[test]
     fn codex_with_nothing_on_disk_is_no_login() {
         let dir = temp_dir("codex-none");
-        let usage = codex_usage(&dir.join("missing"), false);
+        let usage = codex_usage(&dir.join("missing"), false, now());
         assert_eq!((usage.login, usage.plan, usage.limits), (Login::None, None, vec![]));
     }
 }
