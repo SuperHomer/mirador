@@ -100,8 +100,10 @@ downloads, the feature tour and the keybinding reference.
   `tokyo-night`, `gruvbox-dark`, `nord`), configurable keybindings,
   command palette (`mod+K`)
 - **Claude Code integration**: lights up tabs when your agent needs you,
-  enables per-pane session resume, and adds a `/mira-diff` skill for
-  reviewing the turn's work. Mirador offers to set it up on first launch
+  enables per-pane session resume, adds a `/mira-diff` skill for
+  reviewing the turn's work, and (macOS, Linux) wraps your status line to
+  keep your plan's limits, your own line still shown. Mirador offers to
+  set it up on first launch
   when it finds Claude Code (or: palette → *Set Up Claude Code
   Integration*, or `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are

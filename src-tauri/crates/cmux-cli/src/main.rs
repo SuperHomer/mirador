@@ -191,7 +191,9 @@ enum Command {
         run: Option<String>,
     },
     /// Install or remove the Claude Code integration: the hooks that light
-    /// up Mirador tabs, and the `/mira-diff` slash command.
+    /// up Mirador tabs, the `/mira-diff` slash command, and (on macOS and
+    /// Linux) a wrapper in front of your status line that keeps your
+    /// plan's limits, your own status line still shown.
     Hooks {
         /// "setup" or "remove"
         action: String,
