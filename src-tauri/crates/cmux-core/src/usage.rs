@@ -228,7 +228,9 @@ impl Totals {
         for line in text.lines() {
             let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
             let message = &entry["message"];
-            if entry["type"] != "assistant" || !message["usage"].is_object() {
+            // Entries Claude Code adds for itself, left out as Stats does.
+            let meta = entry["isMeta"].as_bool() == Some(true);
+            if meta || entry["type"] != "assistant" || !message["usage"].is_object() {
                 continue;
             }
             let Some(at) = entry["timestamp"].as_str().and_then(parse_timestamp) else { continue };
@@ -354,7 +356,8 @@ mod tests {
     }
 
     /// A session an hour ago (one reply written as two entries) and two
-    /// days ago (a model with no price), a reply too old for either window,
+    /// days ago (a model with no price), an entry Claude Code added for
+    /// itself (`isMeta`), a reply too old for either window,
     /// a subagent's reply, and a file last written eight days ago.
     fn claude_projects(dir: &Path) {
         let session = [
@@ -363,6 +366,7 @@ mod tests {
             reply("2026-10-31T12:00:00.000Z", "msg_b", "claude-unknown-9", 1000, 0),
             reply("2026-10-25T12:00:00.000Z", "msg_c", "claude-opus-5-5", 9999, 0),
             r#"{"type":"user","timestamp":"2026-11-02T11:00:02.000Z","message":{"content":"hi"}}"#.into(),
+            r#"{"type":"assistant","isMeta":true,"timestamp":"2026-11-02T11:00:03.000Z","message":{"id":"msg_m","model":"claude-opus-5-5","usage":{"input_tokens":3333}}}"#.into(),
         ]
         .join("\n");
         write_at(dir, "projects/-repo/s1.jsonl", &session, now());
