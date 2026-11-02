@@ -1842,11 +1842,13 @@ fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
     let login = match account.login {
         Login::Subscription => "subscription",
         Login::ApiKey => "API key",
+        Login::PlanOrApiKey => "plan or API key",
         Login::None => "not signed in",
     };
     let plan = account.plan.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
     let email = account.email.as_deref().map(|e| format!(" · {e}")).unwrap_or_default();
-    let mut lines = vec![format!("{} — {login}{plan}{email}", account.harness.label())];
+    let note = account.note.as_deref().map(|n| format!(" · {n}")).unwrap_or_default();
+    let mut lines = vec![format!("{} — {login}{plan}{email}{note}", account.harness.label())];
     for w in &account.limits {
         let resets = match w.resets_at {
             Some(at) if at > now => format!(", resets in {}", until(at - now)),
@@ -2131,6 +2133,7 @@ mod tests {
             login: Login::Subscription,
             plan: Some("claude_max".into()),
             email: Some("you@example.com".into()),
+            note: None,
             limits: vec![],
             five_hours: TokenTotals { input: 200, output: 750, ..Default::default() },
             seven_days: TokenTotals { cache_read: 1_234_567, ..Default::default() },
@@ -2145,6 +2148,7 @@ mod tests {
             login: Login::ApiKey,
             plan: None,
             email: None,
+            note: None,
             limits: vec![
                 LimitWindow { used_percent: 71.4, window_minutes: 10080, name: "weekly".into(), resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59) },
                 LimitWindow { used_percent: 5.0, window_minutes: 300, name: "5h".into(), resets_at: Some(now + 2 * 3600 + 5 * 60) },
@@ -2167,6 +2171,10 @@ mod tests {
                 "  last 7d: 0 tokens · $0.00",
             ]
         );
+        let declined = AccountUsage { email: None, note: Some("API key in env, declined".into()), ..claude.clone() };
+        assert_eq!(usage_lines(&declined, now)[0], "Claude Code — subscription (claude_max) · API key in env, declined");
+        let either = AccountUsage { login: Login::PlanOrApiKey, email: None, ..claude.clone() };
+        assert_eq!(usage_lines(&either, now)[0], "Claude Code — plan or API key (claude_max)");
         let signed_out = AccountUsage { login: Login::None, plan: None, email: None, ..claude };
         assert_eq!(usage_lines(&signed_out, now)[0], "Claude Code — not signed in");
     }

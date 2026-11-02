@@ -369,7 +369,7 @@ export interface TranscriptSummary {
 }
 
 /** How a harness is signed in (`cmux_protocol::Login`). */
-export type Login = "subscription" | "apiKey" | "none";
+export type Login = "subscription" | "apiKey" | "planOrApiKey" | "none";
 
 /** One of a plan's rate-limit windows, as the harness last reported it. */
 export interface LimitWindow {
@@ -399,6 +399,8 @@ export interface AccountUsage {
   /** As the harness names it: `claude_max`, `plus`. */
   plan: string | null;
   email: string | null;
+  /** What else the login says: "API key in env, declined". */
+  note: string | null;
   /** The most used first; empty for Claude Code, which keeps none on disk. */
   limits: LimitWindow[];
   fiveHours: TokenTotals;

@@ -4,10 +4,13 @@
 //!
 //! Claude Code keeps its account in `.claude.json` (`$CLAUDE_CONFIG_DIR`,
 //! else the home directory): an `oauthAccount` is a plan's sign-in, with
-//! its `organizationType` and `emailAddress`. A key in
-//! `ANTHROPIC_API_KEY`, or an `apiKeyHelper` in `settings.json`, is used
-//! over that sign-in, so either makes it an API key. Claude Code writes
-//! its limits nowhere on disk, so it has none here.
+//! its `organizationType` and `emailAddress`. An `apiKeyHelper` in
+//! `settings.json` makes it an API key. A key in `ANTHROPIC_API_KEY` is
+//! used only if the person said yes to it: Claude Code asks once, and
+//! records the answer in `.claude.json`'s `customApiKeyResponses`, each
+//! list holding a suffix of a key approved or rejected. Only how many
+//! entries each list has is read, never an entry. Claude Code writes its
+//! limits nowhere on disk, so it has none here.
 //!
 //! Codex keeps its login in `$CODEX_HOME/auth.json` (`~/.codex`):
 //! `auth_mode` is `chatgpt` for a plan, `apikey` for a key, and a key
@@ -58,6 +61,16 @@ const SEVEN_DAYS_MS: u64 = 7 * 24 * 3600 * 1000;
 #[serde(rename_all = "camelCase")]
 struct ClaudeJson {
     oauth_account: Option<OauthAccount>,
+    custom_api_key_responses: Option<KeyResponses>,
+}
+
+/// Claude Code's answers about a key in the environment: counted, never
+/// read — `IgnoredAny` drops each entry unread.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct KeyResponses {
+    approved: Vec<IgnoredAny>,
+    rejected: Vec<IgnoredAny>,
 }
 
 #[derive(Deserialize)]
@@ -132,14 +145,28 @@ impl UsageCache {
 
     /// [`claude_usage`], reading only what changed since the last call.
     pub fn claude(&mut self, claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
-        let account = read_json::<ClaudeJson>(claude_json).oauth_account;
+        let json = read_json::<ClaudeJson>(claude_json);
+        let account = json.oauth_account;
         let helper = read_json::<ClaudeSettings>(&claude_dir.join("settings.json")).api_key_helper.is_some();
-        let login = if api_key_in_env || helper {
-            Login::ApiKey
-        } else if account.is_some() {
-            Login::Subscription
-        } else {
-            Login::None
+        let answers = json.custom_api_key_responses.unwrap_or_default();
+        let signed_in = if account.is_some() { Login::Subscription } else { Login::None };
+        let mut note = None;
+        let login = match (helper, api_key_in_env, !answers.approved.is_empty(), !answers.rejected.is_empty()) {
+            // A helper's key is used with no question asked.
+            (true, ..) => Login::ApiKey,
+            (false, false, ..) => signed_in,
+            (false, true, true, false) => Login::ApiKey,
+            (false, true, false, true) => {
+                note = Some("API key in env, declined".to_string());
+                signed_in
+            }
+            // One key approved and another rejected: which one is in the
+            // environment is not something read here.
+            (false, true, true, true) if account.is_some() => Login::PlanOrApiKey,
+            (false, true, true, true) => Login::ApiKey,
+            // Never asked: Claude Code will offer the key, and most say
+            // yes. A guess at the next answer.
+            (false, true, false, false) => Login::ApiKey,
         };
         let (plan, email) = account.map_or((None, None), |a| (a.organization_type, a.email_address));
         // On a plan the list price is not what is paid: no cost, not a cost
@@ -157,8 +184,9 @@ impl UsageCache {
             harness: Harness::Claude,
             login,
             // A plan that is not what usage is billed to would mislead.
-            plan: plan.filter(|_| login == Login::Subscription),
+            plan: plan.filter(|_| matches!(login, Login::Subscription | Login::PlanOrApiKey)),
             email,
+            note,
             limits: Vec::new(),
             in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
@@ -199,6 +227,7 @@ impl UsageCache {
             login,
             plan: rate_limits["plan_type"].as_str().map(str::to_string),
             email: None,
+            note: None,
             limits,
             in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
@@ -587,15 +616,63 @@ mod tests {
         assert!(usage.limits.is_empty());
     }
 
+    /// The sign-in, with Claude Code's answers about an environment key.
+    fn oauth_with(approved: &str, rejected: &str) -> String {
+        format!(
+            r#"{{"oauthAccount":{{"organizationType":"claude_max"}},"customApiKeyResponses":{{"approved":[{approved}],"rejected":[{rejected}]}}}}"#
+        )
+    }
+
     #[test]
-    fn an_api_key_wins_over_a_claude_sign_in() {
+    fn an_approved_env_key_wins_over_a_claude_sign_in() {
         let dir = temp_dir("claude-key");
+        let json = write(&dir, ".claude.json", &oauth_with(r#""abcdefghij0123456789""#, ""));
+        let usage = claude_usage(&json, &dir, true, now());
+        assert_eq!((usage.login, usage.plan, usage.note), (Login::ApiKey, None, None));
+        // Without the key in the environment, the approval is moot.
+        assert_eq!(claude_usage(&json, &dir, false, now()).login, Login::Subscription);
+    }
+
+    #[test]
+    fn a_declined_env_key_leaves_the_plan_with_a_note() {
+        let dir = temp_dir("claude-declined");
+        let json = write(&dir, ".claude.json", &oauth_with("", r#""abcdefghij0123456789""#));
+        let usage = claude_usage(&json, &dir, true, now());
+        assert_eq!(usage.login, Login::Subscription);
+        assert_eq!(usage.plan.as_deref(), Some("claude_max"));
+        assert_eq!(usage.note.as_deref(), Some("API key in env, declined"));
+        // No cost: the plan is what is billed.
+        assert_eq!(usage.five_hours.cost, None);
+        // Declined with no sign-in: nothing is billed at all.
+        let alone = write(&dir, "alone.json", r#"{"customApiKeyResponses":{"approved":[],"rejected":["x"]}}"#);
+        assert_eq!(claude_usage(&alone, &dir, true, now()).login, Login::None);
+    }
+
+    #[test]
+    fn a_key_both_approved_and_rejected_is_plan_or_key() {
+        let dir = temp_dir("claude-both");
+        let json = write(&dir, ".claude.json", &oauth_with(r#""a""#, r#""b""#));
+        let usage = claude_usage(&json, &dir, true, now());
+        assert_eq!((usage.login, usage.plan.as_deref()), (Login::PlanOrApiKey, Some("claude_max")));
+        assert_eq!(usage.five_hours.cost, None);
+    }
+
+    #[test]
+    fn a_key_never_asked_about_is_taken_as_a_key() {
+        let dir = temp_dir("claude-unasked");
         let json = write(&dir, ".claude.json", OAUTH);
-        let from_env = claude_usage(&json, &dir, true, now());
-        assert_eq!(from_env.login, Login::ApiKey);
-        assert_eq!(from_env.plan, None);
+        assert_eq!(claude_usage(&json, &dir, true, now()).login, Login::ApiKey);
+        let empty = write(&dir, "empty.json", &oauth_with("", ""));
+        assert_eq!(claude_usage(&empty, &dir, true, now()).login, Login::ApiKey);
+    }
+
+    #[test]
+    fn a_key_helper_is_a_key_with_no_question_asked() {
+        let dir = temp_dir("claude-helper");
+        let json = write(&dir, ".claude.json", &oauth_with("", r#""b""#));
         write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
         assert_eq!(claude_usage(&json, &dir, false, now()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&json, &dir, true, now()).login, Login::ApiKey);
     }
 
     #[test]

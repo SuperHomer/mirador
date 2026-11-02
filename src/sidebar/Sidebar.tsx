@@ -220,7 +220,12 @@ function HarnessMark({ harness }: { harness: Harness }) {
   }
 }
 
-const LOGIN_LABEL = { subscription: "Subscription", apiKey: "API key", none: "Not signed in" };
+const LOGIN_LABEL = {
+  subscription: "Subscription",
+  apiKey: "API key",
+  planOrApiKey: "Plan or API key",
+  none: "Not signed in",
+};
 
 const total = (t: TokenTotals) => t.input + t.cacheWrite + t.cacheRead + t.output;
 
@@ -316,6 +321,7 @@ function UsageRow({
             <span>{LOGIN_LABEL[a.login]}</span>
             <span>{a.plan ?? ""}</span>
           </div>
+          {a.note && <div className="usage-note">{a.note}</div>}
           {a.limits.map((w) => (
             <div key={w.windowMinutes} className="usage-kv">
               <span>

@@ -2146,6 +2146,9 @@ pub enum Login {
     Subscription,
     /// An API key: usage is billed per token.
     ApiKey,
+    /// A plan's account and an environment key Claude Code was told both
+    /// yes and no about, for different keys: either may be what is billed.
+    PlanOrApiKey,
     /// Not signed in, or nothing says how.
     None,
 }
@@ -2189,6 +2192,9 @@ pub struct AccountUsage {
     /// The plan as the harness names it (`claude_max`, `plus`).
     pub plan: Option<String>,
     pub email: Option<String>,
+    /// What else the login says: "API key in env, declined".
+    #[serde(default)]
+    pub note: Option<String>,
     /// The plan's windows, the most used first. None for Claude Code,
     /// which keeps none on disk.
     pub limits: Vec<LimitWindow>,

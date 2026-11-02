@@ -562,6 +562,10 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
+.usage-note {
+  color: var(--muted);
+}
+
 .usage-kv {
   display: flex;
   justify-content: space-between;

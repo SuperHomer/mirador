@@ -67,7 +67,12 @@ export function UsagePane({ paneId, focused }: Props) {
   );
 }
 
-const LOGIN_LABEL = { subscription: "Subscription", apiKey: "API key", none: "Not signed in" };
+const LOGIN_LABEL = {
+  subscription: "Subscription",
+  apiKey: "API key",
+  planOrApiKey: "Plan or API key",
+  none: "Not signed in",
+};
 
 function Account({ account }: { account: AccountUsage }) {
   const login = LOGIN_LABEL[account.login];
@@ -81,6 +86,7 @@ function Account({ account }: { account: AccountUsage }) {
             {account.email}
           </span>
         )}
+        {account.note && <span className="usage-muted">{account.note}</span>}
       </div>
       {account.limits.map((w) => (
         <Limit key={w.windowMinutes} limit={w} />

@@ -783,7 +783,8 @@ mira usage --split    # ...or as a split of this pane
 ```
 
 One block per harness: how it is signed in (a subscription and its plan,
-an API key, or `not signed in`) and the account's email where the
+an API key, `plan or API key` when that cannot be told, or `not signed
+in`) and the account's email where the
 harness keeps one; then each limit window the plan reports, with how
 much is used and when it resets; then the tokens used in the last 5
 hours and the last 7 days, the plans' own windows, with their cost at
@@ -804,9 +805,15 @@ It never touches the network: everything is read from the harnesses' own
 files, and never a credential — only the shape of the login.
 
 - **Claude Code**: the sign-in in `.claude.json` (in `$CLAUDE_CONFIG_DIR`,
-  else the home directory). `ANTHROPIC_API_KEY` in the app's
-  environment, or an `apiKeyHelper` in `settings.json`, makes it an API
-  key, as Claude Code itself prefers the key. A Claude plan shows tokens,
+  else the home directory). An `apiKeyHelper` in `settings.json` makes
+  it an API key. `ANTHROPIC_API_KEY` in the app's environment does only
+  if you said yes to it: Claude Code asks once and keeps the answer in
+  `.claude.json` (`customApiKeyResponses`), of which only how many keys
+  were approved and rejected is read. Approved: an API key. Declined: the
+  plan, with `API key in env, declined`. Both, for different keys: `plan
+  or API key`. Never asked: an API key, as Claude Code will offer it.
+  The same app can answer differently from a Dock launch and from a
+  shell that exports the key. A Claude plan shows tokens,
   not a percentage of its limits: Claude Code keeps no limits on disk.
   The tokens are added up from the transcripts under `projects/`,
   subagents' included.
