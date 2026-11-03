@@ -218,6 +218,22 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             });
             Ok(Value::Null)
         }
+        Request::CodexThread { pane_id, thread_id } => {
+            let thread = cmux_core::codex_trail::thread_id(&thread_id).ok_or("not a thread id")?;
+            let pane = pane_id.ok_or("no pane: MIRA_PANE is not set")?;
+            {
+                let mut meta = state.meta.lock().unwrap();
+                // Only a Codex's: a record in any other pane would type
+                // `codex resume` into it on the next launch.
+                let m = meta.get_mut(&pane).filter(|m| m.harness() == Some(cmux_protocol::Harness::Codex));
+                let m = m.ok_or("that pane runs no Codex")?;
+                m.agent_session = Some(format!("codex:{thread}"));
+            }
+            state
+                .session_dirty
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(json!({ "paneId": pane }))
+        }
         Request::AgentSession {
             pane_id,
             tty,

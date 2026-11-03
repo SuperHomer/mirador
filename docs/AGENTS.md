@@ -921,7 +921,7 @@ Newline-delimited JSON on the socket named in the discovery file:
 ```
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
-read_screen notify run list_runs agent_session agent_new agent_list
+read_screen notify run list_runs agent_session codex_thread agent_new agent_list
 agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
@@ -936,3 +936,14 @@ anything that can run a shell command integrates: call `mira notify` from
 the agent's finished/attention hooks, and prefer `mira run` for commands
 worth watching. Wire their equivalents of Stop/Notification hooks to
 `mira notify --title "<agent>" "<message>"`.
+
+A Codex that Mirador starts (a role's, `agent new --harness codex`, a
+team member, a restored pane) is given a `notify` of its own, `-c
+notify=["<mira>","codex-notify","--",…]`: after each turn Codex runs it
+with a JSON payload, and `mira codex-notify` records the payload's
+`thread-id` on the pane (`codex_thread`), so a restart can type `codex
+resume <id>` with the role's flags when the Codex is gone by then. It is
+how Windows learns the thread at all; on macOS and Linux the rollout the
+Codex holds open says it too. Your own `notify` from Codex's
+`config.toml` (or the role's profile) runs after it, given the same
+JSON, after the `--`; it never makes Codex fail, app running or not.

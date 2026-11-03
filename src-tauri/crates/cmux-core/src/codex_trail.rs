@@ -585,10 +585,23 @@ fn is_rollout(p: &Path) -> bool {
 /// (`rollout-<time>-<uuid>.jsonl`): what `codex resume` takes.
 pub fn rollout_id(rollout: &Path) -> Option<String> {
     let stem = rollout.file_name()?.to_str()?.strip_prefix("rollout-")?.strip_suffix(".jsonl")?;
-    let id = stem.get(stem.len().checked_sub(36)?..)?;
+    thread_id(stem.get(stem.len().checked_sub(36)?..)?)
+}
+
+/// `id` as a Codex thread id, lowercased: a UUID, and nothing else.
+pub fn thread_id(id: &str) -> Option<String> {
     let groups: Vec<&str> = id.split('-').collect();
     let shape = groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12]);
     (shape && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_hexdigit()))).then(|| id.to_ascii_lowercase())
+}
+
+/// The thread a Codex `notify` payload is about: the JSON Codex appends
+/// to the notify program's arguments after each turn,
+/// `{"type":"agent-turn-complete","thread-id":"<uuid>",…}` (codex-rs
+/// `hooks/src/legacy_notify.rs`). None for anything else.
+pub fn notify_thread(payload: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(payload).ok()?;
+    thread_id(json["thread-id"].as_str()?)
 }
 
 /// The `sessions` directory a rollout is in.
@@ -679,6 +692,18 @@ mod tests {
         assert_eq!(rollout_id(&dir.join("rollout-2026-10-23T16-00-39-01a16910-50d2-7590-8de0-5e5e7b78b19z.jsonl")), None);
         assert_eq!(rollout_id(&dir.join(format!("notes-{id}.jsonl"))), None);
         assert_eq!(rollout_id(&dir.join("rollout-é.jsonl")), None);
+    }
+
+    #[test]
+    fn a_notify_payload_names_its_thread() {
+        // As codex-rs `legacy_notify.rs` writes it.
+        let payload = r#"{"type":"agent-turn-complete","thread-id":"B5F6C1C2-1111-2222-3333-444455556666","turn-id":"12345","cwd":"/Users/example/project","client":"codex-tui","input-messages":["Rename foo"],"last-assistant-message":"Done."}"#;
+        assert_eq!(notify_thread(payload).as_deref(), Some("b5f6c1c2-1111-2222-3333-444455556666"));
+        assert_eq!(notify_thread(r#"{"type":"agent-turn-complete","turn-id":"1"}"#), None, "no thread");
+        assert_eq!(notify_thread(r#"{"thread-id":"abc; rm -rf ~"}"#), None, "not a thread id");
+        assert_eq!(notify_thread(r#"{"thread_id":"b5f6c1c2-1111-2222-3333-444455556666"}"#), None, "not Codex's spelling");
+        assert_eq!(notify_thread("not json"), None);
+        assert_eq!(notify_thread(""), None);
     }
 
     #[test]

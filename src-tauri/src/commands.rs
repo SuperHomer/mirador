@@ -1843,6 +1843,8 @@ pub(crate) fn prepare_launch(
     // Codex is allowed Mirador's socket on top of the profile it would run
     // on anyway.
     let socket = if harness == cmux_protocol::Harness::Codex { codex_socket(role.as_ref(), cwd) } else { None };
+    // And told each turn's thread, which Windows has no other way to learn.
+    let notify = if harness == cmux_protocol::Harness::Codex { codex_notify(role.as_ref()) } else { None };
     let input = cmux_core::agents::launch_command(
         named.as_ref(),
         plain,
@@ -1851,6 +1853,7 @@ pub(crate) fn prepare_launch(
         settings_file.as_deref(),
         task,
         socket.as_ref().map(|(base, socket)| (base.as_str(), socket.as_path())),
+        notify.as_deref(),
         cmux_core::pty::shell::quote_arg,
     );
     Ok(Launch {
@@ -1860,6 +1863,27 @@ pub(crate) fn prepare_launch(
         settings: settings_file.map(|f| f.to_string_lossy().into_owned()),
         prompt: prompt_file.map(|f| f.to_string_lossy().into_owned()),
     })
+}
+
+/// The person's Codex `config.toml`, and the role's profile file beside it
+/// (`<profile>.config.toml`), as text. No file is no config; a config that
+/// cannot be read is None, not guessed at. A missing profile is Codex's
+/// to report.
+fn codex_config(role: Option<&cmux_protocol::AgentRole>) -> Option<(Option<String>, Option<String>)> {
+    let home = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
+    let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
+        Some(Ok(text)) => Some(text),
+        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => return None,
+        _ => None,
+    };
+    // Codex 0.164 keeps a profile in its own file beside config.toml.
+    let profile = role.and_then(|r| r.profile.as_ref()).and_then(|p| {
+        let file = home.as_ref()?.join(format!("{p}.config.toml"));
+        std::fs::read_to_string(file).ok()
+    });
+    Some((config, profile))
 }
 
 /// The profile a Codex started in `cwd` with `role` runs on, and Mirador's
@@ -1872,26 +1896,19 @@ pub(crate) fn codex_socket(
     if cfg!(not(unix)) {
         return None;
     }
-    let home = std::env::var_os("CODEX_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
-    // No file is no config; one that cannot be read is not guessed at.
-    let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
-        Some(Ok(text)) => Some(Some(text)),
-        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
-        _ => Some(None),
-    };
-    config
-        .and_then(|c| {
-            // Codex 0.164 keeps a profile in its own file beside
-            // config.toml; a missing one is Codex's to report.
-            let profile = role.and_then(|r| r.profile.as_ref()).and_then(|p| {
-                let file = home.as_ref()?.join(format!("{p}.config.toml"));
-                std::fs::read_to_string(file).ok()
-            });
-            cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
-        })
+    let (config, profile) = codex_config(role)?;
+    cmux_core::agents::codex_base_profile(config.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
         .map(|base| (base, cmux_core::ipc::default_socket_path()))
+}
+
+/// The `notify` a Codex started with `role` is given: the bundled `mira`,
+/// then the person's own (`agents::codex_notify_argv`). None — the
+/// person's notify left as it is — when their config cannot be read, or
+/// this build has no `mira` beside it.
+pub(crate) fn codex_notify(role: Option<&cmux_protocol::AgentRole>) -> Option<Vec<String>> {
+    let (config, profile) = codex_config(role)?;
+    let theirs = cmux_core::agents::codex_user_notify(config.as_deref(), profile.as_deref());
+    Some(cmux_core::agents::codex_notify_argv(&mira_binary()?, theirs))
 }
 
 /// Marks `entry` as the pane `launch` starts in: typed into its shell once

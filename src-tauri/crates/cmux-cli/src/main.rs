@@ -181,6 +181,14 @@ enum Command {
     /// the hook payload from stdin.
     #[command(hide = true)]
     ClaudeHook { event: String },
+    /// Codex notify handler (given to every Codex Mirador starts): records
+    /// the turn's thread for the pane, then runs the user's own notify,
+    /// given after `--`, with the same JSON.
+    #[command(hide = true)]
+    CodexNotify {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Claude Code status line wrapper: keeps the plan's limits Claude Code
     /// pipes to its status line, then runs the user's own status line
     /// command, if any, on the same input.
@@ -1022,6 +1030,10 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::ClaudeHook { event } => return claude_hook(&event),
+        Command::CodexNotify { args } => {
+            codex_notify(&args);
+            return Ok(());
+        }
         Command::ClaudeStatusline { run } => claude_statusline(run.as_deref()),
         Command::Hooks { action } => return hooks(&action),
         Command::Install => return install(),
@@ -2135,6 +2147,27 @@ fn claude_hook(event: &str) -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+/// Codex runs this after each turn, with its JSON last. It must never
+/// get in Codex's way, so nothing it does can fail or print: the person's
+/// own notify, if they had one, is started first, then the thread is sent
+/// to the app, which may not be running.
+fn codex_notify(args: &[String]) {
+    let (theirs, payload) = cmux_core::agents::split_codex_notify(args);
+    let Some(payload) = payload else { return };
+    if let Some((program, rest)) = theirs.split_first() {
+        let _ = std::process::Command::new(program)
+            .args(rest)
+            .arg(payload)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+    if let Some(thread_id) = cmux_core::codex_trail::notify_thread(payload) {
+        let _ = send_request(Request::CodexThread { pane_id: own_pane(), thread_id });
+    }
 }
 
 /// This binary's real path, through any symlink — `~/.local/bin/mira`

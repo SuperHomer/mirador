@@ -488,8 +488,11 @@ permissions profile — the one it would run on anyway, plus Mirador's socket
 and nothing else — so `mira agent send` and `wait` work from inside its
 sandbox; not when your Codex config uses `sandbox_mode`, gives full access,
 or cannot be read. Exiting the agent
-leaves the shell; restarting Mirador resumes a Claude conversation on the
-role's model and effort, with its prompt.
+leaves the shell; restarting Mirador resumes the conversation — Claude
+Code's, or Codex's with `codex resume` — on the role's model and effort,
+with its prompt. To know which Codex conversation that is, Mirador gives
+Codex a `notify` (`mira codex-notify`) that records it after each turn,
+then runs your own `notify`, if you have one, as before.
 
 ### Teams
 

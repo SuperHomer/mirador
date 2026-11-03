@@ -433,6 +433,13 @@ pub enum Request {
         #[serde(default)]
         message: Option<String>,
     },
+    /// Records the thread the Codex in a pane is on (for resume-on-restore),
+    /// from `mira codex-notify`, which Codex runs after each turn.
+    CodexThread {
+        #[serde(default)]
+        pane_id: Option<String>,
+        thread_id: String,
+    },
     /// Starts an agent in a new pane (a split of the calling pane, or a new
     /// tab): plain Claude Code, or a role's harness, model and prompt.
     AgentNew {

@@ -182,6 +182,7 @@ pub fn run() {
         // a launch builds it, with no task.
         let codex_launch = codex.then(|| {
             let socket = crate::commands::codex_socket(role.as_ref(), m.cwd.as_deref());
+            let notify = crate::commands::codex_notify(role.as_ref());
             cmux_core::agents::launch_command(
                 role.as_ref(),
                 cmux_protocol::Harness::Codex,
@@ -190,6 +191,7 @@ pub fn run() {
                 None,
                 None,
                 socket.as_ref().map(|(base, socket)| (base.as_str(), socket.as_path())),
+                notify.as_deref(),
                 cmux_core::pty::shell::quote_arg,
             )
         });

@@ -35,7 +35,11 @@
 //! As `codex` it echoes each message, and holds a rollout open as Codex
 //! does (`~/.codex/sessions/YYYY/MM/DD/rollout-….jsonl`), writing each
 //! message there as a turn with one `echo` command. `/new` starts a new
-//! rollout in the same process, as Codex's does.
+//! rollout in the same process, as Codex's does. With
+//! `E2E_CODEX_NO_ROLLOUT=1` it holds none, as no process table can show
+//! Mirador on Windows. Started with a `-c notify=[…]`, it runs that
+//! program after each turn with Codex's JSON appended, the turn's thread
+//! in it.
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
@@ -83,16 +87,50 @@ fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
 /// directory, named for when it began and for its thread — a UUID made of
 /// the pid and `seq`, as `codex resume` takes one — its session first.
 fn open_rollout(seq: u32) -> Option<std::fs::File> {
+    if std::env::var("E2E_CODEX_NO_ROLLOUT").is_ok_and(|v| v == "1") {
+        return None;
+    }
     let home = std::path::PathBuf::from(std::env::var("HOME").ok()?);
     let at = timestamp();
     let dir = home.join(".codex/sessions").join(at[..10].replace('-', "/"));
     std::fs::create_dir_all(&dir).ok()?;
-    let thread = format!("{:08x}-0000-4000-8000-{seq:012x}", std::process::id());
-    let name = format!("rollout-{}-{thread}.jsonl", at[..19].replace(':', "-"));
+    let name = format!("rollout-{}-{}.jsonl", at[..19].replace(':', "-"), thread(seq));
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(name)).ok()?;
     let meta = serde_json::json!({ "timestamp": at, "type": "session_meta", "payload": { "id": format!("fake-{seq}"), "cli_version": "fake" } });
     file.write_all(format!("{meta}\n").as_bytes()).ok()?;
     Some(file)
+}
+
+/// The `seq`th thread of this process.
+fn thread(seq: u32) -> String {
+    format!("{:08x}-0000-4000-8000-{seq:012x}", std::process::id())
+}
+
+/// Runs the `notify` this Codex was started with (`-c notify=[…]`) as
+/// Codex does after a turn: its JSON appended, not waited for.
+fn notify(args: &[String], seq: u32, n: u32) {
+    let Some(argv) = args
+        .windows(2)
+        .filter(|w| w[0] == "-c" && w[1].starts_with("notify="))
+        .find_map(|w| cmux_core::agents::codex_user_notify(Some(&w[1]), None))
+    else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "type": "agent-turn-complete",
+        "thread-id": thread(seq),
+        "turn-id": format!("turn-{n}"),
+        "cwd": std::env::current_dir().ok(),
+        "input-messages": [],
+    });
+    let spawned = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .arg(payload.to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    log(serde_json::json!({ "event": "notify", "pid": std::process::id(), "argv": argv, "ok": spawned.is_ok() }));
 }
 
 /// Writes one turn to a rollout: its start and prompt, `took` of work,
@@ -306,12 +344,15 @@ fn main() {
             continue;
         }
         if !claude {
-            if message.trim() == "/new" && rollout.is_some() {
+            if message.trim() == "/new" {
                 sessions += 1;
                 rollout = open_rollout(sessions);
-            } else if let Some(file) = rollout.as_mut() {
+            } else {
                 turns += 1;
-                rollout_turn(file, turns, &message, turn);
+                if let Some(file) = rollout.as_mut() {
+                    rollout_turn(file, turns, &message, turn);
+                }
+                notify(&args, sessions, turns);
             }
             println!("got: {message}");
             input_box();
