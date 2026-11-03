@@ -148,6 +148,28 @@ pub fn keystrokes(message: &str, from: Option<&str>) -> Result<(Vec<u8>, Vec<u8>
     Ok((paste, b"\r".to_vec()))
 }
 
+/// How long to wait between what is typed and its Enter, so the Enter
+/// comes on its own read and submits rather than joining the text.
+///
+/// Codex needs longer. Where it gets no bracketed paste (Windows' console
+/// input gives it none), plain characters arriving 8 ms apart or less
+/// (`PASTE_BURST_CHAR_INTERVAL`) are a paste burst, and an Enter during
+/// one, or within 120 ms of its last character
+/// (`PASTE_ENTER_SUPPRESS_WINDOW`), is a newline in the input box. On
+/// Windows a burst ends only after 60 ms with nothing typed
+/// (`PASTE_BURST_ACTIVE_IDLE_TIMEOUT`), all in codex-rs
+/// `tui/src/bottom_pane/paste_burst.rs`. That is 180 ms after the text at
+/// the least; ConPTY's own delay in delivering it comes on top, so 400 ms
+/// leaves it more than the whole window again. The same holds for `/new`,
+/// four plain characters in one write.
+pub fn enter_delay(harness: Option<cmux_protocol::Harness>) -> std::time::Duration {
+    use std::time::Duration;
+    match harness {
+        Some(cmux_protocol::Harness::Codex) => Duration::from_millis(400),
+        _ => Duration::from_millis(120),
+    }
+}
+
 /// The line that starts `harness` on a new conversation, typed as plain
 /// keystrokes: a slash command pasted is text in the prompt, not a command.
 /// The process keeps running, so what it was launched with — a role's
@@ -320,6 +342,17 @@ mod tests {
         assert_eq!(evil, "\x1b[200~hi[201~rm -rf ~\x1b[201~");
         assert_eq!(evil.matches('\x1b').count(), 2);
         assert!(keystrokes(" \n\x07 ", None).is_err());
+    }
+
+    #[test]
+    fn codex_gets_its_enter_after_a_paste_burst_ends() {
+        use cmux_protocol::Harness;
+        use std::time::Duration;
+        // Codex's Enter-suppress window plus Windows' burst idle timeout.
+        assert!(enter_delay(Some(Harness::Codex)) > Duration::from_millis(120 + 60));
+        for other in [Some(Harness::Claude), Some(Harness::Aider), None] {
+            assert_eq!(enter_delay(other), Duration::from_millis(120));
+        }
     }
 
     #[test]
