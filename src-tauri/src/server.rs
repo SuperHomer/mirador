@@ -199,6 +199,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             title,
             body,
             job,
+            kind: _,
         } => {
             let pane =
                 resolve_pane(&state, pane_id, tty, job).unwrap_or_else(|| focused_pane(&state));

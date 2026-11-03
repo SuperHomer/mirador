@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use cmux_protocol::{AgentInfo, AgentRole, AgentStatus, Harness};
+use cmux_protocol::{AgentInfo, AgentRole, AgentStatus, Harness, NotifyKind};
 
 /// One row of the process table.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -459,6 +459,21 @@ pub fn hook_status(
             None if message.is_some_and(|m| m.contains("waiting for your input")) => None,
             None => Some(AgentStatus::NeedsYou),
         },
+        _ => None,
+    }
+}
+
+/// What a `mira claude-hook` event's notification is about; `None` for
+/// an event that raises none. A Notification is the agent needing the
+/// person when [`hook_status`] says so, and otherwise a reminder.
+pub fn hook_notify_kind(event: &str, notification_type: Option<&str>, message: Option<&str>) -> Option<NotifyKind> {
+    match event {
+        "notification" => Some(match hook_status(event, notification_type, message) {
+            Some(AgentStatus::NeedsYou) => NotifyKind::NeedsYou,
+            _ => NotifyKind::Reminder,
+        }),
+        "stop" => Some(NotifyKind::TurnEnded),
+        "stop-failure" => Some(NotifyKind::Failed),
         _ => None,
     }
 }
@@ -1254,6 +1269,18 @@ mod tests {
         assert_eq!(hook_status("notification", None, Some("Claude is waiting for your input")), None);
         assert_eq!(hook_status("notification", None, Some("Claude needs your permission to use Edit")), Some(NeedsYou));
         assert_eq!(hook_status("something-new", None, None), None);
+    }
+
+    #[test]
+    fn hook_events_name_what_their_notification_is_about() {
+        use NotifyKind::*;
+        assert_eq!(hook_notify_kind("notification", Some("permission_prompt"), None), Some(NeedsYou));
+        assert_eq!(hook_notify_kind("notification", None, Some("Claude needs your permission to use Edit")), Some(NeedsYou));
+        assert_eq!(hook_notify_kind("notification", Some("idle_prompt"), Some("Claude is waiting for your input")), Some(Reminder));
+        assert_eq!(hook_notify_kind("stop", None, None), Some(TurnEnded));
+        assert_eq!(hook_notify_kind("stop-failure", None, None), Some(Failed));
+        assert_eq!(hook_notify_kind("prompt-submit", None, None), None);
+        assert_eq!(hook_notify_kind("session-start", None, None), None);
     }
 
     #[test]

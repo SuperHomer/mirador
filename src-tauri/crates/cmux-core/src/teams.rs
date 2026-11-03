@@ -25,8 +25,8 @@
 use std::path::Path;
 
 use cmux_protocol::{
-    AgentRole, AgentTeam, AgentWay, LayerWeight, ModelWeight, Node, PartWeight, PromptLayer, PromptLayerKind, RoleCatalog,
-    RoleSource, SeatWeight, SplitDir, TeamFields, TeamMember, TeamWeight,
+    AgentRole, AgentStatus, AgentTeam, AgentWay, LayerWeight, NotifyKind, ModelWeight, Node, PartWeight, PromptLayer, PromptLayerKind, RoleCatalog,
+    RoleSource, SeatWeight, SplitDir, TeamFields, TeamMember, TeamRun, TeamWeight,
 };
 use serde::Deserialize;
 
@@ -452,6 +452,34 @@ fn heaviest(seats: &[SeatWeight], team_tokens: u64) -> Vec<PartWeight> {
     }
     out.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.source.cmp(&b.source)));
     out
+}
+
+/// Whether a notification from `pane` reaches the person, in a tab running
+/// `team`. A team's members end turns all day, handing work to each other,
+/// and a notification for each would bury the two the person wants: one of
+/// them needs the person (or failed), or the team as a whole has stopped.
+/// The lead's turn end stands for the team's — a plain notification (`None`)
+/// counts as one, since that is how a harness without hooks (Codex's OSC 9)
+/// says it — but only once no other member is still working. `status_of`
+/// gives a pane's agent status. A pane not in the team is not filtered.
+pub fn team_should_notify(
+    team: &TeamRun,
+    pane: &str,
+    kind: Option<NotifyKind>,
+    status_of: impl Fn(&str) -> Option<AgentStatus>,
+) -> bool {
+    let Some(seat) = team.members.iter().find(|s| s.pane == pane) else {
+        return true;
+    };
+    match kind {
+        Some(NotifyKind::NeedsYou | NotifyKind::Failed) => true,
+        Some(NotifyKind::TurnEnded) | None if seat.lead => team
+            .members
+            .iter()
+            .filter(|s| s.pane != pane)
+            .all(|s| status_of(&s.pane) != Some(AgentStatus::Working)),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -896,5 +924,38 @@ members: []
         assert!(matches!(layout(&panes, Some("rows")), Node::Split { dir: SplitDir::Column, ref children, .. } if children.len() == 5));
         assert_eq!(layout(&panes[..1], None), Node::Leaf { pane_id: "p1".into() });
         assert_eq!(leaves(&layout(&panes, None)), panes);
+    }
+
+    fn squad() -> TeamRun {
+        let seat = |name: &str, pane: &str, lead: bool| cmux_protocol::TeamSeat { name: name.into(), role: name.into(), pane: pane.into(), lead };
+        TeamRun { name: "squad".into(), members: vec![seat("planner", "p1", true), seat("dev", "p2", false), seat("reviewer", "p3", false)] }
+    }
+
+    #[test]
+    fn a_member_notifies_only_when_it_needs_the_person() {
+        use NotifyKind::*;
+        let idle = |_: &str| Some(AgentStatus::Idle);
+        assert!(team_should_notify(&squad(), "elsewhere", Some(TurnEnded), idle), "a pane not in the team is not filtered");
+        assert!(team_should_notify(&squad(), "p2", Some(NeedsYou), idle));
+        assert!(team_should_notify(&squad(), "p2", Some(Failed), idle));
+        assert!(!team_should_notify(&squad(), "p2", Some(TurnEnded), idle));
+        assert!(!team_should_notify(&squad(), "p2", Some(Reminder), idle));
+        assert!(!team_should_notify(&squad(), "p2", None, idle));
+        assert!(team_should_notify(&squad(), "p1", Some(NeedsYou), |_| Some(AgentStatus::Working)));
+    }
+
+    #[test]
+    fn the_leads_turn_end_notifies_once_the_team_has_stopped() {
+        use NotifyKind::*;
+        let dev_working = |p: &str| if p == "p2" { Some(AgentStatus::Working) } else { Some(AgentStatus::Idle) };
+        let stopped = |p: &str| if p == "p2" { Some(AgentStatus::NeedsYou) } else { None };
+        assert!(!team_should_notify(&squad(), "p1", Some(TurnEnded), dev_working));
+        assert!(!team_should_notify(&squad(), "p1", None, dev_working));
+        assert!(team_should_notify(&squad(), "p1", Some(TurnEnded), stopped));
+        // A harness's OSC turn end (Codex) counts as the lead's turn end.
+        assert!(team_should_notify(&squad(), "p1", None, stopped));
+        // The lead's own status is not a teammate's: it may still read Working.
+        assert!(team_should_notify(&squad(), "p1", Some(TurnEnded), |p| (p == "p1").then_some(AgentStatus::Working)));
+        assert!(!team_should_notify(&squad(), "p1", Some(Reminder), stopped));
     }
 }
