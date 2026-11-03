@@ -433,6 +433,13 @@ pub enum Request {
         #[serde(default)]
         message: Option<String>,
     },
+    /// Records the thread the Codex in a pane is on (for resume-on-restore),
+    /// from `mira codex-notify`, which Codex runs after each turn.
+    CodexThread {
+        #[serde(default)]
+        pane_id: Option<String>,
+        thread_id: String,
+    },
     /// Starts an agent in a new pane (a split of the calling pane, or a new
     /// tab): plain Claude Code, or a role's harness, model and prompt.
     AgentNew {
@@ -2208,6 +2215,10 @@ pub struct AccountUsage {
     /// Why a plan shows no limits, and how to get them.
     #[serde(default)]
     pub limits_note: Option<String>,
+    /// A plan with no limits whose status line is not our wrapper yet:
+    /// setting the integration up would show them. Never on Windows.
+    #[serde(default)]
+    pub limits_setup: bool,
     /// What it used in the last five hours and the last seven days: the
     /// lengths of the plans' own windows.
     pub five_hours: TokenTotals,

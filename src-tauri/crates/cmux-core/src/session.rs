@@ -465,8 +465,19 @@ mod tests {
         let b = ws.split_pane(&a, SplitDir::Row).unwrap();
         ws.rename_tab(&ws.tabs[0].id.clone(), "my tab");
         let (_tab2, c) = ws.new_tab();
+        let d = ws.split_pane(&c, SplitDir::Row).unwrap();
 
         let mut meta = HashMap::new();
+        meta.insert(
+            d.clone(),
+            PaneMeta {
+                agent_session: Some("codex:019a3f2e-7b1c-7d20-9e4f-0123456789ab".into()),
+                agent_role: Some("coder".into()),
+                agent_prompt: Some("/data/prompts/coder-1.toml".into()),
+                agent_harness: Some(cmux_protocol::Harness::Codex),
+                ..Default::default()
+            },
+        );
         meta.insert(
             a.clone(),
             PaneMeta {
@@ -511,6 +522,12 @@ mod tests {
         assert_eq!(rmeta[&b].agent_prompt.as_deref(), Some("/data/prompts/reviewer-1-0123.md"));
         assert_eq!(rmeta[&b].agent_status, None);
         assert_eq!(rmeta[&c].command.as_deref(), Some("npm test"));
+        // A Codex's thread too, and it still says Codex before the poller
+        // sees one.
+        assert_eq!(rmeta[&d].agent_session.as_deref(), Some("codex:019a3f2e-7b1c-7d20-9e4f-0123456789ab"));
+        assert_eq!(rmeta[&d].agent_role.as_deref(), Some("coder"));
+        assert_eq!(rmeta[&d].agent_prompt.as_deref(), Some("/data/prompts/coder-1.toml"));
+        assert_eq!(rmeta[&d].harness(), Some(cmux_protocol::Harness::Codex));
     }
 
     #[test]

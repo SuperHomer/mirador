@@ -161,7 +161,7 @@ pub fn send(
     state.pty.write(&pane, &paste)?;
     // Enter on its own read: a TUI that gets it with the paste can take it
     // as part of the paste and leave the message unsent.
-    std::thread::sleep(std::time::Duration::from_millis(120));
+    std::thread::sleep(cmux_core::handoff::enter_delay(harness));
     state.pty.write(&pane, &enter)?;
     let from = from.unwrap_or_else(|| "you".into());
     crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card, title);
@@ -198,7 +198,7 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;
     state.pty.write(pane, line.as_bytes()).map_err(|e| ("not running", e))?;
     // Enter on its own read, as `send` does.
-    std::thread::sleep(std::time::Duration::from_millis(120));
+    std::thread::sleep(cmux_core::handoff::enter_delay(harness));
     state.pty.write(pane, b"\r").map_err(|e| ("not running", e))?;
     Ok(())
 }

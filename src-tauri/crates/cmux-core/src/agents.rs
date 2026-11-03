@@ -496,6 +496,10 @@ pub fn plain_harness(harness: Option<Harness>) -> Result<Harness, String> {
 /// else — its network goes through Codex's proxy, which lets out only what
 /// the profile already allowed.
 ///
+/// `notify` is the `notify` a Codex is given ([`codex_notify_argv`]): how
+/// Mirador learns each turn's thread where it cannot read the process's
+/// open files (Windows), the person's own notify still run after it.
+///
 /// It is typed in, so every argument is put on one line and loses its
 /// control characters: a newline would submit the line half-quoted, and a
 /// stray `^C` would be read as a keystroke before the shell ever saw quotes.
@@ -508,6 +512,7 @@ pub fn launch_command(
     settings_file: Option<&std::path::Path>,
     task: Option<&str>,
     socket: Option<(&str, &std::path::Path)>,
+    notify: Option<&[String]>,
     quote: impl Fn(&str) -> String,
 ) -> String {
     let harness = role.map_or(plain, |r| r.harness);
@@ -539,16 +544,18 @@ pub fn launch_command(
         match harness {
             Harness::Codex => {
                 arg(&mut line, "--profile", role.profile.as_deref().unwrap_or(""));
-                match (prompt, prompt_file) {
+                // The file alone is enough: a resume passes the one the
+                // pane started with, whose prompt is not at hand.
+                match (prompt_file, prompt) {
                     // Read by the shell as one word: what is typed stays
                     // short whatever the prompt's length (`codex_instructions`).
                     // `command`, so a `cat` aliased to something else is
                     // not the one run.
-                    (Some(_), Some(file)) => {
+                    (Some(file), _) => {
                         line.push_str(&format!(" -c \"$(command cat {})\"", quote(&file.to_string_lossy())))
                     }
-                    (Some(prompt), None) => arg(&mut line, "-c", &codex_instructions(prompt)),
-                    (None, _) => {}
+                    (None, Some(prompt)) => arg(&mut line, "-c", &codex_instructions(prompt)),
+                    (None, None) => {}
                 }
             }
             _ => {
@@ -574,6 +581,9 @@ pub fn launch_command(
         // the base allows, and the socket above.
         arg(&mut line, "-c", "permissions.mirador.network.enabled=true");
         arg(&mut line, "-c", "features.network_proxy=true");
+    }
+    if let (Harness::Codex, Some(notify)) = (harness, notify) {
+        arg(&mut line, "-c", &codex_notify_override(notify));
     }
     arg(&mut line, "", task.unwrap_or(""));
     line
@@ -649,6 +659,60 @@ pub fn codex_instructions(prompt: &str) -> String {
     format!("developer_instructions={}", toml_string(prompt.trim()))
 }
 
+/// The `notify` program a Codex runs after each turn, from the person's
+/// Codex `config` and the role's `profile` file (their text), the profile
+/// winning as it does in Codex. None when neither sets one, or what is
+/// set is not a list of strings.
+pub fn codex_user_notify(config: Option<&str>, profile: Option<&str>) -> Option<Vec<String>> {
+    [profile, config].into_iter().flatten().find_map(|text| {
+        let table: toml::Table = toml::from_str(text).ok()?;
+        let argv: Vec<String> = table.get("notify")?.as_array()?.iter().map(|a| a.as_str().map(String::from)).collect::<Option<_>>()?;
+        Some(argv).filter(|a| !a.is_empty())
+    })
+}
+
+/// The `notify` Mirador gives a Codex: `mira codex-notify`, which records
+/// the turn's thread for the pane, then runs `theirs` — the person's own
+/// notify — after `--`. Theirs already being ours (a resumed Codex, a
+/// config someone copied a launch into) is unwrapped, not nested.
+pub fn codex_notify_argv(mira: &std::path::Path, theirs: Option<Vec<String>>) -> Vec<String> {
+    let mut theirs = theirs.unwrap_or_default();
+    let ours = |argv: &[String]| {
+        argv.len() >= 2
+            && argv[1] == "codex-notify"
+            && std::path::Path::new(&argv[0]).file_stem().is_some_and(|s| s == "mira")
+    };
+    while ours(&theirs) {
+        theirs = theirs.iter().skip(2).skip_while(|a| *a == "--").cloned().collect();
+    }
+    let mut argv = vec![mira.to_string_lossy().into_owned(), "codex-notify".into()];
+    if !theirs.is_empty() {
+        argv.push("--".into());
+        argv.extend(theirs);
+    }
+    argv
+}
+
+/// What `mira codex-notify` was given: the person's notify after an
+/// optional `--`, then Codex's JSON last.
+pub fn split_codex_notify(args: &[String]) -> (&[String], Option<&str>) {
+    let Some((json, theirs)) = args.split_last() else { return (&[], None) };
+    let theirs = theirs.strip_prefix(&["--".to_string()][..]).unwrap_or(theirs);
+    (theirs, Some(json.as_str()))
+}
+
+/// `argv` as Codex's `-c notify=[…]`. Each item is a TOML literal string
+/// where it can be: no double quotes for Windows PowerShell 5.1 to strip
+/// from a native command's argument, and a Windows path's backslashes as
+/// they are. One holding `'` or a control character is a basic string.
+pub fn codex_notify_override(argv: &[String]) -> String {
+    let items: Vec<String> = argv
+        .iter()
+        .map(|a| if a.contains('\'') || a.chars().any(char::is_control) { toml_string(a) } else { format!("'{a}'") })
+        .collect();
+    format!("notify=[{}]", items.join(","))
+}
+
 /// The program `harness` runs, which is also how a role file names it.
 pub fn program_of(harness: Harness) -> &'static str {
     HARNESSES.iter().find(|(_, h)| *h == harness).map(|(p, _)| *p).expect("every harness has a program")
@@ -696,6 +760,12 @@ pub fn session_record(session_id: &str, job: Option<&str>) -> Option<String> {
     }
 }
 
+/// The `agent_session` value for a Codex holding `rollout` open:
+/// `codex:<thread>`, the id `codex resume` takes.
+pub fn codex_record(rollout: &std::path::Path) -> Option<String> {
+    crate::codex_trail::rollout_id(rollout).map(|id| format!("codex:{id}"))
+}
+
 /// A role's flags for a resumed Claude Code, each already quoted for the
 /// shell: its `--model`, `--effort`, settings file and prompt file. A
 /// resumed conversation keeps none of the first three — they are the
@@ -703,12 +773,19 @@ pub fn session_record(session_id: &str, job: Option<&str>) -> Option<String> {
 /// `--system-prompt-snapshot`), so a role's pane passes them all again or
 /// comes back on the default model, with every tool, and later without
 /// its role.
+///
+/// For a Codex, `codex` is the whole line that would start it fresh
+/// ([`launch_command`], with no task): its role's model, effort, profile
+/// and prompt file, and Mirador's socket permissions. Codex keeps none of
+/// them in a thread, so a resumed member without them would lose its role
+/// and could not reach `mira`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumeFlags<'a> {
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
     pub settings: Option<&'a str>,
     pub prompt: Option<&'a str>,
+    pub codex: Option<&'a str>,
 }
 
 /// What to type into a restored pane to bring its session back. The id is
@@ -738,6 +815,7 @@ pub fn restore_command(agent_session: &str, flags: ResumeFlags) -> Option<String
             Some(line)
         }
         "claude-bg" => Some(format!("claude attach {id}")),
+        "codex" => crate::checkpoints::resume_line("codex", "resume", id, flags.codex.unwrap_or("codex")),
         _ => None,
     }
 }
@@ -751,7 +829,7 @@ pub fn legacy_resume_command(agent_session: &str) -> Option<String> {
     is_safe_id(id).then(|| format!("claude --resume {id}"))
 }
 
-/// Whether a restored Claude pane may resume by itself. Only where the
+/// Whether a restored Claude or Codex pane may resume by itself. Only where the
 /// poller can see Claude exit (it reads the process table) is an exited
 /// session forgotten; without that, auto-resume would bring back on every
 /// launch a conversation you closed long ago. Windows lists no processes
@@ -782,8 +860,9 @@ pub fn restore_pane(
     // older version, or by a platform without auto-resume. It is derived
     // again from `agent_session` below, or the pane would come back as a
     // command pane on every launch after the session is gone.
-    let command = command
-        .filter(|c| !c.starts_with("claude --resume ") && !c.starts_with("claude attach "));
+    let command = command.filter(|c| {
+        !c.starts_with("claude --resume ") && !c.starts_with("claude attach ") && !c.starts_with("codex resume ")
+    });
     let keep = Restored {
         command: command.map(str::to_string),
         startup_input: None,
@@ -991,6 +1070,7 @@ mod tests {
             effort: Some("'max'"),
             settings: Some("'/p/r.settings.json'"),
             prompt: Some("'/p/r.md'"),
+            codex: None,
         };
         assert_eq!(
             restore_command("claude-fg:abc-1", ResumeFlags { model: Some("'opus'"), ..Default::default() }).as_deref(),
@@ -1086,6 +1166,62 @@ mod tests {
         );
     }
 
+    const THREAD: &str = "019a3f2e-7b1c-7d20-9e4f-0123456789ab";
+
+    #[test]
+    fn records_a_codex_thread_from_its_rollout() {
+        let rollout = std::env::temp_dir().join(format!("sessions/2026/11/03/rollout-2026-11-03T09-00-00-{THREAD}.jsonl"));
+        assert_eq!(codex_record(&rollout), Some(format!("codex:{THREAD}")));
+        assert_eq!(codex_record(&std::env::temp_dir().join("sessions/rollout-2026-11-03T09-00-00-a.jsonl")), None);
+    }
+
+    #[test]
+    fn restores_a_codex_pane_with_the_flags_it_was_launched_with() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let record = format!("codex:{THREAD}");
+        let typed = |s: String| Restored { command: None, startup_input: Some(s) };
+        let idle = |s: String| Restored { command: Some(s), startup_input: None };
+        // Plain: nothing but the resume.
+        assert_eq!(restore_command(&record, ResumeFlags::default()), Some(format!("codex resume {THREAD}")));
+        assert_eq!(restore_pane(None, false, Some(&record), ResumeFlags::default(), true), typed(format!("codex resume {THREAD}")));
+        // A role's model, effort, prompt file and Mirador's socket come
+        // back, from the same line a launch types.
+        let role = AgentRole {
+            name: "coder".into(),
+            harness: Harness::Codex,
+            model: Some("gpt-5".into()),
+            effort: Some("high".into()),
+            ..Default::default()
+        };
+        let socket = Some((":workspace", std::path::Path::new("/tmp/mira.sock")));
+        let file = std::path::Path::new("/data/prompts/coder-1.toml");
+        let launch = launch_command(Some(&role), Harness::Codex, None, Some(file), None, None, socket, None, q);
+        let flags = ResumeFlags { codex: Some(&launch), ..Default::default() };
+        let resume = format!(
+            "codex resume {THREAD} --model 'gpt-5' -c 'model_reasoning_effort=\"high\"' \
+             -c \"$(command cat '/data/prompts/coder-1.toml')\" -c 'default_permissions=\"mirador\"' \
+             -c 'permissions.mirador.extends=\":workspace\"' \
+             -c 'permissions.mirador.network.unix_sockets={{\"/tmp/mira.sock\"=\"allow\"}}' \
+             -c 'permissions.mirador.network.enabled=true' -c 'features.network_proxy=true'"
+        );
+        assert_eq!(restore_pane(None, false, Some(&record), flags, true), typed(resume.clone()));
+        // Windows: offered on a keypress; and what it saved back is derived
+        // again, not kept once the thread is gone.
+        assert_eq!(restore_pane(None, false, Some(&record), flags, false), idle(resume.clone()));
+        assert_eq!(restore_pane(Some(&resume), false, Some(&record), flags, false), idle(resume.clone()));
+        assert_eq!(restore_pane(Some(&resume), false, None, flags, false), Restored::default());
+        // Claude's flags are not a Codex's.
+        let claude = ResumeFlags { model: Some("'opus'"), prompt: Some("'/p/r.md'"), ..Default::default() };
+        assert_eq!(restore_command(&record, claude), Some(format!("codex resume {THREAD}")));
+        // A line that would not start Codex resumes nothing.
+        assert_eq!(restore_command(&record, ResumeFlags { codex: Some("claude --model x"), ..Default::default() }), None);
+        // An id that is not one is never typed.
+        for bad in ["codex:abc; rm -rf ~", "codex:$(id)", "codex:", "codex:a b"] {
+            assert_eq!(restore_command(bad, flags), None, "{bad}");
+            assert_eq!(restore_pane(None, false, Some(bad), flags, true), Restored::default(), "{bad}");
+        }
+    }
+
     #[test]
     fn reads_the_model_flag() {
         assert_eq!(model_flag("claude --model opus --resume x").as_deref(), Some("opus"));
@@ -1136,8 +1272,8 @@ mod tests {
     #[test]
     fn builds_the_launch_command() {
         let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
-        assert_eq!(launch_command(None, Harness::Claude, None, None, None, None, None, q), "claude");
-        assert_eq!(launch_command(None, Harness::Claude, None, None, None, Some("fix the flaky test"), None, q), "claude 'fix the flaky test'");
+        assert_eq!(launch_command(None, Harness::Claude, None, None, None, None, None, None, q), "claude");
+        assert_eq!(launch_command(None, Harness::Claude, None, None, None, Some("fix the flaky test"), None, None, q), "claude 'fix the flaky test'");
         let role = AgentRole {
             name: "reviewer".into(),
             model: Some("opus".into()),
@@ -1147,25 +1283,25 @@ mod tests {
         // A prompt file is what Claude Code gets, when there is one.
         let file = std::path::Path::new("/data/prompts/p1.md");
         assert_eq!(
-            launch_command(Some(&role), Harness::Claude, Some(prompt), Some(file), None, Some("look at\r\nmain\u{3}"), None, q),
+            launch_command(Some(&role), Harness::Claude, Some(prompt), Some(file), None, Some("look at\r\nmain\u{3}"), None, None, q),
             r"claude --model 'opus' --append-system-prompt-file '/data/prompts/p1.md' --name 'reviewer' 'look at main'"
         );
         assert_eq!(
-            launch_command(Some(&role), Harness::Claude, Some(prompt), None, None, None, None, q),
+            launch_command(Some(&role), Harness::Claude, Some(prompt), None, None, None, None, None, q),
             r"claude --model 'opus' --append-system-prompt 'You review. Never edit files; it'\''s read-only.' --name 'reviewer'"
         );
         // A role that limits its tools says where its settings are.
         let settings = std::path::Path::new("/data/prompts/reviewer-2.settings.json");
         assert_eq!(
-            launch_command(Some(&role), Harness::Claude, None, None, Some(settings), None, None, q),
+            launch_command(Some(&role), Harness::Claude, None, None, Some(settings), None, None, None, q),
             r"claude --model 'opus' --settings '/data/prompts/reviewer-2.settings.json' --name 'reviewer'"
         );
         let bare = AgentRole { name: "plain".into(), ..Default::default() };
-        assert_eq!(launch_command(Some(&bare), Harness::Claude, Some("  "), Some(file), None, Some("  "), None, q), "claude --name 'plain'");
+        assert_eq!(launch_command(Some(&bare), Harness::Claude, Some("  "), Some(file), None, Some("  "), None, None, q), "claude --name 'plain'");
         // Its effort comes right after its model.
         let deep = AgentRole { effort: Some("max".into()), ..role.clone() };
         assert_eq!(
-            launch_command(Some(&deep), Harness::Claude, None, None, None, Some("go"), None, q),
+            launch_command(Some(&deep), Harness::Claude, None, None, None, Some("go"), None, None, q),
             "claude --model 'opus' --effort 'max' --name 'reviewer' 'go'"
         );
     }
@@ -1176,14 +1312,14 @@ mod tests {
         assert_eq!(plain_harness(None), Ok(Harness::Claude));
         assert_eq!(plain_harness(Some(Harness::Codex)), Ok(Harness::Codex));
         assert!(plain_harness(Some(Harness::OpenCode)).is_err());
-        assert_eq!(launch_command(None, Harness::Codex, None, None, None, Some("go"), None, q), "codex 'go'");
+        assert_eq!(launch_command(None, Harness::Codex, None, None, None, Some("go"), None, None, q), "codex 'go'");
         // It may reach the app as a Codex role may.
         let socket = Some((":read-only", std::path::Path::new("/tmp/mira.sock")));
-        assert!(launch_command(None, Harness::Codex, None, None, None, None, socket, q)
+        assert!(launch_command(None, Harness::Codex, None, None, None, None, socket, None, q)
             .starts_with("codex -c 'default_permissions=\"mirador\"'"));
         // A role's harness wins over the plain one.
         let claude = AgentRole { name: "reviewer".into(), ..Default::default() };
-        assert_eq!(launch_command(Some(&claude), Harness::Codex, None, None, None, None, None, q), "claude --name 'reviewer'");
+        assert_eq!(launch_command(Some(&claude), Harness::Codex, None, None, None, None, None, None, q), "claude --name 'reviewer'");
     }
 
     #[test]
@@ -1192,23 +1328,23 @@ mod tests {
         let role = AgentRole { name: "dev".into(), harness: Harness::Codex, model: Some("gpt-5".into()), ..Default::default() };
         // Without a file, inline; the escapes are TOML's.
         assert_eq!(
-            launch_command(Some(&role), Harness::Claude, Some("Line \"one\"\r\n\tC:\\path"), None, None, Some("go"), None, q),
+            launch_command(Some(&role), Harness::Claude, Some("Line \"one\"\r\n\tC:\\path"), None, None, Some("go"), None, None, q),
             r#"codex --model 'gpt-5' -c 'developer_instructions="Line \"one\"\n\tC:\\path"' 'go'"#
         );
         // With one, the shell reads the override from it, as one word.
         let file = std::path::Path::new("/data/prompts/dev-1.toml");
         assert_eq!(
-            launch_command(Some(&role), Harness::Claude, Some("You build."), Some(file), None, Some("go"), None, q),
+            launch_command(Some(&role), Harness::Claude, Some("You build."), Some(file), None, Some("go"), None, None, q),
             r#"codex --model 'gpt-5' -c "$(command cat '/data/prompts/dev-1.toml')" 'go'"#
         );
         // The override reads back as the prompt.
         let prompt = "a \"b\"\nc\\d\u{7}  e";
         let value: toml::Table = toml::from_str(&codex_instructions(prompt)).unwrap();
         assert_eq!(value["developer_instructions"].as_str(), Some(prompt));
-        assert_eq!(launch_command(Some(&role), Harness::Claude, None, None, None, None, None, q), "codex --model 'gpt-5'");
+        assert_eq!(launch_command(Some(&role), Harness::Claude, None, None, None, None, None, None, q), "codex --model 'gpt-5'");
         let deep = AgentRole { effort: Some("xhigh".into()), ..role.clone() };
         assert_eq!(
-            launch_command(Some(&deep), Harness::Claude, Some("You build."), None, None, None, None, q),
+            launch_command(Some(&deep), Harness::Claude, Some("You build."), None, None, None, None, None, q),
             r#"codex --model 'gpt-5' -c 'model_reasoning_effort="xhigh"' -c 'developer_instructions="You build."'"#
         );
         // A long prompt makes no long line: a line over 1 KB typed into a
@@ -1216,11 +1352,62 @@ mod tests {
         let long = "Review every step. ".repeat(270);
         let file = std::path::Path::new("/Users/someone/Library/Application Support/Mirador/prompts/dev-0123456789abcdef.toml");
         let socket = Some((":workspace", std::path::Path::new("/var/folders/xy/abcdefghijklmnop/T/mira-501.sock")));
-        let line = launch_command(Some(&deep), Harness::Claude, Some(&long), Some(file), None, None, socket, q);
+        let line = launch_command(Some(&deep), Harness::Claude, Some(&long), Some(file), None, None, socket, None, q);
         assert!(long.len() > 5000 && line.len() < 700, "{} bytes: {line}", line.len());
         // Its profile is the person's own, named as it is.
         let yolo = AgentRole { profile: Some("gpt-6".into()), ..role.clone() };
-        assert_eq!(launch_command(Some(&yolo), Harness::Claude, None, None, None, Some("go"), None, q), "codex --model 'gpt-5' --profile 'gpt-6' 'go'");
+        assert_eq!(launch_command(Some(&yolo), Harness::Claude, None, None, None, Some("go"), None, None, q), "codex --model 'gpt-5' --profile 'gpt-6' 'go'");
+    }
+
+    #[test]
+    fn gives_codex_miradors_notify_in_front_of_the_persons_own() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let mira = std::path::Path::new("/Applications/Mirador.app/Contents/MacOS/mira");
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Theirs, from the profile before the config.
+        let config = "notify = [\"notify-send\", \"Codex\"]";
+        assert_eq!(codex_user_notify(Some(config), None), Some(argv(&["notify-send", "Codex"])));
+        assert_eq!(codex_user_notify(Some(config), Some("notify = [\"say\"]")), Some(argv(&["say"])));
+        assert_eq!(codex_user_notify(Some(config), Some("model = \"gpt-5\"")), Some(argv(&["notify-send", "Codex"])));
+        assert_eq!(codex_user_notify(Some("notify = \"notify-send\""), None), None, "not a list");
+        assert_eq!(codex_user_notify(Some("notify = []"), None), None);
+        assert_eq!(codex_user_notify(None, None), None);
+        // Ours, with theirs after `--`, or alone.
+        let mine = "/Applications/Mirador.app/Contents/MacOS/mira";
+        assert_eq!(codex_notify_argv(mira, None), argv(&[mine, "codex-notify"]));
+        let theirs = Some(argv(&["notify-send", "Codex"]));
+        assert_eq!(codex_notify_argv(mira, theirs.clone()), argv(&[mine, "codex-notify", "--", "notify-send", "Codex"]));
+        // Theirs already ours, from any mira: unwrapped, never nested.
+        let old = argv(&["/old/place/mira.exe", "codex-notify", "--", "notify-send", "Codex"]);
+        assert_eq!(codex_notify_argv(mira, Some(old)), argv(&[mine, "codex-notify", "--", "notify-send", "Codex"]));
+        assert_eq!(codex_notify_argv(mira, Some(argv(&[mine, "codex-notify"]))), argv(&[mine, "codex-notify"]));
+        // What `mira codex-notify` gets back: theirs, then the payload.
+        let given = argv(&["--", "notify-send", "Codex", "{}"]);
+        assert_eq!(split_codex_notify(&given), (&given[1..3], Some("{}")));
+        let alone = argv(&["{}"]);
+        assert_eq!(split_codex_notify(&alone), (&[][..], Some("{}")));
+        assert_eq!(split_codex_notify(&[]), (&[][..], None));
+        // As a `-c`: literal strings, no double quote for PowerShell 5.1 to
+        // strip, a Windows path as it is; a quote falls back to escapes.
+        let windows = argv(&[r"C:\Program Files\Mirador\mira.exe", "codex-notify"]);
+        assert_eq!(codex_notify_override(&windows), r"notify=['C:\Program Files\Mirador\mira.exe','codex-notify']");
+        assert_eq!(codex_notify_override(&argv(&["it's"])), r#"notify=["it's"]"#);
+        for list in [windows, argv(&["it's", "a\\b"])] {
+            assert_eq!(codex_user_notify(Some(&codex_notify_override(&list)), None), Some(list), "reads back");
+        }
+        // On every Codex's line, a role's or plain, after the socket; never
+        // on Claude Code's.
+        let ours = codex_notify_argv(mira, theirs);
+        let socket = Some((":read-only", std::path::Path::new("/tmp/mira.sock")));
+        let line = launch_command(None, Harness::Codex, None, None, None, Some("go"), socket, Some(&ours), q);
+        assert!(
+            line.ends_with(&format!(
+                "-c 'features.network_proxy=true' -c 'notify=['\\''{mine}'\\'','\\''codex-notify'\\'','\\''--'\\'','\\''notify-send'\\'','\\''Codex'\\'']' 'go'"
+            )),
+            "{line}"
+        );
+        let claude = AgentRole { name: "reviewer".into(), ..Default::default() };
+        assert_eq!(launch_command(Some(&claude), Harness::Claude, None, None, None, None, None, Some(&ours), q), "claude --name 'reviewer'");
     }
 
     #[test]
@@ -1230,7 +1417,7 @@ mod tests {
         let socket = Some((":read-only", std::path::Path::new("/var/folders/x/T/mira-501.sock")));
         // The base is what the person's Codex would run on, made no looser.
         assert_eq!(
-            launch_command(Some(&role), Harness::Claude, Some("You review."), None, None, None, socket, q),
+            launch_command(Some(&role), Harness::Claude, Some("You review."), None, None, None, socket, None, q),
             "codex --model 'gpt-5' -c 'developer_instructions=\"You review.\"' \
              -c 'default_permissions=\"mirador\"' -c 'permissions.mirador.extends=\":read-only\"' \
              -c 'permissions.mirador.network.unix_sockets={\"/var/folders/x/T/mira-501.sock\"=\"allow\"}' \
@@ -1238,7 +1425,7 @@ mod tests {
         );
         // Claude Code is started as before.
         let claude = AgentRole { name: "reviewer".into(), ..Default::default() };
-        assert_eq!(launch_command(Some(&claude), Harness::Claude, None, None, None, None, socket, q), "claude --name 'reviewer'");
+        assert_eq!(launch_command(Some(&claude), Harness::Claude, None, None, None, None, socket, None, q), "claude --name 'reviewer'");
     }
 
     #[test]

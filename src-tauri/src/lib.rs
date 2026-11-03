@@ -131,8 +131,9 @@ pub fn run() {
     };
     // Panes that ran Claude Code come back as the shell they were, with
     // `claude --resume <id>` (or `claude attach <job>` for a daemon
-    // session) typed into it — no keypress, and exiting Claude leaves you
-    // at a prompt rather than offering to run it again. The one exception
+    // session; `codex resume <id>` for a Codex) typed into it — no
+    // keypress, and exiting Claude leaves you at a prompt rather than
+    // offering to run it again. The one exception
     // to restored panes waiting for a keypress: resuming a conversation
     // runs nothing until you type into it. Not on Windows, which cannot
     // see Claude exit and so would resume closed conversations forever —
@@ -153,10 +154,14 @@ pub fn run() {
                 .find(|r| r.name == name)
                 .cloned()
         });
-        if let Some(r) = role.as_ref().filter(|r| r.harness != cmux_protocol::Harness::Claude) {
+        // A pane whose Codex the poller saw on a conversation resumes it as
+        // a Codex, with its role; any other is resumed as Claude Code.
+        let codex = m.agent_session.as_deref().is_some_and(|s| s.starts_with("codex:"));
+        let resumes = if codex { cmux_protocol::Harness::Codex } else { cmux_protocol::Harness::Claude };
+        if let Some(r) = role.as_ref().filter(|r| !codex && r.harness != resumes) {
             other_harness.insert(id.clone(), r.harness);
         }
-        let role = role.filter(|r| r.harness == cmux_protocol::Harness::Claude);
+        let role = role.filter(|r| r.harness == resumes);
         let role_model = role.as_ref().and_then(|r| r.model.clone());
         m.agent_model = role_model.clone();
         m.agent_effort = role.as_ref().and_then(|r| r.effort.clone());
@@ -173,6 +178,28 @@ pub fn run() {
         // prompt, unlike limits, holds nothing back.
         let prompt = m.agent_prompt.as_deref().filter(|f| std::path::Path::new(f).is_file());
         let quoted_prompt = prompt.map(cmux_core::pty::shell::quote_arg);
+        // A Codex's flags are the line that would start it fresh, built as
+        // a launch builds it, with no task.
+        let codex_launch = codex.then(|| {
+            let socket = crate::commands::codex_socket(role.as_ref(), m.cwd.as_deref());
+            let notify = crate::commands::codex_notify(role.as_ref());
+            cmux_core::agents::launch_command(
+                role.as_ref(),
+                cmux_protocol::Harness::Codex,
+                None,
+                prompt.map(std::path::Path::new),
+                None,
+                None,
+                socket.as_ref().map(|(base, socket)| (base.as_str(), socket.as_path())),
+                notify.as_deref(),
+                cmux_core::pty::shell::quote_arg,
+            )
+        });
+        if codex {
+            // A Codex agent from the start, as a launch marks one: on
+            // Windows no process table ever says so.
+            m.agent_harness = Some(cmux_protocol::Harness::Codex);
+        }
         let restored = cmux_core::agents::restore_pane(
             m.command.as_deref(),
             m.remote_host.is_some(),
@@ -182,6 +209,7 @@ pub fn run() {
                 effort: quoted_effort.as_deref(),
                 settings: quoted_settings.as_deref(),
                 prompt: quoted_prompt.as_deref(),
+                codex: codex_launch.as_deref(),
             },
             cmux_core::agents::AUTO_RESUME,
         );
@@ -207,11 +235,12 @@ pub fn run() {
             m.startup_input = None;
         }
     }
-    // A role that starts something other than Claude Code — Codex — has no
-    // session to resume. Held, its agent is still running, and is that
-    // harness from the start; otherwise the role no longer marks the pane,
-    // which would pass for a Claude agent until the poller said otherwise
-    // (and on Windows, which lists no processes, it never does).
+    // A role that starts something other than Claude Code, with no Codex
+    // thread recorded, has no session to resume. Held, its agent is still
+    // running, and is that harness from the start; otherwise the role no
+    // longer marks the pane, which would pass for a Claude agent until the
+    // poller said otherwise (and on Windows, which lists no processes, it
+    // never does).
     for (id, harness) in other_harness {
         if let Some(m) = meta.get_mut(&id) {
             if held_at_launch.contains(&id) {

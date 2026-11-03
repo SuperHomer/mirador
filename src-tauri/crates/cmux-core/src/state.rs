@@ -32,9 +32,11 @@ pub struct PaneMeta {
     pub ports: Vec<u16>,
     /// Browser pane: current URL of its child webview.
     pub browser_url: Option<String>,
-    /// The AI agent session running in this pane, captured via hooks for
-    /// resume-on-restore: "claude:<session>" for one running in the pane,
-    /// "claude-bg:<job>" for a daemon session the pane attaches.
+    /// The AI agent session running in this pane, for resume-on-restore:
+    /// "claude-fg:<session>" for a Claude Code in the pane and
+    /// "claude-bg:<job>" for a daemon session it attaches (both from
+    /// hooks), "codex:<thread>" for a Codex (from the rollout it holds
+    /// open, found by the poller).
     pub agent_session: Option<String>,
     /// True once the poller has seen that session's process in the pane
     /// this run. When it then disappears the session was exited, and is
@@ -134,11 +136,17 @@ impl PaneMeta {
         self.agent_harness.is_some() || self.claude_marked()
     }
 
-    /// What it runs. The session, role and launch mark are all Claude
-    /// Code's, so an agent known only by them is a Claude Code one.
+    /// What it runs. A `codex:` session is a Codex's; otherwise the
+    /// session, role and launch mark are Claude Code's, so an agent known
+    /// only by them is a Claude Code one.
     pub fn harness(&self) -> Option<cmux_protocol::Harness> {
-        self.agent_harness
-            .or_else(|| self.claude_marked().then_some(cmux_protocol::Harness::Claude))
+        self.agent_harness.or_else(|| {
+            if self.agent_session.as_deref().is_some_and(|s| s.starts_with("codex:")) {
+                Some(cmux_protocol::Harness::Codex)
+            } else {
+                self.claude_marked().then_some(cmux_protocol::Harness::Claude)
+            }
+        })
     }
 
     fn claude_marked(&self) -> bool {
@@ -1055,6 +1063,19 @@ mod tests {
         assert_eq!(m.harness(), Some(Harness::Claude));
         m.observe_agent(Some(&running(Harness::Claude, "claude")), true);
         assert_eq!(m.agent_session.as_deref(), Some("claude-fg:s1"));
+    }
+
+    #[test]
+    fn a_recorded_codex_pane_stays_a_codex_with_its_thread() {
+        use cmux_protocol::Harness;
+        // As a restore leaves it, before its Codex is seen again.
+        let mut m = PaneMeta { agent_session: Some("codex:t1".into()), agent_role: Some("coder".into()), ..Default::default() };
+        assert_eq!(m.harness(), Some(Harness::Codex));
+        m.observe_agent(Some(&running(Harness::Codex, "codex")), true);
+        assert_eq!(m.agent_session.as_deref(), Some("codex:t1"));
+        // Claude Code in its place is another agent: nothing to resume.
+        assert!(m.observe_agent(Some(&running(Harness::Claude, "claude")), true));
+        assert_eq!(m.agent_session, None);
     }
 
     #[test]
