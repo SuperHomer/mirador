@@ -132,11 +132,16 @@ pub fn resume_command(member: &CheckpointMember, launch: &str) -> Result<String,
         Harness::Codex => ("codex", "resume"),
         other => return Err(format!("{} cannot be resumed by Mirador", other.label())),
     };
-    let flags = launch
-        .strip_prefix(program)
-        .filter(|rest| rest.is_empty() || rest.starts_with(' '))
-        .ok_or_else(|| format!("member `{}` would not start {program}", member.name))?;
-    Ok(format!("{program} {resume} {}{flags}", member.session))
+    resume_line(program, resume, &member.session, launch)
+        .ok_or_else(|| format!("member `{}` would not start {program}", member.name))
+}
+
+/// `launch`, a line starting `program` fresh, made to resume `id` instead:
+/// `codex --model x` is `codex resume <id> --model x`. None when `launch`
+/// does not start `program`. `id` is checked by the caller.
+pub(crate) fn resume_line(program: &str, resume: &str, id: &str, launch: &str) -> Option<String> {
+    let flags = launch.strip_prefix(program).filter(|rest| rest.is_empty() || rest.starts_with(' '))?;
+    Some(format!("{program} {resume} {id}{flags}"))
 }
 
 #[cfg(test)]

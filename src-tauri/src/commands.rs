@@ -1839,33 +1839,10 @@ pub(crate) fn prepare_launch(
     // The session goes by the member's name; the pane keeps the role's, to
     // find it again on a restore.
     let named = role.clone().map(|r| cmux_protocol::AgentRole { name: name.unwrap_or(&r.name).to_string(), ..r });
-    // Codex is allowed Mirador's socket on top of the profile it would run
-    // on anyway — on Unix: Windows has a named pipe, and no such sandbox.
     let harness = role.as_ref().map_or(plain, |r| r.harness);
-    let codex_socket = if cfg!(unix) && harness == cmux_protocol::Harness::Codex {
-        let home = std::env::var_os("CODEX_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
-        // No file is no config; one that cannot be read is not guessed at.
-        let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
-            Some(Ok(text)) => Some(Some(text)),
-            Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
-            _ => Some(None),
-        };
-        config
-            .and_then(|c| {
-                // Codex 0.164 keeps a profile in its own file beside
-                // config.toml; a missing one is Codex's to report.
-                let profile = role.as_ref().and_then(|r| r.profile.as_ref()).and_then(|p| {
-                    let file = home.as_ref()?.join(format!("{p}.config.toml"));
-                    std::fs::read_to_string(file).ok()
-                });
-                cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
-            })
-            .map(|base| (base, cmux_core::ipc::default_socket_path()))
-    } else {
-        None
-    };
+    // Codex is allowed Mirador's socket on top of the profile it would run
+    // on anyway.
+    let socket = if harness == cmux_protocol::Harness::Codex { codex_socket(role.as_ref(), cwd) } else { None };
     let input = cmux_core::agents::launch_command(
         named.as_ref(),
         plain,
@@ -1873,7 +1850,7 @@ pub(crate) fn prepare_launch(
         prompt_file.as_deref(),
         settings_file.as_deref(),
         task,
-        codex_socket.as_ref().map(|(base, socket)| (base.as_str(), socket.as_path())),
+        socket.as_ref().map(|(base, socket)| (base.as_str(), socket.as_path())),
         cmux_core::pty::shell::quote_arg,
     );
     Ok(Launch {
@@ -1883,6 +1860,38 @@ pub(crate) fn prepare_launch(
         settings: settings_file.map(|f| f.to_string_lossy().into_owned()),
         prompt: prompt_file.map(|f| f.to_string_lossy().into_owned()),
     })
+}
+
+/// The profile a Codex started in `cwd` with `role` runs on, and Mirador's
+/// socket, for `agents::launch_command` to allow it on top — on Unix:
+/// Windows has a named pipe, and no such sandbox. None adds nothing.
+pub(crate) fn codex_socket(
+    role: Option<&cmux_protocol::AgentRole>,
+    cwd: Option<&str>,
+) -> Option<(String, std::path::PathBuf)> {
+    if cfg!(not(unix)) {
+        return None;
+    }
+    let home = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
+    // No file is no config; one that cannot be read is not guessed at.
+    let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
+        Some(Ok(text)) => Some(Some(text)),
+        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => None,
+        _ => Some(None),
+    };
+    config
+        .and_then(|c| {
+            // Codex 0.164 keeps a profile in its own file beside
+            // config.toml; a missing one is Codex's to report.
+            let profile = role.and_then(|r| r.profile.as_ref()).and_then(|p| {
+                let file = home.as_ref()?.join(format!("{p}.config.toml"));
+                std::fs::read_to_string(file).ok()
+            });
+            cmux_core::agents::codex_base_profile(c.as_deref(), cwd.map(std::path::Path::new), profile.as_deref())
+        })
+        .map(|base| (base, cmux_core::ipc::default_socket_path()))
 }
 
 /// Marks `entry` as the pane `launch` starts in: typed into its shell once

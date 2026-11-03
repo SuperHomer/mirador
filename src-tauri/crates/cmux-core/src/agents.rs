@@ -539,16 +539,18 @@ pub fn launch_command(
         match harness {
             Harness::Codex => {
                 arg(&mut line, "--profile", role.profile.as_deref().unwrap_or(""));
-                match (prompt, prompt_file) {
+                // The file alone is enough: a resume passes the one the
+                // pane started with, whose prompt is not at hand.
+                match (prompt_file, prompt) {
                     // Read by the shell as one word: what is typed stays
                     // short whatever the prompt's length (`codex_instructions`).
                     // `command`, so a `cat` aliased to something else is
                     // not the one run.
-                    (Some(_), Some(file)) => {
+                    (Some(file), _) => {
                         line.push_str(&format!(" -c \"$(command cat {})\"", quote(&file.to_string_lossy())))
                     }
-                    (Some(prompt), None) => arg(&mut line, "-c", &codex_instructions(prompt)),
-                    (None, _) => {}
+                    (None, Some(prompt)) => arg(&mut line, "-c", &codex_instructions(prompt)),
+                    (None, None) => {}
                 }
             }
             _ => {
@@ -696,6 +698,12 @@ pub fn session_record(session_id: &str, job: Option<&str>) -> Option<String> {
     }
 }
 
+/// The `agent_session` value for a Codex holding `rollout` open:
+/// `codex:<thread>`, the id `codex resume` takes.
+pub fn codex_record(rollout: &std::path::Path) -> Option<String> {
+    crate::codex_trail::rollout_id(rollout).map(|id| format!("codex:{id}"))
+}
+
 /// A role's flags for a resumed Claude Code, each already quoted for the
 /// shell: its `--model`, `--effort`, settings file and prompt file. A
 /// resumed conversation keeps none of the first three — they are the
@@ -703,12 +711,19 @@ pub fn session_record(session_id: &str, job: Option<&str>) -> Option<String> {
 /// `--system-prompt-snapshot`), so a role's pane passes them all again or
 /// comes back on the default model, with every tool, and later without
 /// its role.
+///
+/// For a Codex, `codex` is the whole line that would start it fresh
+/// ([`launch_command`], with no task): its role's model, effort, profile
+/// and prompt file, and Mirador's socket permissions. Codex keeps none of
+/// them in a thread, so a resumed member without them would lose its role
+/// and could not reach `mira`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResumeFlags<'a> {
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
     pub settings: Option<&'a str>,
     pub prompt: Option<&'a str>,
+    pub codex: Option<&'a str>,
 }
 
 /// What to type into a restored pane to bring its session back. The id is
@@ -738,6 +753,7 @@ pub fn restore_command(agent_session: &str, flags: ResumeFlags) -> Option<String
             Some(line)
         }
         "claude-bg" => Some(format!("claude attach {id}")),
+        "codex" => crate::checkpoints::resume_line("codex", "resume", id, flags.codex.unwrap_or("codex")),
         _ => None,
     }
 }
@@ -751,7 +767,7 @@ pub fn legacy_resume_command(agent_session: &str) -> Option<String> {
     is_safe_id(id).then(|| format!("claude --resume {id}"))
 }
 
-/// Whether a restored Claude pane may resume by itself. Only where the
+/// Whether a restored Claude or Codex pane may resume by itself. Only where the
 /// poller can see Claude exit (it reads the process table) is an exited
 /// session forgotten; without that, auto-resume would bring back on every
 /// launch a conversation you closed long ago. Windows lists no processes
@@ -782,8 +798,9 @@ pub fn restore_pane(
     // older version, or by a platform without auto-resume. It is derived
     // again from `agent_session` below, or the pane would come back as a
     // command pane on every launch after the session is gone.
-    let command = command
-        .filter(|c| !c.starts_with("claude --resume ") && !c.starts_with("claude attach "));
+    let command = command.filter(|c| {
+        !c.starts_with("claude --resume ") && !c.starts_with("claude attach ") && !c.starts_with("codex resume ")
+    });
     let keep = Restored {
         command: command.map(str::to_string),
         startup_input: None,
@@ -991,6 +1008,7 @@ mod tests {
             effort: Some("'max'"),
             settings: Some("'/p/r.settings.json'"),
             prompt: Some("'/p/r.md'"),
+            codex: None,
         };
         assert_eq!(
             restore_command("claude-fg:abc-1", ResumeFlags { model: Some("'opus'"), ..Default::default() }).as_deref(),
@@ -1084,6 +1102,62 @@ mod tests {
                 startup_input: Some("claude --resume a1 --model 'opus' --effort 'xhigh' --append-system-prompt-file '/p/r.md'".into())
             }
         );
+    }
+
+    const THREAD: &str = "019a3f2e-7b1c-7d20-9e4f-0123456789ab";
+
+    #[test]
+    fn records_a_codex_thread_from_its_rollout() {
+        let rollout = std::env::temp_dir().join(format!("sessions/2026/11/03/rollout-2026-11-03T09-00-00-{THREAD}.jsonl"));
+        assert_eq!(codex_record(&rollout), Some(format!("codex:{THREAD}")));
+        assert_eq!(codex_record(&std::env::temp_dir().join("sessions/rollout-2026-11-03T09-00-00-a.jsonl")), None);
+    }
+
+    #[test]
+    fn restores_a_codex_pane_with_the_flags_it_was_launched_with() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let record = format!("codex:{THREAD}");
+        let typed = |s: String| Restored { command: None, startup_input: Some(s) };
+        let idle = |s: String| Restored { command: Some(s), startup_input: None };
+        // Plain: nothing but the resume.
+        assert_eq!(restore_command(&record, ResumeFlags::default()), Some(format!("codex resume {THREAD}")));
+        assert_eq!(restore_pane(None, false, Some(&record), ResumeFlags::default(), true), typed(format!("codex resume {THREAD}")));
+        // A role's model, effort, prompt file and Mirador's socket come
+        // back, from the same line a launch types.
+        let role = AgentRole {
+            name: "coder".into(),
+            harness: Harness::Codex,
+            model: Some("gpt-5".into()),
+            effort: Some("high".into()),
+            ..Default::default()
+        };
+        let socket = Some((":workspace", std::path::Path::new("/tmp/mira.sock")));
+        let file = std::path::Path::new("/data/prompts/coder-1.toml");
+        let launch = launch_command(Some(&role), Harness::Codex, None, Some(file), None, None, socket, q);
+        let flags = ResumeFlags { codex: Some(&launch), ..Default::default() };
+        let resume = format!(
+            "codex resume {THREAD} --model 'gpt-5' -c 'model_reasoning_effort=\"high\"' \
+             -c \"$(command cat '/data/prompts/coder-1.toml')\" -c 'default_permissions=\"mirador\"' \
+             -c 'permissions.mirador.extends=\":workspace\"' \
+             -c 'permissions.mirador.network.unix_sockets={{\"/tmp/mira.sock\"=\"allow\"}}' \
+             -c 'permissions.mirador.network.enabled=true' -c 'features.network_proxy=true'"
+        );
+        assert_eq!(restore_pane(None, false, Some(&record), flags, true), typed(resume.clone()));
+        // Windows: offered on a keypress; and what it saved back is derived
+        // again, not kept once the thread is gone.
+        assert_eq!(restore_pane(None, false, Some(&record), flags, false), idle(resume.clone()));
+        assert_eq!(restore_pane(Some(&resume), false, Some(&record), flags, false), idle(resume.clone()));
+        assert_eq!(restore_pane(Some(&resume), false, None, flags, false), Restored::default());
+        // Claude's flags are not a Codex's.
+        let claude = ResumeFlags { model: Some("'opus'"), prompt: Some("'/p/r.md'"), ..Default::default() };
+        assert_eq!(restore_command(&record, claude), Some(format!("codex resume {THREAD}")));
+        // A line that would not start Codex resumes nothing.
+        assert_eq!(restore_command(&record, ResumeFlags { codex: Some("claude --model x"), ..Default::default() }), None);
+        // An id that is not one is never typed.
+        for bad in ["codex:abc; rm -rf ~", "codex:$(id)", "codex:", "codex:a b"] {
+            assert_eq!(restore_command(bad, flags), None, "{bad}");
+            assert_eq!(restore_pane(None, false, Some(bad), flags, true), Restored::default(), "{bad}");
+        }
     }
 
     #[test]

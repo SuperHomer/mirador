@@ -80,13 +80,15 @@ fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
 }
 
 /// Opens the `seq`th rollout of this process, as Codex does: in today's
-/// directory, named for when it began, its session first.
+/// directory, named for when it began and for its thread — a UUID made of
+/// the pid and `seq`, as `codex resume` takes one — its session first.
 fn open_rollout(seq: u32) -> Option<std::fs::File> {
     let home = std::path::PathBuf::from(std::env::var("HOME").ok()?);
     let at = timestamp();
     let dir = home.join(".codex/sessions").join(at[..10].replace('-', "/"));
     std::fs::create_dir_all(&dir).ok()?;
-    let name = format!("rollout-{}-{}-{seq}.jsonl", at[..19].replace(':', "-"), std::process::id());
+    let thread = format!("{:08x}-0000-4000-8000-{seq:012x}", std::process::id());
+    let name = format!("rollout-{}-{thread}.jsonl", at[..19].replace(':', "-"));
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(name)).ok()?;
     let meta = serde_json::json!({ "timestamp": at, "type": "session_meta", "payload": { "id": format!("fake-{seq}"), "cli_version": "fake" } });
     file.write_all(format!("{meta}\n").as_bytes()).ok()?;

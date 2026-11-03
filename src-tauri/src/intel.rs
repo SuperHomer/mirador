@@ -295,6 +295,9 @@ fn fetch_pr(repo_root: &str, branch: &str) -> Option<PrStatus> {
 /// after it (`/new`) from its start (`follow_from_start`). The rollout is
 /// the one the trail reads, found under the same rule (`lsof` only when it
 /// may have changed).
+///
+/// Its thread is recorded on the way (`agent_session`, `codex:<id>`): what
+/// a restart resumes when the pane's Codex is gone by then.
 fn codex_turn_ends(state: &AppState) -> Vec<cmux_protocol::TaskEventKind> {
     let codex: Vec<String> = state
         .meta
@@ -307,6 +310,15 @@ fn codex_turn_ends(state: &AppState) -> Vec<cmux_protocol::TaskEventKind> {
     let mut ends = Vec::new();
     for pane in &codex {
         let Ok(crate::commands::TrailFile::Codex(known)) = crate::commands::trail_file(state, pane) else { continue };
+        if let Some(record) = cmux_core::agents::codex_record(&known.path) {
+            let mut meta = state.meta.lock().unwrap();
+            // Still that pane's Codex: the file was found with the lock let go.
+            let m = meta.get_mut(pane).filter(|m| m.harness() == Some(cmux_protocol::Harness::Codex));
+            if let Some(m) = m.filter(|m| m.agent_session.as_ref() != Some(&record)) {
+                m.agent_session = Some(record);
+                state.session_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         use cmux_core::codex_trail::{follow_from_start, RolloutTail};
         let mut tails = state.codex_tails.lock().unwrap();
         let before = tails.get(pane).map(|t| t.path.clone());

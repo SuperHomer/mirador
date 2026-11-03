@@ -159,6 +159,53 @@ fn a_role_pane_comes_back_resumed_with_its_model_and_limits() {
     assert_eq!(cmux_e2e::flag(&args, "--append-system-prompt-file"), None, "{args:?}");
 }
 
+/// A role's Codex pane whose Codex is gone at launch comes back resuming
+/// its thread — recorded from the rollout it held open, Codex having no
+/// hooks — with the role's flags and Mirador's socket, as it started.
+#[test]
+fn a_codex_role_pane_comes_back_resuming_its_thread() {
+    e2e!();
+    let mut sb = Sandbox::new("codexrestore");
+    sb.write(".mirador/roles/coder.md", "---\nharness: codex\nmodel: gpt-5\n---\nYou code.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew {
+        role: Some("coder".into()),
+        harness: None,
+        title: None,
+        task: Some("look at main".into()),
+        target: None,
+        pane_id: Some(first),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let started = sb.nth_start(&pane, 1);
+    assert_eq!(cmux_e2e::flag(&started, "--model").as_deref(), Some("gpt-5"), "{started:?}");
+    // The poller finds its rollout and records the thread; the session
+    // file says so within a second.
+    let thread = sb.wait_for("the coder's thread in the session file", LONG, || {
+        let file = ["Library/Application Support/Mirador", ".local/share/mirador"]
+            .iter()
+            .find_map(|d| std::fs::read_to_string(sb.home.join(d).join("session.json")).ok())?;
+        let at = file.find("\"codex:")? + "\"codex:".len();
+        Some(file[at..at + 36].to_string())
+    });
+
+    // persistSessions is off here: the quit ends the Codex.
+    sb.quit();
+    sb.launch();
+
+    let args = sb.nth_start(&pane, 2);
+    assert_eq!(args[..2], ["resume".to_string(), thread.clone()], "{args:?}");
+    assert_eq!(cmux_e2e::flag(&args, "--model").as_deref(), Some("gpt-5"), "{args:?}");
+    let given: Vec<&str> = args.windows(2).filter(|w| w[0] == "-c").map(|w| w[1].as_str()).collect();
+    assert!(given.iter().any(|c| c.starts_with("developer_instructions=") && c.contains("You code.")), "{args:?}");
+    assert!(given.contains(&"default_permissions=\"mirador\""), "{args:?}");
+    // Its task was the launch's, not the resume's.
+    assert!(!args.iter().any(|a| a == "look at main"), "{args:?}");
+}
+
 /// The editor for role, way and team files opens beside the pane it is
 /// asked from, knowing that pane's directory, and is still an editor after
 /// a relaunch. What it does inside is the webview's, out of reach here;
