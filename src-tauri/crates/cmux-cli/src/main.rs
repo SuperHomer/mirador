@@ -2195,6 +2195,7 @@ mod tests {
             limits: vec![],
             as_of: None,
             limits_note: None,
+            limits_setup: false,
             five_hours: TokenTotals { input: 200, output: 750, ..Default::default() },
             seven_days: TokenTotals { cache_read: 1_234_567, ..Default::default() },
             in_use: true,
@@ -2211,6 +2212,7 @@ mod tests {
             note: None,
             as_of: None,
             limits_note: None,
+            limits_setup: false,
             limits: vec![
                 LimitWindow { used_percent: 71.4, window_minutes: 10080, name: "weekly".into(), resets_at: Some(now + 3 * 86400 + 4 * 3600 + 59), limit_reached: false },
                 LimitWindow { used_percent: 5.0, window_minutes: 300, name: "5h".into(), resets_at: Some(now + 2 * 3600 + 5 * 60), limit_reached: false },

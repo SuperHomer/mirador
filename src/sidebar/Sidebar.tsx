@@ -24,6 +24,7 @@ import {
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useUiStore } from "../state/uiStore";
+import { useClaudeStore } from "../state/claudeStore";
 import { opensInTab, useConfigStore } from "../state/configStore";
 import { STATUS_LABEL, StatusMark, StatusPips } from "../agents/StatusMark";
 import { elapsed, useNow } from "../agents/time";
@@ -270,6 +271,14 @@ function UsageSection({ pane }: { pane: string | null }) {
           open={open.includes(a.harness)}
           onToggle={() => toggle(a.harness)}
           onOpenPane={() => void openUsage(pane, opensInTab("editor"))}
+          onSetUpLimits={() =>
+            void useClaudeStore
+              .getState()
+              .run()
+              .then(() => accountUsage())
+              .then(setAccounts)
+              .catch(() => {})
+          }
         />
       ))}
     </div>
@@ -283,12 +292,15 @@ function UsageRow({
   open,
   onToggle,
   onOpenPane,
+  onSetUpLimits,
 }: {
   account: AccountUsage;
   open: boolean;
   onToggle: () => void;
   onOpenPane: () => void;
+  onSetUpLimits: () => void;
 }) {
+  const settingUp = useClaudeStore((s) => s.state === "running");
   const worst = a.limits[0];
   const cost = (t: TokenTotals) => (t.cost !== null ? ` · $${t.cost.toFixed(2)}` : "");
   return (
@@ -343,6 +355,11 @@ function UsageRow({
           ))}
           {a.asOf !== null && a.limits.length > 0 && <div className="usage-note">as of {clock(a.asOf)}</div>}
           {a.limitsNote && <div className="usage-note">{a.limitsNote}</div>}
+          {a.limitsSetup && (
+            <button className="usage-open" disabled={settingUp} onClick={onSetUpLimits}>
+              Show limits
+            </button>
+          )}
           <div className="usage-kv">
             <span>Last 5h</span>
             <span>

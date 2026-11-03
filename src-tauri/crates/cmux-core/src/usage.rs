@@ -198,7 +198,11 @@ impl UsageCache {
         let on_plan = matches!(login, Login::Subscription | Login::PlanOrApiKey);
         let (limits, as_of) =
             if on_plan { plan_limits(read_claude_limits(limits), &refused, now_ms) } else { (Vec::new(), None) };
-        let limits_note = (on_plan && limits.is_empty()).then(|| no_limits_note(claude_dir));
+        let no_limits = on_plan && limits.is_empty();
+        let limits_setup = no_limits
+            && cfg!(unix)
+            && !crate::claude_integration::status_line_installed(&claude_dir.join("settings.json"));
+        let limits_note = no_limits.then(|| no_limits_note(limits_setup));
         AccountUsage {
             harness: Harness::Claude,
             login,
@@ -209,6 +213,7 @@ impl UsageCache {
             limits,
             as_of,
             limits_note,
+            limits_setup,
             in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
             seven_days: totals.seven_days,
@@ -271,6 +276,7 @@ impl UsageCache {
             limits,
             as_of,
             limits_note: None,
+            limits_setup: false,
             in_use: in_use(login, &totals),
             five_hours: totals.five_hours,
             seven_days: totals.seven_days,
@@ -315,14 +321,15 @@ fn empty_if_reset(limits: &mut [LimitWindow], now_s: u64) {
 }
 
 /// Why a Claude plan shows no limits, and what gets them: the status line
-/// wrapper, or, once it is there, Claude Code's next reply.
-fn no_limits_note(claude_dir: &Path) -> String {
+/// wrapper, or, once it is there, Claude Code's next reply. The app puts
+/// a button beside the first; the CLI has only the words.
+fn no_limits_note(needs_setup: bool) -> String {
     if cfg!(windows) {
         "Claude Code's plan limits are not read on Windows.".into()
-    } else if crate::claude_integration::status_line_installed(&claude_dir.join("settings.json")) {
-        "Limits appear after Claude Code's next reply.".into()
+    } else if needs_setup {
+        "Your plan's limits come from Claude Code's status line, which mira hooks setup wraps.".into()
     } else {
-        "Run mira hooks setup (or Set up in the banner) to read your plan's limits from Claude Code's status line.".into()
+        "Limits appear after Claude Code's next reply.".into()
     }
 }
 
@@ -1085,7 +1092,7 @@ mod tests {
         let usage = plan_with("limits-snapshot", Some((STATUSLINE, now() - HOUR_MS)), &[]);
         let shown: Vec<(&str, f64, bool)> = usage.limits.iter().map(|w| (w.name.as_str(), w.used_percent, w.limit_reached)).collect();
         assert_eq!(shown, [("weekly", 71.0, false), ("5h", 23.5, false)], "most used first");
-        assert_eq!((usage.as_of, usage.limits_note), (Some(now() - HOUR_MS), None));
+        assert_eq!((usage.as_of, usage.limits_note, usage.limits_setup), (Some(now() - HOUR_MS), None, false));
     }
 
     #[test]
@@ -1102,7 +1109,10 @@ mod tests {
         save_claude_limits(&limits, STATUSLINE.as_bytes(), now()).unwrap();
         write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
         let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &limits);
-        assert_eq!((usage.login, usage.limits.len(), usage.as_of, usage.limits_note), (Login::ApiKey, 0, None, None));
+        assert_eq!(
+            (usage.login, usage.limits.len(), usage.as_of, usage.limits_note, usage.limits_setup),
+            (Login::ApiKey, 0, None, None, false)
+        );
     }
 
     #[test]
@@ -1161,14 +1171,21 @@ mod tests {
     fn a_plan_with_no_limits_says_how_to_get_them() {
         let none = plan_with("limits-note", None, &[]);
         assert_eq!(
-            none.limits_note.as_deref(),
-            Some("Run mira hooks setup (or Set up in the banner) to read your plan's limits from Claude Code's status line.")
+            (none.limits_note.as_deref(), none.limits_setup),
+            (Some("Your plan's limits come from Claude Code's status line, which mira hooks setup wraps."), true)
         );
+        // The user's own status line is not ours: setup would wrap it.
+        let dir = temp_dir("limits-note-theirs");
+        write(&dir, "settings.json", r#"{"statusLine":{"type":"command","command":"~/bin/my-status"}}"#);
+        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot()).limits_setup);
         let dir = temp_dir("limits-note-ours");
         let ours = format!(r#"{{"statusLine":{{"type":"command","command":"\"{}\" claude-statusline"}}}}"#, dir.join("mira").display());
         write(&dir, "settings.json", &ours);
         let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
-        assert_eq!(usage.limits_note.as_deref(), Some("Limits appear after Claude Code's next reply."));
+        assert_eq!(
+            (usage.limits_note.as_deref(), usage.limits_setup),
+            (Some("Limits appear after Claude Code's next reply."), false)
+        );
     }
 
     #[test]

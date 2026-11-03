@@ -409,6 +409,9 @@ export interface AccountUsage {
   asOf: number | null;
   /** Why a plan shows no limits, and how to get them. */
   limitsNote: string | null;
+  /** No limits until the integration wraps Claude Code's status line:
+   *  setting it up (the user's click) would show them. Never on Windows. */
+  limitsSetup: boolean;
   fiveHours: TokenTotals;
   sevenDays: TokenTotals;
   /** Signed in, or used lately: false for a harness never used here. */

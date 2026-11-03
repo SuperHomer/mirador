@@ -588,6 +588,11 @@ body,
   cursor: pointer;
 }
 
+.usage-open:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
 /* Inbox at the left, Commands at the right; neither shrinks, so neither
    can be the one item a narrow footer squeezes to nothing. */
 .sidebar-footer {

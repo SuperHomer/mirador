@@ -8,6 +8,7 @@ import {
   closePane,
   focusPane,
 } from "../bindings";
+import { useClaudeStore } from "../state/claudeStore";
 
 type Props = {
   paneId: string;
@@ -61,7 +62,13 @@ export function UsagePane({ paneId, focused }: Props) {
       {error && <div className="editor-bar error">{error}</div>}
       <div className="usage-body">
         {accounts === null && !error && <div className="usage-muted">Reading…</div>}
-        {accounts?.map((a) => <Account key={a.harness} account={a} />)}
+        {accounts?.map((a) => (
+          <Account
+            key={a.harness}
+            account={a}
+            onSetUpLimits={() => void useClaudeStore.getState().run().then(read)}
+          />
+        ))}
       </div>
     </div>
   );
@@ -74,8 +81,9 @@ const LOGIN_LABEL = {
   none: "Not signed in",
 };
 
-function Account({ account }: { account: AccountUsage }) {
+function Account({ account, onSetUpLimits }: { account: AccountUsage; onSetUpLimits: () => void }) {
   const login = LOGIN_LABEL[account.login];
+  const settingUp = useClaudeStore((s) => s.state === "running");
   return (
     <section className="usage-card">
       <div className="usage-head">
@@ -95,6 +103,11 @@ function Account({ account }: { account: AccountUsage }) {
         <div className="usage-muted">as of {clock(account.asOf)}</div>
       )}
       {account.limitsNote && <div className="usage-muted">{account.limitsNote}</div>}
+      {account.limitsSetup && (
+        <button className="usage-open" disabled={settingUp} onClick={onSetUpLimits}>
+          Show limits
+        </button>
+      )}
       <Totals name="Last 5 hours" totals={account.fiveHours} />
       <Totals name="Last 7 days" totals={account.sevenDays} />
     </section>
