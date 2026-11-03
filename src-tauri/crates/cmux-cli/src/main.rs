@@ -2145,7 +2145,11 @@ fn claude_hook(event: &str) -> Result<(), String> {
             title: Some("Claude Code".into()),
             body,
             job,
-            kind: None,
+            kind: cmux_core::agents::hook_notify_kind(
+                event,
+                payload["notification_type"].as_str(),
+                payload["message"].as_str(),
+            ),
         });
     }
     Ok(())

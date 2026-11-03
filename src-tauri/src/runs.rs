@@ -98,6 +98,7 @@ pub fn finish_run(app: &AppHandle, pane_id: &str, exit_code: Option<i32>) -> boo
         pane_id,
         Some(format!("Command {status}")),
         command,
+        None,
     );
     true
 }

@@ -18,7 +18,9 @@ downloads, the feature tour and the keybinding reference.
   port chips, cwd, and notifications
 - **Agent notifications**: panes get an attention ring and tabs light up on
   OSC 9/99/777 sequences or `mira notify`; native notifications when the
-  window is unfocused; notification panel on `mod+I`
+  window is unfocused; notification panel on `mod+I`. In a team, only a
+  member that needs you (or failed) notifies, plus the lead once the whole
+  team has stopped; members' turn ends and idle reminders are silent
 - **Command panes** (`mira run`): agent-launched commands run in a visible,
   interruptible pane; `--wait` returns clean output + exit code to the caller
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,

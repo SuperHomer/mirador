@@ -43,6 +43,12 @@ This wires these hooks, all calling `mira claude-hook`, and installs the
   Claude's message (needs-permission, idle, …)
 - **Stop** → "finished responding" notification when a turn completes;
   **StopFailure** → "stopped on an error" when an API error ends it
+
+In a team's tab, members hand work to each other all day, so only two
+things notify: a member that needs you (a permission prompt, a question)
+or whose turn failed, and the lead's turn end once no other member is
+working — the team has stopped. Members' turn ends, their OSC 9s and
+everyone's idle reminders are silent.
 - **SessionStart** → records the Claude session id on the pane
 - **UserPromptSubmit**, **PostToolUse**, **PostToolUseFailure** → the
   agent wall's status: working, or back to work after a permission prompt.

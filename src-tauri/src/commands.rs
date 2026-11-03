@@ -1008,7 +1008,7 @@ let app = app.clone();
 let pane_id = pane_id.to_string();
     Box::new(OscScanner::new(move |event| match event {
         OscEvent::Notification { title, body } => {
-            notify::handle_notification(&app, &pane_id, title, body);
+            notify::handle_notification(&app, &pane_id, title, body, None);
         }
         OscEvent::Cwd(path) => {
             let state = app.state::<AppState>();
@@ -1155,7 +1155,7 @@ fn summarize_missed(app: &AppHandle, pane_id: &str, count: u32, last: Option<Str
     } else {
         format!("While Mirador was closed: {count} notifications — the last: {last}")
     };
-    notify::handle_notification(app, pane_id, Some("While Mirador was closed".into()), body);
+    notify::handle_notification(app, pane_id, Some("While Mirador was closed".into()), body, None);
 }
 
 /// Whether to offer the Claude Code integration: Claude Code is used here,
