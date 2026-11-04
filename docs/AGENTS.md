@@ -49,6 +49,12 @@ This wires these hooks, all calling `mira claude-hook`, and installs the
   The tool hooks fire on every tool call; the app answers them without a
   lookup unless some agent is waiting on you.
 
+In a team's tab, members hand work to each other all day, so only two
+things notify: a member that needs you (a permission prompt, a question)
+or whose turn failed, and the lead's turn end once no other member is
+working — the team has stopped. Members' turn ends, their OSC 9s and
+everyone's idle reminders are silent.
+
 A launch that finds hooks from an earlier version, which installed fewer
 events, adds the missing ones — calling the same `mira` the hooks already
 call.

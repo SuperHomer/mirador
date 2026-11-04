@@ -1027,6 +1027,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 title,
                 body,
                 job: own_job(),
+                kind: None,
             }
         }
         Command::ClaudeHook { event } => return claude_hook(&event),
@@ -2144,6 +2145,11 @@ fn claude_hook(event: &str) -> Result<(), String> {
             title: Some("Claude Code".into()),
             body,
             job,
+            kind: cmux_core::agents::hook_notify_kind(
+                event,
+                payload["notification_type"].as_str(),
+                payload["message"].as_str(),
+            ),
         });
     }
     Ok(())

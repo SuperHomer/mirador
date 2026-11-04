@@ -397,6 +397,11 @@ pub enum Request {
         /// its tty and inherited pane id are the daemon's, not a pane's.
         #[serde(default)]
         job: Option<String>,
+        /// What a hook's notification is about, so a team can keep the
+        /// ones the person wants; absent for a plain one (an OSC 9,
+        /// `mira notify`, a run).
+        #[serde(default)]
+        kind: Option<NotifyKind>,
     },
     /// Quits the app. With `end_sessions`, every terminal session is ended
     /// first, held ones included; without it, held sessions keep running
@@ -930,6 +935,20 @@ pub enum AgentStatus {
     NeedsYou,
     /// Finished its turn, waiting for the next prompt.
     Idle,
+}
+
+/// What an agent's notification is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotifyKind {
+    /// Blocked on the human: a permission prompt, a question.
+    NeedsYou,
+    /// Its turn ended on an error.
+    Failed,
+    /// Its turn ended.
+    TurnEnded,
+    /// It has been idle a while (or another notice that changes nothing).
+    Reminder,
 }
 
 /// A pane running a coding agent: Claude Code, or another [`Harness`].

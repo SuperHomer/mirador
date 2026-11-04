@@ -371,3 +371,80 @@ fn a_saved_team_resumes_its_conversations() {
     let lead = teams[0]["members"].as_array().unwrap().iter().find(|m| m["lead"] == true).map(|m| m["name"].clone());
     assert_eq!(lead, Some("planner".into()));
 }
+
+/// A team raises what the person wants and nothing else: a member that
+/// needs them, and the lead's turn end once nobody else is working — not
+/// every member's every turn end, which bury those two.
+#[test]
+fn a_team_notifies_only_when_it_needs_the_person_or_has_stopped() {
+    e2e!();
+    let mut sb = Sandbox::new("teamnotify");
+    sb.set_env("E2E_TURN_MS", "4000");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/dev.md", "---\nmodel: haiku\n---\nYou build.\n");
+    sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: dev\n---\nShip small.\n");
+    sb.launch();
+    let shell = sb.first_pane();
+    let tab = sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()) })["tabId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("the dev", LONG, || sb.member("dev"));
+    let lead = pane_of(&sb, "planner");
+    let dev = pane_of(&sb, "dev");
+    for pane in [&lead, &dev] {
+        sb.wait_for("each member's session", LONG, || sb.events("hooked", pane).into_iter().next());
+    }
+    // Looking at another tab, so no notification here is read on arrival.
+    sb.call(Request::FocusPane { pane_id: shell.clone() });
+
+    // (unread in the team's tab, unread panes) — a hook's notification is
+    // handled before its `mira claude-hook` exits, so before the fake agent
+    // logs the turn done.
+    let notices = |sb: &Sandbox| {
+        let snap = sb.snapshot();
+        let unread = snap["tabs"].as_array().unwrap().iter().find(|t| t["id"] == tab.as_str()).unwrap()["unread"]
+            .as_u64()
+            .unwrap();
+        let panes: Vec<String> =
+            snap["unreadPanes"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().to_string()).collect();
+        (unread, panes)
+    };
+    let send = |from: &str, to: &str, message: &str, force: bool| {
+        sb.request(Request::AgentSend { title: None, to: to.into(), message: message.into(), pane_id: Some(from.into()), force, card: None })
+            .unwrap();
+    };
+    let turns = |sb: &Sandbox, pane: &str| sb.events("turn-done", pane).len();
+
+    // A member's turn end is silent.
+    send(&lead, "dev", "build the chart", false);
+    sb.wait_for("the dev's turn to end", LONG, || (turns(&sb, &dev) == 1).then_some(()));
+    assert_eq!(notices(&sb), (0, vec![]), "a member's turn end raised a notification");
+
+    // A member that needs the person is heard.
+    send(&lead, "dev", "please !ask before you push", false);
+    sb.wait_for("the dev to need you", LONG, || sb.member("dev").filter(|m| m["status"] == "needsYou"));
+    assert_eq!(notices(&sb), (1, vec![dev.clone()]));
+
+    // Released, its turn is silent again.
+    send(&lead, "dev", "yes, go ahead", true);
+    sb.wait_for("the dev's second turn to end", LONG, || (turns(&sb, &dev) == 2).then_some(()));
+    assert_eq!(notices(&sb).0, 1);
+
+    // The lead's turn end, nobody else working: the team has stopped.
+    send(&dev, "planner", "done", false);
+    sb.wait_for("the lead's turn to end", LONG, || (turns(&sb, &lead) == 1).then_some(()));
+    assert_eq!(notices(&sb), (2, vec![dev.clone(), lead.clone()]));
+
+    // The lead's turn end while the dev is mid-turn: it handed work off.
+    // The dev starts after the lead and both turns take as long, so the
+    // lead's ends first.
+    send(&dev, "planner", "and the legend", false);
+    sb.wait_for("the lead to work", LONG, || sb.member("planner").filter(|m| m["status"] == "working"));
+    send(&lead, "dev", "add the legend", false);
+    sb.wait_for("the lead's second turn to end", LONG, || (turns(&sb, &lead) == 2).then_some(()));
+    assert_eq!(turns(&sb, &dev), 2, "the dev was still working when the lead's turn ended");
+    assert_eq!(notices(&sb).0, 2, "the lead's turn end raised a notification while the dev worked");
+    sb.wait_for("the dev's third turn to end", LONG, || (turns(&sb, &dev) == 3).then_some(()));
+    assert_eq!(notices(&sb).0, 2, "a member's turn end raised a notification");
+}

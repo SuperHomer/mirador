@@ -199,10 +199,11 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             title,
             body,
             job,
+            kind,
         } => {
             let pane =
                 resolve_pane(&state, pane_id, tty, job).unwrap_or_else(|| focused_pane(&state));
-            notify::handle_notification(app, &pane, title, body);
+            notify::handle_notification(app, &pane, title, body, kind);
             Ok(json!({ "paneId": pane }))
         }
         Request::Quit { end_sessions } => {
