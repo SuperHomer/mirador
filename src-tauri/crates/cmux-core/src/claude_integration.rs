@@ -400,7 +400,8 @@ description: Drive Mirador, the terminal this session may be running in, with it
      Delete the line above and Mirador stops touching this file. -->
 
 `mira` talks to the Mirador app around this pane. Name an agent by its name
-in this tab, or any pane by its id (`mira list-tabs` shows them).
+in this tab (`mira agent list` shows each agent, its name and its pane), or
+any pane by its id (`mira list-tabs`).
 
 - `mira agent new [--role ROLE] [--tab] "task"` — start an agent beside this pane; the task is its first message
 - `mira agent send NAME "message" [--wait]` — type a message into another agent, as its next prompt

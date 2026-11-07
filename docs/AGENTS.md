@@ -36,9 +36,8 @@ later). The hooks call `mira` by its absolute path, so they work whether or
 not `mira` is on PATH; if the app moves, the next launch points them at the
 new location.
 
-This wires these hooks, all calling `mira claude-hook`, and installs two
-skills in `~/.claude/skills/`: `/mira-diff` for you and `mira` for the
-model.
+This installs two skills in `~/.claude/skills/` — `/mira-diff` for you and
+`mira` for the model — and wires these hooks, all calling `mira claude-hook`:
 
 - **Notification** → the pane running that Claude session lights up with
   Claude's message (needs-permission, idle, …)

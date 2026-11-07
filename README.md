@@ -128,8 +128,8 @@ npm run tauri build          # builds Mirador.app + .dmg (and the mira CLI)
 
 The bundle lands in `src-tauri/target/release/bundle/`. If you use Claude
 Code, the first launch offers to set up the integration — `mira` on your
-PATH, the hooks, `/mira-diff` and the `mira` skill — in one click. To do it by hand instead
-(the CLI ships inside the app):
+PATH, the hooks, `/mira-diff` and the `mira` skill — in one click. To do it
+by hand instead (the CLI ships inside the app):
 
 ```bash
 /Applications/Mirador.app/Contents/MacOS/mira install   # → ~/.local/bin/mira
