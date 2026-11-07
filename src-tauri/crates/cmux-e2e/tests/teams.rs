@@ -89,10 +89,29 @@ fn a_team_starts_is_tracked_and_comes_back() {
     let again = sb.nth_start(&r1, 2);
     assert_eq!(cmux_e2e::flag(&again, "--name").as_deref(), Some("reviewer-1"));
 
-    // A new member is numbered after its role's.
-    sb.call(Request::TeamAdd { role: "reviewer".into(), name: None, pane_id: Some(r1.clone()) });
+    // A new member is numbered after its role's, its task its first
+    // message and a card on the tab's board, for it.
+    sb.call(Request::TeamAdd {
+        role: "reviewer".into(),
+        name: None,
+        task: Some("look at the auth change".into()),
+        pane_id: Some(r1.clone()),
+        title: None,
+    });
     let r3 = sb.wait_for("reviewer-3", LONG, || sb.member("reviewer-3"));
-    sb.nth_start(r3["pane"].as_str().unwrap(), 1);
+    let r3_pane = r3["pane"].as_str().unwrap();
+    let added = sb.nth_start(r3_pane, 1);
+    assert_eq!(added.last().map(String::as_str), Some("look at the auth change"), "{added:?}");
+    let cards = sb.call(Request::TaskList { all: false, pane_id: Some(r1.clone()) });
+    let card = cards["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["title"] == "look at the auth change")
+        .cloned()
+        .unwrap_or_else(|| sb.fail(&format!("no card for the new member's task: {cards}")));
+    assert_eq!(card["pane"], r3_pane, "{card}");
+    assert_eq!(card["assignee"], "reviewer-3", "{card}");
 
     // Quit and relaunch: still the team, in the same tab, every member.
     let before: Vec<(String, String)> = sb.teams()[0]["members"]
