@@ -407,8 +407,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::AgentHistory { name, all, pane_id, card } => {
             Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id, card)? }))
         }
-        Request::TeamAdd { role, name, pane_id } => {
-            let pane = crate::teams::team_add(app.clone(), app.state(), role, name, pane_id)?;
+        Request::TeamAdd { role, name, task, pane_id, title } => {
+            let from = sender(&state, pane_id.as_deref());
+            let pane = crate::teams::team_add_from(app.clone(), app.state(), role, name, task, pane_id, title, from)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::TeamRestart { members, pane_id } => {
