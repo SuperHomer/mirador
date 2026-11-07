@@ -186,6 +186,19 @@ fn a_role_opened_in_a_teams_tab_joins_the_team() {
     let start = sb.nth_start(&plain, 1);
     assert_eq!(start.last().map(String::as_str), Some("tidy the README"), "{start:?}");
     assert_eq!(names(&sb), ["planner", "reviewer", "reviewer-2"]);
+
+    // Nor is a role asked for in a tab of its own: that tab is not the team's.
+    let apart = Request::AgentNew {
+        role: Some("reviewer".into()),
+        harness: None,
+        title: None,
+        task: Some("review it apart".into()),
+        target: Some("tab".into()),
+        pane_id: Some(planner.clone()),
+    };
+    let apart = sb.call(apart)["paneId"].as_str().unwrap().to_string();
+    sb.nth_start(&apart, 1);
+    assert_eq!(names(&sb), ["planner", "reviewer", "reviewer-2"]);
 }
 
 /// The team that ships with Mirador starts in a sandbox with no role, way
