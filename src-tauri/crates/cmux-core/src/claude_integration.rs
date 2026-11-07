@@ -1,12 +1,13 @@
 //! The Claude Code integration: the hooks in `~/.claude/settings.json` that
-//! light up Mirador tabs, the `/mira-diff` skill beside them, and putting
-//! `mira` on PATH. Both the CLI (`mira hooks setup`, `mira install`) and the
-//! app (its first-launch offer, and the repair when the app has moved) do
-//! this, so it lives here and reports what it did instead of printing.
+//! light up Mirador tabs, the `/mira-diff` and `mira` skills beside them,
+//! and putting `mira` on PATH. Both the CLI (`mira hooks setup`, `mira
+//! install`) and the app (its first-launch offer, and the repair when the
+//! app has moved) do this, so it lives here and reports what it did instead
+//! of printing.
 //!
 //! Hooks call `mira` by its absolute path, so they work whether or not
-//! `mira` is on PATH. PATH is still worth setting up — agents and the
-//! `/mira-diff` skill call `mira` by name — but a hook that fires on every
+//! `mira` is on PATH. PATH is still worth setting up — agents and both
+//! skills call `mira` by name — but a hook that fires on every
 //! Claude Code event must not depend on it.
 
 use std::path::{Path, PathBuf};
@@ -157,7 +158,7 @@ pub enum Action {
     Repair,
 }
 
-/// Installs (or removes) the hooks and the skill under `~/.claude`, the
+/// Installs (or removes) the hooks and the skills under `~/.claude`, the
 /// hooks calling `mira` at `mira`. Returns what it did, a line per change.
 pub fn hooks(action: Action, mira: &Path) -> Result<Vec<String>, String> {
     let claude = claude_dir().ok_or("could not find your home directory")?;
@@ -165,7 +166,10 @@ pub fn hooks(action: Action, mira: &Path) -> Result<Vec<String>, String> {
 }
 
 fn hooks_in(claude: &Path, action: Action, mira: &Path) -> Result<Vec<String>, String> {
-    let mut done = skill_at(&claude.join("skills"), action)?;
+    let mut done = Vec::new();
+    for skill in &SKILLS {
+        done.extend(skill_at(&claude.join("skills"), skill, action)?);
+    }
     done.extend(hooks_at(&claude.join("settings.json"), action, mira)?);
     Ok(done)
 }
@@ -334,16 +338,16 @@ fn status_line(settings: &mut serde_json::Value, action: Action, mira: &Path) ->
     }
 }
 
-/// The `/mira-diff` skill `mira hooks setup` installs. Agents already
-/// reach the diff pane through `mira diff`; this is the human's
-/// affordance, which is why it opts out of model invocation.
-///
-/// A skill rather than a `commands/mira-diff.md` file: Claude Code merged
-/// custom commands into skills, both spellings still produce `/mira-diff`,
-/// and skills are where new work is supposed to go. The `!` line needs
-/// Claude Code 2.1.228 or newer to run; on anything older the skill still
-/// loads, it just hands Claude the literal line instead of the output.
-const SKILL_DIR: &str = "mira-diff";
+/// A skill `mira hooks setup` installs: its directory under `skills/`,
+/// which is also its `/name`, and its `SKILL.md`.
+struct Skill {
+    dir: &'static str,
+    body: &'static str,
+}
+
+/// The skills setup installs, in order.
+const SKILLS: [Skill; 2] = [MIRA_DIFF, MIRA];
+
 const SKILL_FILE: &str = "SKILL.md";
 
 /// Marks the file as ours. `setup` only overwrites a file carrying it and
@@ -351,7 +355,18 @@ const SKILL_FILE: &str = "SKILL.md";
 /// survives both — and deleting the line opts a file out of management.
 const SKILL_MARKER: &str = "Installed by `mira hooks setup`";
 
-const SKILL_BODY: &str = r#"---
+/// `/mira-diff`. Agents already reach the diff pane through `mira diff`;
+/// this is the human's affordance, which is why it opts out of model
+/// invocation.
+///
+/// A skill rather than a `commands/mira-diff.md` file: Claude Code merged
+/// custom commands into skills, both spellings still produce `/mira-diff`,
+/// and skills are where new work is supposed to go. The `!` line needs
+/// Claude Code 2.1.228 or newer to run; on anything older the skill still
+/// loads, it just hands Claude the literal line instead of the output.
+const MIRA_DIFF: Skill = Skill {
+    dir: "mira-diff",
+    body: r#"---
 name: mira-diff
 description: Open a Mirador diff pane for the work in this pane
 argument-hint: [commit | range | --staged | --tab]
@@ -366,13 +381,48 @@ disable-model-invocation: true
 If the command printed an error, relay it in one line. Otherwise a diff pane
 is now open for review: acknowledge in one short line, and do not describe or
 summarize the diff — the pane already shows it.
-"#;
+"#,
+};
 
-/// Installs (or removes) the `/mira-diff` skill under a Claude Code skills
-/// directory. A file rather than a settings key, but the same rule as the
-/// hooks: only ever touch what we put there.
-fn skill_at(skills_dir: &Path, action: Action) -> Result<Vec<String>, String> {
-    let dir = skills_dir.join(SKILL_DIR);
+/// `mira`, for the model: without it a plain Claude Code session in a
+/// Mirador pane never learns the CLI exists — the hooks only report, and
+/// only team members are told about `mira` in their prompt. Its
+/// description costs every session some tokens; the body loads only when
+/// invoked, and points at `--help` rather than copying it, so it does not
+/// go stale.
+const MIRA: Skill = Skill {
+    dir: "mira",
+    body: r#"---
+name: mira
+description: Drive Mirador, the terminal this session may be running in, with its `mira` CLI — start and message other agents, start teams, keep the task board, open a diff pane, read another pane's screen. Use when the person names Mirador, `mira` or a pane, or asks to start, message or wait for another agent or a team, or for a card on the task board. Outside Mirador (MIRA_PANE unset) it does nothing: not for git diffs, browser tabs or agent code in general.
+---
+<!-- Installed by `mira hooks setup`, removed by `mira hooks remove`.
+     Delete the line above and Mirador stops touching this file. -->
+
+`mira` talks to the Mirador app around this pane. Name an agent by its name
+in this tab, or any pane by its id (`mira list-tabs` shows them).
+
+- `mira agent new [--role ROLE] [--tab] "task"` — start an agent beside this pane; the task is its first message
+- `mira agent send NAME "message" [--wait]` — type a message into another agent, as its next prompt
+- `mira agent wait NAME` — wait until it stops: exit 0 idle, 2 asking a person, 3 exited, 124 timed out
+- `mira team start TEAM "task"` — start a team in a tab of its own; the task goes to its lead
+- `mira team list [--defined]` — running teams and their members; `--defined`, the teams you can start
+- `mira task add "title" [--to NAME]` — write a card on this tab's board, in To do; prints its id
+- `mira task move ID todo|doing|needs-you|done` — move a card you wrote
+- `mira task done ID` — put a card you wrote in Done
+- `mira diff [COMMIT | RANGE] [--staged] [--tab]` — open a diff pane for the person to review
+- `mira read-screen --pane ID [--lines N]` — another pane's screen, as plain text
+
+The rest, and every flag: `mira --help`, then `mira <command> --help`
+(`mira agent send --help`). Read it rather than guess a flag.
+"#,
+};
+
+/// Installs (or removes) one skill under a Claude Code skills directory.
+/// A file rather than a settings key, but the same rule as the hooks:
+/// only ever touch what we put there.
+fn skill_at(skills_dir: &Path, skill: &Skill, action: Action) -> Result<Vec<String>, String> {
+    let dir = skills_dir.join(skill.dir);
     let path = dir.join(SKILL_FILE);
     // None = no file, Some(false) = someone else's, Some(true) = ours.
     let ours = std::fs::read_to_string(&path)
@@ -387,17 +437,17 @@ fn skill_at(skills_dir: &Path, action: Action) -> Result<Vec<String>, String> {
                 return Ok(done);
             }
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            std::fs::write(&path, SKILL_BODY).map_err(|e| e.to_string())?;
-            done.push(format!("installed /mira-diff ({})", path.display()));
+            std::fs::write(&path, skill.body).map_err(|e| e.to_string())?;
+            done.push(format!("installed /{} ({})", skill.dir, path.display()));
         }
         Action::Remove => match ours {
             Some(true) => {
                 std::fs::remove_file(&path).map_err(|e| e.to_string())?;
                 // A skill is a directory; leaving an empty one behind
-                // would show up as a broken `/mira-diff`. Only ours, and
-                // only if nothing else was put in it.
+                // would show up as a broken skill. Only ours, and only if
+                // nothing else was put in it.
                 let _ = std::fs::remove_dir(&dir);
-                done.push("removed /mira-diff".into());
+                done.push(format!("removed /{}", skill.dir));
             }
             Some(false) => {
                 done.push(format!("kept your own {} (not installed by Mirador)", path.display()))
@@ -809,81 +859,107 @@ mod tests {
         dir
     }
 
-    fn skill_path(skills: &Path) -> PathBuf {
-        skills.join(SKILL_DIR).join(SKILL_FILE)
+    fn skill_path(skills: &Path, skill: &Skill) -> PathBuf {
+        skills.join(skill.dir).join(SKILL_FILE)
     }
 
     #[test]
-    fn setup_installs_the_skill_and_remove_takes_it_back() {
-        let skills = temp_skills("roundtrip");
-        let path = skill_path(&skills);
+    fn setup_installs_each_skill_and_remove_takes_it_back() {
+        for skill in &SKILLS {
+            let skills = temp_skills(&format!("roundtrip-{}", skill.dir));
+            let path = skill_path(&skills, skill);
 
-        skill_at(&skills, Action::Setup).unwrap();
-        let first = std::fs::read_to_string(&path).unwrap();
-        assert!(first.contains("mira diff $ARGUMENTS"), "should call mira diff");
+            skill_at(&skills, skill, Action::Setup).unwrap();
+            let first = std::fs::read_to_string(&path).unwrap();
+            assert!(first.starts_with(&format!("---\nname: {}\n", skill.dir)), "{first}");
+            assert!(first.contains(SKILL_MARKER), "remove could never take it back");
+
+            skill_at(&skills, skill, Action::Setup).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), first, "not idempotent");
+
+            skill_at(&skills, skill, Action::Remove).unwrap();
+            assert!(!path.exists(), "remove should delete our {}", skill.dir);
+            // A skill is a directory: an empty one left behind reads as a
+            // broken skill in Claude Code.
+            assert!(!skills.join(skill.dir).exists(), "the {} dir should go too", skill.dir);
+        }
+    }
+
+    /// The person types `/mira-diff`; the model reaches for `mira` itself.
+    #[test]
+    fn mira_diff_is_for_the_person_and_mira_for_the_model() {
+        assert!(MIRA_DIFF.body.contains("mira diff $ARGUMENTS"), "should call mira diff");
         assert!(
-            first.contains("disable-model-invocation: true"),
+            MIRA_DIFF.body.contains("disable-model-invocation: true"),
             "the human types this one; agents already have `mira diff`"
         );
-
-        skill_at(&skills, Action::Setup).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), first, "not idempotent");
-
-        skill_at(&skills, Action::Remove).unwrap();
-        assert!(!path.exists(), "remove should delete our file");
-        // A skill is a directory: an empty one left behind reads as a
-        // broken /mira-diff in Claude Code.
-        assert!(!skills.join(SKILL_DIR).exists(), "the skill dir should go too");
+        assert!(!MIRA.body.contains("disable-model-invocation"), "the model must see it");
+        assert!(MIRA.body.contains("`mira <command> --help`"), "points at the real help");
     }
 
     /// The directory cleanup must not take anything that isn't ours.
     #[test]
     fn remove_keeps_a_skill_directory_that_holds_other_files() {
         let skills = temp_skills("companion");
-        skill_at(&skills, Action::Setup).unwrap();
-        let theirs = skills.join(SKILL_DIR).join("notes.md");
+        skill_at(&skills, &MIRA_DIFF, Action::Setup).unwrap();
+        let theirs = skills.join(MIRA_DIFF.dir).join("notes.md");
         std::fs::write(&theirs, "mine").unwrap();
 
-        skill_at(&skills, Action::Remove).unwrap();
+        skill_at(&skills, &MIRA_DIFF, Action::Remove).unwrap();
 
-        assert!(!skill_path(&skills).exists(), "ours should go");
+        assert!(!skill_path(&skills, &MIRA_DIFF).exists(), "ours should go");
         assert!(theirs.exists(), "a file someone else put there must survive");
     }
 
-    /// A user's own `/mira-diff` must survive both actions. Without the
-    /// marker check, setup would silently overwrite a command someone wrote
-    /// themselves — and remove would delete it.
+    /// A user's own `/mira-diff` or `mira` skill must survive both actions.
+    /// Without the marker check, setup would silently overwrite a skill
+    /// someone wrote themselves — and remove would delete it.
     #[test]
     fn a_hand_written_skill_of_the_same_name_is_never_touched() {
-        let skills = temp_skills("foreign");
-        let path = skill_path(&skills);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let mine = "---\ndescription: my own thing\n---\n!`echo hi`\n";
-        std::fs::write(&path, mine).unwrap();
+        for skill in &SKILLS {
+            let skills = temp_skills(&format!("foreign-{}", skill.dir));
+            let path = skill_path(&skills, skill);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let mine = "---\ndescription: my own thing\n---\n!`echo hi`\n";
+            std::fs::write(&path, mine).unwrap();
 
-        skill_at(&skills, Action::Setup).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "setup clobbered it");
+            skill_at(&skills, skill, Action::Setup).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "setup clobbered {}", skill.dir);
 
-        skill_at(&skills, Action::Remove).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "remove deleted it");
+            skill_at(&skills, skill, Action::Remove).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "remove deleted {}", skill.dir);
+        }
     }
 
-    /// Removing from a directory that never had the command is a no-op,
+    /// Removing from a directory that never had the skills is a no-op,
     /// not an error — `hooks remove` runs on machines that never ran setup.
     #[test]
     fn remove_without_an_install_is_quiet() {
         let skills = temp_skills("absent");
-        skill_at(&skills, Action::Remove).unwrap();
-        assert!(!skill_path(&skills).exists());
+        for skill in &SKILLS {
+            assert!(skill_at(&skills, skill, Action::Remove).unwrap().is_empty());
+            assert!(!skill_path(&skills, skill).exists());
+        }
     }
 
     #[test]
-    fn hooks_in_does_both_the_skill_and_the_settings() {
+    fn hooks_in_does_both_skills_and_the_settings() {
         let claude = temp_dir("both");
+        let skills = claude.join("skills");
         let mira = fake_mira(&claude);
         let done = hooks_in(&claude, Action::Setup, &mira).unwrap();
-        assert!(done.iter().any(|l| l.starts_with("installed /mira-diff")));
-        assert!(skill_path(&claude.join("skills")).exists());
+        for skill in &SKILLS {
+            let installed = format!("installed /{} ", skill.dir);
+            assert!(done.iter().any(|l| l.starts_with(&installed)), "{done:?}");
+            assert!(skill_path(&skills, skill).exists());
+        }
         assert_eq!(status_at(&claude).hooks, HookState::Installed);
+
+        let done = hooks_in(&claude, Action::Remove, &mira).unwrap();
+        for skill in &SKILLS {
+            assert!(done.contains(&format!("removed /{}", skill.dir)), "{done:?}");
+            assert!(!skill_path(&skills, skill).exists());
+        }
+        assert_eq!(status_at(&claude).hooks, HookState::Missing);
     }
 }
