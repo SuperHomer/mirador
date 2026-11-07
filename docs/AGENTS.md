@@ -36,8 +36,8 @@ later). The hooks call `mira` by its absolute path, so they work whether or
 not `mira` is on PATH; if the app moves, the next launch points them at the
 new location.
 
-This wires these hooks, all calling `mira claude-hook`, and installs the
-`/mira-diff` skill in `~/.claude/skills/mira-diff/`:
+This installs two skills in `~/.claude/skills/` — `/mira-diff` for you and
+`mira` for the model — and wires these hooks, all calling `mira claude-hook`:
 
 - **Notification** → the pane running that Claude session lights up with
   Claude's message (needs-permission, idle, …)
@@ -75,9 +75,22 @@ the wrapper does not run your command on Windows.
 `/mira-diff` is the human's side of `mira diff`: typing it in a Claude Code
 pane opens the same review surface, with the same arguments. It sets
 `disable-model-invocation`, because an agent that wants a diff pane should
-run `mira diff` rather than reach for a slash command. Both actions only
-touch a file carrying their own marker, so a `/mira-diff` you wrote yourself
-is left alone by `setup` and by `remove`.
+run `mira diff` rather than reach for a slash command.
+
+`mira` is the model's. Without it a plain Claude Code session in a Mirador
+pane never learns the CLI exists: the hooks only report to Mirador, and
+only a team's members are told about `mira`, in their prompt. Claude loads
+it when you name Mirador, `mira` or a pane, or ask it to start, message or
+wait for another agent or a team, or for a card on the task board. Its body
+is a one-screen map of the main commands that points at
+`mira <command> --help` for the rest. Its description is the only cost in
+every session; the body loads only when the skill is used. It pre-approves
+no command, so each `mira` call goes through your own permission rules.
+
+Both skills carry the same marker, and both actions only touch a file
+carrying it, so a `/mira-diff` or `mira` skill you wrote yourself is left
+alone by `setup` and by `remove`. Delete the marker line from an installed
+one and Mirador stops managing it.
 
 A skill rather than a `commands/mira-diff.md`: Claude Code merged custom
 commands into skills and both spellings still produce `/mira-diff`, but
