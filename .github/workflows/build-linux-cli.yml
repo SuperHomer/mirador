@@ -1,0 +1,72 @@
+name: Build Linux CLI
+
+# Mirador has no Linux app, but its `mira` CLI is wanted on Linux: agents
+# working on a remote Linux computer over SSH will reach the app through
+# it. So this builds `mira` alone — no frontend, no tauri, no signing — for
+# both Linux architectures, and releases attach the two binaries.
+#
+# Static, against musl: the binary goes to whatever Linux a remote computer
+# runs, and one linked against the runner's glibc would refuse to start on
+# anything older (ubuntu-latest's 2.39 rules out most servers). A static
+# binary runs on any distro, and since `mira`'s dependencies are pure Rust,
+# nothing is lost by it. Each architecture builds natively on its own
+# runner, so no cross toolchain is needed.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - ".github/workflows/build-linux-cli.yml"
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - ".github/workflows/build-linux-cli.yml"
+  # release.yml calls this on a tag push and does the attaching itself.
+  workflow_call:
+  workflow_dispatch:
+
+# The build runs `cargo build`, i.e. dependency build scripts. Those must
+# never hold a token that can write to the repository; the jobs in
+# release.yml that do write never run any of it.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # The Rust names for the architectures, which are also what
+        # `uname -m` prints on the remote computer: the artifact name can
+        # be read straight off it.
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          workspaces: src-tauri
+
+      # Only cmux-cli and what it depends on: the app crate's build script,
+      # which wants the frontend and the staged sidecar, never runs.
+      - name: Build mira
+        run: cargo build --release -p cmux-cli --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml
+
+      # An artifact does not keep the executable bit, and nor does a release
+      # download, so whatever installs `mira` from either has to set it.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mira-linux-${{ matrix.arch }}
+          path: src-tauri/target/${{ matrix.target }}/release/mira
+          if-no-files-found: error
