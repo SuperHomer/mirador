@@ -134,6 +134,60 @@ fn a_team_starts_is_tracked_and_comes_back() {
     assert_eq!(after, before);
 }
 
+/// A role opened in a team's tab joins the running team, told its
+/// teammates, as `team add` would add it: `mira agent new --role`, and the
+/// app's `+ New`, which makes the same call. A plain agent there does not.
+#[test]
+fn a_role_opened_in_a_teams_tab_joins_the_team() {
+    e2e!();
+    let mut sb = Sandbox::new("team-join");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(
+        ".mirador/teams/squad.md",
+        "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n---\nShip small.\n",
+    );
+    sb.launch();
+    let first = sb.first_pane();
+    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first) })["tabId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let names = |sb: &Sandbox| -> Vec<String> {
+        let t = sb.teams().into_iter().find(|t| t["tabId"] == tab.as_str()).unwrap_or_default();
+        t["members"].as_array().into_iter().flatten().map(|m| m["name"].as_str().unwrap().to_string()).collect()
+    };
+    sb.wait_for("the team to list", LONG, || (names(&sb) == ["planner", "reviewer"]).then_some(()));
+    let planner = pane_of(&sb, "planner");
+
+    let agent_new = |role: Option<&str>, task: &str| Request::AgentNew {
+        role: role.map(String::from),
+        harness: None,
+        title: None,
+        task: Some(task.into()),
+        target: Some("split".into()),
+        pane_id: Some(planner.clone()),
+    };
+    let joined = sb.call(agent_new(Some("reviewer"), "review the login form"))["paneId"].as_str().unwrap().to_string();
+    let member = sb.wait_for("reviewer-2", LONG, || sb.member("reviewer-2"));
+    assert_eq!(member["pane"], joined.as_str());
+    let start = sb.nth_start(&joined, 1);
+    assert_eq!(start.last().map(String::as_str), Some("review the login form"), "{start:?}");
+    assert_eq!(cmux_e2e::flag(&start, "--name").as_deref(), Some("reviewer-2"));
+    let prompt = std::fs::read_to_string(cmux_e2e::flag(&start, "--append-system-prompt-file").unwrap()).unwrap();
+    assert!(prompt.starts_with("You review.\n\n# Your team: squad"), "{prompt}");
+    assert!(
+        prompt.contains("- `planner` (planner, leads the team)") && prompt.contains("- `reviewer` (reviewer)"),
+        "{prompt}"
+    );
+
+    // A plain agent opens beside the planner all the same, but is no member.
+    let plain = sb.call(agent_new(None, "tidy the README"))["paneId"].as_str().unwrap().to_string();
+    let start = sb.nth_start(&plain, 1);
+    assert_eq!(start.last().map(String::as_str), Some("tidy the README"), "{start:?}");
+    assert_eq!(names(&sb), ["planner", "reviewer", "reviewer-2"]);
+}
+
 /// The team that ships with Mirador starts in a sandbox with no role, way
 /// or team file at all: a planner and a worker on Claude Code's Opus 5.5,
 /// the planner unable to edit, and a reviewer on Codex — each told the

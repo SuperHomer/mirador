@@ -355,6 +355,9 @@ other, on the role's model and effort, and keeps that prompt. Codex gets
 Without a role, `--harness codex` starts plain Codex instead of plain
 Claude Code (no other harness can be started that way, and `--harness`
 with `--role` is refused: a role names its own).
+In a team's tab, `agent new --role` (without `--tab`) is `team add`: the
+agent joins the running team as a member, told its teammates (see
+*Teams*). A plain agent there, with no role, is no member.
 Any Codex, a role's or plain, also gets `-c` overrides for a permissions profile, `mirador`, that
 extends the one Codex would run on — your `default_permissions`, else
 `:workspace` in a trusted project and `:read-only` elsewhere — with
@@ -565,7 +568,11 @@ covers, unless `--force`, a member whose screen shows a numbered menu, or
 no input box after the wait `send` makes. `team add`, `team
 restart` and `team clear` act on the team of the calling pane's tab.
 `team add` gives the new member its task as its first message, as `team
-start` gives the lead its, and files the task's card for it.
+start` gives the lead its, and files the task's card for it. In a team's
+tab, `agent new --role` is `team add`, and so is a role opened from the
+app there (+ New, a pane's menu, the palette). A member added either way
+belongs to the running team, kept with its tab, never to the team's
+file: the next `team start` does not have it.
 
 A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
