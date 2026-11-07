@@ -4,11 +4,13 @@ import {
   agentRoles,
   Harness,
   HARNESS_LABEL,
+  Node as Layout,
   openAgent,
   openAgentEditor,
   RoleCatalog,
 } from "../bindings";
 import { useUiStore } from "../state/uiStore";
+import { useWorkspaceStore } from "../state/workspaceStore";
 import { opensInTab, useConfigStore } from "../state/configStore";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { runAction } from "../keymap/actions";
@@ -34,6 +36,16 @@ export function useRoleCatalog(pane: string | null): RoleCatalog | null {
   return catalog;
 }
 
+function holds(node: Layout, pane: string): boolean {
+  return node.type === "leaf" ? node.paneId === pane : node.children.some((c) => holds(c, pane));
+}
+
+/** The team running in `pane`'s tab, if any: a role started from there
+ *  joins it (`open_agent_from`). */
+export function useTeamOf(pane: string): string | null {
+  return useWorkspaceStore((s) => s.snapshot?.tabs.find((t) => holds(t.root, pane))?.team?.name ?? null);
+}
+
 /** The palette's team step: which team, and its task, are chosen there. */
 export function startTeamStep() {
   useUiStore.getState().openPalette("team");
@@ -50,10 +62,12 @@ export function startTeamStep() {
  * so that typing goes straight to it and Esc, heard on the menu, closes
  * it. Closes on a click
  * outside, or Esc while it has the keyboard — an Esc typed into a
- * terminal is the terminal's.
+ * terminal is the terminal's. In a team's tab it says a role joins that
+ * team and a plain agent is no member, as `open_agent_from` decides.
  */
 export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }) {
   const catalog = useRoleCatalog(pane);
+  const team = useTeamOf(pane);
   const [message, setMessage] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const accels = acceleratorsByAction(useConfigStore((s) => s.config?.keybindings));
@@ -179,7 +193,7 @@ export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }
       {(["claude", "codex"] as Harness[]).map((h) => (
         <div key={h} className="agent-menu-row">
           <span className="agent-menu-name">{HARNESS_LABEL[h]}</span>
-          <span className="agent-menu-meta">default model</span>
+          <span className="agent-menu-meta">{team ? "default model · not a member" : "default model"}</span>
           <button className="agent-menu-start" onClick={() => start(null, h)}>
             Start
           </button>
@@ -200,7 +214,7 @@ export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }
         <button className="agent-menu-link" onClick={edit}>
           Edit roles…
         </button>
-        <span className="agent-menu-joins">Joins this tab</span>
+        <span className="agent-menu-joins">{team ? `Joins team ${team}` : "Joins this tab"}</span>
       </div>
 
       <div className="agent-menu-sep" />
