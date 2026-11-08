@@ -193,12 +193,39 @@ fn timestamp() -> String {
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{sec:02}.{milli:03}Z")
 }
 
-/// Runs `mira claude-hook <event>` with `payload`, as Claude Code's hooks
-/// do; whether it succeeded.
+/// The settings file it was started with (`--settings`), read once.
+static SETTINGS: std::sync::OnceLock<Option<serde_json::Value>> = std::sync::OnceLock::new();
+
+/// Runs the hook for `event` (`session-start`, …) with `payload`, as
+/// Claude Code does: through `sh`, the command its `--settings` names for
+/// that event — what Mirador gives an agent on a remote — else `mira
+/// claude-hook <event>` (`E2E_MIRA`), as the hooks a person sets up here
+/// call. Whether it succeeded.
 fn hook(event: &str, payload: serde_json::Value) -> bool {
-    let Ok(mira) = std::env::var("E2E_MIRA") else { return false };
-    std::process::Command::new(mira)
-        .args(["claude-hook", event])
+    let name = match event {
+        "session-start" => "SessionStart",
+        "prompt-submit" => "UserPromptSubmit",
+        "stop" => "Stop",
+        "notification" => "Notification",
+        _ => "",
+    };
+    let named = SETTINGS.get().and_then(Option::as_ref).and_then(|s| {
+        s["hooks"][name].as_array()?.iter().find_map(|m| m["hooks"][0]["command"].as_str().map(String::from))
+    });
+    let mut command = match named {
+        Some(line) => {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", &line]);
+            c
+        }
+        None => {
+            let Ok(mira) = std::env::var("E2E_MIRA") else { return false };
+            let mut c = std::process::Command::new(mira);
+            c.args(["claude-hook", event]);
+            c
+        }
+    };
+    command
         .env_remove("CLAUDE_JOB_DIR")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
@@ -218,6 +245,12 @@ fn main() {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let args: Vec<String> = args.collect();
+    let _ = SETTINGS.set(
+        args.iter()
+            .position(|a| a == "--settings")
+            .and_then(|i| std::fs::read_to_string(args.get(i + 1)?).ok())
+            .and_then(|t| serde_json::from_str(&t).ok()),
+    );
     let pid = std::process::id();
     let pane = std::env::var("MIRA_PANE").ok();
     let has = |a: &str| args.iter().any(|x| x == a);

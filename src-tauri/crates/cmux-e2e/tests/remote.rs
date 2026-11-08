@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use cmux_e2e::{e2e, Sandbox};
+use cmux_e2e::{e2e, flag, Sandbox};
 use cmux_protocol::Request;
 
 const LONG: Duration = Duration::from_secs(45);
@@ -11,6 +11,25 @@ const LONG: Duration = Duration::from_secs(45);
 /// The app's version, which every crate of the workspace shares: the
 /// `mira` a remote must run.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Where a remote agent's files go: `<home>/.mirador/run/<pane>`, then
+/// `.sh`, `.prompt.md`, `.settings.json`.
+fn run_base(sb: &Sandbox, pane: &str) -> String {
+    format!("{}/.mirador/run/{pane}", sb.home.display())
+}
+
+/// Asserts the settings file at `path` gives the agent Mirador's hooks,
+/// calling the remote's `mira`.
+fn assert_hooks(path: &str, mira: &std::path::Path) {
+    let settings: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        settings["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+        format!("\"{}\" claude-hook session-start", mira.display()),
+        "{settings}"
+    );
+    assert_eq!(settings["hooks"]["Stop"][0]["hooks"][0]["command"], format!("\"{}\" claude-hook stop", mira.display()));
+    assert!(settings.get("statusLine").is_none(), "the status line is the person's own: {settings}");
+}
 
 /// An ssh pane to `box`, in a tab of its own (a split would be narrow
 /// enough to wrap a path), once its shell is up: the pane's master
@@ -152,15 +171,16 @@ fn a_file_sent_to_the_remote_arrives_exact() {
 }
 
 /// `agent new --host box --dir <dir>`: plain Claude Code on the remote, in
-/// that directory, told its pane and this app's socket, listed as an agent
-/// on `box` — and a message sent from a local pane reaches it. A role or
-/// Codex there is not done yet, and a host goes with a directory.
+/// that directory, told its pane and this app's socket, given Mirador's
+/// hooks, listed as an agent on `box` — and a message sent from a local
+/// pane reaches it. Codex there is not done yet, and a host goes with a
+/// directory.
 #[test]
 fn a_plain_agent_runs_on_the_remote() {
     e2e!();
     let mut sb = Sandbox::new("ragent");
     sb.sshd();
-    sb.place_remote_mira(VERSION);
+    let mira = sb.place_remote_mira(VERSION);
     sb.launch();
     let first = sb.first_pane();
     let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
@@ -177,17 +197,18 @@ fn a_plain_agent_runs_on_the_remote() {
 
     let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--host", "box", "look around"]);
     assert!(code != 0 && err.contains("--dir"), "{err}");
-    for refused in [agent_new(Some("reviewer"), None), agent_new(None, Some(cmux_protocol::Harness::Codex))] {
-        let err = sb.request(refused).expect_err("not on a remote yet");
-        assert!(err.contains("not done yet"), "{err}");
-    }
+    let err = sb.request(agent_new(None, Some(cmux_protocol::Harness::Codex))).expect_err("not on a remote yet");
+    assert!(err.contains("not done yet"), "{err}");
     assert_eq!(sb.panes().len(), 1, "a refusal opens no pane");
 
     let pane = sb.call(agent_new(None, None))["paneId"].as_str().unwrap().to_string();
     let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
     assert_eq!(start["kind"], "claude");
     assert_eq!(start["cwd"], dir.as_str());
-    assert_eq!(start["args"], serde_json::json!(["look around"]));
+    // Even a plain agent has settings there: Mirador's hooks.
+    let settings = format!("{}.settings.json", run_base(&sb, &pane));
+    assert_eq!(start["args"], serde_json::json!(["--settings", settings, "look around"]));
+    assert_hooks(&settings, &mira);
     let socket = start["socket"].as_str().unwrap_or_default();
     assert!(socket.ends_with(".sock") && std::path::Path::new(socket).exists(), "{start}");
 
@@ -206,4 +227,56 @@ fn a_plain_agent_runs_on_the_remote() {
     sb.wait_for("the message on the remote", LONG, || {
         sb.events("message", &pane).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
     });
+}
+
+/// A role from this computer's catalog runs on the remote: its model, its
+/// prompt and its settings — sent there, Mirador's hooks in them — and it
+/// reports: the hooks it runs reach this app through the forwarded
+/// socket, and its pane gets a status. A role that keeps only some skills
+/// is not done on a remote yet: listing them runs Claude Code here.
+#[test]
+fn a_role_runs_on_the_remote_and_reports_through_its_hooks() {
+    e2e!();
+    let mut sb = Sandbox::new("rrole");
+    sb.sshd();
+    let mira = sb.place_remote_mira(VERSION);
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(".mirador/roles/charts.md", "---\nskills: [pdf]\n---\nCharts.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let agent_new = |role: &str| Request::AgentNew {
+        role: Some(role.into()),
+        harness: None,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.clone()),
+        host: Some("box".into()),
+        dir: Some(dir.clone()),
+    };
+
+    let err = sb.request(agent_new("charts")).expect_err("a skills list is not done on a remote");
+    assert!(err.contains("not done on a remote yet"), "{err}");
+    assert_eq!(sb.panes().len(), 1, "a refusal opens no pane");
+
+    let pane = sb.call(agent_new("reviewer"))["paneId"].as_str().unwrap().to_string();
+    let args = sb.nth_start(&pane, 1);
+    let base = run_base(&sb, &pane);
+    assert_eq!(flag(&args, "--model").as_deref(), Some("haiku"), "{args:?}");
+    let prompt = format!("{base}.prompt.md");
+    let settings = format!("{base}.settings.json");
+    assert_eq!(flag(&args, "--append-system-prompt-file"), Some(prompt.clone()), "{args:?}");
+    assert_eq!(flag(&args, "--settings"), Some(settings.clone()), "{args:?}");
+    assert_eq!(args.last().map(String::as_str), Some("look around"));
+    assert!(std::fs::read_to_string(&prompt).unwrap().contains("You review."));
+    assert_hooks(&settings, &mira);
+
+    let listed = sb.wait_for("the remote agent's status, from its hooks", LONG, || {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.into_iter().find(|a| a["paneId"] == pane.as_str() && !a["status"].is_null())
+    });
+    assert_eq!((listed["role"].as_str(), listed["remoteHost"].as_str()), (Some("reviewer"), Some("box")), "{listed}");
+    let hooked = sb.events("hooked", &pane);
+    assert_eq!(hooked.first().map(|h| h["ok"].clone()), Some(serde_json::json!(true)), "{hooked:?}");
 }

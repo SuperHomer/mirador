@@ -343,7 +343,8 @@ enum AgentAction {
         #[arg(long)]
         title: Option<String>,
         /// Run it on this ssh host instead (an alias from ~/.ssh/config, or
-        /// a destination), in --dir there: plain Claude Code only, for now.
+        /// a destination), in --dir there: Claude Code, plain or with a role
+        /// of this computer's; not Codex, for now.
         #[arg(long, requires = "dir")]
         host: Option<String>,
         /// The directory on --host the agent works in.

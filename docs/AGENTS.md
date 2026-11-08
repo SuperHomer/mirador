@@ -902,7 +902,7 @@ mira ssh open prod --tab
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
 mira ssh forward --app [--pane <id>]   # this app's socket, on the remote; prints its path there
-mira agent new --host prod --dir /srv/app "look at the failing job"   # plain Claude Code, on prod
+mira agent new --host prod --dir /srv/app [--role reviewer] "look at the failing job"   # Claude Code, on prod
 ```
 
 The pane runs the *system* ssh, so agent auth, 2FA prompts, and ProxyJump
@@ -938,10 +938,16 @@ hand, and it is used as it is (`mira --version` says which version a
 `mira` is).
 
 `mira agent new --host <host> --dir <dir>` starts an agent on the remote,
-in `<dir>` there: plain Claude Code only, for now (a role or Codex is
-refused as not done yet), and `--host` and `--dir` go together. Before
-its pane opens, the remote gets its `mira` and this app's socket, as
-above. A script is written to `~/.mirador/run/<pane>.sh` there, and the
+in `<dir>` there: Claude Code, plain or with `--role` (Codex is refused
+as not done yet), and `--host` and `--dir` go together. A role is this
+computer's, from the roles the calling pane's directory sees, as for an
+agent here: the remote's own `.mirador/roles` are not read. Its prompt
+and settings are worked out here and sent there, as
+`~/.mirador/run/<pane>.prompt.md` and `<pane>.settings.json`. A role
+that keeps only some skills or plugins is refused for now: listing them
+runs Claude Code here, which says nothing of the remote's. Before its
+pane opens, the remote gets its `mira` and this app's socket, as above.
+A script is written to `~/.mirador/run/<pane>.sh` there, and the
 pane runs `ssh -tt <host> sh <that script>`: nothing is typed into it,
 and nothing is quoted for the remote's login shell. The script starts
 the person's login shell as an interactive login shell, for the PATH
@@ -952,8 +958,11 @@ their own terminal there would have (where nvm or `npm -g` put
 and `mira` on the remote; the pane, its tab, the board and every name on
 this machine, reached through the forwarded socket. Mirador sees no
 process on the remote, so a send does not wait for the agent to be seen
-running, as on Windows. Its status comes from its hooks, if the remote's
-Claude Code has Mirador's in its own settings. After a restart, the pane
+running, as on Windows. Its status comes from its hooks: every agent
+there, role or plain, is given Mirador's hooks in its own `--settings`,
+calling the remote's `mira`, whatever the remote's Claude Code settings
+hold (where `mira hooks setup` was also run there, both fire). The
+status line is not given: that is the person's own. After a restart, the pane
 comes back idle like any SSH pane; a keypress starts a fresh agent with
 the same script. That agent reaches this app only while the old ssh
 connection still holds the socket's forward (it lingers 30 minutes):

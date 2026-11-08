@@ -586,6 +586,11 @@ pub fn launch_command(
             }
         }
     }
+    // A plain Claude Code has settings only when it runs on a remote: its
+    // hooks, which Mirador writes for it there.
+    if let (None, Harness::Claude, Some(file)) = (role, harness, settings_file) {
+        arg(&mut line, "--settings", &file.to_string_lossy());
+    }
     // Any Codex, a role's or plain, may reach the app.
     if let (Harness::Codex, Some((base, socket))) = (harness, socket) {
         arg(&mut line, "-c", "default_permissions=\"mirador\"");
@@ -1301,6 +1306,13 @@ mod tests {
         let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
         assert_eq!(launch_command(None, Harness::Claude, None, None, None, None, None, None, q), "claude");
         assert_eq!(launch_command(None, Harness::Claude, None, None, None, Some("fix the flaky test"), None, None, q), "claude 'fix the flaky test'");
+        // A plain Claude Code on a remote has settings of its own: its hooks.
+        let settings = std::path::Path::new("/h/.mirador/run/p.settings.json");
+        assert_eq!(
+            launch_command(None, Harness::Claude, None, None, Some(settings), Some("go"), None, None, q),
+            "claude --settings '/h/.mirador/run/p.settings.json' 'go'"
+        );
+        assert_eq!(launch_command(None, Harness::Codex, None, None, Some(settings), None, None, None, q), "codex");
         let role = AgentRole {
             name: "reviewer".into(),
             model: Some("opus".into()),

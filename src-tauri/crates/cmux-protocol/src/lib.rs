@@ -469,7 +469,7 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
         /// An ssh host to run it on instead, in `dir` there. Both or
-        /// neither; plain Claude Code only, for now.
+        /// neither; Claude Code only, for now.
         #[serde(default)]
         host: Option<String>,
         #[serde(default)]

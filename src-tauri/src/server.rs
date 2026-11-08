@@ -733,6 +733,13 @@ fn resolve_pane(
             .iter()
             .any(|t| cmux_core::layout::contains(&t.root, id))
     });
+    // A remote agent's hook runs on another computer: its tty and job are
+    // that computer's, which this process table cannot see — a tty there
+    // could even share a name with a pane's here. The pane it was told
+    // decides, as on Windows.
+    if let Some(id) = claimed.as_ref().filter(|id| state.meta.lock().unwrap().get(*id).is_some_and(|m| m.remote_host.is_some())) {
+        return Some(id.clone());
+    }
     let procs = if tty.is_some() || job.is_some() {
         cmux_core::agents::process_table()
     } else {

@@ -1722,15 +1722,6 @@ pub fn open_agent_from(
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    if let Some((host, dir)) = remote {
-        if role.is_some() {
-            return Err("an agent with a role on a remote is not done yet: start a plain one there".into());
-        }
-        if plain != cmux_protocol::Harness::Claude {
-            return Err("Codex on a remote is not done yet: start Claude Code there".into());
-        }
-        return open_remote_agent(app, state, &host, &dir, task, &source, tab, title, from);
-    }
     // The agent works where it was asked from, whichever way it opens, and
     // gets the roles that directory sees: its repository's, then yours.
     let cwd = state
@@ -1740,6 +1731,12 @@ pub fn open_agent_from(
         .get(&source)
         .and_then(|m| m.cwd.clone())
         .or_else(cmux_core::config::default_cwd);
+    if let Some((host, dir)) = remote {
+        if plain != cmux_protocol::Harness::Claude {
+            return Err("Codex on a remote is not done yet: start Claude Code there".into());
+        }
+        return open_remote_agent(app, state, &host, &dir, role.as_deref(), cwd.as_deref(), task, &source, tab, title, from);
+    }
     let launch = prepare_launch(role.as_deref(), plain, None, cwd.as_deref(), &[], None, task.as_deref())?;
 
     let new_pane = if tab {
@@ -1763,19 +1760,31 @@ pub fn open_agent_from(
     Ok(new_pane)
 }
 
-/// Starts plain Claude Code on `host`, in `dir` there, in a pane split from
-/// `source` (or a tab). Nothing is typed into it: the pane's PTY runs
-/// `ssh -tt <host> sh <run>`, a run script written there first
-/// (`ssh::run_script`), so no command line is quoted for the remote's login
-/// shell. Before any pane opens, the remote gets its `mira`
-/// (`ssh::ensure_mira`: a remote without one is refused here, not in the
-/// agent's first hook) and this app's socket (`ssh::forward_socket`), named
-/// to the agent as `MIRA_SOCKET`, with its pane as `MIRA_PANE`.
+/// Starts Claude Code on `host`, in `dir` there — plain, or as `role`,
+/// which comes from this computer's catalog (what `cwd` sees), as for an
+/// agent here — in a pane split from `source` (or a tab). Nothing is typed
+/// into it: the pane's PTY runs `ssh -tt <host> sh <run>`, a run script
+/// written there first (`ssh::run_script`), so no command line is quoted
+/// for the remote's login shell. Before any pane opens, the remote gets
+/// its `mira` (`ssh::ensure_mira`: a remote without one is refused here,
+/// not in the agent's first hook) and this app's socket
+/// (`ssh::forward_socket`), named to the agent as `MIRA_SOCKET`, with its
+/// pane as `MIRA_PANE`.
+///
+/// The role's prompt and settings are worked out here, as for a local
+/// agent (`prepare_launch`, which writes them), and their contents sent
+/// beside the run script as `<pane>.prompt.md` and `<pane>.settings.json`.
+/// Every agent there, role or plain, gets a settings file carrying
+/// Mirador's hooks, calling the remote's `mira`: its status reaches this
+/// app whatever the remote's own Claude Code settings hold. Not the status
+/// line: that is the person's own. A role that keeps only some skills or
+/// plugins is refused: listing them runs Claude Code here, which says
+/// nothing of the remote's.
 ///
 /// Mirador sees no process on the remote, so the agent counts as ready at
-/// once (`handoff::readiness`) and its status comes from hooks over that
-/// socket. Restored at the next launch, the pane comes back idle like any
-/// SSH pane, and a keypress runs the script again: a fresh agent, not the
+/// once (`handoff::readiness`) and its status comes from those hooks.
+/// Restored at the next launch, the pane comes back idle like any SSH
+/// pane, and a keypress runs the script again: a fresh agent, not the
 /// conversation it had. That agent reaches this app only while the old
 /// connection's master still holds the forward (`ControlPersist`, 30
 /// minutes); past that, or after the remote restarts, its `MIRA_SOCKET`
@@ -1788,6 +1797,8 @@ fn open_remote_agent(
     state: State<'_, AppState>,
     host: &str,
     dir: &str,
+    role: Option<&str>,
+    cwd: Option<&str>,
     task: Option<String>,
     source: &str,
     tab: bool,
@@ -1800,25 +1811,71 @@ fn open_remote_agent(
     }
     #[cfg(windows)]
     {
-        let _ = (app, state, task, source, tab, title, from);
+        let _ = (app, state, role, cwd, task, source, tab, title, from);
         Err("an agent on a remote is not done on Windows yet".into())
     }
     #[cfg(not(windows))]
     {
-        cmux_core::ssh::ensure_mira(host, env!("CARGO_PKG_VERSION"))?;
+        let catalog = cmux_core::roles::catalog(cwd.map(std::path::Path::new));
+        if let Some(name) = role.map(str::trim).filter(|r| !r.is_empty()) {
+            let (r, _) = cmux_core::roles::role_layers(&catalog, name)?;
+            if r.harness != cmux_protocol::Harness::Claude {
+                return Err(format!("role `{name}` runs Codex: Codex on a remote is not done yet"));
+            }
+            if cmux_core::role_limits::needs_inventory(&r) {
+                return Err(format!("role `{name}`: a role that limits skills or plugins is not done on a remote yet"));
+            }
+        }
+        let mira = cmux_core::ssh::ensure_mira(host, env!("CARGO_PKG_VERSION"))?;
         let socket = cmux_core::ssh::forward_socket(host, &cmux_core::ipc::default_socket_path())?;
         let home = cmux_core::ssh::remote_home(host)?;
-        let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
-        let launch = cmux_core::agents::launch_command(None, cmux_protocol::Harness::Claude, None, None, None, task.as_deref(), None, None, quote);
+        let launch = prepare_launch(role, cmux_protocol::Harness::Claude, Some(&catalog), cwd, &[], None, task.as_deref())?;
+        let prompt = launch.prompt.as_deref().map(std::fs::read_to_string).transpose().map_err(|e| format!("could not read the role's prompt: {e}"))?;
+        let mut settings: serde_json::Value = match launch.settings.as_deref() {
+            Some(file) => std::fs::read_to_string(file)
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .ok_or("could not read the role's settings")?,
+            None => serde_json::json!({}),
+        };
+        let hooks = settings.as_object_mut().ok_or("the role's settings are not an object")?.entry("hooks").or_insert(serde_json::json!({}));
+        if let (Some(hooks), serde_json::Value::Object(ours)) = (hooks.as_object_mut(), cmux_core::claude_integration::hooks_for(std::path::Path::new(&mira))) {
+            for (event, matchers) in ours {
+                let list = hooks.entry(event).or_insert(serde_json::json!([]));
+                if let Some(list) = list.as_array_mut() {
+                    list.extend(matchers.as_array().into_iter().flatten().cloned());
+                }
+            }
+        }
 
         let pane = if tab {
             state.workspace.lock().unwrap().new_tab().1
         } else {
             state.workspace.lock().unwrap().split_pane(source, SplitDir::Row).ok_or_else(|| format!("no pane {source}"))?
         };
-        let run = format!("{home}/.mirador/run/{pane}.sh");
-        let script = cmux_core::ssh::run_script(&run, &pane, &socket, dir, &launch);
-        if let Err(e) = cmux_core::ssh::put_file(host, &run, script.as_bytes()) {
+        let base = format!("{home}/.mirador/run/{pane}");
+        let (run, prompt_file, settings_file) = (format!("{base}.sh"), format!("{base}.prompt.md"), format!("{base}.settings.json"));
+        let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let line = cmux_core::agents::launch_command(
+            launch.role.as_ref(),
+            cmux_protocol::Harness::Claude,
+            prompt.as_deref(),
+            prompt.as_ref().map(|_| std::path::Path::new(&prompt_file)),
+            Some(std::path::Path::new(&settings_file)),
+            task.as_deref(),
+            None,
+            None,
+            quote,
+        );
+        let sent = (|| {
+            if let Some(prompt) = &prompt {
+                cmux_core::ssh::put_file(host, &prompt_file, prompt.as_bytes())?;
+            }
+            let settings = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+            cmux_core::ssh::put_file(host, &settings_file, settings.as_bytes())?;
+            cmux_core::ssh::put_file(host, &run, cmux_core::ssh::run_script(&run, &pane, &socket, dir, &line).as_bytes())
+        })();
+        if let Err(e) = sent {
             // Nobody has seen the pane yet: it goes as if never opened.
             state.workspace.lock().unwrap().close_pane(&pane);
             return Err(e);
@@ -1831,6 +1888,13 @@ fn open_remote_agent(
             entry.agent_launched = true;
             entry.agent_started_at = Some(std::time::Instant::now());
             entry.agent_harness = Some(cmux_protocol::Harness::Claude);
+            if let Some(role) = launch.role {
+                entry.agent_model = role.model;
+                entry.agent_effort = role.effort;
+                entry.agent_role = Some(role.name);
+                entry.agent_settings = Some(settings_file);
+                entry.agent_prompt = prompt.map(|_| prompt_file);
+            }
         }
         emit_workspace(&app);
         if let Some(task) = &task {
