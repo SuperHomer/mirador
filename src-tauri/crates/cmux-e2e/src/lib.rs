@@ -234,6 +234,8 @@ pub struct Sandbox {
     /// The tail of every credential a live sandbox was given: no file
     /// holding one is left behind.
     secrets: Vec<String>,
+    /// The sandbox's own sshd, once [`Self::sshd`] started it.
+    sshd: Option<Child>,
 }
 
 impl Sandbox {
@@ -394,6 +396,7 @@ impl Sandbox {
             env: Vec::new(),
             live,
             secrets: Vec::new(),
+            sshd: None,
         }
     }
 
@@ -663,6 +666,97 @@ impl Sandbox {
             .find(|m| m["name"] == name)
     }
 
+    /// Starts an sshd of the sandbox's own, on a free local port, and adds a
+    /// host `box` to the sandbox home's `~/.ssh/config` that reaches it with
+    /// a key of its own: a remote computer, which is this one. A login
+    /// there looks like the sandbox — its home, runtime and config
+    /// directories, its `bin` first on the PATH, its agents' log — through
+    /// sshd's `SetEnv`, which overrides what sshd took from the passwd
+    /// entry. sshd runs as the person running the tests, so it needs no
+    /// root: a high port, a host key it owns, no PAM.
+    pub fn sshd(&mut self) {
+        assert!(self.sshd.is_none(), "sshd already running");
+        let dir = self.root.join("sshd");
+        let ssh = self.home.join(".ssh");
+        for d in [&dir, &ssh] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for key in [dir.join("host_key"), ssh.join("id_ed25519")] {
+            let made = Command::new("ssh-keygen").args(["-q", "-N", "", "-t", "ed25519", "-f"]).arg(&key).status();
+            assert!(made.is_ok_and(|s| s.success()), "ssh-keygen {}", key.display());
+        }
+        std::fs::copy(ssh.join("id_ed25519.pub"), ssh.join("authorized_keys")).unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let path = format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.root.join("bin").display());
+        let set_env: String = [
+            ("HOME", self.home.display().to_string()),
+            ("XDG_RUNTIME_DIR", self.runtime.display().to_string()),
+            ("XDG_CONFIG_HOME", self.config.display().to_string()),
+            ("PATH", path),
+            ("E2E_AGENT_LOG", self.agent_log.display().to_string()),
+        ]
+        .iter()
+        .map(|(k, v)| format!(" \"{k}={v}\""))
+        .collect();
+        let sshd_config = [
+            "ListenAddress 127.0.0.1".to_string(),
+            format!("HostKey {}", dir.join("host_key").display()),
+            format!("AuthorizedKeysFile {}", ssh.join("authorized_keys").display()),
+            "PasswordAuthentication no".into(),
+            "KbdInteractiveAuthentication no".into(),
+            "UsePAM no".into(),
+            "StrictModes no".into(),
+            "PidFile none".into(),
+            "LogLevel VERBOSE".into(),
+            format!("SetEnv{set_env}"),
+        ];
+        std::fs::write(dir.join("sshd_config"), sshd_config.join("\n") + "\n").unwrap();
+        let host = [
+            "Host box".to_string(),
+            "  HostName 127.0.0.1".into(),
+            format!("  Port {port}"),
+            format!("  IdentityFile {}", ssh.join("id_ed25519").display()),
+            "  IdentitiesOnly yes".into(),
+            "  StrictHostKeyChecking no".into(),
+            format!("  UserKnownHostsFile {}", ssh.join("known_hosts").display()),
+            "  LogLevel ERROR".into(),
+        ];
+        std::fs::write(ssh.join("config"), host.join("\n") + "\n").unwrap();
+        // ssh reads ~/.ssh/config from the passwd entry's home, not $HOME:
+        // without `-F` it would read the person's own, and know no `box`.
+        // And the app's ControlPath, under the sandbox's config directory,
+        // is over the 104 bytes a socket path can be, which ssh refuses:
+        // the first ControlPath ssh is given wins, so this short one does.
+        let wrapper = self.root.join("bin/ssh");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\nexec /usr/bin/ssh -F \"$HOME/.ssh/config\" -o \"ControlPath={}/cm-%C\" \"$@\"\n",
+                self.runtime.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        // A login over ssh runs /etc/zprofile, whose path_helper puts the
+        // system's directories first: the sandbox's `bin` goes first again.
+        std::fs::write(self.home.join(".zprofile"), format!("export PATH=\"{}:$PATH\"\n", self.root.join("bin").display()))
+            .unwrap();
+        let log = std::fs::File::create(self.root.join("sshd.log")).unwrap();
+        let child = Command::new("/usr/sbin/sshd")
+            .args(["-D", "-e", "-p", &port.to_string(), "-f"])
+            .arg(dir.join("sshd_config"))
+            .stdin(Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .expect("start sshd");
+        self.sshd = Some(child);
+        self.wait_for("sshd to listen", Duration::from_secs(15), || {
+            std::net::TcpStream::connect(("127.0.0.1", port)).ok().map(|_| ())
+        });
+    }
+
     /// How many times this sandbox has been launched.
     pub fn launches(&self) -> u32 {
         self.launches
@@ -673,6 +767,23 @@ impl Drop for Sandbox {
     fn drop(&mut self) {
         self.quit();
         self.wait_for_agents();
+        // After the app: its ssh panes have hung up by now. But the app asks
+        // for ControlPersist, so the connection's master outlives them for
+        // half an hour, and killing sshd's listener never reaches the
+        // session it serves (`sshd-session`): tell the master to go first,
+        // which ends the session, through the wrapper so its config and
+        // ControlPath are the ones it was started with. No master, no harm.
+        if let Some(mut sshd) = self.sshd.take() {
+            let _ = Command::new(self.root.join("bin/ssh"))
+                .args(["-O", "exit", "box"])
+                .env("HOME", &self.home)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = sshd.kill();
+            let _ = sshd.wait();
+        }
         let _ = std::fs::remove_dir_all(&self.runtime);
         // A failed test leaves its directory for a look — but not the
         // logins in it; a passing one leaves nothing.
