@@ -848,12 +848,16 @@ pub enum Request {
         pane_id: Option<String>,
     },
     /// The `mira` of this app's version on a remote pane's host, fetched
-    /// there from its release the first time: its path (`mira`).
+    /// there from its release the first time: its path (`mira`). A socket
+    /// request with no CLI verb, for the e2e and by hand: starting an agent
+    /// on a remote calls `ssh::ensure_mira` directly.
     SshMira {
         #[serde(default)]
         pane_id: Option<String>,
     },
     /// Writes `text` to `path` on a remote pane's host, exactly, owner-only.
+    /// A socket request with no CLI verb, for the e2e and by hand: starting
+    /// an agent on a remote calls `ssh::put_file` directly.
     SshPut {
         #[serde(default)]
         pane_id: Option<String>,

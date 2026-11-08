@@ -962,7 +962,9 @@ login shell as an interactive login shell, for the PATH their own
 terminal there would have (where nvm or `npm -g` put `claude`), and that
 shell runs the script again with `sh`, which goes to the directory (or
 says loudly there is none) and starts `claude` with `MIRA_PANE` and
-`MIRA_SOCKET` set.
+`MIRA_SOCKET` set. An rc file that execs tmux or fish takes the pane
+over before the agent starts: the pane shows tmux or a fish prompt, and
+no agent.
 
 Mirador sees no process on the remote, so a send does not wait for the
 agent to be seen running, as on Windows; its status comes from its
@@ -1011,6 +1013,13 @@ wherever it is set, names the socket outright, before any discovery
 file; a remote has none, so without it `mira` there says Mirador is not
 running. Agents started there are given it; this command is for
 anything else run there by hand.
+
+Starting agents on a computer means trusting it with this Mirador: the
+forwarded socket is the whole automation socket. Whoever can act as
+that user on the remote, or as root there, can drive this Mirador while
+it is forwarded, `send-input` into any local pane included, which runs
+commands on this machine as you. The socket's owner-only mode keeps
+other users there out, not those.
 
 ## 9. Raw socket protocol
 

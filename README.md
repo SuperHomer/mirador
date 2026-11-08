@@ -773,6 +773,12 @@ directory there the agents work in. What the remote needs:
 - **Claude Code, installed and signed in** there — `claude setup-token`
   is the way for agents nobody sits in front of.
 
+Starting agents on a computer means trusting it with this Mirador. They
+reach it through its automation socket, forwarded there whole: whoever
+can act as you on that computer, or as root there, can drive this
+Mirador while it is forwarded — type into any pane here included, which
+runs commands on this machine as you.
+
 What lives where: roles and teams are this computer's, the ones the
 calling pane's directory sees, and a remote's own `.mirador` is not read.
 Each agent's prompt and settings are sent to `~/.mirador/run` on the

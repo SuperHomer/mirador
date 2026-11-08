@@ -136,7 +136,7 @@ pub fn forward_socket(host: &str, local: &std::path::Path) -> Result<String, Str
     let output = control("forward")?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("socket forward failed (is the SSH pane connected?): {}", err.trim()));
+        return Err(format!("could not forward the app's socket to {host}: {}", err.trim()));
     }
     Ok(remote)
 }
@@ -172,8 +172,10 @@ fn remote_shell(host: &str, script: &str) -> Result<String, String> {
     let err = String::from_utf8_lossy(&output.stderr);
     match output.status.code() {
         Some(0) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
-        // ssh's own failure; anything else is the command's.
-        Some(255) | None => Err(format!("ssh {host} failed (is the SSH pane connected?): {}", err.trim())),
+        // ssh's own failure — a host it cannot reach or log in to; it runs
+        // on a connection of its own, before any pane may exist. Anything
+        // else is the command's.
+        Some(255) | None => Err(format!("ssh {host}: {}", err.trim())),
         Some(_) => Err(format!("on {host}: {}", err.trim())),
     }
 }

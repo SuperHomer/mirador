@@ -1850,6 +1850,8 @@ pub(crate) fn refuse_on_remote(catalog: &cmux_protocol::RoleCatalog, role: &str)
 /// A remote computer, reached for agents: its home, where their files go;
 /// the `mira` of this version there, which their hooks and prompts call;
 /// and this app's socket forwarded there, which that `mira` reaches.
+// Read and built only where remote agents are done (not Windows yet).
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) struct Remote {
     pub host: String,
     pub home: String,
@@ -1877,6 +1879,7 @@ pub(crate) fn reach_remote(host: &str) -> Result<Remote, String> {
 }
 
 /// What an agent on a remote was started with, its files there.
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) struct RemoteLaunch {
     pub run: String,
     pub role: Option<cmux_protocol::AgentRole>,
