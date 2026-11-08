@@ -746,6 +746,23 @@ of either is ignored for its default.
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).
 
+### Computers
+
+A computer is somewhere agents can work over SSH: a host — an alias from
+`~/.ssh/config`, or a destination such as `-p 2222 me@gpu.example` — and
+the directory on it where the work is. The palette's *Pane: Computers…*
+lists them, each opening an SSH pane to its host, and *Add a computer…*
+asks for the host, the directory and a name (by default the host's
+alias), then keeps it in mirador.json:
+
+```jsonc
+{ "computers": [{ "name": "devbox", "host": "devbox", "dir": "~/work/app" }] }
+```
+
+A name is letters, digits, `-`, `_` and `.`, and no two computers share
+one. Teams do not start on a computer yet; the directory is for that, in
+a later release.
+
 ## Terminals that keep running when you quit
 
 Quitting Mirador doesn't end what runs in it: shells, builds, dev servers and

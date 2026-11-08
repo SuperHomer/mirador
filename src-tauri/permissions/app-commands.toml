@@ -55,6 +55,8 @@ permissions = [
   "allow-open-settings",
   "allow-settings-view",
   "allow-set-config-value",
+  "allow-list-computers",
+  "allow-add-computer",
   "allow-start-team",
   "allow-list-teams",
   "allow-team-cost",

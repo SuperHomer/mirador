@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentRole,
   AgentTeam,
+  Computer,
+  addComputer,
   agentRoles,
+  listComputers,
   startTeam,
   newTab,
   splitPane,
@@ -28,6 +31,8 @@ interface Entry {
   command?: boolean;
   /** Already formatted for this platform; absent when nothing is bound. */
   accel?: string;
+  /** Leads on to another step or a question, so the palette stays open. */
+  stay?: boolean;
   run: () => void;
 }
 
@@ -49,7 +54,22 @@ interface Step {
   /** What to say when the step has nothing in it. */
   empty: string;
   entries: Entry[];
+  /** A first row for what was typed, when something is: a choice no list holds. */
+  typed?: (text: string) => Entry;
 }
+
+/** A question instead of a list: Enter answers with what was typed. */
+interface Ask {
+  crumb: string;
+  placeholder: string;
+  /** The answer when Enter is pressed on nothing. */
+  fallback?: string;
+  /** May throw: the error shows where the rows would. */
+  answer: (text: string) => void | Promise<void>;
+}
+
+/** What a role's name may be (`roles::is_name`), so a host alias that is one names its computer. */
+const isName = (s: string) => /^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/.test(s);
 
 /** `key` tells apart a row shown twice: once in RECENT, once in its group. */
 type Row = { kind: "entry"; entry: Entry; key?: string } | { kind: "step"; step: Step };
@@ -131,6 +151,9 @@ export function CommandPalette() {
   const [hosts, setHosts] = useState<string[]>([]);
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [teams, setTeams] = useState<AgentTeam[]>([]);
+  const [computers, setComputers] = useState<Computer[]>([]);
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -140,7 +163,7 @@ export function CommandPalette() {
   const focusedPane = () =>
     activeTab(useWorkspaceStore.getState().snapshot)?.focusedPane ?? null;
 
-  const { entries, steps } = useMemo(() => {
+  const { entries, steps, inner } = useMemo(() => {
     // Shown so the palette teaches its own shortcuts: the keys a command
     // already has are the reason to stop opening the palette for it.
     const accels = acceleratorsByAction(keybindings);
@@ -263,13 +286,78 @@ export function CommandPalette() {
         run: () => void openSsh(null, false, host),
       })),
     };
+    // Computers: an ssh host and the directory there, kept in mirador.json.
+    // A row opens an SSH pane; the directory is for teams, which start on
+    // a computer in a later version.
+    const question = (next: Ask) => {
+      setStepId(null);
+      setQuery("");
+      setAskError(null);
+      setAsk(next);
+    };
+    const askDir = (host: string) =>
+      question({
+        crumb: "Directory",
+        placeholder: `The directory on ${host} where the work is, e.g. ~/work/app`,
+        answer: (dir) =>
+          question({
+            crumb: "Name",
+            placeholder: isName(host) ? `Its name (Enter: ${host})` : "Its name",
+            fallback: isName(host) ? host : undefined,
+            answer: async (name) => {
+              await addComputer(name, host, dir);
+              setComputers(await listComputers());
+              setAsk(null);
+              setStepId("computers");
+            },
+          }),
+      });
+    const computerStep: Step = {
+      id: "computers",
+      title: "Pane: Computers…",
+      hint: "pick a computer ›",
+      group: "pane",
+      crumb: "Computers",
+      placeholder: "Search computers…",
+      empty: "No matching computer",
+      entries: [
+        ...computers.map((c) => ({
+          id: `computer:${c.name}`,
+          title: `${c.name} · ${c.host} · ${c.dir}`,
+          hint: "open SSH pane (the directory is for teams)",
+          run: () => void openSsh(null, false, c.host),
+        })),
+        {
+          id: "computer:add",
+          title: "Add a computer…",
+          hint: "host, directory, name",
+          stay: true,
+          run: () => {
+            setStepId("computer-host");
+            setQuery("");
+          },
+        },
+      ],
+    };
+    // Reached only from "Add a computer…", so not listed at the top.
+    const hostStep: Step = {
+      id: "computer-host",
+      title: "Add a computer",
+      hint: "",
+      group: "pane",
+      crumb: "Add a computer",
+      placeholder: "Pick a host, or type a destination (user@host)…",
+      empty: "No ~/.ssh/config host: type a destination",
+      entries: hosts.map((host) => ({ id: `computer-host:${host}`, title: host, hint: "~/.ssh/config", stay: true, run: () => askDir(host) })),
+      typed: (text) => ({ id: "computer-host:typed", title: `Use "${text}"`, hint: "as typed", stay: true, run: () => askDir(text) }),
+    };
     // A step with nothing in it is not offered; "Agents: New Agent…" always
-    // has plain Claude Code.
-    const steps = [agents, teamStep, ssh].filter((st) => st.entries.length > 0);
-    return { entries: [...base, ...custom, ...tabEntries], steps };
-  }, [customCommands, roles, teams, hosts, keybindings, tabs]);
+    // has plain Claude Code, and Computers its "Add a computer…".
+    const steps = [agents, teamStep, ssh, computerStep].filter((st) => st.entries.length > 0);
+    return { entries: [...base, ...custom, ...tabEntries], steps, inner: [hostStep] };
+  }, [customCommands, roles, teams, hosts, computers, keybindings, tabs]);
 
-  const step = steps.find((st) => st.id === stepId) ?? null;
+  const step = [...steps, ...inner].find((st) => st.id === stepId) ?? null;
 
   const sections = useMemo<Section[]>(() => {
     const rank = <T,>(items: T[], text: (t: T) => string) =>
@@ -278,8 +366,10 @@ export function CommandPalette() {
         .filter((x): x is { item: T; score: number } => x.score !== null)
         .sort((a, b) => b.score - a.score)
         .map((x) => x.item);
+    if (ask) return [];
     if (step) {
-      const rows = rank(step.entries, (e) => e.title).map((entry) => ({ kind: "entry" as const, entry }));
+      const typed = step.typed && query.trim() ? [step.typed(query.trim())] : [];
+      const rows = [...typed, ...rank(step.entries, (e) => e.title)].map((entry) => ({ kind: "entry" as const, entry }));
       return [{ label: null, rows }];
     }
     if (!query) {
@@ -320,7 +410,7 @@ export function CommandPalette() {
       })),
     );
     return [{ label: null, rows: [...top, ...deep] }];
-  }, [entries, steps, step, query, recent]);
+  }, [entries, steps, step, ask, query, recent]);
   // The rows in the order shown, which the arrow keys walk.
   const filtered = useMemo(() => sections.flatMap((sec) => sec.rows), [sections]);
   const found = filtered.findIndex((r) => rowId(r) === selectedId);
@@ -334,6 +424,8 @@ export function CommandPalette() {
   useEffect(() => {
     if (open) {
       void sshHosts().then(setHosts);
+      void listComputers().then(setComputers);
+      setAsk(null);
       const pane =
         activeTab(useWorkspaceStore.getState().snapshot)?.focusedPane ?? null;
       agentRoles(pane)
@@ -383,7 +475,14 @@ export function CommandPalette() {
   };
   const back = () => {
     setStepId(null);
+    setAsk(null);
     setQuery("");
+  };
+  const answer = (text: string) => {
+    const value = text.trim() || ask?.fallback;
+    if (!ask || !value) return;
+    setAskError(null);
+    Promise.resolve(ask.answer(value)).catch((e) => setAskError(String(e)));
   };
   const choose = (row: Row | undefined) => {
     if (!row) return;
@@ -391,18 +490,21 @@ export function CommandPalette() {
       enter(row.step);
       return;
     }
-    // By the id it has inside its step, so a deep entry and the same
-    // entry picked in its step are one recent command.
-    rememberRecent(row.entry.id.replace(/^deep:/, ""));
-    close();
+    if (!row.entry.stay) {
+      // By the id it has inside its step, so a deep entry and the same
+      // entry picked in its step are one recent command.
+      rememberRecent(row.entry.id.replace(/^deep:/, ""));
+      close();
+    }
     row.entry.run();
   };
+  const crumb = ask?.crumb ?? step?.crumb;
 
   return (
     <div className="palette-overlay" onMouseDown={close}>
       <div className="palette" onMouseDown={(e) => e.stopPropagation()}>
         <div className="palette-field">
-          {step && (
+          {crumb && (
             <button
               className="palette-crumb"
               title="Back (Esc)"
@@ -411,22 +513,22 @@ export function CommandPalette() {
                 inputRef.current?.focus();
               }}
             >
-              {step.crumb} ›
+              {crumb} ›
             </button>
           )}
           <input
             ref={inputRef}
             className="palette-input"
-            placeholder={step ? step.placeholder : "Type a command…"}
+            placeholder={ask?.placeholder ?? step?.placeholder ?? "Type a command…"}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 e.preventDefault();
                 // Inside a step, back to the top first.
-                if (step) back();
+                if (crumb) back();
                 else close();
-              } else if (e.key === "Backspace" && step && query === "") {
+              } else if (e.key === "Backspace" && crumb && query === "") {
                 e.preventDefault();
                 back();
               } else if (e.key === "ArrowDown") {
@@ -437,7 +539,8 @@ export function CommandPalette() {
                 select(Math.max(selected - 1, 0));
               } else if (e.key === "Enter") {
                 e.preventDefault();
-                choose(filtered[selected]);
+                if (ask) answer(query);
+                else choose(filtered[selected]);
               }
               e.stopPropagation();
             }}
@@ -473,7 +576,7 @@ export function CommandPalette() {
           })}
           {filtered.length === 0 && (
             <div className="palette-empty">
-              {step ? step.empty : "No matching commands"}
+              {ask ? (askError ?? "Enter to go on, Esc to go back") : step ? step.empty : "No matching commands"}
             </div>
           )}
         </div>

@@ -53,3 +53,16 @@ pub fn settings_view() -> Result<Vec<SettingRow>, String> {
 pub fn set_config_value(key: String, value: Option<serde_json::Value>) -> Result<(), String> {
     cmux_core::config::settings::set_config_value(&key, value)
 }
+
+/// The usable computers mirador.json lists, for the palette.
+#[tauri::command]
+pub fn list_computers() -> Vec<cmux_core::config::Computer> {
+    cmux_core::config::computers_in(&cmux_core::config::load().0)
+}
+
+/// Adds a computer to mirador.json; refused for a name that is taken or
+/// not shell-safe, or an empty host or directory.
+#[tauri::command]
+pub fn add_computer(name: String, host: String, dir: String) -> Result<cmux_core::config::Computer, String> {
+    cmux_core::config::settings::add_computer(&name, &host, &dir)
+}
