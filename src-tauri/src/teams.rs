@@ -223,14 +223,34 @@ pub(crate) fn roster_now(
 }
 
 /// Adds a `role` member to the team of `pane_id`'s tab, split from that
-/// pane. Its teammates learn of it from `team list`. Returns its pane.
+/// pane, with `task` as its first message. Its teammates learn of it from
+/// `team list`. Returns its pane.
 #[tauri::command(async)]
 pub fn team_add(
     app: AppHandle,
     state: State<'_, AppState>,
     role: String,
     name: Option<String>,
+    task: Option<String>,
     pane_id: Option<String>,
+    title: Option<String>,
+) -> Result<String, String> {
+    team_add_from(app, state, role, name, task, pane_id, title, "you".into())
+}
+
+/// [`team_add`], its task logged as given by `from`: a person, from the
+/// app; whoever ran `mira team add`, from the socket. `title` is the
+/// task's card's, instead of one made from the task.
+#[allow(clippy::too_many_arguments)]
+pub fn team_add_from(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    role: String,
+    name: Option<String>,
+    task: Option<String>,
+    pane_id: Option<String>,
+    title: Option<String>,
+    from: String,
 ) -> Result<String, String> {
     let (tab, run) = team_here(&state, pane_id.as_deref())?;
     // It would start here, told its teammates call `mira` by their path
@@ -251,7 +271,7 @@ pub fn team_add(
     let cwd = cwd_of(&state, Some(&source));
     let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
     let roster = roster_now(&run, &catalog, &seat, Some(&seat));
-    let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), None)?;
+    let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task.as_deref())?;
 
     let pane = {
         let mut ws = state.workspace.lock().unwrap();
@@ -263,6 +283,9 @@ pub fn team_add(
     };
     mark_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), launch, cwd);
     emit_workspace(&app);
+    if let Some(task) = &task {
+        crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &pane, task, None, title);
+    }
     Ok(pane)
 }
 

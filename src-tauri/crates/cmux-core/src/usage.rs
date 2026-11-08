@@ -599,7 +599,9 @@ pub fn local_clock(ms: u64) -> String {
     let secs = (ms / 1000) as i64;
     #[cfg(unix)]
     {
-        let t = secs as libc::time_t;
+        // `as _`, not `as libc::time_t`: the libc crate deprecates that
+        // name on musl, the Linux CLI's target, ahead of a size change.
+        let t = secs as _;
         let mut tm: libc::tm = unsafe { std::mem::zeroed() };
         // SAFETY: both pointers are to locals that outlive the call.
         if !unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {

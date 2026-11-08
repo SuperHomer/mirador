@@ -172,15 +172,19 @@ fn switching_views_keeps_what_a_terminal_shows() {
         let last = format!("{word}-21");
         sb.wait_for("the shell's output", LONG, || sb.screen(pane).filter(|s| s.lines().any(|l| l.trim() == last)));
     }
-    let lines = |pane: &str| -> Vec<String> {
-        let text = sb.request(Request::ReadScreen { pane_id: Some(pane.to_string()), lines: Some(200) }).unwrap()["text"]
+    let text = |pane: &str| -> String {
+        sb.request(Request::ReadScreen { pane_id: Some(pane.to_string()), lines: Some(200) }).unwrap()["text"]
             .as_str()
             .unwrap()
-            .to_string();
-        text.lines().filter(|l| l.contains("alpha-") || l.contains("beta-")).map(|l| l.trim().to_string()).collect()
+            .to_string()
+    };
+    let lines = |pane: &str| -> Vec<String> {
+        text(pane).lines().filter(|l| l.contains("alpha-") || l.contains("beta-")).map(|l| l.trim().to_string()).collect()
     };
     let before = (lines(&first), lines(&other));
-    assert_eq!(before.0.len(), 4, "the command line and three answers: {:?}", before.0);
+    // CI once counted 3, the command line missing, and it never did here:
+    // the whole screen says what it showed instead.
+    assert_eq!(before.0.len(), 4, "the command line and three answers: {:?}; the screen:\n{}", before.0, text(&first));
 
     sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
     // Both terminals are drawn on the board, the other tab's included.
@@ -538,12 +542,21 @@ fn what_mira_creates_lands_by_the_boards_rules() {
     let kept: Vec<&Value> = before.as_array().unwrap().iter().filter(|c| c["paneId"] != panes[1].as_str()).collect();
     assert_eq!(after.as_array().unwrap().iter().collect::<Vec<_>>(), kept);
 
-    // A new tab's frame goes where the board is looked at. The app saves
-    // where that is a moment after the board moves (each pane made above
-    // brought its card into view), so let it settle before saying where.
-    sb.type_into(&first, "sleep 1; echo settled-$((6*7))\r");
-    sb.wait_for("the shell", LONG, || sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "settled-42")));
+    // A new tab's frame goes where the board is looked at. A pane just
+    // made brings its card into view, and the board saves where it looks
+    // a moment after it stops: a camera set meanwhile must not be saved
+    // over. On a slow runner it was, and the frame went where the board
+    // had been. The board's save comes within FLY_MS + SAVE_DELAY_MS
+    // (620 ms) of the move; the camera is watched well past that.
+    let (code, _, err) = sb.mira(Some(&first), &["split"]);
+    assert_eq!(code, 0, "{err}");
     sb.call(Request::SetCamera { x: -20000.0, y: -20000.0, zoom: 1.0, width: Some(1000.0), height: Some(800.0) });
+    let planted = sb.snapshot()["camera"].clone();
+    let until = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < until {
+        assert_eq!(sb.snapshot()["camera"], planted, "the board saved over the camera set");
+        std::thread::sleep(Duration::from_millis(75));
+    }
     let (code, _, err) = sb.mira(None, &["new-tab"]);
     assert_eq!(code, 0, "{err}");
     let snap = sb.snapshot();

@@ -91,10 +91,29 @@ fn a_team_starts_is_tracked_and_comes_back() {
     let again = sb.nth_start(&r1, 2);
     assert_eq!(cmux_e2e::flag(&again, "--name").as_deref(), Some("reviewer-1"));
 
-    // A new member is numbered after its role's.
-    sb.call(Request::TeamAdd { role: "reviewer".into(), name: None, pane_id: Some(r1.clone()) });
+    // A new member is numbered after its role's, its task its first
+    // message and a card on the tab's board, for it.
+    sb.call(Request::TeamAdd {
+        role: "reviewer".into(),
+        name: None,
+        task: Some("look at the auth change".into()),
+        pane_id: Some(r1.clone()),
+        title: None,
+    });
     let r3 = sb.wait_for("reviewer-3", LONG, || sb.member("reviewer-3"));
-    sb.nth_start(r3["pane"].as_str().unwrap(), 1);
+    let r3_pane = r3["pane"].as_str().unwrap();
+    let added = sb.nth_start(r3_pane, 1);
+    assert_eq!(added.last().map(String::as_str), Some("look at the auth change"), "{added:?}");
+    let cards = sb.call(Request::TaskList { all: false, pane_id: Some(r1.clone()) });
+    let card = cards["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["title"] == "look at the auth change")
+        .cloned()
+        .unwrap_or_else(|| sb.fail(&format!("no card for the new member's task: {cards}")));
+    assert_eq!(card["pane"], r3_pane, "{card}");
+    assert_eq!(card["assignee"], "reviewer-3", "{card}");
 
     // Quit and relaunch: still the team, in the same tab, every member.
     let before: Vec<(String, String)> = sb.teams()[0]["members"]
@@ -115,6 +134,77 @@ fn a_team_starts_is_tracked_and_comes_back() {
         .map(|m| (m["name"].as_str().unwrap().into(), m["pane"].as_str().unwrap().into()))
         .collect();
     assert_eq!(after, before);
+}
+
+/// A role opened in a team's tab joins the running team, told its
+/// teammates, as `team add` would add it: `mira agent new --role`, and the
+/// app's `+ New`, which makes the same call. A plain agent there does not.
+#[test]
+fn a_role_opened_in_a_teams_tab_joins_the_team() {
+    e2e!();
+    let mut sb = Sandbox::new("team-join");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(
+        ".mirador/teams/squad.md",
+        "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n---\nShip small.\n",
+    );
+    sb.launch();
+    let first = sb.first_pane();
+    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first), host: None, dir: None })["tabId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let names = |sb: &Sandbox| -> Vec<String> {
+        let t = sb.teams().into_iter().find(|t| t["tabId"] == tab.as_str()).unwrap_or_default();
+        t["members"].as_array().into_iter().flatten().map(|m| m["name"].as_str().unwrap().to_string()).collect()
+    };
+    sb.wait_for("the team to list", LONG, || (names(&sb) == ["planner", "reviewer"]).then_some(()));
+    let planner = pane_of(&sb, "planner");
+
+    let agent_new = |role: Option<&str>, task: &str| Request::AgentNew {
+        role: role.map(String::from),
+        harness: None,
+        title: None,
+        task: Some(task.into()),
+        target: Some("split".into()),
+        pane_id: Some(planner.clone()),
+        host: None,
+        dir: None,
+    };
+    let joined = sb.call(agent_new(Some("reviewer"), "review the login form"))["paneId"].as_str().unwrap().to_string();
+    let member = sb.wait_for("reviewer-2", LONG, || sb.member("reviewer-2"));
+    assert_eq!(member["pane"], joined.as_str());
+    let start = sb.nth_start(&joined, 1);
+    assert_eq!(start.last().map(String::as_str), Some("review the login form"), "{start:?}");
+    assert_eq!(cmux_e2e::flag(&start, "--name").as_deref(), Some("reviewer-2"));
+    let prompt = std::fs::read_to_string(cmux_e2e::flag(&start, "--append-system-prompt-file").unwrap()).unwrap();
+    assert!(prompt.starts_with("You review.\n\n# Your team: squad"), "{prompt}");
+    assert!(
+        prompt.contains("- `planner` (planner, leads the team)") && prompt.contains("- `reviewer` (reviewer)"),
+        "{prompt}"
+    );
+
+    // A plain agent opens beside the planner all the same, but is no member.
+    let plain = sb.call(agent_new(None, "tidy the README"))["paneId"].as_str().unwrap().to_string();
+    let start = sb.nth_start(&plain, 1);
+    assert_eq!(start.last().map(String::as_str), Some("tidy the README"), "{start:?}");
+    assert_eq!(names(&sb), ["planner", "reviewer", "reviewer-2"]);
+
+    // Nor is a role asked for in a tab of its own: that tab is not the team's.
+    let apart = Request::AgentNew {
+        role: Some("reviewer".into()),
+        harness: None,
+        title: None,
+        task: Some("review it apart".into()),
+        target: Some("tab".into()),
+        pane_id: Some(planner.clone()),
+        host: None,
+        dir: None,
+    };
+    let apart = sb.call(apart)["paneId"].as_str().unwrap().to_string();
+    sb.nth_start(&apart, 1);
+    assert_eq!(names(&sb), ["planner", "reviewer", "reviewer-2"]);
 }
 
 /// The team that ships with Mirador starts in a sandbox with no role, way

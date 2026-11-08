@@ -173,6 +173,12 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::SetCamera { x, y, zoom, width, height } => {
             crate::commands::set_camera(app.state(), x, y, zoom, width, height)?;
+            // The board saves where it looks a moment after it moves, and
+            // that save would land over this one. Told, it shows this
+            // camera and drops the save. Not done for the board's own
+            // set_camera: the echo would cancel its next move.
+            let camera = state.workspace.lock().unwrap().camera;
+            let _ = app.emit("camera-set", camera);
             Ok(Value::Null)
         }
         Request::SetCardRect { pane_id, x, y, w, h } => {
@@ -420,8 +426,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::AgentHistory { name, all, pane_id, card } => {
             Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id, card)? }))
         }
-        Request::TeamAdd { role, name, pane_id } => {
-            let pane = crate::teams::team_add(app.clone(), app.state(), role, name, pane_id)?;
+        Request::TeamAdd { role, name, task, pane_id, title } => {
+            let from = sender(&state, pane_id.as_deref());
+            let pane = crate::teams::team_add_from(app.clone(), app.state(), role, name, task, pane_id, title, from)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::TeamRestart { members, pane_id } => {

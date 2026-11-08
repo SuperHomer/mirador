@@ -725,18 +725,10 @@ impl Sandbox {
         std::fs::write(ssh.join("config"), host.join("\n") + "\n").unwrap();
         // ssh reads ~/.ssh/config from the passwd entry's home, not $HOME:
         // without `-F` it would read the person's own, and know no `box`.
-        // And the app's ControlPath, under the sandbox's config directory,
-        // is over the 104 bytes a socket path can be, which ssh refuses:
-        // the first ControlPath ssh is given wins, so this short one does.
+        // The ControlPath is the app's own, under the sandbox's short
+        // runtime directory.
         let wrapper = self.root.join("bin/ssh");
-        std::fs::write(
-            &wrapper,
-            format!(
-                "#!/bin/sh\nexec /usr/bin/ssh -F \"$HOME/.ssh/config\" -o \"ControlPath={}/cm-%C\" \"$@\"\n",
-                self.runtime.display()
-            ),
-        )
-        .unwrap();
+        std::fs::write(&wrapper, "#!/bin/sh\nexec /usr/bin/ssh -F \"$HOME/.ssh/config\" \"$@\"\n").unwrap();
         #[cfg(unix)]
         std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         #[cfg(unix)]
@@ -791,11 +783,13 @@ impl Drop for Sandbox {
         // for ControlPersist, so the connection's master outlives them for
         // half an hour, and killing sshd's listener never reaches the
         // session it serves (`sshd-session`): tell the master to go first,
-        // which ends the session, through the wrapper so its config and
-        // ControlPath are the ones it was started with. No master, no harm.
+        // which ends the session, through the wrapper so its config is the
+        // one it was started with, at the app's ControlPath
+        // (`<XDG_RUNTIME_DIR>/mirador/ssh/cm-%C`). No master, no harm.
         if let Some(mut sshd) = self.sshd.take() {
+            let control = format!("ControlPath={}/mirador/ssh/cm-%C", self.runtime.display());
             let _ = Command::new(self.root.join("bin/ssh"))
-                .args(["-O", "exit", "box"])
+                .args(["-o", &control, "-O", "exit", "box"])
                 .env("HOME", &self.home)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())

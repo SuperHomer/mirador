@@ -1225,8 +1225,8 @@ pub async fn account_usage(app: AppHandle) -> Result<Vec<cmux_protocol::AccountU
         .map_err(|e| e.to_string())
 }
 
-/// Sets the integration up: `mira` on PATH (agents and `/mira-diff` call it
-/// by name), then the hooks and the skill (which call it by path). Answers
+/// Sets the integration up: `mira` on PATH (agents and the skills call it
+/// by name), then the hooks (which call it by path) and the skills. Answers
 /// the offer either way, so a failure is not offered again unasked — the
 /// palette entry is how to retry. Returns what was done, line by line.
 #[tauri::command]
@@ -1715,6 +1715,14 @@ pub fn open_agent(
 /// agent without a role: Claude Code, else Codex. `title` is the task's
 /// card's, instead of one made from the task. `remote` runs it on that ssh
 /// host instead, in that directory there ([`open_remote_agent`]).
+///
+/// A role split into a team's tab joins the running team, as `team add`
+/// would make it: an agent there that is not a member is in no `team
+/// list` and was never told its teammates, so nobody could hand it work.
+/// A plain Claude Code or Codex does not join, because a seat is a role.
+/// A role with `remote` there is refused, for now: a member on a remote is
+/// not something `team add` can make yet, and outside the team it would be
+/// the agent nobody could hand work to.
 #[allow(clippy::too_many_arguments)]
 pub fn open_agent_from(
     app: AppHandle,
@@ -1735,6 +1743,14 @@ pub fn open_agent_from(
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if let Some(role) = role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        if !tab && crate::teams::team_here(&state, Some(&source)).is_ok() {
+            if remote.is_some() {
+                return Err("a role on a remote in a team's tab is not done yet: start it in a tab of its own (--tab), or from another tab".into());
+            }
+            return crate::teams::team_add_from(app, state, role.to_string(), None, task, Some(source), title, from);
+        }
+    }
     // The agent works where it was asked from, whichever way it opens, and
     // gets the roles that directory sees: its repository's, then yours.
     let cwd = state

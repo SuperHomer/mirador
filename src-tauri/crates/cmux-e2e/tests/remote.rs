@@ -369,9 +369,24 @@ fn a_team_runs_on_the_remote() {
     let err = sb.request(Request::TeamRestart { members: vec![], pane_id: Some(planner.clone()) }).expect_err("not on a remote yet");
     assert!(err.contains("not done yet"), "{err}");
     let err = sb
-        .request(Request::TeamAdd { role: "reviewer".into(), name: None, pane_id: Some(planner) })
+        .request(Request::TeamAdd { role: "reviewer".into(), name: None, pane_id: Some(planner), task: None, title: None })
         .expect_err("not on a remote yet");
     assert!(err.contains("adding a member there is not done yet"), "{err}");
+    // A role on a remote asked for in a team's tab would be a member there,
+    // or an agent outside the team: neither is done yet.
+    let err = sb
+        .request(Request::AgentNew {
+            role: Some("reviewer".into()),
+            harness: None,
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(reviewer.clone()),
+            host: Some("box".into()),
+            dir: Some(dir.clone()),
+        })
+        .expect_err("not in a team's tab yet");
+    assert!(err.contains("in a team's tab is not done yet"), "{err}");
 }
 
 fn pane_of(sb: &Sandbox, name: &str) -> String {

@@ -105,12 +105,12 @@ downloads, the feature tour and the keybinding reference.
   `tokyo-night`, `gruvbox-dark`, `nord`), configurable keybindings,
   command palette (`mod+K`)
 - **Claude Code integration**: lights up tabs when your agent needs you,
-  enables per-pane session resume, adds a `/mira-diff` skill for
-  reviewing the turn's work, and (macOS, Linux) wraps your status line to
-  keep your plan's limits, your own line still shown. Mirador offers to
-  set it up on first launch
-  when it finds Claude Code (or: palette → *Set Up Claude Code
-  Integration*, or `mira install && mira hooks setup`)
+  enables per-pane session resume, adds a `/mira-diff` skill for reviewing
+  the turn's work and a `mira` skill that teaches Claude the CLI, and
+  (macOS, Linux) wraps your status line to keep your plan's limits, your
+  own line still shown. Mirador offers to set it up on first launch when
+  it finds Claude Code (or: palette → *Set Up Claude Code Integration*,
+  or `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself
@@ -129,8 +129,8 @@ npm run tauri build          # builds Mirador.app + .dmg (and the mira CLI)
 
 The bundle lands in `src-tauri/target/release/bundle/`. If you use Claude
 Code, the first launch offers to set up the integration — `mira` on your
-PATH, the hooks and `/mira-diff` — in one click. To do it by hand instead
-(the CLI ships inside the app):
+PATH, the hooks, `/mira-diff` and the `mira` skill — in one click. To do it
+by hand instead (the CLI ships inside the app):
 
 ```bash
 /Applications/Mirador.app/Contents/MacOS/mira install   # → ~/.local/bin/mira
@@ -238,6 +238,15 @@ publishes the draft, so no updater ever sees a release without its manifest.
 The app asks for
 `latest-{{target}}-{{arch}}.json` under `/releases/latest/download/`, which
 GitHub resolves to the newest release, so no workflow rewrites any config.
+
+Each release also carries the `mira` CLI alone for Linux,
+`mira-linux-x86_64` and `mira-linux-aarch64`
+([build-linux-cli.yml](.github/workflows/build-linux-cli.yml)), static
+against musl so that they run on any distribution. Mirador has no Linux
+app; these are the first piece of running agents on a remote Linux
+computer over SSH, which a later release wires up — on their own they
+reach no app. They are named by what `uname -m` prints there, and are not
+updater payloads.
 
 ## Development
 
@@ -555,7 +564,7 @@ Mirador keeps track of the team with its tab, across restarts:
 mira team list               # each member: running, exited, or closed
 mira team restart            # start the exited and closed ones again
 mira team restart dev-2      # …or just these
-mira team add reviewer       # another member, beside this pane: reviewer-2
+mira team add reviewer "look at the auth change"  # reviewer-2, beside this pane, with its first task
 mira team list --defined     # the teams this directory can start
 mira team cost squad         # what it costs to start, and a turn, before you start it
 ```
@@ -623,6 +632,10 @@ setup`) to see an agent stop.
 is idle — never into a shell running something else, which it reports as
 `busy` — and opens a new pane beside a teammate for one whose pane was
 closed. Run `team add` and `team restart` from a pane of the team's tab.
+A role started in a team's tab — from + New, a pane's menu, the palette
+or `mira agent new --role` — is a `team add`: it joins the running team
+for the session, told its teammates, and the team's file is never
+changed. A plain Claude Code or Codex started there is no member.
 
 The **agent wall** is a way of showing a tab: in place of its splits, the
 tab's agents in a grid — roles, and any agent you started by hand:

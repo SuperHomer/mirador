@@ -771,7 +771,7 @@ export const getConfig = () => invoke<ResolvedConfig>("get_config");
 /** Whether to offer the Claude Code integration (decided in Rust). */
 export const claudeIntegrationOffer = () =>
   invoke<boolean>("claude_integration_offer");
-/** `mira` on PATH, then the hooks and `/mira-diff`. Lines of what was done. */
+/** `mira` on PATH, then the hooks and the skills. Lines of what was done. */
 export const setupClaudeIntegration = () =>
   invoke<string[]>("setup_claude_integration");
 /** "Not now": the offer is not made again. */
