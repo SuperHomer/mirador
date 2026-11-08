@@ -199,9 +199,10 @@ enum Command {
         run: Option<String>,
     },
     /// Install or remove the Claude Code integration: the hooks that light
-    /// up Mirador tabs, the `/mira-diff` slash command, and (on macOS and
-    /// Linux) a wrapper in front of your status line that keeps your
-    /// plan's limits, your own status line still shown.
+    /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
+    /// teaches Claude this CLI, and (on macOS and Linux) a wrapper in front
+    /// of your status line that keeps your plan's limits, your own status
+    /// line still shown.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -2184,7 +2185,7 @@ fn own_path() -> Result<std::path::PathBuf, String> {
 }
 
 /// Idempotently installs (or removes) the Mirador hooks in
-/// ~/.claude/settings.json and the `/mira-diff` skill beside them.
+/// ~/.claude/settings.json and the `/mira-diff` and `mira` skills beside them.
 fn hooks(action: &str) -> Result<(), String> {
     use cmux_core::claude_integration::{self, Action};
     let action = match action {
@@ -2196,7 +2197,7 @@ fn hooks(action: &str) -> Result<(), String> {
         println!("{line}");
     }
     if action == Action::Setup {
-        println!("note: agents and /mira-diff call `mira` by name; `mira install` puts it on PATH");
+        println!("note: agents and the skills call `mira` by name; `mira install` puts it on PATH");
     }
     Ok(())
 }
