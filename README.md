@@ -241,11 +241,12 @@ GitHub resolves to the newest release, so no workflow rewrites any config.
 Each release also carries the `mira` CLI alone for Linux,
 `mira-linux-x86_64` and `mira-linux-aarch64`
 ([build-linux-cli.yml](.github/workflows/build-linux-cli.yml)), static
-against musl so that they run on any distribution. Mirador has no Linux
-app; these are the first piece of running agents on a remote Linux
-computer over SSH, which a later release wires up — on their own they
-reach no app. They are named by what `uname -m` prints there, and are not
-updater payloads.
+against musl so that they run on any distribution, and for Windows,
+`mira-windows-x86_64.exe`, the `mira.exe` the installers carry. Mirador
+has no Linux app; these are the first piece of running agents on a remote
+Linux or Windows computer over SSH, which a later release wires up — on
+their own they reach no app. They are named by OS and architecture,
+x86_64 or aarch64 as `uname -m` spells them, and are not updater payloads.
 
 ## Development
 
