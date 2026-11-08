@@ -40,3 +40,38 @@ fn an_ssh_pane_reaches_the_sandboxs_own_remote() {
     assert!(lines.contains(&"pane=[]"), "{screen}");
     assert!(lines.iter().any(|l| l.starts_with("ssh=127.0.0.1 ")), "over ssh, not a local shell: {screen}");
 }
+
+/// A `mira` on the remote has no discovery file there, so it finds no app
+/// — until the app forwards its socket over the pane's connection, and
+/// `MIRA_SOCKET` names it: then it is this app that answers.
+#[test]
+fn mira_on_the_remote_reaches_the_app_through_its_forwarded_socket() {
+    e2e!();
+    let mut sb = Sandbox::new("forward");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    let pane = sb.call(Request::SshOpen { host: "box".into(), target: Some("tab".into()) })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // zsh's prompt: the login shell is the passwd entry's, zsh where this runs.
+    sb.wait_for_screen(&pane, "the remote shell's prompt", LONG, |s| s.lines().any(|l| l.trim_end().ends_with('%')));
+
+    sb.type_into(&pane, "mira list-tabs\r");
+    sb.wait_for_screen(&pane, "mira finding no app", LONG, |s| s.contains("Mirador is not running"));
+
+    let forwarded = sb.call(Request::SshForwardApp { pane_id: Some(pane.clone()) });
+    assert_eq!(forwarded["paneId"], pane.as_str());
+    let socket = forwarded["socket"].as_str().unwrap().to_string();
+    assert!(socket.ends_with(".sock") && socket.len() < 104, "{socket}");
+    sb.type_into(&pane, &format!("MIRA_SOCKET={socket} mira list-tabs\r"));
+    let tabs: Vec<String> = sb.snapshot()["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(tabs.len(), 2, "the first tab and the ssh pane's");
+    sb.wait_for_screen(&pane, "the app's tabs, listed on the remote", LONG, |s| tabs.iter().all(|t| s.contains(t)));
+}

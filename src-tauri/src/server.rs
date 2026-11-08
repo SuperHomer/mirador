@@ -650,6 +650,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             cmux_core::ssh::forward(&host, port, cancel)?;
             Ok(json!({ "paneId": pane, "port": port, "cancelled": cancel }))
         }
+        #[cfg(not(windows))]
+        Request::SshForwardApp { pane_id } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            let socket = cmux_core::ssh::forward_socket(&host, &cmux_core::ipc::default_socket_path())?;
+            Ok(json!({ "paneId": pane, "socket": socket }))
+        }
+        // A named pipe cannot be forwarded: Windows needs another way.
+        #[cfg(windows)]
+        Request::SshForwardApp { .. } => Err("forwarding the app over ssh is not done on Windows yet".into()),
     }
 }
 

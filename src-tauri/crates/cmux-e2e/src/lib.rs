@@ -669,10 +669,12 @@ impl Sandbox {
     /// Starts an sshd of the sandbox's own, on a free local port, and adds a
     /// host `box` to the sandbox home's `~/.ssh/config` that reaches it with
     /// a key of its own: a remote computer, which is this one. A login
-    /// there looks like the sandbox — its home, runtime and config
-    /// directories, its `bin` first on the PATH, its agents' log — through
+    /// there looks like the sandbox — its home and runtime directory, its
+    /// `bin`, `mira` in it, first on the PATH, its agents' log — through
     /// sshd's `SetEnv`, which overrides what sshd took from the passwd
-    /// entry. sshd runs as the person running the tests, so it needs no
+    /// entry. Not its config directory: a remote has no discovery file of
+    /// the app's, so a `mira` there finds the app only through what it is
+    /// given. sshd runs as the person running the tests, so it needs no
     /// root: a high port, a host key it owns, no PAM.
     pub fn sshd(&mut self) {
         assert!(self.sshd.is_none(), "sshd already running");
@@ -691,7 +693,6 @@ impl Sandbox {
         let set_env: String = [
             ("HOME", self.home.display().to_string()),
             ("XDG_RUNTIME_DIR", self.runtime.display().to_string()),
-            ("XDG_CONFIG_HOME", self.config.display().to_string()),
             ("PATH", path),
             ("E2E_AGENT_LOG", self.agent_log.display().to_string()),
         ]
@@ -738,6 +739,8 @@ impl Sandbox {
         .unwrap();
         #[cfg(unix)]
         std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(self.bin("mira"), self.root.join("bin/mira")).unwrap();
         // A login over ssh runs /etc/zprofile, whose path_helper puts the
         // system's directories first: the sandbox's `bin` goes first again.
         std::fs::write(self.home.join(".zprofile"), format!("export PATH=\"{}:$PATH\"\n", self.root.join("bin").display()))

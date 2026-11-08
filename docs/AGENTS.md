@@ -901,6 +901,7 @@ mira ssh open "-p 2222 user@box"   # or a full destination with options
 mira ssh open prod --tab
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
+mira ssh forward --app [--pane <id>]   # this app's socket, on the remote; prints its path there
 ```
 
 The pane runs the *system* ssh, so agent auth, 2FA prompts, and ProxyJump
@@ -912,6 +913,18 @@ process and authenticates again.
 Forwarding is what makes a remote dev server reviewable: `mira ssh forward
 3000` then `mira browser open http://localhost:3000` and the browser pane
 renders the remote app.
+
+`mira ssh forward --app` goes the other way, macOS and Linux only for
+now: it forwards this app's socket to the pane's host, over the same
+ControlMaster, and prints the socket's path there:
+`$XDG_RUNTIME_DIR/mira-<hash>.sock` on the remote (`/tmp` without one, or
+when that path would be too long for a socket), named for this app's own
+socket, so it is the same path after the app restarts. sshd makes it
+owner-only.
+A `mira` on the remote reaches this app with `MIRA_SOCKET` set to that
+path. `MIRA_SOCKET`, wherever it is set, names the socket outright,
+before any discovery file; a remote has none, so without it `mira`
+there says Mirador is not running.
 
 Disconnects leave the pane idle with `[press any key to reconnect]`;
 restarting Mirador restores remote panes idle too — it never re-opens an

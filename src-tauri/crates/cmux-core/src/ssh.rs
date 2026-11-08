@@ -91,6 +91,71 @@ pub fn forward(host: &str, port: u16, cancel: bool) -> Result<(), String> {
     }
 }
 
+/// Makes this app's socket, `local`, reachable on `host` over the pane's
+/// ControlMaster, as [`forward`] does a port, so a `mira` run there
+/// reaches this app through [`crate::ipc::SOCKET_ENV`]. Returns the
+/// socket's path on the remote. sshd creates it owner-only (its
+/// `StreamLocalBindMask` is 0177 by default): nobody else on that
+/// computer reaches the app through it.
+#[cfg(not(windows))]
+pub fn forward_socket(host: &str, local: &std::path::Path) -> Result<String, String> {
+    let dir = remote_shell(host, r#"printf %s "${XDG_RUNTIME_DIR:-/tmp}""#)?;
+    let remote = remote_socket_path(&dir, local);
+    // sshd does not bind over a file already there (`StreamLocalBindUnlink`
+    // is off by default), and this instance's earlier forward, from before
+    // a restart, leaves its socket behind.
+    // The remote's shell is a POSIX one: single quotes hold anything.
+    remote_shell(host, &format!("rm -f '{}'", remote.replace('\'', r"'\''")))?;
+    let mut cmd = Command::new("ssh");
+    cmd.arg("-O").arg("forward");
+    for opt in control_opts() {
+        cmd.arg("-o").arg(opt);
+    }
+    cmd.arg("-R").arg(format!("{remote}:{}", local.display())).args(host_args(host));
+    let output = cmd.output().map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("socket forward failed (is the SSH pane connected?): {}", err.trim()));
+    }
+    Ok(remote)
+}
+
+/// Runs `command` on `host` over the pane's connection, and gives what it
+/// printed.
+#[cfg(not(windows))]
+fn remote_shell(host: &str, command: &str) -> Result<String, String> {
+    let mut cmd = Command::new("ssh");
+    // Never a password prompt: nobody is there to answer it.
+    cmd.arg("-o").arg("BatchMode=yes");
+    for opt in control_opts() {
+        cmd.arg("-o").arg(opt);
+    }
+    let output = cmd.args(host_args(host)).arg(command).output().map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ssh {host} failed (is the SSH pane connected?): {}", err.trim()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Where the app's socket `local` goes on a remote whose runtime directory
+/// is `dir`: named for `local`, which only one running app serves and the
+/// same app serves again after a restart, so agents told the path once
+/// still reach it after an update. Short, because a socket path over ~104
+/// bytes cannot be bound there either; `/tmp` when `dir` will not do.
+pub fn remote_socket_path(dir: &str, local: &std::path::Path) -> String {
+    // FNV-1a: a few lines, and the same in every Rust release, which
+    // std's hasher does not promise.
+    let hash = local.to_string_lossy().bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+    let name = format!("mira-{hash:08x}.sock");
+    let dir = dir.trim().trim_end_matches('/');
+    if dir.starts_with('/') && dir.len() + 1 + name.len() < 104 {
+        format!("{dir}/{name}")
+    } else {
+        format!("/tmp/{name}")
+    }
+}
+
 /// Windows: no connection to piggyback on, so each forward is a dedicated
 /// `ssh -N -L` child that Mirador owns and kills on cancel (or on exit,
 /// since it dies with its parent's process tree). Authentication happens
@@ -188,6 +253,25 @@ pub fn config_hosts() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The app's socket on a remote: in its runtime directory, named for
+    /// the local socket — the same name after a restart, another for
+    /// another instance — or in /tmp when that directory is missing, not
+    /// absolute, or too deep for a socket path.
+    #[test]
+    fn the_apps_socket_on_a_remote_is_short_and_this_instances() {
+        let local = std::path::Path::new("/tmp/mira.sock");
+        // FNV-1a of the path, pinned: a change here strands remote agents.
+        assert_eq!(remote_socket_path("/run/user/1000", local), "/run/user/1000/mira-5ee79133.sock");
+        assert_eq!(remote_socket_path("/run/user/1000/\n", local), "/run/user/1000/mira-5ee79133.sock");
+        assert_eq!(
+            remote_socket_path("/tmp", std::path::Path::new("/run/user/1000/mira.sock")),
+            "/tmp/mira-2e8a4af1.sock"
+        );
+        for dir in ["", "/", "run/user", &format!("/{}", "d".repeat(100))] {
+            assert_eq!(remote_socket_path(dir, local), "/tmp/mira-5ee79133.sock", "{dir}");
+        }
+    }
 
     #[test]
     fn interactive_command_uses_ssh_tt_and_control_master() {

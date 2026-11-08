@@ -501,9 +501,14 @@ enum SshAction {
     /// List host aliases from ~/.ssh/config.
     Hosts,
     /// Forward localhost:PORT to the remote's localhost:PORT (so the
-    /// browser pane can reach a remote dev server).
+    /// browser pane can reach a remote dev server). With --app, forward
+    /// this app's socket instead and print its path on the remote: a
+    /// `mira` there reaches the app with MIRA_SOCKET set to it.
     Forward {
-        port: u16,
+        #[arg(required_unless_present = "app")]
+        port: Option<u16>,
+        #[arg(long, conflicts_with = "port")]
+        app: bool,
         #[arg(long)]
         pane: Option<String>,
     },
@@ -917,9 +922,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 target: tab.then(|| "tab".to_string()),
             },
             SshAction::Hosts => Request::SshHosts,
-            SshAction::Forward { port, pane } => Request::SshForward {
+            SshAction::Forward { app: true, pane, .. } => {
+                let resp = send_request(Request::SshForwardApp { pane_id: pane })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                println!("{}", resp.data.as_ref().and_then(|d| d["socket"].as_str()).unwrap_or_default());
+                return Ok(());
+            }
+            SshAction::Forward { port, pane, .. } => Request::SshForward {
                 pane_id: pane,
-                port,
+                port: port.ok_or("a port, or --app")?,
                 cancel: false,
             },
             SshAction::Unforward { port, pane } => Request::SshForward {
@@ -1125,10 +1138,18 @@ fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     use cmux_protocol::RequestEnvelope;
     use std::io::{BufRead, BufReader};
 
-    let disc = cmux_core::ipc::read_discovery()
-        .ok_or("Mirador is not running (no socket discovery file)")?;
-    let stream = cmux_core::transport::connect(&disc.socket)
-        .map_err(|e| format!("Mirador is not running ({e})"))?;
+    let named = std::env::var_os(cmux_core::ipc::SOCKET_ENV).filter(|s| !s.is_empty());
+    let stream = match named {
+        Some(socket) => cmux_core::transport::connect(std::path::Path::new(&socket)).map_err(|e| {
+            format!("no Mirador at {}={} ({e})", cmux_core::ipc::SOCKET_ENV, socket.to_string_lossy())
+        })?,
+        None => {
+            let disc = cmux_core::ipc::read_discovery()
+                .ok_or("Mirador is not running (no socket discovery file)")?;
+            cmux_core::transport::connect(&disc.socket)
+                .map_err(|e| format!("Mirador is not running ({e})"))?
+        }
+    };
 
     let envelope = RequestEnvelope { id: Some(1), req };
     let mut line = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
@@ -2371,6 +2392,24 @@ mod tests {
 
         std::env::remove_var(cmux_core::pty::PANE_ENV);
         assert_eq!(own_pane(), None);
+    }
+
+    /// `ssh forward` takes a port, or --app for the app's socket: not both,
+    /// not neither.
+    #[test]
+    fn ssh_forward_takes_a_port_or_the_app() {
+        let Command::Ssh { action: SshAction::Forward { port, app, .. } } = parse(&["ssh", "forward", "3000"]) else {
+            panic!()
+        };
+        assert_eq!((port, app), (Some(3000), false));
+        let Command::Ssh { action: SshAction::Forward { port, app, pane } } =
+            parse(&["ssh", "forward", "--app", "--pane", "p1"])
+        else {
+            panic!()
+        };
+        assert_eq!((port, app, pane.as_deref()), (None, true, Some("p1")));
+        assert!(Cli::try_parse_from(["mira", "ssh", "forward"]).is_err());
+        assert!(Cli::try_parse_from(["mira", "ssh", "forward", "3000", "--app"]).is_err());
     }
 
     /// Screenshots taken in the same millisecond each get a file of their

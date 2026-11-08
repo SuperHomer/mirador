@@ -828,6 +828,13 @@ pub enum Request {
         #[serde(default)]
         cancel: bool,
     },
+    /// Forwards this app's socket to a remote pane's host, over its
+    /// ControlMaster: a `mira` there reaches the app with `MIRA_SOCKET`
+    /// set to the path it answers (`socket`).
+    SshForwardApp {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Opens a commit-graph pane (split of the source pane, or a new tab),
     /// for the repository the calling pane sits in.
     GraphOpen {
