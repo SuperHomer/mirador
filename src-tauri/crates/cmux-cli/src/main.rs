@@ -305,15 +305,16 @@ enum TaskAction {
         #[arg(long)]
         all: bool,
     },
-    /// Write a card in this tab, in To do, and print its id. It moves only
-    /// when moved: `task move`, `task done`.
+    /// Write a card in To do, and print its id: on this tab's board, or with
+    /// --to on the board of that agent's tab. It moves only when moved:
+    /// `task move`, `task done`.
     Add {
         // Not trailing_var_arg: `--to` after the title is an option, not
         // more title.
         #[arg(required = true)]
         title: Vec<String>,
-        /// The agent it is for: a teammate's name in this tab, as
-        /// `agent send` takes it.
+        /// The agent it is for: a teammate's name in this tab, or
+        /// `<team>/<name>` in another tab's team, as `agent send` takes it.
         #[arg(long)]
         to: Option<String>,
         /// More about it than the title says.
@@ -360,8 +361,9 @@ enum AgentAction {
     },
     /// Type a message into another agent's terminal, as its next prompt.
     /// TO is a teammate's name in this tab — a team member's, a session's,
-    /// a role's — or a pane id. It says who it is from when this pane is
-    /// an agent. Refused for a pane running no agent, and for an agent
+    /// a role's — or `<team>/<name>` for an agent of another tab's running
+    /// team, or a pane id. It says who it is from when this pane is an
+    /// agent. Refused for a pane running no agent, and for an agent
     /// waiting on a person (a permission prompt) unless --force.
     Send {
         to: String,
@@ -420,7 +422,8 @@ enum AgentAction {
     },
     /// Wait until an agent has worked and stopped: exit 0 when it is idle,
     /// 2 when it stopped to ask a person, 3 when it exited, 124 on timeout.
-    /// Needs Claude Code's hooks (`mira hooks setup`) to see it stop.
+    /// NAME as `agent send` takes it, `<team>/<name>` included. Needs
+    /// Claude Code's hooks (`mira hooks setup`) to see it stop.
     Wait {
         name: String,
         #[arg(long, default_value_t = 1800)]

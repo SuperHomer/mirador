@@ -60,9 +60,10 @@ pub fn given(
     );
 }
 
-/// Writes a card titled `title`, with `description` when given, in
-/// `caller`'s tab, for the agent `to` names there — which must be one — or
-/// for nobody yet. Its id.
+/// Writes a card titled `title`, with `description` when given, for the
+/// agent `to` names as `agent send` finds it — which must be one — on that
+/// agent's tab's board, another tab's for `<team>/<name>`; or for nobody
+/// yet, on `caller`'s tab's board. Its id.
 pub fn add(
     app: &AppHandle,
     title: &str,
@@ -81,8 +82,18 @@ pub fn add(
         Some(to) => Some(crate::handoff::find(state, &to, Some(caller.clone()))?),
         None => None,
     };
-    let (tab, team, _) = whereabouts(state, &caller);
-    let to = pane.as_deref().and_then(|p| whereabouts(state, p).2);
+    // On the board of the tab the card's agent is in, as `given` files a
+    // message's: the caller's board would hold a card for a pane it lacks.
+    let (tab, team, to) = match &pane {
+        Some(pane) => whereabouts(state, pane),
+        None => {
+            let (tab, team, _) = whereabouts(state, &caller);
+            (tab, team, None)
+        }
+    };
+    // Named as the board it lands on can reply to: from another tab, by
+    // `<team>/<name>` or its pane id (`handoff::sender_in`).
+    let from = crate::handoff::sender_in(state, &caller, tab.as_deref()).unwrap_or(from);
     let card = cmux_core::tasks::new_id();
     record(
         app,
@@ -102,16 +113,20 @@ pub fn add(
     Ok(card)
 }
 
-/// Puts the card written by hand that `id` names in `column`.
-pub fn move_card(app: &AppHandle, id: &str, column: TaskColumn, by: String) -> Result<(), String> {
-    let card = written(&app.state::<AppState>(), id)?;
-    record(app, TaskEventKind::Moved { card, column, by });
+/// Puts the card written by hand that `id` names in `column`, moved `by`
+/// the agent in `mover` when there is one — named as the card's tab sees
+/// it (`handoff::sender_in`) — else `by`.
+pub fn move_card(app: &AppHandle, id: &str, column: TaskColumn, by: String, mover: Option<String>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let card = written(&state, id)?;
+    let by = mover.and_then(|p| crate::handoff::sender_in(&state, &p, card.tab.as_deref())).unwrap_or(by);
+    record(app, TaskEventKind::Moved { card: card.id, column, by });
     Ok(())
 }
 
-/// The whole id of the card written by hand that `id` names.
-pub fn written(state: &AppState, id: &str) -> Result<String, String> {
-    Ok(cmux_core::tasks::written(&cmux_core::tasks::cards(&events(state)), id)?.id.clone())
+/// The card written by hand that `id`, or the start of it, names.
+pub fn written(state: &AppState, id: &str) -> Result<TaskCard, String> {
+    Ok(cmux_core::tasks::written(&cmux_core::tasks::cards(&events(state)), id)?.clone())
 }
 
 /// The tab and team of `pane`, and its name as `agent list` shows it.
@@ -208,8 +223,7 @@ pub fn task_add(
 /// on a person — and puts the card in Doing.
 #[tauri::command]
 pub fn task_send(app: AppHandle, state: State<'_, AppState>, card: String, pane_id: String) -> Result<String, String> {
-    let cards = cmux_core::tasks::cards(&events(&state));
-    let card = cmux_core::tasks::written(&cards, &card)?.clone();
+    let card = written(&state, &card)?;
     send_card(&app, &card, &pane_id)
 }
 

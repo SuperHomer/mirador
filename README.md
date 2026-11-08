@@ -619,13 +619,15 @@ mira agent wait dev-2                           # block until dev-2 has finished
 `agent send` types the message into the teammate's terminal as its next
 prompt, headed with who it is from, as one bracketed paste — a message of
 several lines arrives whole. A name is a teammate's in your tab (a team
-member's, a Claude session's, a role's); a pane id reaches any pane. It
-refuses a pane running no agent, where the message would run as a shell
-command, and an agent waiting on you (a permission prompt), where it would
-answer the prompt — `--force` overrides that one. `agent wait` exits 0 once
-the agent has worked and stopped, 2 if it stopped to ask you something, 3
-if it exited, 124 on `--timeout`; it needs Claude Code's hooks (`mira hooks
-setup`) to see an agent stop.
+member's, a Claude session's, a role's); `<team>/<name>` reaches a member of
+another tab's team, and a message across tabs names its sender the way the
+recipient can reply to, `<team>/<name>` or a pane id; a pane id reaches any
+pane. It refuses a pane running no agent, where the message would run as a
+shell command, and an agent waiting on you (a permission prompt), where it
+would answer the prompt — `--force` overrides that one. `agent wait` exits 0
+once the agent has worked and stopped, 2 if it stopped to ask you something,
+3 if it exited, 124 on `--timeout`; it needs Claude Code's hooks (`mira
+hooks setup`) to see an agent stop.
 
 `team restart` types a member's command back into its pane when its shell
 is idle — never into a shell running something else, which it reports as
