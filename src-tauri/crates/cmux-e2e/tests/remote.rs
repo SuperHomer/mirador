@@ -44,8 +44,12 @@ fn remote_pane(sb: &Sandbox) -> String {
         .as_str()
         .unwrap()
         .to_string();
-    // zsh's prompt: the login shell is the passwd entry's, zsh where this runs.
-    sb.wait_for_screen(&pane, "the remote shell's prompt", LONG, |s| s.lines().any(|l| l.trim_end().ends_with('%')));
+    // The login shell is the passwd entry's: zsh on this Mac (`host% `),
+    // bash on CI's runner (`host:dir user$ `), after macOS's banner urging
+    // zsh. The prompt is the last line written.
+    sb.wait_for_screen(&pane, "the remote shell's prompt", LONG, |s| {
+        s.lines().map(str::trim_end).rfind(|l| !l.is_empty()).is_some_and(|l| l.ends_with('%') || l.ends_with('$'))
+    });
     pane
 }
 

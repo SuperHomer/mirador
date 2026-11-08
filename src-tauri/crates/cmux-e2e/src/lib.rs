@@ -741,10 +741,15 @@ impl Sandbox {
         std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(self.bin("mira"), self.root.join("bin/mira")).unwrap();
-        // A login over ssh runs /etc/zprofile, whose path_helper puts the
-        // system's directories first: the sandbox's `bin` goes first again.
-        std::fs::write(self.home.join(".zprofile"), format!("export PATH=\"{}:$PATH\"\n", self.root.join("bin").display()))
-            .unwrap();
+        // A login over ssh runs the system's profile, whose path_helper puts
+        // the system's directories first: the sandbox's `bin` goes first
+        // again, from the profile the login shell reads next — zsh's (this
+        // Mac's passwd shell), bash's (CI's runner), which reads only the
+        // first of .bash_profile, .bash_login and .profile, or sh's.
+        let path = format!("export PATH=\"{}:$PATH\"\n", self.root.join("bin").display());
+        for profile in [".zprofile", ".bash_profile", ".profile"] {
+            std::fs::write(self.home.join(profile), &path).unwrap();
+        }
         let log = std::fs::File::create(self.root.join("sshd.log")).unwrap();
         let child = Command::new("/usr/sbin/sshd")
             .args(["-D", "-e", "-p", &port.to_string(), "-f"])
