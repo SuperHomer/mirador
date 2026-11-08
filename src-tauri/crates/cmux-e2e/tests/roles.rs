@@ -16,6 +16,8 @@ fn agent_new(sb: &Sandbox, role: &str, from: &str) -> Result<String, String> {
         task: None,
         target: None,
         pane_id: Some(from.into()),
+        host: None,
+        dir: None,
     })
     .map(|v| v["paneId"].as_str().unwrap().to_string())
 }

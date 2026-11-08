@@ -323,7 +323,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             task,
             target,
             pane_id,
+            host,
+            dir,
         } => {
+            let remote = match (host, dir) {
+                (Some(host), Some(dir)) => Some((host, dir)),
+                (None, None) => None,
+                _ => return Err("a host and a directory there go together: give both, or neither".into()),
+            };
             let from = sender(&state, pane_id.as_deref());
             let pane_id = crate::commands::open_agent_from(
                 app.clone(),
@@ -337,6 +344,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 harness,
                 title,
                 from,
+                remote,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }

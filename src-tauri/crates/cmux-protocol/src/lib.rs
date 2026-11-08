@@ -468,6 +468,12 @@ pub enum Request {
         /// starts in; the focused pane when absent.
         #[serde(default)]
         pane_id: Option<String>,
+        /// An ssh host to run it on instead, in `dir` there. Both or
+        /// neither; plain Claude Code only, for now.
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
     },
     /// Every agent pane and what it is doing.
     AgentList,
@@ -1025,6 +1031,9 @@ pub struct AgentInfo {
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,
     pub branch: Option<String>,
+    /// The ssh host it runs on, for an agent on a remote computer.
+    #[serde(default)]
+    pub remote_host: Option<String>,
 }
 
 /// How far an agent is through the task list it keeps (`TaskCreate` /

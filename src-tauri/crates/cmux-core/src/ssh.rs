@@ -47,8 +47,11 @@ fn host_args(host: &str) -> Vec<String> {
     host.split_whitespace().map(String::from).collect()
 }
 
-/// The interactive `ssh -tt` command for a remote pane.
-pub fn interactive_command(host: &str) -> CommandBuilder {
+/// The interactive `ssh -tt` command for a remote pane: a login shell, or
+/// with `run`, an agent's run script there ([`run_script`]), as `sh <run>`
+/// — plain words ([`is_plain_path`]), which any login shell runs as they
+/// are.
+pub fn interactive_command(host: &str, run: Option<&str>) -> CommandBuilder {
     #[cfg(not(windows))]
     let _ = std::fs::create_dir_all(control_dir());
     let mut cmd = CommandBuilder::new("ssh");
@@ -59,6 +62,10 @@ pub fn interactive_command(host: &str) -> CommandBuilder {
     }
     for arg in host_args(host) {
         cmd.arg(arg);
+    }
+    if let Some(run) = run {
+        cmd.arg("sh");
+        cmd.arg(run);
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -198,6 +205,53 @@ fn ensure_mira_script(version: &str) -> String {
 pub fn ensure_mira(host: &str, version: &str) -> Result<String, String> {
     let path = remote_shell(host, &ensure_mira_script(version))?;
     Ok(path.trim().to_string())
+}
+
+/// The remote's home directory, where an agent's run script goes. It ends
+/// up in commands given to ssh as plain words, so one with a space or
+/// anything a shell would read is refused rather than quoted for a shell
+/// Mirador cannot know.
+#[cfg(not(windows))]
+pub fn remote_home(host: &str) -> Result<String, String> {
+    let home = remote_shell(host, r#"printf %s "$HOME""#)?;
+    if !home.starts_with('/') || !is_plain_path(&home) {
+        return Err(format!("{host}'s home directory, `{home}`, is not one an agent can be started in from Mirador yet"));
+    }
+    Ok(home)
+}
+
+/// Whether `path` is one every shell reads as one word, unquoted.
+pub fn is_plain_path(path: &str) -> bool {
+    !path.is_empty() && path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
+}
+
+/// The script an agent's pane runs on a remote, saved there as `run` (a
+/// plain path). It runs twice. First through the person's login shell, as
+/// an interactive login shell: what a terminal of theirs there would be,
+/// which reads their profile and their rc file alike. A command over ssh
+/// otherwise gets neither, and `claude` installed through nvm or `npm -g`
+/// is only on the PATH those set (nvm's installer writes to `.bashrc` or
+/// `.zshrc`, which Ubuntu's own `.bashrc` skips unless interactive). That
+/// shell is given nothing but `exec /bin/sh <run>`, plain words, so its
+/// own syntax never matters, fish included. Then `sh` again, under that
+/// PATH: it goes to `dir`, saying so loudly if there is none, and becomes
+/// `launch`, quoted for POSIX sh, with the pane and the app's socket in
+/// its environment.
+#[cfg_attr(windows, allow(dead_code))]
+pub fn run_script(run: &str, pane: &str, socket: &str, dir: &str, launch: &str) -> String {
+    let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+    let shown = dir.replace(['"', '\\', '$', '`'], "_");
+    [
+        r#"if [ "$MIRA_RUN" != agent ]; then"#.to_string(),
+        format!("  export MIRA_RUN=agent MIRA_PANE={} MIRA_SOCKET={}", quote(pane), quote(socket)),
+        format!(r#"  exec "${{SHELL:-/bin/sh}}" -l -i -c 'exec /bin/sh {run}'"#),
+        "fi".into(),
+        "unset MIRA_RUN".into(),
+        format!(r#"cd {} || {{ echo "mirador: no directory {shown} on $(hostname)" >&2; exit 1; }}"#, quote(dir)),
+        format!("exec {launch}"),
+    ]
+    .join("\n")
+        + "\n"
 }
 
 /// Writes `bytes` to `path` on `host`, exactly, owner-only (0600: prompts
@@ -380,6 +434,48 @@ mod tests {
         assert!(!script.contains('@'), "every placeholder filled: {script}");
     }
 
+    /// An agent's run script: through the login shell with nothing but
+    /// plain words, then in its directory with the pane and the socket in
+    /// its environment, as the launch line — everything quoted for sh.
+    #[test]
+    fn a_remote_agent_runs_through_the_login_shell_then_sh() {
+        let run = "/home/me/.mirador/run/p1.sh";
+        let script = run_script(run, "p1", "/run/user/1/mira-5ee79133.sock", "/srv/it's here", "claude 'look around'");
+        assert_eq!(
+            script,
+            [
+                r#"if [ "$MIRA_RUN" != agent ]; then"#,
+                "  export MIRA_RUN=agent MIRA_PANE='p1' MIRA_SOCKET='/run/user/1/mira-5ee79133.sock'",
+                r#"  exec "${SHELL:-/bin/sh}" -l -i -c 'exec /bin/sh /home/me/.mirador/run/p1.sh'"#,
+                "fi",
+                "unset MIRA_RUN",
+                r#"cd '/srv/it'\''s here' || { echo "mirador: no directory /srv/it's here on $(hostname)" >&2; exit 1; }"#,
+                "exec claude 'look around'",
+                "",
+            ]
+            .join("\n")
+        );
+        let odd = run_script(run, "p1", "/s", "/a\"$(x)`y`\\b", "claude");
+        assert!(odd.contains(r#"no directory /a__(x)_y__b on"#), "{odd}");
+    }
+
+    /// A path every shell reads as one word, and those it might not.
+    #[test]
+    fn plain_paths_are_one_word_in_any_shell() {
+        assert!(is_plain_path("/home/me-2/.mirador/run/0f3a_b.sh"));
+        for odd in ["", "/home/my name", "/home/$USER", "/home/it's", "/home/a;b", "~/x", "/home/*"] {
+            assert!(!is_plain_path(odd), "{odd}");
+        }
+    }
+
+    /// A remote pane runs a login shell there, or a run script as `sh` and
+    /// its path: plain words after the host.
+    #[test]
+    fn a_remote_agent_pane_runs_its_script() {
+        let dbg = format!("{:?}", interactive_command("box", Some("/home/me/.mirador/run/p1.sh")));
+        assert!(dbg.contains(r#""box", "sh", "/home/me/.mirador/run/p1.sh""#), "{dbg}");
+    }
+
     /// A file sent to a remote: base64 between delimiters no base64 holds,
     /// decoding to the exact bytes — a quote, `$HOME`, a backslash, a line
     /// equal to the delimiter, no final newline — written aside, made 0600,
@@ -403,7 +499,7 @@ mod tests {
 
     #[test]
     fn interactive_command_uses_ssh_tt_and_control_master() {
-        let cmd = interactive_command("myhost");
+        let cmd = interactive_command("myhost", None);
         let dbg = format!("{cmd:?}");
         assert!(dbg.contains("ssh"));
         assert!(dbg.contains("-tt"));

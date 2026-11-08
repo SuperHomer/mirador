@@ -902,6 +902,7 @@ mira ssh open prod --tab
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
 mira ssh forward --app [--pane <id>]   # this app's socket, on the remote; prints its path there
+mira agent new --host prod --dir /srv/app "look at the failing job"   # plain Claude Code, on prod
 ```
 
 The pane runs the *system* ssh, so agent auth, 2FA prompts, and ProxyJump
@@ -935,6 +936,30 @@ keeps it. Only Linux on those two is published; on any other system,
 or with no network there, put a `mira` built for it at that path by
 hand, and it is used as it is (`mira --version` says which version a
 `mira` is).
+
+`mira agent new --host <host> --dir <dir>` starts an agent on the remote,
+in `<dir>` there: plain Claude Code only, for now (a role or Codex is
+refused as not done yet), and `--host` and `--dir` go together. Before
+its pane opens, the remote gets its `mira` and this app's socket, as
+above. A script is written to `~/.mirador/run/<pane>.sh` there, and the
+pane runs `ssh -tt <host> sh <that script>`: nothing is typed into it,
+and nothing is quoted for the remote's login shell. The script starts
+the person's login shell as an interactive login shell, for the PATH
+their own terminal there would have (where nvm or `npm -g` put
+`claude`), and that shell runs the script again with `sh`, which goes to
+`<dir>` (or says loudly there is none) and starts `claude` with
+`MIRA_PANE` and `MIRA_SOCKET` set. What runs where: the agent, its files
+and `mira` on the remote; the pane, its tab, the board and every name on
+this machine, reached through the forwarded socket. Mirador sees no
+process on the remote, so a send does not wait for the agent to be seen
+running, as on Windows. Its status comes from its hooks, if the remote's
+Claude Code has Mirador's in its own settings. After a restart, the pane
+comes back idle like any SSH pane; a keypress starts a fresh agent with
+the same script. That agent reaches this app only while the old ssh
+connection still holds the socket's forward (it lingers 30 minutes):
+past that, or after the remote restarts, its hooks and `mira` calls find
+nothing at `MIRA_SOCKET` and its pane here never reports, until the
+socket is forwarded again, which is not done yet.
 
 Disconnects leave the pane idle with `[press any key to reconnect]`;
 restarting Mirador restores remote panes idle too — it never re-opens an

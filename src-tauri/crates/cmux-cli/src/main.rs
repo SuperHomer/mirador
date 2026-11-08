@@ -235,6 +235,9 @@ enum Command {
         /// Run `ssh -tt <HOST>` instead of an interactive shell.
         #[arg(long)]
         ssh: Option<String>,
+        /// With --ssh: run this script on the host, not a login shell there.
+        #[arg(long, requires = "ssh")]
+        ssh_run: Option<String>,
     },
 }
 
@@ -339,6 +342,13 @@ enum AgentAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
+        /// Run it on this ssh host instead (an alias from ~/.ssh/config, or
+        /// a destination), in --dir there: plain Claude Code only, for now.
+        #[arg(long, requires = "dir")]
+        host: Option<String>,
+        /// The directory on --host the agent works in.
+        #[arg(long, requires = "host")]
+        dir: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -783,9 +793,11 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Agent { action } => match action {
-            AgentAction::New { role, harness, tab, title, task } => Request::AgentNew {
+            AgentAction::New { role, harness, tab, title, host, dir, task } => Request::AgentNew {
                 role,
                 title,
+                host,
+                dir,
                 harness: harness.map(|h| match h.as_str() {
                     "codex" => cmux_protocol::Harness::Codex,
                     _ => cmux_protocol::Harness::Claude,
@@ -1060,7 +1072,8 @@ fn run(cli: Cli) -> Result<(), String> {
             rows,
             command,
             ssh,
-        } => return hold(pane, socket, cwd, cols, rows, command, ssh),
+            ssh_run,
+        } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_run),
     };
 
     let response = send_request(req)?;
@@ -2013,6 +2026,7 @@ fn own_tty() -> Option<String> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn hold(
     pane: String,
     socket: std::path::PathBuf,
@@ -2021,6 +2035,7 @@ fn hold(
     rows: u16,
     command: Option<String>,
     ssh: Option<String>,
+    ssh_run: Option<String>,
 ) -> Result<(), String> {
     use cmux_core::hold::server::{serve, HoldConfig, Program};
     // Nothing inherited survives: on macOS a socket becomes close-on-exec
@@ -2042,7 +2057,7 @@ fn hold(
     }
     let program = match (command, ssh) {
         (Some(cmd), _) => Program::Command(cmd),
-        (None, Some(host)) => Program::Ssh(host),
+        (None, Some(host)) => Program::Ssh(host, ssh_run),
         (None, None) => Program::Shell,
     };
     let code = serve(HoldConfig {
@@ -2392,6 +2407,19 @@ mod tests {
 
         std::env::remove_var(cmux_core::pty::PANE_ENV);
         assert_eq!(own_pane(), None);
+    }
+
+    /// `agent new --host` goes with `--dir`: both, or neither.
+    #[test]
+    fn an_agent_on_a_host_needs_a_directory_there() {
+        let Command::Agent { action: AgentAction::New { host, dir, task, .. } } =
+            parse(&["agent", "new", "--host", "box", "--dir", "/srv", "look"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), dir.as_deref(), task), (Some("box"), Some("/srv"), vec!["look".to_string()]));
+        assert!(Cli::try_parse_from(["mira", "agent", "new", "--host", "box", "look"]).is_err());
+        assert!(Cli::try_parse_from(["mira", "agent", "new", "--dir", "/srv", "look"]).is_err());
     }
 
     /// `ssh forward` takes a port, or --app for the app's socket: not both,

@@ -112,7 +112,7 @@ fn an_agent_s_activity_says_what_it_cost() {
     sb.launch();
     let shell = sb.first_pane();
     let agent = sb
-        .request(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(shell.clone()) })
+        .request(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(shell.clone()), host: None, dir: None })
         .map(|v| v["paneId"].as_str().unwrap().to_string())
         .unwrap();
     sb.wait_for("its session", LONG, || sb.events("hooked", &agent).into_iter().next());

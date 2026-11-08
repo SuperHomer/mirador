@@ -21,7 +21,9 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
                 m.is_some_and(|m| m.is_agent()),
                 m.is_some_and(|m| m.agent_live),
                 m.and_then(|m| m.agent_started_at).map(|t| t.elapsed()),
-                cmux_core::agents::AUTO_RESUME,
+                // No process on a remote is ever seen from here, as none is
+                // on Windows.
+                cmux_core::agents::AUTO_RESUME && !m.is_some_and(|m| m.remote_host.is_some()),
             )
         };
         match readiness {

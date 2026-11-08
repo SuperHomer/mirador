@@ -47,6 +47,10 @@ pub struct SessionPane {
     pub agent_session: Option<String>,
     #[serde(default)]
     pub remote_host: Option<String>,
+    /// A remote agent's run script on `remote_host`: a keypress on the
+    /// restored pane runs it again, starting a fresh agent there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_run: Option<String>,
     #[serde(default)]
     pub diff_repo: Option<String>,
     #[serde(default)]
@@ -194,6 +198,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         browser_url: m.and_then(|m| m.browser_url.clone()),
                         agent_session: m.and_then(|m| m.agent_session.clone()),
                         remote_host: m.and_then(|m| m.remote_host.clone()),
+                        remote_run: m.and_then(|m| m.remote_run.clone()),
                         diff_repo: m.and_then(|m| m.diff_repo.clone()),
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
@@ -319,6 +324,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     browser_url: p.browser_url,
                     agent_session: p.agent_session,
                     remote_host: p.remote_host,
+                    remote_run: p.remote_run,
                     diff_repo: p.diff_repo,
                     diff_spec: p.diff_spec,
                     agent_role: p.agent_role,

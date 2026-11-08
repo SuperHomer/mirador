@@ -150,3 +150,60 @@ fn a_file_sent_to_the_remote_arrives_exact() {
     }
     assert!(!path.with_extension("txt.tmp").exists(), "nothing left beside it");
 }
+
+/// `agent new --host box --dir <dir>`: plain Claude Code on the remote, in
+/// that directory, told its pane and this app's socket, listed as an agent
+/// on `box` — and a message sent from a local pane reaches it. A role or
+/// Codex there is not done yet, and a host goes with a directory.
+#[test]
+fn a_plain_agent_runs_on_the_remote() {
+    e2e!();
+    let mut sb = Sandbox::new("ragent");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let agent_new = |role: Option<&str>, harness: Option<cmux_protocol::Harness>| Request::AgentNew {
+        role: role.map(String::from),
+        harness,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.clone()),
+        host: Some("box".into()),
+        dir: Some(dir.clone()),
+    };
+
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--host", "box", "look around"]);
+    assert!(code != 0 && err.contains("--dir"), "{err}");
+    for refused in [agent_new(Some("reviewer"), None), agent_new(None, Some(cmux_protocol::Harness::Codex))] {
+        let err = sb.request(refused).expect_err("not on a remote yet");
+        assert!(err.contains("not done yet"), "{err}");
+    }
+    assert_eq!(sb.panes().len(), 1, "a refusal opens no pane");
+
+    let pane = sb.call(agent_new(None, None))["paneId"].as_str().unwrap().to_string();
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    assert_eq!(start["kind"], "claude");
+    assert_eq!(start["cwd"], dir.as_str());
+    assert_eq!(start["args"], serde_json::json!(["look around"]));
+    let socket = start["socket"].as_str().unwrap_or_default();
+    assert!(socket.ends_with(".sock") && std::path::Path::new(socket).exists(), "{start}");
+
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+    let listed = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));
+    assert_eq!((listed["harness"].as_str(), listed["remoteHost"].as_str()), (Some("claude"), Some("box")), "{listed}");
+
+    sb.call(Request::AgentSend {
+        to: pane.clone(),
+        message: "hello from here".into(),
+        pane_id: Some(first.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message on the remote", LONG, || {
+        sb.events("message", &pane).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
+    });
+}

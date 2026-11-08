@@ -126,6 +126,8 @@ fn a_message_sent_before_its_agent_is_up_waits_for_it() {
         task: None,
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -157,6 +159,8 @@ fn an_agent_showing_a_menu_is_not_typed_into() {
         task: None,
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -211,6 +215,8 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
         task: None,
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
     })["paneId"]
         .as_str()
         .unwrap()

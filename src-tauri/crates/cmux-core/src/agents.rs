@@ -1599,6 +1599,7 @@ mod tests {
             since_ms: None,
             cwd: None,
             branch: None,
+            remote_host: None,
         }
     }
 

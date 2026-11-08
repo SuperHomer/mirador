@@ -90,8 +90,11 @@ pub fn launch(
         server::Program::Command(line) => {
             cmd.args(["--command", line]);
         }
-        server::Program::Ssh(host) => {
+        server::Program::Ssh(host, run) => {
             cmd.args(["--ssh", host]);
+            if let Some(run) = run {
+                cmd.args(["--ssh-run", run]);
+            }
         }
     }
     cmd.stdin(Stdio::null())

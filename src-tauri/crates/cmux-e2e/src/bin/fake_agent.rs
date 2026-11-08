@@ -255,6 +255,7 @@ fn main() {
         "args": args,
         "pane": pane,
         "cwd": std::env::current_dir().ok(),
+        "socket": std::env::var("MIRA_SOCKET").ok(),
     }));
 
     let claude = kind == "claude";

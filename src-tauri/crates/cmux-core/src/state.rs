@@ -111,6 +111,9 @@ pub struct PaneMeta {
     pub usage: bool,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
+    /// Remote agent pane: the run script on `remote_host` its PTY runs
+    /// instead of a login shell there (`ssh::run_script`).
+    pub remote_run: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
     /// `diff_spec` — both set, or neither.
     pub diff_repo: Option<String>,

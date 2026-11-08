@@ -198,6 +198,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 since_ms: m.agent_since_ms,
                 cwd: m.cwd.clone(),
                 branch: m.branch.clone(),
+                remote_host: m.remote_host.clone(),
                 pane_id: pane,
             })
         })
@@ -889,13 +890,14 @@ fn attach_pane_blocking(
     // Remote panes run `ssh -tt <host>`; command panes run their command
     // directly in the PTY (exit detection, output capture); shell panes get
     // an interactive login shell.
-    let (cwd, pane_command, remote_host) = {
+    let (cwd, pane_command, remote_host, remote_run) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(&pane_id);
         (
             m.and_then(|m| m.cwd.clone()),
             m.and_then(|m| m.command.clone()),
             m.and_then(|m| m.remote_host.clone()),
+            m.and_then(|m| m.remote_run.clone()),
         )
     };
 
@@ -966,7 +968,7 @@ fn attach_pane_blocking(
 
     let command_builder = match remote_host.as_deref() {
         // Remote pane: the system ssh handles auth/agent/2FA/ProxyJump.
-        Some(host) => Some(cmux_core::ssh::interactive_command(host)),
+        Some(host) => Some(cmux_core::ssh::interactive_command(host, remote_run.as_deref())),
         None => pane_command
             .as_deref()
             .map(|cmd| cmux_core::pty::shell::run_command(cmd, cwd.as_deref())),
@@ -979,7 +981,7 @@ fn attach_pane_blocking(
     }
 
     let program = match (remote_host.as_deref(), pane_command.as_deref()) {
-        (Some(host), _) => Program::Ssh(host.to_string()),
+        (Some(host), _) => Program::Ssh(host.to_string(), remote_run.clone()),
         (None, Some(cmd)) => Program::Command(cmd.to_string()),
         (None, None) => Program::Shell,
     };
@@ -1085,7 +1087,8 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
 enum Program {
     Shell,
     Command(String),
-    Ssh(String),
+    /// The host, and the run script there it runs instead of a login shell.
+    Ssh(String, Option<String>),
 }
 
 /// With `persistSessions` on, runs the pane in a session holder so it
@@ -1113,7 +1116,7 @@ fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
     let held = match program {
         Program::Shell => Held::Shell,
         Program::Command(cmd) => Held::Command(cmd.clone()),
-        Program::Ssh(host) => Held::Ssh(host.clone()),
+        Program::Ssh(host, run) => Held::Ssh(host.clone(), run.clone()),
     };
     let state = app.state::<AppState>();
     let result = cmux_core::hold::launch(&mira, pane_id, &socket, cwd, cols, rows, &held)
@@ -1691,13 +1694,14 @@ pub fn open_agent(
     tab: bool,
     harness: Option<cmux_protocol::Harness>,
 ) -> Result<String, String> {
-    open_agent_from(app, state, role, task, pane_id, tab, harness, None, "you".into())
+    open_agent_from(app, state, role, task, pane_id, tab, harness, None, "you".into(), None)
 }
 
 /// [`open_agent`], its task logged as given by `from`: a person, from the
 /// app; whoever ran `mira agent new`, from the socket. `harness` is for an
 /// agent without a role: Claude Code, else Codex. `title` is the task's
-/// card's, instead of one made from the task.
+/// card's, instead of one made from the task. `remote` runs it on that ssh
+/// host instead, in that directory there ([`open_remote_agent`]).
 #[allow(clippy::too_many_arguments)]
 pub fn open_agent_from(
     app: AppHandle,
@@ -1709,6 +1713,7 @@ pub fn open_agent_from(
     harness: Option<cmux_protocol::Harness>,
     title: Option<String>,
     from: String,
+    remote: Option<(String, String)>,
 ) -> Result<String, String> {
     if role.is_some() && harness.is_some() {
         return Err("a role names its own harness: give a role or a harness, not both".into());
@@ -1717,6 +1722,15 @@ pub fn open_agent_from(
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if let Some((host, dir)) = remote {
+        if role.is_some() {
+            return Err("an agent with a role on a remote is not done yet: start a plain one there".into());
+        }
+        if plain != cmux_protocol::Harness::Claude {
+            return Err("Codex on a remote is not done yet: start Claude Code there".into());
+        }
+        return open_remote_agent(app, state, &host, &dir, task, &source, tab, title, from);
+    }
     // The agent works where it was asked from, whichever way it opens, and
     // gets the roles that directory sees: its repository's, then yours.
     let cwd = state
@@ -1747,6 +1761,83 @@ pub fn open_agent_from(
         crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &new_pane, task, None, title);
     }
     Ok(new_pane)
+}
+
+/// Starts plain Claude Code on `host`, in `dir` there, in a pane split from
+/// `source` (or a tab). Nothing is typed into it: the pane's PTY runs
+/// `ssh -tt <host> sh <run>`, a run script written there first
+/// (`ssh::run_script`), so no command line is quoted for the remote's login
+/// shell. Before any pane opens, the remote gets its `mira`
+/// (`ssh::ensure_mira`: a remote without one is refused here, not in the
+/// agent's first hook) and this app's socket (`ssh::forward_socket`), named
+/// to the agent as `MIRA_SOCKET`, with its pane as `MIRA_PANE`.
+///
+/// Mirador sees no process on the remote, so the agent counts as ready at
+/// once (`handoff::readiness`) and its status comes from hooks over that
+/// socket. Restored at the next launch, the pane comes back idle like any
+/// SSH pane, and a keypress runs the script again: a fresh agent, not the
+/// conversation it had. That agent reaches this app only while the old
+/// connection's master still holds the forward (`ControlPersist`, 30
+/// minutes); past that, or after the remote restarts, its `MIRA_SOCKET`
+/// names a path nothing serves, so it works but its hooks fail and its
+/// pane here never reports. Forwarding the socket again for a restored
+/// pane is still to be done.
+#[allow(clippy::too_many_arguments)]
+fn open_remote_agent(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    host: &str,
+    dir: &str,
+    task: Option<String>,
+    source: &str,
+    tab: bool,
+    title: Option<String>,
+    from: String,
+) -> Result<String, String> {
+    let host = host.trim();
+    if host.is_empty() || dir.trim().is_empty() {
+        return Err("an agent on a remote needs both a host and a directory there".into());
+    }
+    #[cfg(windows)]
+    {
+        let _ = (app, state, task, source, tab, title, from);
+        Err("an agent on a remote is not done on Windows yet".into())
+    }
+    #[cfg(not(windows))]
+    {
+        cmux_core::ssh::ensure_mira(host, env!("CARGO_PKG_VERSION"))?;
+        let socket = cmux_core::ssh::forward_socket(host, &cmux_core::ipc::default_socket_path())?;
+        let home = cmux_core::ssh::remote_home(host)?;
+        let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let launch = cmux_core::agents::launch_command(None, cmux_protocol::Harness::Claude, None, None, None, task.as_deref(), None, None, quote);
+
+        let pane = if tab {
+            state.workspace.lock().unwrap().new_tab().1
+        } else {
+            state.workspace.lock().unwrap().split_pane(source, SplitDir::Row).ok_or_else(|| format!("no pane {source}"))?
+        };
+        let run = format!("{home}/.mirador/run/{pane}.sh");
+        let script = cmux_core::ssh::run_script(&run, &pane, &socket, dir, &launch);
+        if let Err(e) = cmux_core::ssh::put_file(host, &run, script.as_bytes()) {
+            // Nobody has seen the pane yet: it goes as if never opened.
+            state.workspace.lock().unwrap().close_pane(&pane);
+            return Err(e);
+        }
+        {
+            let mut meta = state.meta.lock().unwrap();
+            let entry = meta.entry(pane.clone()).or_default();
+            entry.remote_host = Some(host.to_string());
+            entry.remote_run = Some(run);
+            entry.agent_launched = true;
+            entry.agent_started_at = Some(std::time::Instant::now());
+            entry.agent_harness = Some(cmux_protocol::Harness::Claude);
+        }
+        emit_workspace(&app);
+        if let Some(task) = &task {
+            crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &pane, task, None, title);
+        }
+        Ok(pane)
+    }
 }
 
 /// An agent ready to be typed into a pane: the command line, and what to

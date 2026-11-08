@@ -37,7 +37,7 @@ fn real_agents_start() {
     sb.launch();
     let first = sb.first_pane();
     let start = |role: &str| {
-        sb.call(Request::AgentNew { role: Some(role.into()), harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()) })
+        sb.call(Request::AgentNew { role: Some(role.into()), harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()), host: None, dir: None })
             ["paneId"]
             .as_str()
             .unwrap()
