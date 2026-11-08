@@ -981,10 +981,11 @@ fn attach_pane_blocking(
     }
 
     // A remote agent reaches this app through its forwarded socket, which
-    // lives only as long as the connection that forwarded it: forwarded
-    // again before its script runs, so a restored pane's rerun reaches the
-    // app too. Once per start, not per key. A failure is left to show in
-    // the pane, where ssh meets the same trouble.
+    // lives only as long as the connection that forwarded it: made sure of
+    // before its script runs (`forward_socket` leaves a working one
+    // alone), so a restored pane's rerun reaches the app too. Once per
+    // start, not per key. A failure is left to show in the pane, where ssh
+    // meets the same trouble.
     #[cfg(not(windows))]
     if let (Some(host), Some(_)) = (remote_host.as_deref(), remote_run.as_deref()) {
         if let Err(e) = cmux_core::ssh::forward_socket(host, &cmux_core::ipc::default_socket_path()) {

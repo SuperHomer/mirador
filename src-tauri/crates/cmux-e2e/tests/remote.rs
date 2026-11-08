@@ -100,11 +100,16 @@ fn mira_on_the_remote_reaches_the_app_through_its_forwarded_socket() {
     assert_eq!(tabs.len(), 2, "the first tab and the ssh pane's");
     sb.wait_for_screen(&pane, "the app's tabs, listed on the remote", LONG, |s| tabs.iter().all(|t| s.contains(t)));
 
-    // Forwarded again over the same connection — as before each remote
-    // agent's start — the socket is still served, at the same path.
+    // The app relaunched while the connection lives on (it outlives the
+    // app; the sandbox ends it only at the end): no record of the forward,
+    // which the master still holds, so it is cancelled, removed and made
+    // again — and the socket is still served, at the same path, which a
+    // forward redone over the same master without the cancel would not be.
+    sb.quit();
+    sb.launch();
     let again = sb.call(Request::SshForwardApp { pane_id: Some(pane.clone()) });
     assert_eq!(again["socket"], socket.as_str());
-    assert!(std::path::Path::new(&socket).exists(), "the second forward left no socket at {socket}");
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok(), "nothing serves {socket} after the relaunch");
 }
 
 /// A remote that has the `mira` of this version already keeps it: the app

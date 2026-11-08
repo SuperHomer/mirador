@@ -969,9 +969,10 @@ no agent.
 Mirador sees no process on the remote, so a send does not wait for the
 agent to be seen running, as on Windows; its status comes from its
 hooks. After a restart, the pane comes back idle like any SSH pane, and
-a keypress starts a fresh agent with the same script. The socket is
-forwarded again before each start, so that agent reaches this app even
-once the old connection, and its forward, are gone; if that forward
+a keypress starts a fresh agent with the same script. Before each start
+the socket's forward is checked, and made again if the connection it
+rode on is gone, so that agent reaches this app even once the old
+connection, and its forward, are gone; if that forward
 fails, the pane says so before the agent starts.
 
 `team start --host` starts every member as `agent new --host` starts

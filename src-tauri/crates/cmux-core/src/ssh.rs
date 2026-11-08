@@ -111,8 +111,22 @@ pub fn forward_socket(host: &str, local: &std::path::Path) -> Result<String, Str
     // rm and forward, then a forward that is a no-op over the same master —
     // would leave nothing serving it, and no error anywhere. One at a time,
     // whichever thread asks (a pane starting, `agent new --host`, a team).
-    static FORWARDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _one_at_a_time = FORWARDING.lock().unwrap_or_else(|e| e.into_inner());
+    //
+    // And a forward that works is left alone. Redoing it takes the socket
+    // away for a moment, and a teammate's hook connecting then is lost
+    // without a word: a team's members each forwarded again as their panes
+    // started, and one's first status never came. A forward lasts as long
+    // as the master it was made on, so each is kept with that master's
+    // pid, and done again only once another master holds the connection.
+    static FORWARDED: std::sync::Mutex<Vec<Forwarded>> = std::sync::Mutex::new(Vec::new());
+    let mut forwarded = FORWARDED.lock().unwrap_or_else(|e| e.into_inner());
+    let master = master_pid(host);
+    if let Some(f) = forwarded.iter().find(|f| f.host == host && f.local == local && Some(f.master) == master) {
+        return Ok(f.remote.clone());
+    }
+    // Being redone, it has no record until it is made: a redo that fails
+    // half-way must not leave one saying it works.
+    forwarded.retain(|f| !(f.host == host && f.local == local));
     let dir = remote_shell(host, r#"printf %s "${XDG_RUNTIME_DIR:-/tmp}""#)?;
     let remote = remote_socket_path(&dir, local);
     let spec = format!("{remote}:{}", local.display());
@@ -138,7 +152,38 @@ pub fn forward_socket(host: &str, local: &std::path::Path) -> Result<String, Str
         let err = String::from_utf8_lossy(&output.stderr);
         return Err(format!("could not forward the app's socket to {host}: {}", err.trim()));
     }
+    if let Some(master) = master_pid(host) {
+        forwarded.push(Forwarded { host: host.to_string(), local: local.to_path_buf(), master, remote: remote.clone() });
+    }
     Ok(remote)
+}
+
+/// A forward of this app's socket that works: made on `host`'s master
+/// `master` (its pid), from `local`, to `remote` there.
+#[cfg(not(windows))]
+struct Forwarded {
+    host: String,
+    local: std::path::PathBuf,
+    master: u32,
+    remote: String,
+}
+
+/// The pid of the ControlMaster holding `host`'s connection, if one runs.
+#[cfg(not(windows))]
+fn master_pid(host: &str) -> Option<u32> {
+    let mut cmd = Command::new("ssh");
+    cmd.arg("-O").arg("check");
+    for opt in control_opts() {
+        cmd.arg("-o").arg(opt);
+    }
+    let output = cmd.args(host_args(host)).output().ok()?;
+    output.status.success().then(|| master_pid_in(&String::from_utf8_lossy(&output.stderr))).flatten()
+}
+
+/// The pid in `ssh -O check`'s answer, `Master running (pid=26180)`.
+#[cfg_attr(windows, allow(dead_code))]
+fn master_pid_in(answer: &str) -> Option<u32> {
+    answer.split_once("(pid=")?.1.split_once(')')?.0.parse().ok()
 }
 
 /// Runs `script` on `host` over the pane's connection, and gives what it
@@ -437,6 +482,14 @@ mod tests {
         for dir in ["", "/", "run/user", &format!("/{}", "d".repeat(100))] {
             assert_eq!(remote_socket_path(dir, local), "/tmp/mira-5ee79133.sock", "{dir}");
         }
+    }
+
+    /// A master's pid, from `ssh -O check`'s answer; none from anything else.
+    #[test]
+    fn a_masters_pid_is_read_from_its_check() {
+        assert_eq!(master_pid_in("Master running (pid=26180)\n"), Some(26180));
+        assert_eq!(master_pid_in("Control socket connect(/tmp/cm-x): No such file or directory\n"), None);
+        assert_eq!(master_pid_in(""), None);
     }
 
     /// The script a remote runs for its `mira`: this version's file under
