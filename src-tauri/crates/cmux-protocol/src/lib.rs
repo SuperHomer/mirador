@@ -341,8 +341,10 @@ pub enum Request {
         #[serde(default)]
         view: Option<View>,
     },
-    /// Where the board is looked at. Saved, never broadcast: the board
-    /// that moved it already shows it.
+    /// Where the board is looked at. Saved, and told to the board, which
+    /// shows it and drops any save of its own still pending (it would
+    /// land over this one). The board's own saves are never broadcast:
+    /// it shows them already.
     SetCamera {
         x: f64,
         y: f64,
