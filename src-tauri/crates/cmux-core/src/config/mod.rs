@@ -82,6 +82,23 @@ pub struct Config {
     /// and system prompt: the palette's *New Agent* entries, `mira agent
     /// new <role>`.
     pub agent_roles: Vec<AgentRole>,
+    /// Computers agents can work on over SSH, added from the palette's
+    /// *Add a computer…* (`settings::add_computer`).
+    pub computers: Vec<Computer>,
+}
+
+/// A computer agents can work on: an ssh host — an alias from
+/// ~/.ssh/config, or a destination as `ssh` takes it — and the directory
+/// on it where the work is. `name` is what the palette and, later, `mira
+/// team start --on` call it. Every field defaults, as `AgentRole`'s do,
+/// so a hand-edited entry missing one is dropped by [`computers_in`]
+/// rather than failing the whole file, and every other setting with it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Computer {
+    pub name: String,
+    pub host: String,
+    pub dir: String,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -572,6 +589,21 @@ fn agent_roles_in(cfg: &Config) -> Vec<AgentRole> {
     roles
 }
 
+/// The usable computers: a name `roles::is_name` takes and no earlier one
+/// has, and a host and a directory, each trimmed. The rest are dropped,
+/// as unusable roles are, so a name means one computer everywhere.
+pub fn computers_in(cfg: &Config) -> Vec<Computer> {
+    let mut computers: Vec<Computer> = Vec::new();
+    for c in &cfg.computers {
+        let c = Computer { name: c.name.trim().into(), host: c.host.trim().into(), dir: c.dir.trim().into() };
+        if !crate::roles::is_name(&c.name) || c.host.is_empty() || c.dir.is_empty() || computers.iter().any(|k| k.name == c.name) {
+            continue;
+        }
+        computers.push(c);
+    }
+    computers
+}
+
 /// The usable `agentRoles`, read from the config on disk now. Only part
 /// of the roles a pane sees — `roles::catalog` adds the role files.
 pub fn agent_roles() -> Vec<AgentRole> {
@@ -651,6 +683,24 @@ pub(crate) fn normalize_color(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A computer missing a field, or one that cannot be used, is dropped;
+    /// the file still loads, and every other setting with it.
+    #[test]
+    fn a_bad_computer_is_dropped_not_the_whole_file() {
+        let text = r#"{
+            "fontSize": 15,
+            "computers": [
+                { "name": " box ", "host": "devbox", "dir": "~/work" },
+                { "name": "nodir", "host": "devbox" },
+                { "name": "box", "host": "other", "dir": "~/x" },
+                { "name": "my box", "host": "devbox", "dir": "~/w" }
+            ]
+        }"#;
+        let cfg: Config = serde_json::from_str(text).expect("the file still parses");
+        assert_eq!(cfg.font_size, Some(15.0));
+        assert_eq!(computers_in(&cfg), vec![Computer { name: "box".into(), host: "devbox".into(), dir: "~/work".into() }]);
+    }
 
     #[cfg(unix)]
     #[test]

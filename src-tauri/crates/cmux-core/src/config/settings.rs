@@ -7,7 +7,7 @@ use std::path::Path;
 use cmux_protocol::{ChoiceOption, SettingKind, SettingRow};
 use serde_json::{json, Value};
 
-use super::{config_path, default_font_family, Config};
+use super::{config_path, default_font_family, Computer, Config};
 
 /// One mirador.json key, as the Settings pane describes it.
 pub struct Setting {
@@ -68,6 +68,8 @@ pub fn settings() -> Vec<Setting> {
             "What clicking an agent in the sidebar does: its tab's wall, or the agent alone."),
         setting("agentRoles", "Agents", ReadOnly, "none",
             "Named ways to start a Claude Code agent, each with its own model and system prompt."),
+        setting("computers", "Agents", ReadOnly, "none",
+            "Computers agents can work on over SSH: a name, an ssh host and the directory there. Added from the palette."),
         setting("editorOpensIn", "Panes", choice(&["tab", "split"]), "tab", "Where the roles, ways and teams editor opens."),
         setting("diffOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where a diff opens."),
         setting("graphOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where the commit graph opens."),
@@ -212,11 +214,59 @@ pub(super) fn set_config_value_in(path: &Path, key: &str, value: Option<Value>) 
             obj.shift_remove(key);
         }
     }
+    write_object(path, obj)
+}
+
+fn write_object(path: &Path, obj: serde_json::Map<String, Value>) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let text = serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| e.to_string())?;
     std::fs::write(path, text + "\n").map_err(|e| e.to_string())
+}
+
+/// Adds a computer to mirador.json's `computers`.
+pub fn add_computer(name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    add_computer_in(&config_path(), name, host, dir)
+}
+
+/// Appends a computer to `computers` in the file at `path`, as
+/// [`set_config_value_in`] edits a key: as JSON, so nothing else in the
+/// file changes. `computers` is read-only in the Settings pane, since it
+/// takes no single value, so this is the one way the app writes it. The
+/// name goes on command lines and in palette entries, so it is a role's
+/// kind of name (`roles::is_name`), and no two computers share one.
+pub(super) fn add_computer_in(path: &Path, name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    let computer = Computer { name: name.trim().into(), host: host.trim().into(), dir: dir.trim().into() };
+    if !crate::roles::is_name(&computer.name) {
+        return Err(format!(
+            "`{}` can't name a computer: letters, digits, `-`, `_` and `.`, not starting with `-` or `.`",
+            computer.name
+        ));
+    }
+    if computer.host.is_empty() {
+        return Err("a computer needs an ssh host".into());
+    }
+    if computer.dir.is_empty() {
+        return Err("a computer needs the directory where the work is".into());
+    }
+    let mut obj = read_object(path)?;
+    let mut list = match obj.get("computers") {
+        None => Vec::new(),
+        Some(Value::Array(list)) => list.clone(),
+        Some(_) => return Err("computers in mirador.json is not a list".into()),
+    };
+    if list.iter().any(|c| c["name"].as_str().map(str::trim) == Some(computer.name.as_str())) {
+        return Err(format!("there is already a computer `{}`", computer.name));
+    }
+    list.push(serde_json::to_value(&computer).map_err(|e| e.to_string())?);
+    // As set_config_value_in: never write what Config cannot read back.
+    if serde_json::from_value::<Config>(json!({ "computers": list })).is_err() {
+        return Err("computers in mirador.json has an entry that is not a computer".into());
+    }
+    obj.insert("computers".into(), Value::Array(list));
+    write_object(path, obj)?;
+    Ok(computer)
 }
 
 #[cfg(test)]
@@ -231,6 +281,51 @@ mod tests {
 
     fn read(path: &Path) -> Value {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_computer_is_added_and_nothing_else_changes() {
+        let path = temp_config("computers");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"fontSize": 14, "someFutureKey": {"kept": true}}"#).unwrap();
+        let added = add_computer_in(&path, " box ", "devbox", "~/work/app").unwrap();
+        assert_eq!(added, Computer { name: "box".into(), host: "devbox".into(), dir: "~/work/app".into() });
+        add_computer_in(&path, "gpu", "-p 2222 me@gpu.example", "/srv/app").unwrap();
+        let file = read(&path);
+        assert_eq!(file["fontSize"], 14);
+        assert_eq!(file["someFutureKey"], json!({ "kept": true }), "a key Config does not know survives");
+        assert_eq!(
+            file["computers"],
+            json!([
+                { "name": "box", "host": "devbox", "dir": "~/work/app" },
+                { "name": "gpu", "host": "-p 2222 me@gpu.example", "dir": "/srv/app" },
+            ])
+        );
+        let config: Config = serde_json::from_value(file).unwrap();
+        assert_eq!(config.computers.len(), 2);
+    }
+
+    #[test]
+    fn a_computer_needs_a_new_shell_safe_name_a_host_and_a_dir() {
+        let path = temp_config("computers-bad");
+        add_computer_in(&path, "box", "devbox", "~/work").unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+        let dup = add_computer_in(&path, "box", "other", "~/x").unwrap_err();
+        assert_eq!(dup, "there is already a computer `box`");
+        for bad in ["", "my box", "-box", ".box", "box;rm", "bo$x"] {
+            let err = add_computer_in(&path, bad, "devbox", "~/work").unwrap_err();
+            assert!(err.contains("can't name a computer"), "{bad}: {err}");
+        }
+        assert!(add_computer_in(&path, "b2", " ", "~/work").unwrap_err().contains("ssh host"));
+        assert!(add_computer_in(&path, "b2", "devbox", "").unwrap_err().contains("directory"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "a refused computer changes nothing");
+
+        std::fs::write(&path, r#"{"computers": ["nope"]}"#).unwrap();
+        assert!(add_computer_in(&path, "b2", "devbox", "~/w").unwrap_err().contains("not a computer"));
+        std::fs::write(&path, r#"{"computers": "nope"}"#).unwrap();
+        assert!(add_computer_in(&path, "b2", "devbox", "~/w").unwrap_err().contains("not a list"));
+        // The Settings pane does not write it: it takes no single value.
+        assert!(set_config_value_in(&path, "computers", Some(json!([]))).is_err());
     }
 
     #[test]
