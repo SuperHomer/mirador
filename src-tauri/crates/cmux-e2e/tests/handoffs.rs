@@ -36,7 +36,7 @@ fn agents_hand_each_other_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None });
     sb.wait_for("the planner", LONG, || sb.member("planner"));
     let planner = pane_of(&sb, "planner");
     let r1 = pane_of(&sb, "reviewer-1");

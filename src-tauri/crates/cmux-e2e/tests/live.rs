@@ -99,6 +99,8 @@ fn mirador_test_team_hands_off() {
                 .into(),
         ),
         pane_id: Some(first),
+        host: None,
+        dir: None,
     });
 
     // Each member, by its pane, is the agent its role says: `team list`

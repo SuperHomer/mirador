@@ -106,20 +106,34 @@ pub fn forward(host: &str, port: u16, cancel: bool) -> Result<(), String> {
 /// computer reaches the app through it.
 #[cfg(not(windows))]
 pub fn forward_socket(host: &str, local: &std::path::Path) -> Result<String, String> {
+    // Every pane of a host shares the one path, and the steps below are
+    // three: two forwards of it interleaved — one's rm between the other's
+    // rm and forward, then a forward that is a no-op over the same master —
+    // would leave nothing serving it, and no error anywhere. One at a time,
+    // whichever thread asks (a pane starting, `agent new --host`, a team).
+    static FORWARDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = FORWARDING.lock().unwrap_or_else(|e| e.into_inner());
     let dir = remote_shell(host, r#"printf %s "${XDG_RUNTIME_DIR:-/tmp}""#)?;
     let remote = remote_socket_path(&dir, local);
+    let spec = format!("{remote}:{}", local.display());
+    let control = |action: &str| {
+        let mut cmd = Command::new("ssh");
+        cmd.arg("-O").arg(action);
+        for opt in control_opts() {
+            cmd.arg("-o").arg(opt);
+        }
+        cmd.arg("-R").arg(&spec).args(host_args(host));
+        cmd.output().map_err(|e| e.to_string())
+    };
+    // Forwarded again over the same master, the same forward is a no-op:
+    // after the rm below, nothing would serve the path. So any forward of
+    // it is let go first; with none, ssh says so and nothing changes.
+    let _ = control("cancel");
     // sshd does not bind over a file already there (`StreamLocalBindUnlink`
-    // is off by default), and this instance's earlier forward, from before
-    // a restart, leaves its socket behind.
-    // The remote's shell is a POSIX one: single quotes hold anything.
+    // is off by default), and an earlier forward, a cancelled one or one
+    // from before a restart, leaves its socket behind.
     remote_shell(host, &format!("rm -f '{}'", remote.replace('\'', r"'\''")))?;
-    let mut cmd = Command::new("ssh");
-    cmd.arg("-O").arg("forward");
-    for opt in control_opts() {
-        cmd.arg("-o").arg(opt);
-    }
-    cmd.arg("-R").arg(format!("{remote}:{}", local.display())).args(host_args(host));
-    let output = cmd.output().map_err(|e| e.to_string())?;
+    let output = control("forward")?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         return Err(format!("socket forward failed (is the SSH pane connected?): {}", err.trim()));
@@ -248,6 +262,9 @@ pub fn run_script(run: &str, pane: &str, socket: &str, dir: &str, launch: &str) 
         "fi".into(),
         "unset MIRA_RUN".into(),
         format!(r#"cd {} || {{ echo "mirador: no directory {shown} on $(hostname)" >&2; exit 1; }}"#, quote(dir)),
+        // A forward that failed before this start shows here; the agent
+        // still works, it just never reports.
+        r#"[ -S "$MIRA_SOCKET" ] || echo "mirador: nothing listens at $MIRA_SOCKET on $(hostname): this agent will not report to Mirador" >&2"#.into(),
         format!("exec {launch}"),
     ]
     .join("\n")
@@ -450,6 +467,7 @@ mod tests {
                 "fi",
                 "unset MIRA_RUN",
                 r#"cd '/srv/it'\''s here' || { echo "mirador: no directory /srv/it's here on $(hostname)" >&2; exit 1; }"#,
+                r#"[ -S "$MIRA_SOCKET" ] || echo "mirador: nothing listens at $MIRA_SOCKET on $(hostname): this agent will not report to Mirador" >&2"#,
                 "exec claude 'look around'",
                 "",
             ]

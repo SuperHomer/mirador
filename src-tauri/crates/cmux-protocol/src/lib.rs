@@ -567,6 +567,12 @@ pub enum Request {
         /// The title of the task's card, instead of one made from `task`.
         #[serde(default)]
         title: Option<String>,
+        /// An ssh host to run every member on instead, in `dir` there.
+        /// Both or neither.
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,

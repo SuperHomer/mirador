@@ -250,6 +250,13 @@ enum TeamAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
+        /// Run every member on this ssh host instead, in --dir there. The
+        /// team and its roles are still this computer's.
+        #[arg(long, requires = "dir")]
+        host: Option<String>,
+        /// The directory on --host the team works in.
+        #[arg(long, requires = "host")]
+        dir: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -890,8 +897,10 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Team { action } => match action {
-            TeamAction::Start { team, title, task } => Request::TeamStart {
+            TeamAction::Start { team, title, host, dir, task } => Request::TeamStart {
                 team,
+                host,
+                dir,
                 task: (!task.is_empty()).then(|| task.join(" ")),
                 pane_id: own_pane(),
                 title,
@@ -2421,6 +2430,14 @@ mod tests {
         assert_eq!((host.as_deref(), dir.as_deref(), task), (Some("box"), Some("/srv"), vec!["look".to_string()]));
         assert!(Cli::try_parse_from(["mira", "agent", "new", "--host", "box", "look"]).is_err());
         assert!(Cli::try_parse_from(["mira", "agent", "new", "--dir", "/srv", "look"]).is_err());
+        // A team's, the same.
+        let Command::Team { action: TeamAction::Start { host, dir, .. } } =
+            parse(&["team", "start", "squad", "--host", "box", "--dir", "/srv", "go"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), dir.as_deref()), (Some("box"), Some("/srv")));
+        assert!(Cli::try_parse_from(["mira", "team", "start", "squad", "--host", "box", "go"]).is_err());
     }
 
     /// `ssh forward` takes a port, or --app for the app's socket: not both,

@@ -420,6 +420,7 @@ hook. `--json` adds the cwd, branch and when the status last changed.
 ```bash
 mira team list --defined                 # teams this directory can start
 mira team start squad "add OAuth"        # a tab of its own; the task goes to the lead
+mira team start squad --host prod --dir /srv/app "add OAuth"   # every member on prod (see section 8)
 mira team list                           # running teams: each member's state and pane
 mira team add reviewer [--name gate]     # another member, beside this pane
 mira team restart [member…]              # bring back exited or closed members
@@ -564,6 +565,9 @@ each member, teammates first and the lead last, and reports each as
 covers, unless `--force`, a member whose screen shows a numbered menu, or
 no input box after the wait `send` makes. `team add`, `team
 restart` and `team clear` act on the team of the calling pane's tab.
+`team restart` refuses a team running on a remote, for now: no process
+there is seen, so its members always read as running, and each pane runs
+ssh, not a shell to type into.
 
 A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
@@ -964,11 +968,21 @@ calling the remote's `mira`, whatever the remote's Claude Code settings
 hold (where `mira hooks setup` was also run there, both fire). The
 status line is not given: that is the person's own. After a restart, the pane
 comes back idle like any SSH pane; a keypress starts a fresh agent with
-the same script. That agent reaches this app only while the old ssh
-connection still holds the socket's forward (it lingers 30 minutes):
-past that, or after the remote restarts, its hooks and `mira` calls find
-nothing at `MIRA_SOCKET` and its pane here never reports, until the
-socket is forwarded again, which is not done yet.
+the same script. The socket is forwarded again before each start, so
+that agent reaches this app even once the old connection, and its
+forward, are gone.
+
+`mira team start <team> --host <host> --dir <dir>` starts every member
+of a team there, each as `agent new --host` starts one, in one tab here.
+The team and its roles are this computer's, as for a team here; a team
+with a member a remote cannot run (Codex, or a role limiting skills or
+plugins) is refused naming that member, before anything opens or
+reaches the remote. Each member is told its teammates as usual, with
+`mira` named by its path on the remote. Every member's files are sent
+before the tab opens, so a team that cannot start opens nothing. Its
+board, names and tab are here; `agent send` reaches a member by name
+from a teammate, or by pane id from anywhere. `team restart` does not
+work on a remote team yet.
 
 Disconnects leave the pane idle with `[press any key to reconnect]`;
 restarting Mirador restores remote panes idle too — it never re-opens an

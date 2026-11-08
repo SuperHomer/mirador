@@ -99,6 +99,12 @@ fn mira_on_the_remote_reaches_the_app_through_its_forwarded_socket() {
         .collect();
     assert_eq!(tabs.len(), 2, "the first tab and the ssh pane's");
     sb.wait_for_screen(&pane, "the app's tabs, listed on the remote", LONG, |s| tabs.iter().all(|t| s.contains(t)));
+
+    // Forwarded again over the same connection — as before each remote
+    // agent's start — the socket is still served, at the same path.
+    let again = sb.call(Request::SshForwardApp { pane_id: Some(pane.clone()) });
+    assert_eq!(again["socket"], socket.as_str());
+    assert!(std::path::Path::new(&socket).exists(), "the second forward left no socket at {socket}");
 }
 
 /// A remote that has the `mira` of this version already keeps it: the app
@@ -279,4 +285,85 @@ fn a_role_runs_on_the_remote_and_reports_through_its_hooks() {
     assert_eq!((listed["role"].as_str(), listed["remoteHost"].as_str()), (Some("reviewer"), Some("box")), "{listed}");
     let hooked = sb.events("hooked", &pane);
     assert_eq!(hooked.first().map(|h| h["ok"].clone()), Some(serde_json::json!(true)), "{hooked:?}");
+}
+
+/// `team start --host box --dir <dir>`: every member on the remote, the
+/// team and its roles still this computer's. Each starts in the directory
+/// there, the lead with the task; each is told its teammates and calls
+/// `mira` by its path there, never this machine's; each reports through
+/// its hooks; a message from a local pane reaches one. A team with a Codex
+/// member opens nothing, naming the member; a restart is not done yet.
+#[test]
+fn a_team_runs_on_the_remote() {
+    e2e!();
+    let mut sb = Sandbox::new("rteam");
+    sb.sshd();
+    let mira = sb.place_remote_mira(VERSION);
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(".mirador/roles/coder.md", "---\nharness: codex\n---\nYou code.\n");
+    sb.write(".mirador/teams/squad.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n---\nShip small.\n");
+    sb.write(".mirador/teams/mixed.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: coder\n---\nMixed.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let team_start = |team: &str| Request::TeamStart {
+        team: team.into(),
+        task: Some("plan the chart".into()),
+        pane_id: Some(first.clone()),
+        title: None,
+        host: Some("box".into()),
+        dir: Some(dir.clone()),
+    };
+
+    let err = sb.request(team_start("mixed")).expect_err("Codex is not done on a remote");
+    assert!(err.contains("member `coder`") && err.contains("not done yet"), "{err}");
+    assert_eq!(sb.snapshot()["tabs"].as_array().unwrap().len(), 1, "a team that cannot start opens nothing");
+
+    sb.call(team_start("squad"));
+    sb.wait_for("the team to list", LONG, || {
+        let names: Vec<String> = sb.teams().first()?["members"].as_array()?.iter().map(|m| m["name"].as_str().unwrap().to_string()).collect();
+        (names == ["planner", "reviewer"]).then_some(())
+    });
+    let (planner, reviewer) = (pane_of(&sb, "planner"), pane_of(&sb, "reviewer"));
+    for pane in [&planner, &reviewer] {
+        let start = sb.wait_for("a member's start", LONG, || sb.events("start", pane).into_iter().next());
+        assert_eq!(start["cwd"], dir.as_str(), "{start}");
+    }
+    let lead = sb.nth_start(&planner, 1);
+    assert_eq!(lead.last().map(String::as_str), Some("plan the chart"), "{lead:?}");
+    assert_ne!(sb.nth_start(&reviewer, 1).last().map(String::as_str), Some("plan the chart"), "only the lead gets the task");
+    let prompt = std::fs::read_to_string(flag(&lead, "--append-system-prompt-file").unwrap()).unwrap();
+    assert!(prompt.starts_with("You plan.\n\n# Your team: squad"), "{prompt}");
+    assert!(prompt.contains("- `reviewer` (reviewer)") && prompt.contains(mira.to_str().unwrap()), "{prompt}");
+    assert!(!prompt.contains("target/debug/mira"), "never this machine's mira: {prompt}");
+
+    sb.wait_for("both members' status, from their hooks", LONG, || {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        let reporting = |pane: &str| agents.iter().any(|a| a["paneId"] == pane && a["remoteHost"] == "box" && !a["status"].is_null());
+        (reporting(&planner) && reporting(&reviewer)).then_some(())
+    });
+
+    sb.call(Request::AgentSend {
+        to: reviewer.clone(),
+        message: "hello from here".into(),
+        pane_id: Some(first.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message on the remote", LONG, || {
+        sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
+    });
+
+    let err = sb.request(Request::TeamRestart { members: vec![], pane_id: Some(planner.clone()) }).expect_err("not on a remote yet");
+    assert!(err.contains("not done yet"), "{err}");
+    let err = sb
+        .request(Request::TeamAdd { role: "reviewer".into(), name: None, pane_id: Some(planner) })
+        .expect_err("not on a remote yet");
+    assert!(err.contains("adding a member there is not done yet"), "{err}");
+}
+
+fn pane_of(sb: &Sandbox, name: &str) -> String {
+    sb.member(name).and_then(|m| m["pane"].as_str().map(String::from)).expect(name)
 }

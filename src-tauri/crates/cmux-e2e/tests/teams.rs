@@ -33,6 +33,8 @@ fn a_team_starts_is_tracked_and_comes_back() {
         team: "squad".into(),
         task: Some("plan the chart".into()),
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
     })["tabId"]
         .as_str()
         .unwrap()
@@ -129,6 +131,8 @@ fn the_built_in_omakase_team_starts_out_of_the_box() {
         team: "omakase".into(),
         task: Some("add a health check".into()),
         pane_id: Some(first),
+        host: None,
+        dir: None,
     });
     let names: Vec<String> = sb.wait_for("the team", LONG, || {
         let t = sb.teams().into_iter().next()?;
@@ -193,7 +197,7 @@ fn a_codex_member_gets_its_whole_long_prompt() {
     sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: coder\n    lead: true\n---\nShip small.\n");
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first) });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first), host: None, dir: None });
     let pane = sb.wait_for("the coder", LONG, || sb.member("coder"))["pane"].as_str().unwrap().to_string();
     let instructions = |args: &[String]| {
         let config: toml::Table = toml::from_str(&cmux_e2e::flag(args, "-c").expect("a -c")).unwrap();
@@ -228,7 +232,7 @@ fn a_team_is_cleared_with_its_lead_last() {
     );
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first) });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first), host: None, dir: None });
     sb.wait_for("the team", LONG, || sb.member("coder"));
     let [planner, r1, r2, coder] = ["planner", "reviewer-1", "reviewer-2", "coder"].map(|n| pane_of(&sb, n));
     for pane in [&planner, &r1, &r2] {
@@ -303,7 +307,7 @@ fn a_saved_team_resumes_its_conversations() {
     );
     sb.launch();
     let first = sb.first_pane();
-    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first.clone()) })
+    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first.clone()), host: None, dir: None })
         ["tabId"]
         .as_str()
         .unwrap()
@@ -385,7 +389,7 @@ fn a_team_notifies_only_when_it_needs_the_person_or_has_stopped() {
     sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: dev\n---\nShip small.\n");
     sb.launch();
     let shell = sb.first_pane();
-    let tab = sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()) })["tabId"]
+    let tab = sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None })["tabId"]
         .as_str()
         .unwrap()
         .to_string();

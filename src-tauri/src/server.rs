@@ -387,9 +387,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::TeamStart { team, task, pane_id, title } => {
+        Request::TeamStart { team, task, pane_id, title, host, dir } => {
+            let remote = match (host, dir) {
+                (Some(host), Some(dir)) => Some((host, dir)),
+                (None, None) => None,
+                _ => return Err("a host and a directory there go together: give both, or neither".into()),
+            };
             let from = sender(&state, pane_id.as_deref());
-            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from)?;
+            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from, remote)?;
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
