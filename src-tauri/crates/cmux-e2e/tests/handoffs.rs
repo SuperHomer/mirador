@@ -106,6 +106,70 @@ fn agents_hand_each_other_work() {
     assert!(!std::path::Path::new("/tmp/should-not-exist").exists());
 }
 
+/// An agent outside a team's tab reaches its members as `<team>/<name>`;
+/// a bare name still looks only in the sender's own tab.
+#[test]
+fn another_tabs_team_is_reached_by_team_and_name() {
+    e2e!();
+    let mut sb = Sandbox::new("crosstab");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/dev.md", "---\nmodel: haiku\n---\nYou build.\n");
+    sb.write(".mirador/teams/squad.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: dev\n---\nShip small.\n");
+    sb.launch();
+    let shell = sb.first_pane();
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.wait_for("the planner", LONG, || sb.member("planner"));
+    let planner = pane_of(&sb, "planner");
+    sb.wait_for("the planner's session", LONG, || sb.events("hooked", &planner).into_iter().next());
+    // A plain agent beside the first shell: in its tab, not the team's.
+    let loner = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(shell.clone()),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    send(&sb, &loner, "squad/planner", "from the other tab").unwrap();
+    sb.wait_for("the message, to the planner", LONG, || {
+        sb.events("message", &planner).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.ends_with("from the other tab")))
+    });
+    // `agent wait` finds it the same way, through the CLI.
+    let (code, _, err) = sb.mira(Some(&loner), &["agent", "wait", "squad/planner", "--timeout", "2"]);
+    // Its turn may still be running (0) or long over (124); a name it
+    // could not find would be neither.
+    assert!(code == 0 || code == 124, "wait squad/planner: {code} {err}");
+
+    // A card for a member goes on the team's board, not the sender's.
+    let card = sb.call(Request::TaskAdd {
+        title: "chart for the other tab".into(),
+        to: Some("squad/dev".into()),
+        pane_id: Some(loner.clone()),
+        description: None,
+    })["cardId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let board = |pane: &str| -> Vec<String> {
+        let cards = sb.call(Request::TaskList { all: false, pane_id: Some(pane.into()) });
+        cards["cards"].as_array().unwrap().iter().filter_map(|c| c["id"].as_str().map(String::from)).collect()
+    };
+    let dev = pane_of(&sb, "dev");
+    assert!(board(&dev).contains(&card), "not on the team's board: {:?}", board(&dev));
+    assert!(!board(&loner).contains(&card), "on the sender's board too");
+
+    let bare = send(&sb, &loner, "planner", "hi").unwrap_err();
+    assert!(bare.contains("no agent `planner` in this tab") && bare.contains("`<team>/<name>`"), "{bare}");
+    let no_team = send(&sb, &loner, "nope/planner", "hi").unwrap_err();
+    assert_eq!(no_team, "no team `nope` is running (there are: squad)");
+    let no_member = send(&sb, &loner, "squad/gate", "hi").unwrap_err();
+    assert!(no_member.starts_with("team `squad` has no agent `gate` (there are: "), "{no_member}");
+}
+
 /// A message sent the moment an agent is started — `mira agent new` then
 /// `mira agent send`, as a lead does — waits for the agent to be running.
 /// Typed at once, it went to the pane's shell, still to type the agent's

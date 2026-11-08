@@ -60,9 +60,10 @@ pub fn given(
     );
 }
 
-/// Writes a card titled `title`, with `description` when given, in
-/// `caller`'s tab, for the agent `to` names there — which must be one — or
-/// for nobody yet. Its id.
+/// Writes a card titled `title`, with `description` when given, for the
+/// agent `to` names as `agent send` finds it — which must be one — on that
+/// agent's tab's board, another tab's for `<team>/<name>`; or for nobody
+/// yet, on `caller`'s tab's board. Its id.
 pub fn add(
     app: &AppHandle,
     title: &str,
@@ -81,8 +82,15 @@ pub fn add(
         Some(to) => Some(crate::handoff::find(state, &to, Some(caller.clone()))?),
         None => None,
     };
-    let (tab, team, _) = whereabouts(state, &caller);
-    let to = pane.as_deref().and_then(|p| whereabouts(state, p).2);
+    // On the board of the tab the card's agent is in, as `given` files a
+    // message's: the caller's board would hold a card for a pane it lacks.
+    let (tab, team, to) = match &pane {
+        Some(pane) => whereabouts(state, pane),
+        None => {
+            let (tab, team, _) = whereabouts(state, &caller);
+            (tab, team, None)
+        }
+    };
     let card = cmux_core::tasks::new_id();
     record(
         app,

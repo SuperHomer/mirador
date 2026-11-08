@@ -87,8 +87,40 @@ fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_proto
 fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> {
     let ws = state.workspace.lock().unwrap();
     let tab = ws.tab_of_pane(caller).ok_or_else(|| format!("no pane {caller}"))?;
-    let meta = state.meta.lock().unwrap();
-    Ok(cmux_core::layout::pane_ids(&tab.root)
+    Ok(agents_of(tab, &state.meta.lock().unwrap()))
+}
+
+/// The agents of the tab running the team called `team`: none when no
+/// tab runs one, and an error when two do, since a name could then mean
+/// either.
+fn team_candidates(state: &AppState, team: &str) -> Result<Option<Vec<Candidate>>, String> {
+    let ws = state.workspace.lock().unwrap();
+    let tabs: Vec<&cmux_core::state::Tab> =
+        ws.tabs.iter().filter(|t| t.team.as_ref().is_some_and(|run| run.name == team)).collect();
+    match tabs.as_slice() {
+        [] => Ok(None),
+        [tab] => Ok(Some(agents_of(tab, &state.meta.lock().unwrap()))),
+        many => {
+            let ids: Vec<&str> = many.iter().map(|t| t.id.as_str()).collect();
+            Err(format!("team `{team}` is running in more than one tab ({}): name the pane by its id", ids.join(", ")))
+        }
+    }
+}
+
+/// The names of the teams running now, for an error that names a team
+/// that is not one of them.
+fn running_teams(state: &AppState) -> String {
+    let ws = state.workspace.lock().unwrap();
+    let names: Vec<&str> = ws.tabs.iter().filter_map(|t| Some(t.team.as_ref()?.name.as_str())).collect();
+    if names.is_empty() {
+        " — there are none".into()
+    } else {
+        format!(" (there are: {})", names.join(", "))
+    }
+}
+
+fn agents_of(tab: &cmux_core::state::Tab, meta: &std::collections::HashMap<String, cmux_core::state::PaneMeta>) -> Vec<Candidate> {
+    cmux_core::layout::pane_ids(&tab.root)
         .into_iter()
         .filter_map(|pane| {
             let m = meta.get(&pane).filter(|m| m.is_agent())?;
@@ -99,17 +131,28 @@ fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> 
                 .map(|s| s.name.clone());
             Some(Candidate { member, session: m.agent_name.clone(), role: m.agent_role.clone(), pane })
         })
-        .collect())
+        .collect()
 }
 
-/// The pane `name` means from `caller`'s tab: a teammate by name, or any
-/// pane by its id.
+/// The pane `name` means from `caller`'s tab: a teammate by name, the
+/// agent `<name>` of the tab running team `<team>` as `<team>/<name>`, or
+/// any pane by its id.
 pub fn find(state: &AppState, name: &str, caller: Option<String>) -> Result<String, String> {
     if state.workspace.lock().unwrap().all_pane_ids().iter().any(|p| p == name) {
         return Ok(name.to_string());
     }
     let caller = caller.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    cmux_core::handoff::resolve(name, &candidates(state, &caller)?)
+    let here = || cmux_core::handoff::resolve(name, &candidates(state, &caller)?, None);
+    let Some((team, member)) = name.trim().split_once('/') else {
+        return here();
+    };
+    let team = team.trim();
+    match team_candidates(state, team)? {
+        Some(there) => cmux_core::handoff::resolve(member, &there, Some(team)),
+        // A session's name is free text and may hold a `/` of its own:
+        // what reached a teammate before still does.
+        None => here().map_err(|_| format!("no team `{team}` is running{}", running_teams(state))),
+    }
 }
 
 /// Types `message` into `to`'s terminal, said to be from the caller when
