@@ -585,8 +585,8 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
-    /// Writes a card in `pane_id`'s tab, for the agent `to` (as
-    /// `AgentSend` finds it) or nobody yet. Answers its id.
+    /// Writes a card for the agent `to` (as `AgentSend` finds it), on its
+    /// tab's board, or for nobody yet, on `pane_id`'s tab's. Answers its id.
     TaskAdd {
         title: String,
         #[serde(default)]

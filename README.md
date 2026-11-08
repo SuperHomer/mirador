@@ -620,13 +620,15 @@ mira agent wait dev-2                           # block until dev-2 has finished
 `agent send` types the message into the teammate's terminal as its next
 prompt, headed with who it is from, as one bracketed paste — a message of
 several lines arrives whole. A name is a teammate's in your tab (a team
-member's, a Claude session's, a role's); a pane id reaches any pane. It
-refuses a pane running no agent, where the message would run as a shell
-command, and an agent waiting on you (a permission prompt), where it would
-answer the prompt — `--force` overrides that one. `agent wait` exits 0 once
-the agent has worked and stopped, 2 if it stopped to ask you something, 3
-if it exited, 124 on `--timeout`; it needs Claude Code's hooks (`mira hooks
-setup`) to see an agent stop.
+member's, a Claude session's, a role's); `<team>/<name>` reaches a member of
+another tab's team, and a message across tabs names its sender the way the
+recipient can reply to, `<team>/<name>` or a pane id; a pane id reaches any
+pane. It refuses a pane running no agent, where the message would run as a
+shell command, and an agent waiting on you (a permission prompt), where it
+would answer the prompt — `--force` overrides that one. `agent wait` exits 0
+once the agent has worked and stopped, 2 if it stopped to ask you something,
+3 if it exited, 124 on `--timeout`; it needs Claude Code's hooks (`mira
+hooks setup`) to see an agent stop.
 
 `team restart` types a member's command back into its pane when its shell
 is idle — never into a shell running something else, which it reports as
@@ -760,13 +762,30 @@ of either is ignored for its default.
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).
 
+### Computers
+
+A computer is somewhere agents can work over SSH: a host — an alias from
+`~/.ssh/config`, or a destination such as `-p 2222 me@gpu.example` — and
+the directory on it where the work is. The palette's *Pane: Computers…*
+lists them, each opening an SSH pane to its host, and *Add a computer…*
+asks for the host, the directory and a name (by default the host's
+alias), then keeps it in mirador.json:
+
+```jsonc
+{ "computers": [{ "name": "devbox", "host": "devbox", "dir": "~/work/app" }] }
+```
+
+A name is letters, digits, `-`, `_` and `.`, and no two computers share
+one. Teams do not start on a computer yet; the directory is for that, in
+a later release.
+
 ### Teams on a remote computer
 
 An agent, or a whole team, can run on a computer you reach by ssh, while
 this Mirador stays the one place with the tabs, the teams, the task board
-and every name. The agents work there;
-their panes are here, and a local agent in the same tab messages a remote
-one by name, as any teammate.
+and every name. The agents work there; their panes are here, and a local
+agent messages a remote one by name, as a teammate in its tab, or from
+another tab as `<team>/<name>`.
 
 ```bash
 mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
@@ -802,8 +821,9 @@ machine's logins is copied.
 
 Not done yet: Codex on a remote; a role that keeps only some skills or
 plugins; `team restart` and `team add` on a team running there; Windows
-remotes, or Mirador on Windows driving one; and picking the computer by
-name from the palette. [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has
+remotes, or Mirador on Windows driving one; and a computer saved from the
+palette (*Computers*, above) cannot yet be picked for a team: `--host` and
+`--dir` name it. [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has
 how it works.
 
 ## Terminals that keep running when you quit

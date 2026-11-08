@@ -1219,6 +1219,18 @@ export const setDiffWorktree = (paneId: string, worktree: string) =>
 export const openSsh = (paneId: string | null, tab: boolean, host: string) =>
   invoke<string>("open_ssh", { paneId, tab, host });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
+
+/** A computer agents can work on: an ssh host and the directory there. */
+export interface Computer {
+  name: string;
+  host: string;
+  dir: string;
+}
+/** The computers mirador.json lists. */
+export const listComputers = () => invoke<Computer[]>("list_computers");
+/** Adds one; refused for a taken or unsafe name, or an empty host or dir. */
+export const addComputer = (name: string, host: string, dir: string) =>
+  invoke<Computer>("add_computer", { name, host, dir });
 export const setBrowserBounds = (
   paneId: string,
   x: number,

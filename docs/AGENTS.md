@@ -631,10 +631,15 @@ mira agent clear [name | --pane <id>] [--force]  # a new conversation; this pane
 `send` resolves a name among the agents of the calling pane's tab — a
 team member's name first, then a Claude session's, then a role's; the
 first kind that matches must match exactly one pane — or takes any pane id.
+`<team>/<name>` looks the name up the same way in the tab running team
+`<team>` (`mira team list` names them).
 It writes the message as a bracketed paste (`ESC[200~ … ESC[201~`), every
 control character but newline and tab removed so nothing in it can end
 the paste, then Enter as a separate write. When the caller is an agent the
-message opens with `[message from <name>, via mira agent send]`. An agent
+message opens with `[message from <name>, via mira agent send]`, where
+`<name>` is what the recipient replies to: from another tab it is
+`<team>/<name>` when the sender's tab runs a team, else the sender's pane
+id. An agent
 started but not yet running (just launched, resumed or restored, its
 command still to reach its shell) is waited for, up to the 20 s the app
 gives any agent to show up. Refused: a pane that runs no agent, the
@@ -663,7 +668,7 @@ pane. A working agent is not refused: the line queues behind its turn.
 ### Tasks, the board and history
 
 ```bash
-mira task add <title…> [--to <name>] [--description <text>]   # a card in this tab, in To do; prints its id
+mira task add <title…> [--to <name>] [--description <text>]   # a card in To do, on this tab's board or --to's agent's; prints its id
 mira task move <id> <todo|doing|needs-you|done>
 mira task done <id>                            # same as move <id> done
 mira task list [--all]                         # this tab's cards by column; every tab's
@@ -674,9 +679,11 @@ mira agent board                               # this tab's wall, on its Tasks s
 
 Mirador keeps a log of tasks: one line per event, kept across restarts.
 It logs a task given once the start or the send has worked — `team start`
-(the task, to the lead), `team add` and `agent new` with a task, `agent send` — each with who sent it (the calling agent's
-name, or `you`), the agent it went to (its team member name, else its
-session's, else its role's, else its harness's: `claude`, `codex`), and
+(the task, to the lead), `team add` and `agent new` with a task, `agent
+send` — each with who sent it (the calling agent's name — from another
+tab `<team>/<name>` or its pane id — or `you`), the agent it went to (its
+team member name, else its session's, else its role's, else its
+harness's: `claude`, `codex`), and
 its tab and team. It logs a Claude Code agent's turn ending when its
 status changes: working or needs-you to idle is done, anything to
 needs-you is needs-you, needs-you back to working is a resume — that
@@ -951,8 +958,9 @@ SSH session behind your back.
 An agent, or a whole team, can run on a computer you reach by ssh. The
 agents, their files and their `mira` are there; their panes, tabs,
 board and every name stay here, in the one Mirador, which they reach
-through a forwarded socket. A local agent in the same tab messages a
-remote one by name as any teammate; from anywhere, by pane id.
+through a forwarded socket. A local agent messages a remote one by name,
+as a teammate in its tab, or from another tab as `<team>/<name>`; from
+anywhere, by pane id.
 
 ```bash
 mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
@@ -1009,7 +1017,9 @@ opens, so a team that cannot start opens nothing here.
 Not done yet: Codex there; a role that keeps only some skills or
 plugins (listing them runs Claude Code here, which says nothing of the
 remote's); `team restart` and `team add` on a team running there; a
-Windows remote, or Mirador on Windows driving one.
+Windows remote, or Mirador on Windows driving one; and picking a
+computer saved in `computers` for an agent or a team: `--host` and
+`--dir` name it.
 
 ### How a remote reaches this app
 

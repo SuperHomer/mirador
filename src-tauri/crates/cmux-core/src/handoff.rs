@@ -20,9 +20,10 @@
 //! `mira agent clear` types an agent's own new-conversation command under
 //! the first two rules; a working agent takes it once its turn is over.
 //!
-//! A name is looked up in the sender's tab only — its teammates — by
-//! team member name, then session name, then role. A pane id reaches any
-//! pane.
+//! A name is looked up in the sender's tab — its teammates — by team
+//! member name, then session name, then role. `<team>/<name>` looks it up
+//! the same way in the tab running that team instead. A pane id reaches
+//! any pane.
 
 use cmux_protocol::AgentStatus;
 
@@ -41,7 +42,10 @@ pub struct Candidate {
 /// first, then a session's, then a role's — the first kind that matches
 /// at all, which must match one pane. Two reviewers are `reviewer-1` and
 /// `reviewer-2`, never "reviewer".
-pub fn resolve(name: &str, candidates: &[Candidate]) -> Result<String, String> {
+/// `team` is the running team whose tab the candidates are, when the name
+/// came as `<team>/<name>`; none for the sender's own tab. It changes only
+/// what a miss says.
+pub fn resolve(name: &str, candidates: &[Candidate], team: Option<&str>) -> Result<String, String> {
     let name = name.trim();
     let kinds: [fn(&Candidate) -> Option<&String>; 3] = [|c| c.member.as_ref(), |c| c.session.as_ref(), |c| c.role.as_ref()];
     for kind in kinds {
@@ -56,10 +60,10 @@ pub fn resolve(name: &str, candidates: &[Candidate]) -> Result<String, String> {
         }
     }
     let known: Vec<String> = candidates.iter().map(label).collect();
-    Err(if known.is_empty() {
-        format!("no agent `{name}` in this tab — there are none")
-    } else {
-        format!("no agent `{name}` in this tab (there are: {})", known.join(", "))
+    let known = if known.is_empty() { " — there are none".to_string() } else { format!(" (there are: {})", known.join(", ")) };
+    Err(match team {
+        Some(team) => format!("team `{team}` has no agent `{name}`{known}"),
+        None => format!("no agent `{name}` in this tab{known}; `<team>/<name>` reaches another tab's team"),
     })
 }
 
@@ -289,17 +293,29 @@ mod tests {
             c("p3", Some("reviewer-2"), Some("reviewer-2"), Some("reviewer")),
             c("p4", None, Some("Fix the flaky test"), None),
         ];
-        assert_eq!(resolve("reviewer-2", &tab), Ok("p3".into()));
-        assert_eq!(resolve(" planner ", &tab), Ok("p1".into()));
-        assert_eq!(resolve("Fix the flaky test", &tab), Ok("p4".into()));
-        let two = resolve("reviewer", &tab).unwrap_err();
+        assert_eq!(resolve("reviewer-2", &tab, None), Ok("p3".into()));
+        assert_eq!(resolve(" planner ", &tab, None), Ok("p1".into()));
+        assert_eq!(resolve("Fix the flaky test", &tab, None), Ok("p4".into()));
+        let two = resolve("reviewer", &tab, None).unwrap_err();
         assert!(two.contains("more than one") && two.contains("reviewer-1, reviewer-2"), "{two}");
-        let none = resolve("gate", &tab).unwrap_err();
+        let none = resolve("gate", &tab, None).unwrap_err();
         assert!(none.contains("no agent `gate`") && none.contains("planner"), "{none}");
-        assert!(resolve("x", &[]).unwrap_err().contains("there are none"));
+        assert!(resolve("x", &[], None).unwrap_err().contains("there are none"));
         // A member's name wins over another agent's role of the same word.
         let mixed = [c("a", Some("dev"), None, Some("x")), c("b", None, None, Some("dev"))];
-        assert_eq!(resolve("dev", &mixed), Ok("a".into()));
+        assert_eq!(resolve("dev", &mixed, None), Ok("a".into()));
+    }
+
+    /// A miss in the sender's tab points at the form that reaches another
+    /// tab's team; a miss in a named team's tab says which team.
+    #[test]
+    fn a_miss_says_where_it_looked() {
+        let tab = [c("p1", Some("planner"), None, Some("planner"))];
+        let here = resolve("lead", &tab, None).unwrap_err();
+        assert_eq!(here, "no agent `lead` in this tab (there are: planner); `<team>/<name>` reaches another tab's team");
+        let there = resolve("lead", &tab, Some("omakase")).unwrap_err();
+        assert_eq!(there, "team `omakase` has no agent `lead` (there are: planner)");
+        assert_eq!(resolve("lead", &[], Some("omakase")).unwrap_err(), "team `omakase` has no agent `lead` — there are none");
     }
 
     #[test]

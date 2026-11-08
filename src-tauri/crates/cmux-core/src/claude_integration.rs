@@ -415,6 +415,7 @@ description: Drive Mirador, the terminal this session may be running in, with it
 `mira` talks to the Mirador app around this pane. Name an agent by its name
 in this tab (`mira agent list` shows each agent, its name and its pane), or
 any pane by its id (`mira list-tabs`).
+Another tab's team: `<team>/<name>`; `mira team list` names the teams.
 
 - `mira agent new [--role ROLE] [--tab] "task"` — start an agent beside this pane; the task is its first message
 - `mira agent send NAME "message" [--wait]` — type a message into another agent, as its next prompt
@@ -921,6 +922,10 @@ mod tests {
         );
         assert!(!MIRA.body.contains("disable-model-invocation"), "the model must see it");
         assert!(MIRA.body.contains("`mira <command> --help`"), "points at the real help");
+        assert!(
+            MIRA.body.contains("Another tab's team: `<team>/<name>`"),
+            "says how to reach another tab's team"
+        );
     }
 
     /// The directory cleanup must not take anything that isn't ours.
