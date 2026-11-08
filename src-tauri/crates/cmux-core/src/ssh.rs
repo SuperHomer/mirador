@@ -131,11 +131,57 @@ fn remote_shell(host: &str, command: &str) -> Result<String, String> {
         cmd.arg("-o").arg(opt);
     }
     let output = cmd.args(host_args(host)).arg(command).output().map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("ssh {host} failed (is the SSH pane connected?): {}", err.trim()));
+    let err = String::from_utf8_lossy(&output.stderr);
+    match output.status.code() {
+        Some(0) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+        // ssh's own failure; anything else is the command's.
+        Some(255) | None => Err(format!("ssh {host} failed (is the SSH pane connected?): {}", err.trim())),
+        Some(_) => Err(format!("on {host}: {}", err.trim())),
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// What a remote runs to find the `mira` of this app's version, or fetch
+/// it from that version's release: `~/.mirador/bin/mira-<version>`. Only
+/// Linux on x86_64 or aarch64 is published; anywhere else it exits 2,
+/// saying where a person may put one by hand. Release assets lose their
+/// executable bit, hence the chmod. POSIX sh, whatever the login shell.
+#[cfg_attr(windows, allow(dead_code))]
+const ENSURE_MIRA: &str = r#"d="$HOME/.mirador/bin"
+f="$d/mira-@VERSION@"
+if [ -x "$f" ]; then printf %s "$f"; exit 0; fi
+os=$(uname -s | tr A-Z a-z)
+m=$(uname -m)
+case "$m" in x86_64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;; *) arch= ;; esac
+if [ "$os" != linux ] || [ -z "$arch" ]; then
+  echo "no mira is published for $os/$m: put a mira of version @VERSION@ at $f" >&2
+  exit 2
+fi
+url="https://github.com/@REPO@/releases/download/v@VERSION@/mira-linux-$arch"
+mkdir -p "$d" || exit 1
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL -o "$f.tmp" "$url"
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO "$f.tmp" "$url"
+else
+  echo "neither curl nor wget is there to fetch $url" >&2
+  false
+fi || { rm -f "$f.tmp"; echo "could not fetch $url" >&2; exit 1; }
+chmod +x "$f.tmp" && mv "$f.tmp" "$f" && printf %s "$f"
+"#;
+
+#[cfg_attr(windows, allow(dead_code))]
+fn ensure_mira_script(version: &str) -> String {
+    ENSURE_MIRA.replace("@VERSION@", version).replace("@REPO@", crate::REPO)
+}
+
+/// The path of a `mira` of `version` on `host`, fetched from that
+/// version's release the first time ([`ENSURE_MIRA`]): nothing is copied
+/// from this machine, whose `mira` is built for another system.
+#[cfg(not(windows))]
+pub fn ensure_mira(host: &str, version: &str) -> Result<String, String> {
+    let script = ensure_mira_script(version);
+    let path = remote_shell(host, &format!("sh -c '{}'", script.replace('\'', r"'\''")))?;
+    Ok(path.trim().to_string())
 }
 
 /// Where the app's socket `local` goes on a remote whose runtime directory
@@ -258,6 +304,20 @@ mod tests {
     /// the local socket — the same name after a restart, another for
     /// another instance — or in /tmp when that directory is missing, not
     /// absolute, or too deep for a socket path.
+    /// The script a remote runs for its `mira`: this version's file under
+    /// ~/.mirador/bin, fetched from this version's release for its arch.
+    #[test]
+    fn a_remote_fetches_the_mira_of_this_version() {
+        let script = ensure_mira_script("1.2.3");
+        assert!(script.contains("f=\"$d/mira-1.2.3\""), "{script}");
+        assert!(script.starts_with("d=\"$HOME/.mirador/bin\"\n"), "{script}");
+        assert!(
+            script.contains("url=\"https://github.com/SuperHomer/mirador/releases/download/v1.2.3/mira-linux-$arch\""),
+            "{script}"
+        );
+        assert!(!script.contains('@'), "every placeholder filled: {script}");
+    }
+
     #[test]
     fn the_apps_socket_on_a_remote_is_short_and_this_instances() {
         let local = std::path::Path::new("/tmp/mira.sock");

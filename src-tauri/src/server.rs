@@ -659,6 +659,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         // A named pipe cannot be forwarded: Windows needs another way.
         #[cfg(windows)]
         Request::SshForwardApp { .. } => Err("forwarding the app over ssh is not done on Windows yet".into()),
+        #[cfg(not(windows))]
+        Request::SshMira { pane_id } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            let mira = cmux_core::ssh::ensure_mira(&host, env!("CARGO_PKG_VERSION"))?;
+            Ok(json!({ "paneId": pane, "mira": mira }))
+        }
+        #[cfg(windows)]
+        Request::SshMira { .. } => Err("a remote's mira is not done on Windows yet".into()),
     }
 }
 

@@ -8,6 +8,23 @@ use cmux_protocol::Request;
 
 const LONG: Duration = Duration::from_secs(45);
 
+/// The app's version, which every crate of the workspace shares: the
+/// `mira` a remote must run.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// An ssh pane to `box`, in a tab of its own (a split would be narrow
+/// enough to wrap a path), once its shell is up: the pane's master
+/// connection is what the app's ssh requests ride on.
+fn remote_pane(sb: &Sandbox) -> String {
+    let pane = sb.call(Request::SshOpen { host: "box".into(), target: Some("tab".into()) })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // zsh's prompt: the login shell is the passwd entry's, zsh where this runs.
+    sb.wait_for_screen(&pane, "the remote shell's prompt", LONG, |s| s.lines().any(|l| l.trim_end().ends_with('%')));
+    pane
+}
+
 /// `box` is in `ssh hosts`, an ssh pane reaches it, and the login there
 /// looks like the sandbox: its home, its `bin` first on the PATH, and no
 /// `MIRA_PANE`, which ssh does not carry.
@@ -22,13 +39,7 @@ fn an_ssh_pane_reaches_the_sandboxs_own_remote() {
     let (code, hosts, err) = sb.mira(None, &["ssh", "hosts"]);
     assert!(code == 0 && hosts.lines().any(|l| l == "box"), "{hosts}{err}");
 
-    // A tab of its own: a split would be narrow enough to wrap a path.
-    let pane = sb.call(Request::SshOpen { host: "box".into(), target: Some("tab".into()) })["paneId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    // zsh's prompt: the login shell is the passwd entry's, zsh where this runs.
-    sb.wait_for_screen(&pane, "the remote shell's prompt", LONG, |s| s.lines().any(|l| l.trim_end().ends_with('%')));
+    let pane = remote_pane(&sb);
     sb.type_into(&pane, "echo home=$HOME; echo \"pane=[$MIRA_PANE]\"; echo ssh=$SSH_CONNECTION; command -v claude\r");
     let home = format!("home={}", sb.home.display());
     let claude = format!("{}/claude", sb.root.join("bin").display());
@@ -51,12 +62,7 @@ fn mira_on_the_remote_reaches_the_app_through_its_forwarded_socket() {
     sb.sshd();
     sb.launch();
     sb.first_pane();
-    let pane = sb.call(Request::SshOpen { host: "box".into(), target: Some("tab".into()) })["paneId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    // zsh's prompt: the login shell is the passwd entry's, zsh where this runs.
-    sb.wait_for_screen(&pane, "the remote shell's prompt", LONG, |s| s.lines().any(|l| l.trim_end().ends_with('%')));
+    let pane = remote_pane(&sb);
 
     sb.type_into(&pane, "mira list-tabs\r");
     sb.wait_for_screen(&pane, "mira finding no app", LONG, |s| s.contains("Mirador is not running"));
@@ -74,4 +80,43 @@ fn mira_on_the_remote_reaches_the_app_through_its_forwarded_socket() {
         .collect();
     assert_eq!(tabs.len(), 2, "the first tab and the ssh pane's");
     sb.wait_for_screen(&pane, "the app's tabs, listed on the remote", LONG, |s| tabs.iter().all(|t| s.contains(t)));
+}
+
+/// A remote that has the `mira` of this version already keeps it: the app
+/// answers its path, and it runs there.
+#[test]
+fn a_remote_keeps_the_mira_it_has() {
+    e2e!();
+    let mut sb = Sandbox::new("mirakeep");
+    sb.sshd();
+    let placed = sb.place_remote_mira(VERSION);
+    sb.launch();
+    sb.first_pane();
+    let pane = remote_pane(&sb);
+
+    let answer = sb.call(Request::SshMira { pane_id: Some(pane.clone()) });
+    assert_eq!(answer["paneId"], pane.as_str());
+    assert_eq!(answer["mira"], placed.to_str().unwrap());
+    sb.type_into(&pane, &format!("{} --version\r", placed.display()));
+    sb.wait_for_screen(&pane, "the remote's mira version", LONG, |s| s.lines().any(|l| l.trim_end() == format!("mira {VERSION}")));
+}
+
+/// None is published for macOS, which this remote is: the app says so,
+/// naming the system and where a person may put one by hand. The fetch
+/// itself, on Linux, is never run here: no test touches the network.
+#[test]
+fn a_remote_with_no_published_mira_says_where_to_put_one() {
+    e2e!();
+    let mut sb = Sandbox::new("miranone");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    let pane = remote_pane(&sb);
+
+    let err = sb.request(Request::SshMira { pane_id: Some(pane) }).expect_err("no mira for macOS");
+    let machine = std::process::Command::new("uname").arg("-m").output().unwrap().stdout;
+    let machine = String::from_utf8_lossy(&machine).trim().to_string();
+    assert!(err.contains(&format!("no mira is published for darwin/{machine}")), "{err}");
+    let by_hand = sb.home.join(format!(".mirador/bin/mira-{VERSION}"));
+    assert!(err.contains(by_hand.to_str().unwrap()), "{err}");
 }

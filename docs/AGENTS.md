@@ -926,6 +926,16 @@ path. `MIRA_SOCKET`, wherever it is set, names the socket outright,
 before any discovery file; a remote has none, so without it `mira`
 there says Mirador is not running.
 
+The `mira` a remote runs is its own, never copied from this machine
+(whose `mira` is built for macOS): `~/.mirador/bin/mira-<version>` on
+the remote, of this app's version exactly. The first time it is needed,
+the remote fetches it with `curl` (or `wget`) from that version's
+release on GitHub, `mira-linux-x86_64` or `mira-linux-aarch64`, and
+keeps it. Only Linux on those two is published; on any other system,
+or with no network there, put a `mira` built for it at that path by
+hand, and it is used as it is (`mira --version` says which version a
+`mira` is).
+
 Disconnects leave the pane idle with `[press any key to reconnect]`;
 restarting Mirador restores remote panes idle too — it never re-opens an
 SSH session behind your back.

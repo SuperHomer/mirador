@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use cmux_protocol::{Request, ResponseEnvelope, SplitDir, View};
 
 #[derive(Parser)]
-#[command(name = "mira", about = "Automation client for the Mirador terminal")]
+#[command(name = "mira", version, about = "Automation client for the Mirador terminal")]
 struct Cli {
     /// Print raw JSON responses.
     #[arg(long, global = true)]

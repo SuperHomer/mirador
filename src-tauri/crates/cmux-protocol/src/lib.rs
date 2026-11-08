@@ -835,6 +835,12 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// The `mira` of this app's version on a remote pane's host, fetched
+    /// there from its release the first time: its path (`mira`).
+    SshMira {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Opens a commit-graph pane (split of the source pane, or a new tab),
     /// for the repository the calling pane sits in.
     GraphOpen {

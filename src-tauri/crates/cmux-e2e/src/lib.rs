@@ -760,6 +760,18 @@ impl Sandbox {
         });
     }
 
+    /// Puts the debug `mira` where a remote keeps the `mira` of `version`
+    /// (`ssh::ensure_mira`), as if fetched already: no test fetches one.
+    /// Gives its path.
+    pub fn place_remote_mira(&self, version: &str) -> PathBuf {
+        let dir = self.home.join(".mirador/bin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("mira-{version}"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(self.bin("mira"), &path).unwrap();
+        path
+    }
+
     /// How many times this sandbox has been launched.
     pub fn launches(&self) -> u32 {
         self.launches
