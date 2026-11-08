@@ -170,7 +170,7 @@ pub fn send(
 ) -> Result<String, String> {
     use tauri::Manager;
     let state = &*app.state::<AppState>();
-    let card = card.map(|id| crate::tasks::written(state, &id)).transpose()?;
+    let card = card.map(|id| crate::tasks::written(state, &id).map(|c| c.id)).transpose()?;
     let pane = find(state, to, caller.clone())?;
     if caller.as_deref() == Some(pane.as_str()) {
         return Err("that is the pane this runs in: an agent cannot message itself".into());
@@ -199,7 +199,8 @@ pub fn send(
             return Err(format!("{to} {why}, or send with --force"));
         }
     }
-    let from = caller.as_deref().and_then(|c| sender(state, c));
+    let to_tab = state.workspace.lock().unwrap().tab_of_pane(&pane).map(|t| t.id.clone());
+    let from = caller.as_deref().and_then(|c| sender_in(state, c, to_tab.as_deref()));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
     state.pty.write(&pane, &paste)?;
     // Enter on its own read: a TUI that gets it with the paste can take it
@@ -268,4 +269,26 @@ pub fn sender(state: &AppState, pane: &str) -> Option<String> {
         .into_iter()
         .find(|x| x.pane == pane)
         .and_then(|x| cmux_core::handoff::sender_name(&x))
+}
+
+/// [`sender`], as an agent in tab `seen_from` can reply to it: its name
+/// from its own tab; from another, `<team>/<name>` when its tab runs a
+/// team only it runs, else its pane id — a bare name would find nobody
+/// there, or someone else. None when it is no agent.
+pub fn sender_in(state: &AppState, pane: &str, seen_from: Option<&str>) -> Option<String> {
+    let name = sender(state, pane);
+    let ws = state.workspace.lock().unwrap();
+    let tab = ws.tab_of_pane(pane);
+    if seen_from.is_none() || tab.map(|t| t.id.as_str()) == seen_from {
+        return name;
+    }
+    if !state.meta.lock().unwrap().get(pane).is_some_and(|m| m.is_agent()) {
+        return None;
+    }
+    let team = tab.and_then(|t| t.team.as_ref()).map(|run| run.name.as_str());
+    let only = |team: &str| ws.tabs.iter().filter(|t| t.team.as_ref().is_some_and(|r| r.name == team)).count() == 1;
+    Some(match (team, name) {
+        (Some(team), Some(name)) if only(team) => format!("{team}/{name}"),
+        _ => pane.to_string(),
+    })
 }

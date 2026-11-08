@@ -91,6 +91,9 @@ pub fn add(
             (tab, team, None)
         }
     };
+    // Named as the board it lands on can reply to: from another tab, by
+    // `<team>/<name>` or its pane id (`handoff::sender_in`).
+    let from = crate::handoff::sender_in(state, &caller, tab.as_deref()).unwrap_or(from);
     let card = cmux_core::tasks::new_id();
     record(
         app,
@@ -110,16 +113,20 @@ pub fn add(
     Ok(card)
 }
 
-/// Puts the card written by hand that `id` names in `column`.
-pub fn move_card(app: &AppHandle, id: &str, column: TaskColumn, by: String) -> Result<(), String> {
-    let card = written(&app.state::<AppState>(), id)?;
-    record(app, TaskEventKind::Moved { card, column, by });
+/// Puts the card written by hand that `id` names in `column`, moved `by`
+/// the agent in `mover` when there is one — named as the card's tab sees
+/// it (`handoff::sender_in`) — else `by`.
+pub fn move_card(app: &AppHandle, id: &str, column: TaskColumn, by: String, mover: Option<String>) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let card = written(&state, id)?;
+    let by = mover.and_then(|p| crate::handoff::sender_in(&state, &p, card.tab.as_deref())).unwrap_or(by);
+    record(app, TaskEventKind::Moved { card: card.id, column, by });
     Ok(())
 }
 
-/// The whole id of the card written by hand that `id` names.
-pub fn written(state: &AppState, id: &str) -> Result<String, String> {
-    Ok(cmux_core::tasks::written(&cmux_core::tasks::cards(&events(state)), id)?.id.clone())
+/// The card written by hand that `id`, or the start of it, names.
+pub fn written(state: &AppState, id: &str) -> Result<TaskCard, String> {
+    Ok(cmux_core::tasks::written(&cmux_core::tasks::cards(&events(state)), id)?.clone())
 }
 
 /// The tab and team of `pane`, and its name as `agent list` shows it.
@@ -216,8 +223,7 @@ pub fn task_add(
 /// on a person — and puts the card in Doing.
 #[tauri::command]
 pub fn task_send(app: AppHandle, state: State<'_, AppState>, card: String, pane_id: String) -> Result<String, String> {
-    let cards = cmux_core::tasks::cards(&events(&state));
-    let card = cmux_core::tasks::written(&cards, &card)?.clone();
+    let card = written(&state, &card)?;
     send_card(&app, &card, &pane_id)
 }
 

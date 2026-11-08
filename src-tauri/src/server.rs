@@ -393,7 +393,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::TaskMove { card, column, pane_id } => {
             let by = sender(&state, pane_id.as_deref());
-            crate::tasks::move_card(app, &card, column, by)?;
+            crate::tasks::move_card(app, &card, column, by, pane_id)?;
             Ok(Value::Null)
         }
         Request::AgentTrail { name, pane_id, turns } => {
