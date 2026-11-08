@@ -565,9 +565,10 @@ each member, teammates first and the lead last, and reports each as
 covers, unless `--force`, a member whose screen shows a numbered menu, or
 no input box after the wait `send` makes. `team add`, `team
 restart` and `team clear` act on the team of the calling pane's tab.
-`team restart` refuses a team running on a remote, for now: no process
-there is seen, so its members always read as running, and each pane runs
-ssh, not a shell to type into.
+`team restart` and `team add` refuse a team running on a remote, for
+now: no process there is seen, so its members always read as running,
+and each pane runs ssh, not a shell to type into; an added member would
+start here (section 8).
 
 A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
@@ -905,8 +906,6 @@ mira ssh open "-p 2222 user@box"   # or a full destination with options
 mira ssh open prod --tab
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
-mira ssh forward --app [--pane <id>]   # this app's socket, on the remote; prints its path there
-mira agent new --host prod --dir /srv/app [--role reviewer] "look at the failing job"   # Claude Code, on prod
 ```
 
 The pane runs the *system* ssh, so agent auth, 2FA prompts, and ProxyJump
@@ -919,17 +918,77 @@ Forwarding is what makes a remote dev server reviewable: `mira ssh forward
 3000` then `mira browser open http://localhost:3000` and the browser pane
 renders the remote app.
 
-`mira ssh forward --app` goes the other way, macOS and Linux only for
-now: it forwards this app's socket to the pane's host, over the same
-ControlMaster, and prints the socket's path there:
-`$XDG_RUNTIME_DIR/mira-<hash>.sock` on the remote (`/tmp` without one, or
-when that path would be too long for a socket), named for this app's own
-socket, so it is the same path after the app restarts. sshd makes it
-owner-only.
-A `mira` on the remote reaches this app with `MIRA_SOCKET` set to that
-path. `MIRA_SOCKET`, wherever it is set, names the socket outright,
-before any discovery file; a remote has none, so without it `mira`
-there says Mirador is not running.
+Disconnects leave the pane idle with `[press any key to reconnect]`;
+restarting Mirador restores remote panes idle too — it never re-opens an
+SSH session behind your back.
+
+### Agents and teams on a remote computer
+
+An agent, or a whole team, can run on a computer you reach by ssh. The
+agents, their files and their `mira` are there; their panes, tabs,
+board and every name stay here, in the one Mirador, which they reach
+through a forwarded socket. A local agent in the same tab messages a
+remote one by name as any teammate; from anywhere, by pane id.
+
+```bash
+mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
+mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
+mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+```
+
+`--host` is an alias from `~/.ssh/config` or a destination, and `--dir`
+the directory there the agents work in; the two go together. The remote
+needs Linux on x86_64 or aarch64 (other systems: see its `mira`, below),
+ssh by key or agent (nothing answers a password prompt), and Claude
+Code, installed and signed in (`claude setup-token` for agents nobody
+sits in front of). Nothing of this machine's logins is copied there.
+
+Roles and teams are this computer's: the ones the calling pane's
+directory sees, as for agents here; the remote's own `.mirador` is not
+read. A role's prompt and settings are worked out here and sent there,
+as `~/.mirador/run/<pane>.prompt.md` and `<pane>.settings.json`. Every
+agent there, role or plain, gets Mirador's hooks in its own
+`--settings`, calling the remote's `mira`, so its status comes back
+here whatever the remote's Claude Code settings hold (where `mira hooks
+setup` was also run there, both fire). The status line is not given:
+that is the person's own.
+
+An agent's pane opens only once the remote has its `mira`, this app's
+socket and the agent's files. It runs `ssh -tt <host> sh
+~/.mirador/run/<pane>.sh`, a script written there first: nothing is
+typed into the pane, and nothing is quoted for the remote's login
+shell. The script starts the person's
+login shell as an interactive login shell, for the PATH their own
+terminal there would have (where nvm or `npm -g` put `claude`), and that
+shell runs the script again with `sh`, which goes to the directory (or
+says loudly there is none) and starts `claude` with `MIRA_PANE` and
+`MIRA_SOCKET` set.
+
+Mirador sees no process on the remote, so a send does not wait for the
+agent to be seen running, as on Windows; its status comes from its
+hooks. After a restart, the pane comes back idle like any SSH pane, and
+a keypress starts a fresh agent with the same script. The socket is
+forwarded again before each start, so that agent reaches this app even
+once the old connection, and its forward, are gone; if that forward
+fails, the pane says so before the agent starts.
+
+`team start --host` starts every member as `agent new --host` starts
+one, in one tab here. Each member is told its teammates as usual, with
+`mira` named by its path on the remote. A team with a member a remote
+cannot run is refused, naming that member, before anything opens or
+reaches the remote; and every member's files are sent before the tab
+opens, so a team that cannot start opens nothing here.
+
+Not done yet: Codex there; a role that keeps only some skills or
+plugins (listing them runs Claude Code here, which says nothing of the
+remote's); `team restart` and `team add` on a team running there; a
+Windows remote, or Mirador on Windows driving one.
+
+### How a remote reaches this app
+
+```bash
+mira ssh forward --app [--pane <id>]   # this app's socket, on the remote; prints its path there
+```
 
 The `mira` a remote runs is its own, never copied from this machine
 (whose `mira` is built for macOS): `~/.mirador/bin/mira-<version>` on
@@ -941,52 +1000,17 @@ or with no network there, put a `mira` built for it at that path by
 hand, and it is used as it is (`mira --version` says which version a
 `mira` is).
 
-`mira agent new --host <host> --dir <dir>` starts an agent on the remote,
-in `<dir>` there: Claude Code, plain or with `--role` (Codex is refused
-as not done yet), and `--host` and `--dir` go together. A role is this
-computer's, from the roles the calling pane's directory sees, as for an
-agent here: the remote's own `.mirador/roles` are not read. Its prompt
-and settings are worked out here and sent there, as
-`~/.mirador/run/<pane>.prompt.md` and `<pane>.settings.json`. A role
-that keeps only some skills or plugins is refused for now: listing them
-runs Claude Code here, which says nothing of the remote's. Before its
-pane opens, the remote gets its `mira` and this app's socket, as above.
-A script is written to `~/.mirador/run/<pane>.sh` there, and the
-pane runs `ssh -tt <host> sh <that script>`: nothing is typed into it,
-and nothing is quoted for the remote's login shell. The script starts
-the person's login shell as an interactive login shell, for the PATH
-their own terminal there would have (where nvm or `npm -g` put
-`claude`), and that shell runs the script again with `sh`, which goes to
-`<dir>` (or says loudly there is none) and starts `claude` with
-`MIRA_PANE` and `MIRA_SOCKET` set. What runs where: the agent, its files
-and `mira` on the remote; the pane, its tab, the board and every name on
-this machine, reached through the forwarded socket. Mirador sees no
-process on the remote, so a send does not wait for the agent to be seen
-running, as on Windows. Its status comes from its hooks: every agent
-there, role or plain, is given Mirador's hooks in its own `--settings`,
-calling the remote's `mira`, whatever the remote's Claude Code settings
-hold (where `mira hooks setup` was also run there, both fire). The
-status line is not given: that is the person's own. After a restart, the pane
-comes back idle like any SSH pane; a keypress starts a fresh agent with
-the same script. The socket is forwarded again before each start, so
-that agent reaches this app even once the old connection, and its
-forward, are gone.
-
-`mira team start <team> --host <host> --dir <dir>` starts every member
-of a team there, each as `agent new --host` starts one, in one tab here.
-The team and its roles are this computer's, as for a team here; a team
-with a member a remote cannot run (Codex, or a role limiting skills or
-plugins) is refused naming that member, before anything opens or
-reaches the remote. Each member is told its teammates as usual, with
-`mira` named by its path on the remote. Every member's files are sent
-before the tab opens, so a team that cannot start opens nothing. Its
-board, names and tab are here; `agent send` reaches a member by name
-from a teammate, or by pane id from anywhere. `team restart` does not
-work on a remote team yet.
-
-Disconnects leave the pane idle with `[press any key to reconnect]`;
-restarting Mirador restores remote panes idle too — it never re-opens an
-SSH session behind your back.
+`mira ssh forward --app`, macOS and Linux only for now, forwards this
+app's socket to the pane's host over the same ControlMaster, and prints
+the socket's path there: `$XDG_RUNTIME_DIR/mira-<hash>.sock` on the
+remote (`/tmp` without one, or when that path would be too long for a
+socket), named for this app's own socket, so it is the same path after
+the app restarts. sshd makes it owner-only. A `mira` on the remote
+reaches this app with `MIRA_SOCKET` set to that path. `MIRA_SOCKET`,
+wherever it is set, names the socket outright, before any discovery
+file; a remote has none, so without it `mira` there says Mirador is not
+running. Agents started there are given it; this command is for
+anything else run there by hand.
 
 ## 9. Raw socket protocol
 

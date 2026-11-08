@@ -94,7 +94,8 @@ downloads, the feature tour and the keybinding reference.
   it, reads its console errors — while you watch (`mira browser …`)
 - **Remote workspaces**: `mira ssh open <host>` panes run the system ssh
   (agent auth, 2FA, ProxyJump all work); ControlMaster-backed port
-  forwarding brings remote dev servers to your browser pane
+  forwarding brings remote dev servers to your browser pane; agents and
+  whole teams can run there too, their tabs and board here
 - **Automation socket**: every action drivable via the `mira` CLI / Unix socket
 - **Session persistence**: layout, cwds, scrollback, and browser URLs
   survive restarts and crashes
@@ -745,6 +746,46 @@ of either is ignored for its default.
 
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).
+
+### Teams on a remote computer
+
+An agent, or a whole team, can run on a computer you reach by ssh, while
+this Mirador stays the one place with the tabs, the teams, the task board
+and every name. The agents work there;
+their panes are here, and a local agent in the same tab messages a remote
+one by name, as any teammate.
+
+```bash
+mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
+mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
+mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+```
+
+`--host` is an alias from `~/.ssh/config` or a destination; `--dir` is the
+directory there the agents work in. What the remote needs:
+
+- **Linux on x86_64 or aarch64**, for now.
+- **ssh by key or agent**: nothing answers a password prompt.
+- **`curl` or `wget`, once**: the remote fetches the `mira` of this
+  Mirador's version from its GitHub release, into
+  `~/.mirador/bin/mira-<version>`. With no network there, or on another
+  system, put a `mira` built for it at that path by hand.
+- **Claude Code, installed and signed in** there — `claude setup-token`
+  is the way for agents nobody sits in front of.
+
+What lives where: roles and teams are this computer's, the ones the
+calling pane's directory sees, and a remote's own `.mirador` is not read.
+Each agent's prompt and settings are sent to `~/.mirador/run` on the
+remote; its hooks come with it, in its own settings, so its status
+reaches this Mirador whatever the remote's Claude Code settings hold. The
+status line is not installed there — that is yours. Nothing of this
+machine's logins is copied.
+
+Not done yet: Codex on a remote; a role that keeps only some skills or
+plugins; `team restart` and `team add` on a team running there; Windows
+remotes, or Mirador on Windows driving one; and picking the computer by
+name from the palette. [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has
+how it works.
 
 ## Terminals that keep running when you quit
 

@@ -250,11 +250,12 @@ enum TeamAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
-        /// Run every member on this ssh host instead, in --dir there. The
-        /// team and its roles are still this computer's.
+        /// Run every member on a computer you reach by ssh (an alias from
+        /// ~/.ssh/config, or a destination); the team and its roles are
+        /// still this computer's.
         #[arg(long, requires = "dir")]
         host: Option<String>,
-        /// The directory on --host the team works in.
+        /// With --host: the directory there the team works in.
         #[arg(long, requires = "host")]
         dir: Option<String>,
         #[arg(trailing_var_arg = true)]
@@ -349,12 +350,12 @@ enum AgentAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
-        /// Run it on this ssh host instead (an alias from ~/.ssh/config, or
-        /// a destination), in --dir there: Claude Code, plain or with a role
-        /// of this computer's; not Codex, for now.
+        /// Run it on a computer you reach by ssh (an alias from
+        /// ~/.ssh/config, or a destination): Claude Code, plain or as a role
+        /// of this computer's; not Codex yet.
         #[arg(long, requires = "dir")]
         host: Option<String>,
-        /// The directory on --host the agent works in.
+        /// With --host: the directory there it works in.
         #[arg(long, requires = "host")]
         dir: Option<String>,
         #[arg(trailing_var_arg = true)]
@@ -519,14 +520,18 @@ enum SshAction {
     /// List host aliases from ~/.ssh/config.
     Hosts,
     /// Forward localhost:PORT to the remote's localhost:PORT (so the
-    /// browser pane can reach a remote dev server). With --app, forward
-    /// this app's socket instead and print its path on the remote: a
-    /// `mira` there reaches the app with MIRA_SOCKET set to it.
+    /// browser pane can reach a remote dev server), or with --app this
+    /// app's socket.
     Forward {
         #[arg(required_unless_present = "app")]
         port: Option<u16>,
+        /// Forward this app's socket to the computer instead, and print its
+        /// path there: a `mira` there reaches the app with MIRA_SOCKET set
+        /// to it.
         #[arg(long, conflicts_with = "port")]
         app: bool,
+        /// The SSH pane whose computer it goes to; the active tab's SSH pane,
+        /// or any, otherwise.
         #[arg(long)]
         pane: Option<String>,
     },
