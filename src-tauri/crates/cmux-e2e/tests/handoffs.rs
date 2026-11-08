@@ -125,7 +125,11 @@ fn another_tabs_team_is_reached_by_team_and_name() {
     sb.write(".mirador/teams/gate.md", "---\nmembers:\n  - role: reviewer\n    lead: true\n---\nCheck it.\n");
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()) });
+    let start_squad = |sb: &Sandbox| -> String {
+        let started = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()) });
+        started["tabId"].as_str().unwrap().to_string()
+    };
+    let squad_tab = start_squad(&sb);
     sb.wait_for("the planner", LONG, || sb.member("planner"));
     let planner = pane_of(&sb, "planner");
     sb.wait_for("the planner's session", LONG, || sb.events("hooked", &planner).into_iter().next());
@@ -201,6 +205,20 @@ fn another_tabs_team_is_reached_by_team_and_name() {
         sb.events("message", &dev).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.ends_with("looks good")))
     });
     assert_eq!(header_from(back["text"].as_str().unwrap()), "gate/reviewer", "{back}");
+
+    // A second squad: `squad/<name>` could mean either tab, so it is
+    // refused, and a squad member signs with its pane id instead.
+    let again = start_squad(&sb);
+    let twice = send(&sb, &loner, "squad/planner", "hi").unwrap_err();
+    assert!(
+        twice.contains("team `squad` is running in more than one tab") && twice.contains(&squad_tab) && twice.contains(&again),
+        "{twice}"
+    );
+    send(&sb, &dev, "gate/reviewer", "one more look").unwrap();
+    let got = sb.wait_for("the second message, to the reviewer", LONG, || {
+        sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.ends_with("one more look")))
+    });
+    assert_eq!(header_from(got["text"].as_str().unwrap()), dev, "{got}");
 }
 
 /// A message sent the moment an agent is started — `mira agent new` then
