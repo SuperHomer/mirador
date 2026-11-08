@@ -341,8 +341,10 @@ pub enum Request {
         #[serde(default)]
         view: Option<View>,
     },
-    /// Where the board is looked at. Saved, never broadcast: the board
-    /// that moved it already shows it.
+    /// Where the board is looked at. Saved, and told to the board, which
+    /// shows it and drops any save of its own still pending (it would
+    /// land over this one). The board's own saves are never broadcast:
+    /// it shows them already.
     SetCamera {
         x: f64,
         y: f64,
@@ -624,12 +626,18 @@ pub enum Request {
         pane_id: Option<String>,
     },
     /// Adds a member to the team of `pane_id`'s tab, beside the others.
+    /// `task` is its first message.
     TeamAdd {
         role: String,
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
+        task: Option<String>,
+        #[serde(default)]
         pane_id: Option<String>,
+        /// The title of the task's card, instead of one made from `task`.
+        #[serde(default)]
+        title: Option<String>,
     },
     /// Starts again the members of `pane_id`'s team whose agent has exited
     /// or whose pane was closed — `members` by name, or all of them.

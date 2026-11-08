@@ -15,9 +15,17 @@ use std::process::Command;
 
 use portable_pty::CommandBuilder;
 
+/// In the runtime dir, beside the holders: a control socket is runtime
+/// state, and its path has to fit the 104-byte socket limit, which a long
+/// config directory once broke ("ControlPath too long", every SSH pane).
 #[cfg(not(windows))]
 fn control_dir() -> PathBuf {
-    crate::config::config_dir().join("ssh")
+    control_dir_in(&crate::config::runtime_dir())
+}
+
+#[cfg(not(windows))]
+fn control_dir_in(runtime_dir: &std::path::Path) -> PathBuf {
+    runtime_dir.join("ssh")
 }
 
 /// `%C` is a short stable hash of (host, port, user, proxy) — safe for a
@@ -198,6 +206,30 @@ mod tests {
         // Multiplexing is a unix-only capability of OpenSSH.
         assert_eq!(dbg.contains("ControlMaster=auto"), !cfg!(windows));
         assert!(dbg.contains("myhost"));
+    }
+
+    /// What OpenSSH binds for a ControlPath: `%C` expanded to 40 hex
+    /// digits, and the `.` and 16 random characters of the name it listens
+    /// on before renaming. It refuses one of 104 bytes or more.
+    #[cfg(not(windows))]
+    fn bound_len(path: &str) -> usize {
+        path.replace("%C", &"f".repeat(40)).len() + 17
+    }
+
+    /// The control socket is not in the config directory, whose length
+    /// is the user's (a sandbox's under $TMPDIR broke every SSH pane), and
+    /// fits in the runtime dir of an e2e sandbox and of a long home. The
+    /// budget: a runtime dir of up to 38 bytes, so a home of up to 29.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_control_socket_is_runtime_state_and_fits() {
+        let path = control_path();
+        assert!(path.starts_with(&*crate::config::runtime_dir().to_string_lossy()), "{path}");
+        assert!(!path.starts_with(&*crate::config::config_dir().to_string_lossy()), "{path}");
+        for runtime in ["/tmp/me2e99999crosstab/mirador", "/Users/firstname.lastname/.mirador"] {
+            let path = control_dir_in(std::path::Path::new(runtime)).join("cm-%C").to_string_lossy().into_owned();
+            assert!(bound_len(&path) < 104, "{path}: {}", bound_len(&path));
+        }
     }
 
     #[test]

@@ -199,9 +199,10 @@ enum Command {
         run: Option<String>,
     },
     /// Install or remove the Claude Code integration: the hooks that light
-    /// up Mirador tabs, the `/mira-diff` slash command, and (on macOS and
-    /// Linux) a wrapper in front of your status line that keeps your
-    /// plan's limits, your own status line still shown.
+    /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
+    /// teaches Claude this CLI, and (on macOS and Linux) a wrapper in front
+    /// of your status line that keeps your plan's limits, your own status
+    /// line still shown.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -256,12 +257,18 @@ enum TeamAction {
         #[arg(long)]
         defined: bool,
     },
-    /// Add a member to this tab's team, beside this pane.
+    /// Add a member to this tab's team, beside this pane. TASK is its
+    /// first message.
     Add {
         role: String,
         /// What to call it; the role's name, numbered if taken, otherwise.
         #[arg(long)]
         name: Option<String>,
+        /// The title of the task's card, instead of its first line.
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(trailing_var_arg = true)]
+        task: Vec<String>,
     },
     /// Start again this tab's members whose agent exited or whose pane was
     /// closed — the ones named, or all of them. A member's shell must be
@@ -880,7 +887,13 @@ fn run(cli: Cli) -> Result<(), String> {
             },
             TeamAction::List { defined: true } => return defined_teams(cli.json),
             TeamAction::List { defined: false } => Request::TeamList,
-            TeamAction::Add { role, name } => Request::TeamAdd { role, name, pane_id: own_pane() },
+            TeamAction::Add { role, name, title, task } => Request::TeamAdd {
+                role,
+                name,
+                task: (!task.is_empty()).then(|| task.join(" ")),
+                pane_id: own_pane(),
+                title,
+            },
             TeamAction::Restart { members } => Request::TeamRestart { members, pane_id: own_pane() },
             TeamAction::Clear { force } => Request::TeamClear { pane_id: own_pane(), force },
             TeamAction::Save { name } => Request::TeamSave { name, pane_id: own_pane() },
@@ -2184,7 +2197,7 @@ fn own_path() -> Result<std::path::PathBuf, String> {
 }
 
 /// Idempotently installs (or removes) the Mirador hooks in
-/// ~/.claude/settings.json and the `/mira-diff` skill beside them.
+/// ~/.claude/settings.json and the `/mira-diff` and `mira` skills beside them.
 fn hooks(action: &str) -> Result<(), String> {
     use cmux_core::claude_integration::{self, Action};
     let action = match action {
@@ -2196,7 +2209,7 @@ fn hooks(action: &str) -> Result<(), String> {
         println!("{line}");
     }
     if action == Action::Setup {
-        println!("note: agents and /mira-diff call `mira` by name; `mira install` puts it on PATH");
+        println!("note: agents and the skills call `mira` by name; `mira install` puts it on PATH");
     }
     Ok(())
 }
