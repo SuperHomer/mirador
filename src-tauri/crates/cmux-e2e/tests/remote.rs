@@ -1,6 +1,11 @@
 //! A remote computer, end to end: the sandbox's own sshd, reached as `box`
 //! from an ssh pane. Skipped unless `MIRA_E2E=1`.
 
+// The remote is a Unix sshd sandbox reached over Unix sockets, and the
+// Windows side of remotes is not done: none of this builds there.
+#![cfg(unix)]
+
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 use cmux_e2e::{e2e, flag, Sandbox};
@@ -173,11 +178,7 @@ fn a_file_sent_to_the_remote_arrives_exact() {
     });
     assert_eq!(answer["paneId"], pane.as_str());
     assert_eq!(std::fs::read(&path).unwrap(), text.as_bytes());
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-    }
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     assert!(!path.with_extension("txt.tmp").exists(), "nothing left beside it");
 }
 
