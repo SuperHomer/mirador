@@ -368,6 +368,9 @@ other, on the role's model and effort, and keeps that prompt. Codex gets
 Without a role, `--harness codex` starts plain Codex instead of plain
 Claude Code (no other harness can be started that way, and `--harness`
 with `--role` is refused: a role names its own).
+In a team's tab, `agent new --role` (without `--tab`) is `team add`: the
+agent joins the running team as a member, told its teammates (see
+*Teams*). A plain agent there, with no role, is no member.
 Any Codex, a role's or plain, also gets `-c` overrides for a permissions profile, `mirador`, that
 extends the one Codex would run on — your `default_permissions`, else
 `:workspace` in a trusted project and `:read-only` elsewhere — with
@@ -434,7 +437,7 @@ hook. `--json` adds the cwd, branch and when the status last changed.
 mira team list --defined                 # teams this directory can start
 mira team start squad "add OAuth"        # a tab of its own; the task goes to the lead
 mira team list                           # running teams: each member's state and pane
-mira team add reviewer [--name gate]     # another member, beside this pane
+mira team add reviewer [--name gate] [task…]  # another member, beside this pane; the task is its first message
 mira team restart [member…]              # bring back exited or closed members
 mira team clear [--force]                # every running member on a new conversation, the lead last
 mira team save [name]                    # this team's conversations, as name (the team's by default)
@@ -577,6 +580,12 @@ each member, teammates first and the lead last, and reports each as
 covers, unless `--force`, a member whose screen shows a numbered menu, or
 no input box after the wait `send` makes. `team add`, `team
 restart` and `team clear` act on the team of the calling pane's tab.
+`team add` gives the new member its task as its first message, as `team
+start` gives the lead its, and files the task's card for it. In a team's
+tab, `agent new --role` is `team add`, and so is a role opened from the
+app there (+ New, a pane's menu, the palette). A member added either way
+belongs to the running team, kept with its tab, never to the team's
+file: the next `team start` does not have it.
 
 A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
@@ -658,7 +667,7 @@ mira agent board                               # this tab's wall, on its Tasks s
 
 Mirador keeps a log of tasks: one line per event, kept across restarts.
 It logs a task given once the start or the send has worked — `team start`
-(the task, to the lead), `agent new` with a task, `agent send` — each with who sent it (the calling agent's
+(the task, to the lead), `team add` and `agent new` with a task, `agent send` — each with who sent it (the calling agent's
 name, or `you`), the agent it went to (its team member name, else its
 session's, else its role's, else its harness's: `claude`, `codex`), and
 its tab and team. It logs a Claude Code agent's turn ending when its

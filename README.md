@@ -554,7 +554,7 @@ Mirador keeps track of the team with its tab, across restarts:
 mira team list               # each member: running, exited, or closed
 mira team restart            # start the exited and closed ones again
 mira team restart dev-2      # …or just these
-mira team add reviewer       # another member, beside this pane: reviewer-2
+mira team add reviewer "look at the auth change"  # reviewer-2, beside this pane, with its first task
 mira team list --defined     # the teams this directory can start
 mira team cost squad         # what it costs to start, and a turn, before you start it
 ```
@@ -622,6 +622,10 @@ setup`) to see an agent stop.
 is idle — never into a shell running something else, which it reports as
 `busy` — and opens a new pane beside a teammate for one whose pane was
 closed. Run `team add` and `team restart` from a pane of the team's tab.
+A role started in a team's tab — from + New, a pane's menu, the palette
+or `mira agent new --role` — is a `team add`: it joins the running team
+for the session, told its teammates, and the team's file is never
+changed. A plain Claude Code or Codex started there is no member.
 
 The **agent wall** is a way of showing a tab: in place of its splits, the
 tab's agents in a grid — roles, and any agent you started by hand:

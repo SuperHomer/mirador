@@ -257,12 +257,18 @@ enum TeamAction {
         #[arg(long)]
         defined: bool,
     },
-    /// Add a member to this tab's team, beside this pane.
+    /// Add a member to this tab's team, beside this pane. TASK is its
+    /// first message.
     Add {
         role: String,
         /// What to call it; the role's name, numbered if taken, otherwise.
         #[arg(long)]
         name: Option<String>,
+        /// The title of the task's card, instead of its first line.
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(trailing_var_arg = true)]
+        task: Vec<String>,
     },
     /// Start again this tab's members whose agent exited or whose pane was
     /// closed — the ones named, or all of them. A member's shell must be
@@ -881,7 +887,13 @@ fn run(cli: Cli) -> Result<(), String> {
             },
             TeamAction::List { defined: true } => return defined_teams(cli.json),
             TeamAction::List { defined: false } => Request::TeamList,
-            TeamAction::Add { role, name } => Request::TeamAdd { role, name, pane_id: own_pane() },
+            TeamAction::Add { role, name, title, task } => Request::TeamAdd {
+                role,
+                name,
+                task: (!task.is_empty()).then(|| task.join(" ")),
+                pane_id: own_pane(),
+                title,
+            },
             TeamAction::Restart { members } => Request::TeamRestart { members, pane_id: own_pane() },
             TeamAction::Clear { force } => Request::TeamClear { pane_id: own_pane(), force },
             TeamAction::Save { name } => Request::TeamSave { name, pane_id: own_pane() },

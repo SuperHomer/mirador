@@ -1698,6 +1698,11 @@ pub fn open_agent(
 /// app; whoever ran `mira agent new`, from the socket. `harness` is for an
 /// agent without a role: Claude Code, else Codex. `title` is the task's
 /// card's, instead of one made from the task.
+///
+/// A role split into a team's tab joins the running team, as `team add`
+/// would make it: an agent there that is not a member is in no `team
+/// list` and was never told its teammates, so nobody could hand it work.
+/// A plain Claude Code or Codex does not join, because a seat is a role.
 #[allow(clippy::too_many_arguments)]
 pub fn open_agent_from(
     app: AppHandle,
@@ -1717,6 +1722,11 @@ pub fn open_agent_from(
     let source = pane_id
         .filter(|id| state.meta.lock().unwrap().contains_key(id))
         .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    if let Some(role) = role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        if !tab && crate::teams::team_here(&state, Some(&source)).is_ok() {
+            return crate::teams::team_add_from(app, state, role.to_string(), None, task, Some(source), title, from);
+        }
+    }
     // The agent works where it was asked from, whichever way it opens, and
     // gets the roles that directory sees: its repository's, then yours.
     let cwd = state
