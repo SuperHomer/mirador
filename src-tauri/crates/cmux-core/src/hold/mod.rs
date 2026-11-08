@@ -18,25 +18,15 @@ use std::path::{Path, PathBuf};
 
 /// Where this user's holders live.
 ///
-/// On unix, a directory: under `$XDG_RUNTIME_DIR` when it is set, so a
-/// sandbox instance with its own runtime dir can never see — let alone
-/// attach — the real app's live shells. Otherwise `~/.mirador/holders`:
-/// the data directory (`~/Library/Application Support/Mirador` on macOS)
-/// puts a socket path at ~100 bytes, against a 104-byte limit, and the temp
-/// directory is swept of files untouched for days, which would cut a
-/// long-lived session off from its socket.
+/// On unix, a directory in the runtime dir (`config::runtime_dir`, which
+/// says why there).
 ///
 /// On Windows, a pipe-name prefix carrying the user name, like the
 /// automation pipe's: named pipes live in one machine-wide namespace.
 pub fn location() -> PathBuf {
     #[cfg(unix)]
     {
-        match std::env::var("XDG_RUNTIME_DIR") {
-            Ok(dir) if !dir.is_empty() => PathBuf::from(dir).join("mirador").join("holders"),
-            _ => PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
-                .join(".mirador")
-                .join("holders"),
-        }
+        crate::config::runtime_dir().join("holders")
     }
     #[cfg(windows)]
     {

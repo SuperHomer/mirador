@@ -276,7 +276,7 @@ export const actions: ActionDef[] = [
     id: "setup_claude_integration",
     title: "App: Set Up Claude Code Integration",
     group: "app",
-    // Hooks that light up tabs, /mira-diff, and mira on PATH. The answer
+    // Hooks that light up tabs, the skills, and mira on PATH. The answer
     // shows at the foot of the sidebar, where the first-launch offer was.
     run: () => void useClaudeStore.getState().run(),
   },

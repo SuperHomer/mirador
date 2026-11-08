@@ -5,7 +5,8 @@ name: Release
 # pointed at a release with no `latest-<target>-<arch>.json`, and every
 # running app's update check 404'd. Here the release stays a draft — which
 # /releases/latest/ never resolves to — until both platforms' assets and
-# manifests are on it, and only then is it published.
+# manifests, and the Linux `mira` CLI, are on it, and only then is it
+# published.
 #
 # To release: commit `Release vX.Y.Z`, then
 #   gh release create vX.Y.Z --draft --title "vX.Y.Z — …" --notes-file notes.md
@@ -67,10 +68,16 @@ jobs:
     uses: ./.github/workflows/build-windows.yml
     secrets: inherit
 
+  # The `mira` CLI alone, for remote Linux computers; nothing to sign, so
+  # no secrets.
+  linux:
+    needs: preflight
+    uses: ./.github/workflows/build-linux-cli.yml
+
   # Separate jobs so repo-write lives here and nowhere near the builds'
   # dependency graph. Linux — they only move files.
   attach:
-    needs: [macos, windows]
+    needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -85,11 +92,23 @@ jobs:
           name: mirador-windows
           path: windows
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mira-linux-x86_64
+          path: linux-x86_64
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mira-linux-aarch64
+          path: linux-aarch64
+
       # Version-free names on purpose: that is what makes
       # /releases/latest/download/<name> a permanent link, so the landing
       # page can point straight at the installer and never need updating.
-      # The version lives in the release tag.
-      - name: Attach installers, update payloads and manifests to the draft
+      # The version lives in the release tag. The Linux `mira` binaries are
+      # named by the architecture `uname -m` prints, so whatever puts `mira`
+      # on a remote computer can build the link from that alone.
+      - name: Attach installers, update payloads, manifests and the Linux CLI to the draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -106,6 +125,10 @@ jobs:
           mv windows/bundle/nsis/*-setup.exe.sig     Mirador-Windows-x64-setup.exe.sig
           mv windows/bundle/nsis/*.exe               Mirador-Windows-x64-setup.exe
           mv windows/bundle/msi/*.msi                Mirador-Windows-x64.msi
+          # Not updater payloads, so no .sig and no manifest: the app never
+          # updates itself from them.
+          mv linux-x86_64/mira                       mira-linux-x86_64
+          mv linux-aarch64/mira                      mira-linux-aarch64
 
           # The draft's body, read now rather than from the event: there is
           # no release event any more. Into a file, never through an expression —
@@ -150,6 +173,8 @@ jobs:
             Mirador-Windows-x64-setup.exe.sig \
             Mirador-Windows-x64.msi \
             latest-windows-x86_64.json \
+            mira-linux-x86_64 \
+            mira-linux-aarch64 \
             --repo "$REPO" --clobber
 
   # Last, and only if everything above succeeded. A failed build leaves an

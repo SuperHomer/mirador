@@ -333,15 +333,22 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
     sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
     sb.wait_for("the welcome", LONG, || sb.screen(&pane).filter(|s| s.contains("Press any key")));
 
+    // Untimed first: before its 10 s wait for an input box, a send or a
+    // clear also waits until the app has seen the agent's process running
+    // (`handoff::wait_started`), which comes with the next poll, up to 2 s
+    // and a process scan later. The hook above does not need that poll, so
+    // timing the first call counted that wait too: 12.17 s on a slow
+    // runner. Once one call has been through it, the next waits only for
+    // the input box.
+    let clear = |force| sb.request(Request::AgentClear { name: Some(pane.clone()), pane_id: Some(first.clone()), force });
+    let refused = clear(false).unwrap_err();
+    assert!(refused.contains("no input box"), "{refused}");
     let asked = std::time::Instant::now();
     let refused = send(&sb, &first, &pane, "hello").unwrap_err();
     let took = asked.elapsed();
     assert!(refused.contains("no input box"), "{refused}");
     // The wait is 10 s, and no read of the screen outlives it.
     assert!(took >= Duration::from_secs(10) && took < Duration::from_secs(12), "refused after {took:?}");
-    let clear = |force| sb.request(Request::AgentClear { name: Some(pane.clone()), pane_id: Some(first.clone()), force });
-    let refused = clear(false).unwrap_err();
-    assert!(refused.contains("no input box"), "{refused}");
     assert_eq!(sb.events("message", &pane).len(), 0, "nothing reached it");
 
     // Forced, it goes through — and, as a key would, dismisses the welcome.
