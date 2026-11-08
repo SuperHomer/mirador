@@ -120,3 +120,33 @@ fn a_remote_with_no_published_mira_says_where_to_put_one() {
     let by_hand = sb.home.join(format!(".mirador/bin/mira-{VERSION}"));
     assert!(err.contains(by_hand.to_str().unwrap()), "{err}");
 }
+
+/// A file sent to the remote arrives byte for byte, owner-only, its
+/// directory made: a quote, `$HOME`, a backslash, a line equal to the
+/// delimiter its script uses, and no final newline. The remote is this
+/// computer, so the file is read straight off the disk.
+#[test]
+fn a_file_sent_to_the_remote_arrives_exact() {
+    e2e!();
+    let mut sb = Sandbox::new("put");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    let pane = remote_pane(&sb);
+
+    let path = sb.home.join(".mirador/sent/probe.txt");
+    let text = "it's $HOME \\ here\nMIRA_EOF\nEOF\nno newline at the end";
+    let answer = sb.call(Request::SshPut {
+        pane_id: Some(pane.clone()),
+        path: path.to_str().unwrap().into(),
+        text: text.into(),
+    });
+    assert_eq!(answer["paneId"], pane.as_str());
+    assert_eq!(std::fs::read(&path).unwrap(), text.as_bytes());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    assert!(!path.with_extension("txt.tmp").exists(), "nothing left beside it");
+}

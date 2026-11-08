@@ -6,6 +6,9 @@ license.workspace = true
 description = "Mirador core: PTY management, layout, OSC scanning, config, SSH. No Tauri dependency."
 
 [dependencies]
+# A file sent to a remote travels as base64 (`ssh::put_file`). Already in
+# the tree: the app and the CLI use it.
+base64 = "0.22"
 cmux-protocol = { path = "../cmux-protocol" }
 portable-pty = "0.9"
 serde.workspace = true

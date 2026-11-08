@@ -841,6 +841,13 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// Writes `text` to `path` on a remote pane's host, exactly, owner-only.
+    SshPut {
+        #[serde(default)]
+        pane_id: Option<String>,
+        path: String,
+        text: String,
+    },
     /// Opens a commit-graph pane (split of the source pane, or a new tab),
     /// for the repository the calling pane sits in.
     GraphOpen {

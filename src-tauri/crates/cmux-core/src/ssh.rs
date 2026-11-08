@@ -120,17 +120,34 @@ pub fn forward_socket(host: &str, local: &std::path::Path) -> Result<String, Str
     Ok(remote)
 }
 
-/// Runs `command` on `host` over the pane's connection, and gives what it
-/// printed.
+/// Runs `script` on `host` over the pane's connection, and gives what it
+/// printed. The script goes to `sh -s` on stdin, never on the command
+/// line: nothing in it is quoted for the remote's login shell, which may
+/// be fish, whose quoting is not POSIX. A command in it that reads stdin
+/// would read the rest of the script, so scripts redirect any that does.
 #[cfg(not(windows))]
-fn remote_shell(host: &str, command: &str) -> Result<String, String> {
+fn remote_shell(host: &str, script: &str) -> Result<String, String> {
+    use std::io::Write;
     let mut cmd = Command::new("ssh");
     // Never a password prompt: nobody is there to answer it.
     cmd.arg("-o").arg("BatchMode=yes");
     for opt in control_opts() {
         cmd.arg("-o").arg(opt);
     }
-    let output = cmd.args(host_args(host)).arg(command).output().map_err(|e| e.to_string())?;
+    let mut child = cmd
+        .args(host_args(host))
+        .args(["sh", "-s"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let mut stdin = child.stdin.take().expect("piped");
+    let script = script.to_string();
+    // From a thread: a large upload must not wait on ssh's output being read.
+    let writer = std::thread::spawn(move || stdin.write_all(script.as_bytes()));
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    let _ = writer.join();
     let err = String::from_utf8_lossy(&output.stderr);
     match output.status.code() {
         Some(0) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
@@ -179,9 +196,39 @@ fn ensure_mira_script(version: &str) -> String {
 /// from this machine, whose `mira` is built for another system.
 #[cfg(not(windows))]
 pub fn ensure_mira(host: &str, version: &str) -> Result<String, String> {
-    let script = ensure_mira_script(version);
-    let path = remote_shell(host, &format!("sh -c '{}'", script.replace('\'', r"'\''")))?;
+    let path = remote_shell(host, &ensure_mira_script(version))?;
     Ok(path.trim().to_string())
+}
+
+/// Writes `bytes` to `path` on `host`, exactly, owner-only (0600: prompts
+/// and settings are the person's), making its directory if needed.
+#[cfg(not(windows))]
+pub fn put_file(host: &str, path: &str, bytes: &[u8]) -> Result<(), String> {
+    remote_shell(host, &put_file_script(path, bytes)).map(|_| ())
+}
+
+/// The script [`put_file`] runs. The bytes travel as base64 in a quoted
+/// heredoc rather than as themselves: a heredoc always ends its text with
+/// a newline, so a file without one could not arrive exact, and any text
+/// may hold a line equal to the delimiter. Base64 holds no `_`, so
+/// `MIRA_EOF` never occurs in it, and `base64 -d` is in coreutils, busybox
+/// and macOS alike. Written beside the file then moved, so it appears whole
+/// and 0600 from the start (umask 077).
+#[cfg_attr(windows, allow(dead_code))]
+fn put_file_script(path: &str, bytes: &[u8]) -> String {
+    use base64::Engine;
+    let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let lines: Vec<&str> = encoded.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap()).collect();
+    let dir = path.rsplit_once('/').map(|(d, _)| d).filter(|d| !d.is_empty());
+    let tmp = format!("{path}.tmp");
+    format!(
+        "set -e\numask 077\n{mkdir}base64 -d > {tmp} <<'MIRA_EOF'\n{body}\nMIRA_EOF\nchmod 600 {tmp}\nmv {tmp} {path}\n",
+        mkdir = dir.map(|d| format!("mkdir -p {}\n", quote(d))).unwrap_or_default(),
+        tmp = quote(&tmp),
+        body = lines.join("\n"),
+        path = quote(path),
+    )
 }
 
 /// Where the app's socket `local` goes on a remote whose runtime directory
@@ -304,6 +351,21 @@ mod tests {
     /// the local socket — the same name after a restart, another for
     /// another instance — or in /tmp when that directory is missing, not
     /// absolute, or too deep for a socket path.
+    #[test]
+    fn the_apps_socket_on_a_remote_is_short_and_this_instances() {
+        let local = std::path::Path::new("/tmp/mira.sock");
+        // FNV-1a of the path, pinned: a change here strands remote agents.
+        assert_eq!(remote_socket_path("/run/user/1000", local), "/run/user/1000/mira-5ee79133.sock");
+        assert_eq!(remote_socket_path("/run/user/1000/\n", local), "/run/user/1000/mira-5ee79133.sock");
+        assert_eq!(
+            remote_socket_path("/tmp", std::path::Path::new("/run/user/1000/mira.sock")),
+            "/tmp/mira-2e8a4af1.sock"
+        );
+        for dir in ["", "/", "run/user", &format!("/{}", "d".repeat(100))] {
+            assert_eq!(remote_socket_path(dir, local), "/tmp/mira-5ee79133.sock", "{dir}");
+        }
+    }
+
     /// The script a remote runs for its `mira`: this version's file under
     /// ~/.mirador/bin, fetched from this version's release for its arch.
     #[test]
@@ -318,19 +380,25 @@ mod tests {
         assert!(!script.contains('@'), "every placeholder filled: {script}");
     }
 
+    /// A file sent to a remote: base64 between delimiters no base64 holds,
+    /// decoding to the exact bytes — a quote, `$HOME`, a backslash, a line
+    /// equal to the delimiter, no final newline — written aside, made 0600,
+    /// then moved into place, its directory made first.
     #[test]
-    fn the_apps_socket_on_a_remote_is_short_and_this_instances() {
-        let local = std::path::Path::new("/tmp/mira.sock");
-        // FNV-1a of the path, pinned: a change here strands remote agents.
-        assert_eq!(remote_socket_path("/run/user/1000", local), "/run/user/1000/mira-5ee79133.sock");
-        assert_eq!(remote_socket_path("/run/user/1000/\n", local), "/run/user/1000/mira-5ee79133.sock");
-        assert_eq!(
-            remote_socket_path("/tmp", std::path::Path::new("/run/user/1000/mira.sock")),
-            "/tmp/mira-2e8a4af1.sock"
+    fn a_file_sent_to_a_remote_arrives_exact() {
+        use base64::Engine;
+        let text = "it's $HOME \\ here\nMIRA_EOF\nEOF\nno newline at the end";
+        let script = put_file_script("/h/it's/probe.txt", text.as_bytes());
+        let body = script.split_once("<<'MIRA_EOF'\n").unwrap().1.split_once("\nMIRA_EOF\n").unwrap().0;
+        assert!(!body.contains("MIRA_EOF") && body.lines().all(|l| l.len() <= 76), "{script}");
+        let decoded = base64::engine::general_purpose::STANDARD.decode(body.replace('\n', "")).unwrap();
+        assert_eq!(decoded, text.as_bytes());
+        assert!(script.starts_with("set -e\numask 077\nmkdir -p '/h/it'\\''s'\n"), "{script}");
+        assert!(
+            script.ends_with("chmod 600 '/h/it'\\''s/probe.txt.tmp'\nmv '/h/it'\\''s/probe.txt.tmp' '/h/it'\\''s/probe.txt'\n"),
+            "{script}"
         );
-        for dir in ["", "/", "run/user", &format!("/{}", "d".repeat(100))] {
-            assert_eq!(remote_socket_path(dir, local), "/tmp/mira-5ee79133.sock", "{dir}");
-        }
+        assert!(!put_file_script("probe.txt", b"x").contains("mkdir"), "no directory to make");
     }
 
     #[test]

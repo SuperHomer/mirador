@@ -667,6 +667,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         #[cfg(windows)]
         Request::SshMira { .. } => Err("a remote's mira is not done on Windows yet".into()),
+        #[cfg(not(windows))]
+        Request::SshPut { pane_id, path, text } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            cmux_core::ssh::put_file(&host, &path, text.as_bytes())?;
+            Ok(json!({ "paneId": pane, "path": path }))
+        }
+        #[cfg(windows)]
+        Request::SshPut { .. } => Err("sending a file over ssh is not done on Windows yet".into()),
     }
 }
 
