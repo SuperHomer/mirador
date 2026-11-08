@@ -111,6 +111,27 @@ pub fn config_dir() -> PathBuf {
     }
 }
 
+/// Where Mirador keeps its own sockets: the session holders' and the SSH
+/// ControlMaster's. Under `$XDG_RUNTIME_DIR` when it is set, so a sandbox
+/// instance with its own runtime dir can never see — let alone attach —
+/// the real app's; otherwise `~/.mirador`. Not the config or the data
+/// directory: a Unix socket path must fit in 104 bytes, and those can be
+/// long (`~/Library/Application Support/Mirador` alone puts a holder's at
+/// ~100). Not the temp directory either: it is swept of files untouched
+/// for days, which would cut a long-lived session off from its socket.
+#[cfg(unix)]
+pub fn runtime_dir() -> PathBuf {
+    runtime_dir_from(std::env::var("XDG_RUNTIME_DIR").ok(), std::env::var("HOME").ok())
+}
+
+#[cfg(unix)]
+fn runtime_dir_from(xdg_runtime_dir: Option<String>, home: Option<String>) -> PathBuf {
+    match xdg_runtime_dir {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir).join("mirador"),
+        _ => PathBuf::from(home.unwrap_or_else(|| ".".into())).join(".mirador"),
+    }
+}
+
 pub fn config_path() -> PathBuf {
     config_dir().join("mirador.json")
 }
@@ -630,6 +651,15 @@ pub(crate) fn normalize_color(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_runtime_dir_is_the_xdg_one_else_under_home() {
+        let dir = |xdg: Option<&str>, home: Option<&str>| runtime_dir_from(xdg.map(String::from), home.map(String::from));
+        assert_eq!(dir(Some("/run/user/501"), Some("/home/a")), PathBuf::from("/run/user/501/mirador"));
+        assert_eq!(dir(None, Some("/home/a")), PathBuf::from("/home/a/.mirador"));
+        assert_eq!(dir(Some(""), Some("/home/a")), PathBuf::from("/home/a/.mirador"), "an empty one is unset");
+    }
 
     #[test]
     fn tilde_expands_against_home() {
