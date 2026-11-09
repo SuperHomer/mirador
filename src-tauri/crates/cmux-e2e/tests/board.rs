@@ -157,8 +157,8 @@ fn the_board_comes_back_as_it_was_left() {
 
 /// A terminal shows the same thing after a trip to the board and back: the
 /// board draws the same xterm, never a new one, so nothing is lost or
-/// replayed. (Its size changes on the way, and it reflows, so only lines
-/// that fit either width are compared.)
+/// replayed. (Its size changes on the way, and it reflows, so only its
+/// answers are compared: short lines that fit either width.)
 #[test]
 fn switching_views_keeps_what_a_terminal_shows() {
     e2e!();
@@ -178,19 +178,23 @@ fn switching_views_keeps_what_a_terminal_shows() {
             .unwrap()
             .to_string()
     };
-    let lines = |pane: &str| -> Vec<String> {
-        text(pane).lines().filter(|l| l.contains("alpha-") || l.contains("beta-")).map(|l| l.trim().to_string()).collect()
+    // Only the answers, never the echoed command: under a long prompt, as
+    // on CI's runner, the command wraps, and rewraps when the size changes.
+    let all = |word: &str| [7, 14, 21].map(|n| format!("{word}-{n}")).to_vec();
+    let answers = |pane: &str, word: &str| -> Vec<String> {
+        let want = all(word);
+        text(pane).lines().map(str::trim).filter(|l| want.iter().any(|w| w == l)).map(String::from).collect()
     };
-    let before = (lines(&first), lines(&other));
-    // CI once counted 3, the command line missing, and it never did here:
-    // the whole screen says what it showed instead.
-    assert_eq!(before.0.len(), 4, "the command line and three answers: {:?}; the screen:\n{}", before.0, text(&first));
+    // Each answer once, in order: nothing lost, nothing replayed.
+    let shown = || answers(&first, "alpha") == all("alpha") && answers(&other, "beta") == all("beta");
+    // The whole screen, if it ever shows otherwise.
+    assert!(shown(), "{:?} {:?}; the first screen:\n{}", answers(&first, "alpha"), answers(&other, "beta"), text(&first));
 
     sb.call(Request::View { view: Some(cmux_protocol::View::Board) });
     // Both terminals are drawn on the board, the other tab's included.
-    sb.wait_for("the board to settle", LONG, || (lines(&first) == before.0 && lines(&other) == before.1).then_some(()));
+    sb.wait_for("the board to settle", LONG, || shown().then_some(()));
     sb.call(Request::View { view: Some(cmux_protocol::View::Tabs) });
-    sb.wait_for("the tabs to settle", LONG, || (lines(&first) == before.0 && lines(&other) == before.1).then_some(()));
+    sb.wait_for("the tabs to settle", LONG, || shown().then_some(()));
     // And they still take input after the round trip.
     assert_panes_answer(&sb, &[first, other]);
 }
