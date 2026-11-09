@@ -287,8 +287,9 @@ export function CommandPalette() {
       })),
     };
     // Computers: an ssh host and the directory there, kept in mirador.json.
-    // A row opens an SSH pane; the directory is for teams, which start on
-    // a computer in a later version.
+    // A row opens an SSH pane. The directory is kept for starting agents
+    // and teams there by the computer's name, not done yet: today
+    // `--host` and `--dir` name it.
     const question = (next: Ask) => {
       setStepId(null);
       setQuery("");
