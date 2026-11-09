@@ -1,3 +1,9 @@
+/// This product's GitHub repository: where its release notes and the
+/// `mira` a remote computer fetches come from. Pinned rather than derived
+/// from the updater endpoint: a config-driven URL would be a way to point
+/// the app at someone else's notes, or someone else's binary.
+pub const REPO: &str = "SuperHomer/mirador";
+
 pub mod agents;
 pub mod board;
 pub mod browser_url;

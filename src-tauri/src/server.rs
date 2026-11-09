@@ -329,7 +329,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             task,
             target,
             pane_id,
+            host,
+            dir,
         } => {
+            let remote = match (host, dir) {
+                (Some(host), Some(dir)) => Some((host, dir)),
+                (None, None) => None,
+                _ => return Err("a host and a directory there go together: give both, or neither".into()),
+            };
             let from = sender(&state, pane_id.as_deref());
             let pane_id = crate::commands::open_agent_from(
                 app.clone(),
@@ -343,6 +350,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 harness,
                 title,
                 from,
+                remote,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }
@@ -385,9 +393,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::TeamStart { team, task, pane_id, title } => {
+        Request::TeamStart { team, task, pane_id, title, host, dir } => {
+            let remote = match (host, dir) {
+                (Some(host), Some(dir)) => Some((host, dir)),
+                (None, None) => None,
+                _ => return Err("a host and a directory there go together: give both, or neither".into()),
+            };
             let from = sender(&state, pane_id.as_deref());
-            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from)?;
+            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from, remote)?;
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
@@ -657,6 +670,31 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             cmux_core::ssh::forward(&host, port, cancel)?;
             Ok(json!({ "paneId": pane, "port": port, "cancelled": cancel }))
         }
+        #[cfg(not(windows))]
+        Request::SshForwardApp { pane_id } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            let socket = cmux_core::ssh::forward_socket(&host, &cmux_core::ipc::default_socket_path())?;
+            Ok(json!({ "paneId": pane, "socket": socket }))
+        }
+        // A named pipe cannot be forwarded: Windows needs another way.
+        #[cfg(windows)]
+        Request::SshForwardApp { .. } => Err("forwarding the app over ssh is not done on Windows yet".into()),
+        #[cfg(not(windows))]
+        Request::SshMira { pane_id } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            let mira = cmux_core::ssh::ensure_mira(&host, env!("CARGO_PKG_VERSION"))?;
+            Ok(json!({ "paneId": pane, "mira": mira }))
+        }
+        #[cfg(windows)]
+        Request::SshMira { .. } => Err("a remote's mira is not done on Windows yet".into()),
+        #[cfg(not(windows))]
+        Request::SshPut { pane_id, path, text } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            cmux_core::ssh::put_file(&host, &path, text.as_bytes())?;
+            Ok(json!({ "paneId": pane, "path": path }))
+        }
+        #[cfg(windows)]
+        Request::SshPut { .. } => Err("sending a file over ssh is not done on Windows yet".into()),
     }
 }
 
@@ -707,6 +745,13 @@ fn resolve_pane(
             .iter()
             .any(|t| cmux_core::layout::contains(&t.root, id))
     });
+    // A remote agent's hook runs on another computer: its tty and job are
+    // that computer's, which this process table cannot see — a tty there
+    // could even share a name with a pane's here. The pane it was told
+    // decides, as on Windows.
+    if let Some(id) = claimed.as_ref().filter(|id| state.meta.lock().unwrap().get(*id).is_some_and(|m| m.remote_host.is_some())) {
+        return Some(id.clone());
+    }
     let procs = if tty.is_some() || job.is_some() {
         cmux_core::agents::process_table()
     } else {

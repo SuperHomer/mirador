@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use cmux_protocol::{Request, ResponseEnvelope, SplitDir, View};
 
 #[derive(Parser)]
-#[command(name = "mira", about = "Automation client for the Mirador terminal")]
+#[command(name = "mira", version, about = "Automation client for the Mirador terminal")]
 struct Cli {
     /// Print raw JSON responses.
     #[arg(long, global = true)]
@@ -236,6 +236,9 @@ enum Command {
         /// Run `ssh -tt <HOST>` instead of an interactive shell.
         #[arg(long)]
         ssh: Option<String>,
+        /// With --ssh: run this script on the host, not a login shell there.
+        #[arg(long, requires = "ssh")]
+        ssh_run: Option<String>,
     },
 }
 
@@ -248,6 +251,14 @@ enum TeamAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
+        /// Run every member on a computer you reach by ssh (an alias from
+        /// ~/.ssh/config, or a destination); the team and its roles are
+        /// still this computer's.
+        #[arg(long, requires = "dir")]
+        host: Option<String>,
+        /// With --host: the directory there the team works in.
+        #[arg(long, requires = "host")]
+        dir: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -347,6 +358,14 @@ enum AgentAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
+        /// Run it on a computer you reach by ssh (an alias from
+        /// ~/.ssh/config, or a destination): Claude Code, plain or as a role
+        /// of this computer's; not Codex yet.
+        #[arg(long, requires = "dir")]
+        host: Option<String>,
+        /// With --host: the directory there it works in.
+        #[arg(long, requires = "host")]
+        dir: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -511,9 +530,18 @@ enum SshAction {
     /// List host aliases from ~/.ssh/config.
     Hosts,
     /// Forward localhost:PORT to the remote's localhost:PORT (so the
-    /// browser pane can reach a remote dev server).
+    /// browser pane can reach a remote dev server), or with --app this
+    /// app's socket.
     Forward {
-        port: u16,
+        #[arg(required_unless_present = "app")]
+        port: Option<u16>,
+        /// Forward this app's socket to the computer instead, and print its
+        /// path there: a `mira` there reaches the app with MIRA_SOCKET set
+        /// to it.
+        #[arg(long, conflicts_with = "port")]
+        app: bool,
+        /// The SSH pane whose computer it goes to; the active tab's SSH pane,
+        /// or any, otherwise.
         #[arg(long)]
         pane: Option<String>,
     },
@@ -788,9 +816,11 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Agent { action } => match action {
-            AgentAction::New { role, harness, tab, title, task } => Request::AgentNew {
+            AgentAction::New { role, harness, tab, title, host, dir, task } => Request::AgentNew {
                 role,
                 title,
+                host,
+                dir,
                 harness: harness.map(|h| match h.as_str() {
                     "codex" => cmux_protocol::Harness::Codex,
                     _ => cmux_protocol::Harness::Claude,
@@ -882,8 +912,10 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Team { action } => match action {
-            TeamAction::Start { team, title, task } => Request::TeamStart {
+            TeamAction::Start { team, title, host, dir, task } => Request::TeamStart {
                 team,
+                host,
+                dir,
                 task: (!task.is_empty()).then(|| task.join(" ")),
                 pane_id: own_pane(),
                 title,
@@ -933,9 +965,17 @@ fn run(cli: Cli) -> Result<(), String> {
                 target: tab.then(|| "tab".to_string()),
             },
             SshAction::Hosts => Request::SshHosts,
-            SshAction::Forward { port, pane } => Request::SshForward {
+            SshAction::Forward { app: true, pane, .. } => {
+                let resp = send_request(Request::SshForwardApp { pane_id: pane })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                println!("{}", resp.data.as_ref().and_then(|d| d["socket"].as_str()).unwrap_or_default());
+                return Ok(());
+            }
+            SshAction::Forward { port, pane, .. } => Request::SshForward {
                 pane_id: pane,
-                port,
+                port: port.ok_or("a port, or --app")?,
                 cancel: false,
             },
             SshAction::Unforward { port, pane } => Request::SshForward {
@@ -1063,7 +1103,8 @@ fn run(cli: Cli) -> Result<(), String> {
             rows,
             command,
             ssh,
-        } => return hold(pane, socket, cwd, cols, rows, command, ssh),
+            ssh_run,
+        } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_run),
     };
 
     let response = send_request(req)?;
@@ -1141,10 +1182,18 @@ fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     use cmux_protocol::RequestEnvelope;
     use std::io::{BufRead, BufReader};
 
-    let disc = cmux_core::ipc::read_discovery()
-        .ok_or("Mirador is not running (no socket discovery file)")?;
-    let stream = cmux_core::transport::connect(&disc.socket)
-        .map_err(|e| format!("Mirador is not running ({e})"))?;
+    let named = std::env::var_os(cmux_core::ipc::SOCKET_ENV).filter(|s| !s.is_empty());
+    let stream = match named {
+        Some(socket) => cmux_core::transport::connect(std::path::Path::new(&socket)).map_err(|e| {
+            format!("no Mirador at {}={} ({e})", cmux_core::ipc::SOCKET_ENV, socket.to_string_lossy())
+        })?,
+        None => {
+            let disc = cmux_core::ipc::read_discovery()
+                .ok_or("Mirador is not running (no socket discovery file)")?;
+            cmux_core::transport::connect(&disc.socket)
+                .map_err(|e| format!("Mirador is not running ({e})"))?
+        }
+    };
 
     let envelope = RequestEnvelope { id: Some(1), req };
     let mut line = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
@@ -2008,6 +2057,7 @@ fn own_tty() -> Option<String> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn hold(
     pane: String,
     socket: std::path::PathBuf,
@@ -2016,6 +2066,7 @@ fn hold(
     rows: u16,
     command: Option<String>,
     ssh: Option<String>,
+    ssh_run: Option<String>,
 ) -> Result<(), String> {
     use cmux_core::hold::server::{serve, HoldConfig, Program};
     // Nothing inherited survives: on macOS a socket becomes close-on-exec
@@ -2037,7 +2088,7 @@ fn hold(
     }
     let program = match (command, ssh) {
         (Some(cmd), _) => Program::Command(cmd),
-        (None, Some(host)) => Program::Ssh(host),
+        (None, Some(host)) => Program::Ssh(host, ssh_run),
         (None, None) => Program::Shell,
     };
     let code = serve(HoldConfig {
@@ -2387,6 +2438,45 @@ mod tests {
 
         std::env::remove_var(cmux_core::pty::PANE_ENV);
         assert_eq!(own_pane(), None);
+    }
+
+    /// `agent new --host` goes with `--dir`: both, or neither.
+    #[test]
+    fn an_agent_on_a_host_needs_a_directory_there() {
+        let Command::Agent { action: AgentAction::New { host, dir, task, .. } } =
+            parse(&["agent", "new", "--host", "box", "--dir", "/srv", "look"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), dir.as_deref(), task), (Some("box"), Some("/srv"), vec!["look".to_string()]));
+        assert!(Cli::try_parse_from(["mira", "agent", "new", "--host", "box", "look"]).is_err());
+        assert!(Cli::try_parse_from(["mira", "agent", "new", "--dir", "/srv", "look"]).is_err());
+        // A team's, the same.
+        let Command::Team { action: TeamAction::Start { host, dir, .. } } =
+            parse(&["team", "start", "squad", "--host", "box", "--dir", "/srv", "go"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), dir.as_deref()), (Some("box"), Some("/srv")));
+        assert!(Cli::try_parse_from(["mira", "team", "start", "squad", "--host", "box", "go"]).is_err());
+    }
+
+    /// `ssh forward` takes a port, or --app for the app's socket: not both,
+    /// not neither.
+    #[test]
+    fn ssh_forward_takes_a_port_or_the_app() {
+        let Command::Ssh { action: SshAction::Forward { port, app, .. } } = parse(&["ssh", "forward", "3000"]) else {
+            panic!()
+        };
+        assert_eq!((port, app), (Some(3000), false));
+        let Command::Ssh { action: SshAction::Forward { port, app, pane } } =
+            parse(&["ssh", "forward", "--app", "--pane", "p1"])
+        else {
+            panic!()
+        };
+        assert_eq!((port, app, pane.as_deref()), (None, true, Some("p1")));
+        assert!(Cli::try_parse_from(["mira", "ssh", "forward"]).is_err());
+        assert!(Cli::try_parse_from(["mira", "ssh", "forward", "3000", "--app"]).is_err());
     }
 
     /// Screenshots taken in the same millisecond each get a file of their

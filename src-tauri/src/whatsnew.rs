@@ -20,11 +20,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::AppState;
 
-/// Where the notes come from. The repository is pinned rather than derived
-/// from the updater endpoint: this only ever fetches public release notes
-/// for this product, and a config-driven URL would be a way to point the
-/// pane at someone else's text.
-const REPO: &str = "SuperHomer/mirador";
+/// Where the notes come from (pinned: see [`cmux_core::REPO`]).
+use cmux_core::REPO;
 
 /// GitHub rejects API requests without one.
 const USER_AGENT: &str = "mirador-whats-new";

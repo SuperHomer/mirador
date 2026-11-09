@@ -42,6 +42,20 @@ pub fn hook_command(mira: &Path, event: &str) -> String {
     format!("\"{}\" claude-hook {event}", mira.display())
 }
 
+/// Mirador's hooks, calling `mira` at `mira`: the `hooks` of a Claude Code
+/// settings file, one matcher per event. What setup installs, and what an
+/// agent on a remote is given in its own `--settings`.
+pub fn hooks_for(mira: &Path) -> serde_json::Value {
+    HOOK_EVENTS
+        .iter()
+        .map(|(hook_event, cli_event)| {
+            let matcher = serde_json::json!({ "hooks": [{ "type": "command", "command": hook_command(mira, cli_event) }] });
+            (hook_event.to_string(), serde_json::json!([matcher]))
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
 /// True if a hook matcher entry is one we installed: by absolute path, by
 /// name (`mira claude-hook`, before hooks used a path) or as the legacy
 /// `cmux claude-hook`. Setup replaces any of them; remove takes them out.
@@ -187,20 +201,19 @@ fn hooks_at(path: &Path, action: Action, mira: &Path) -> Result<Vec<String>, Str
 
     match action {
         Action::Setup | Action::Repair => {
-            for (hook_event, cli_event) in HOOK_EVENTS {
+            let serde_json::Value::Object(ours) = hooks_for(mira) else { unreachable!() };
+            for (hook_event, matchers) in ours {
                 let entries = hooks_obj
                     .as_object_mut()
                     .ok_or("hooks is not an object")?
-                    .entry(*hook_event)
+                    .entry(hook_event.clone())
                     .or_insert(serde_json::json!([]));
                 let list = entries.as_array_mut().ok_or("hook entry is not an array")?;
                 // Drop any prior hook of ours — by path, by name, or the old
                 // `cmux` — then add this one: idempotent, and an earlier
                 // install migrates to the current command.
                 list.retain(|matcher| !is_our_hook(matcher));
-                list.push(serde_json::json!({
-                    "hooks": [{ "type": "command", "command": hook_command(mira, cli_event) }]
-                }));
+                list.extend(matchers.as_array().into_iter().flatten().cloned());
                 done.push(format!("installed {hook_event} hook"));
             }
         }
@@ -729,6 +742,18 @@ mod tests {
         let command = settings["hooks"]["Stop"][0]["hooks"][0]["command"].as_str().unwrap();
         assert_eq!(command, format!("\"{}\" claude-hook stop", mira.display()));
         assert_eq!(quoted_executable(command), Some(mira));
+    }
+
+    /// The hooks an agent on a remote is given: one matcher per event,
+    /// calling the `mira` named, as setup installs them.
+    #[test]
+    fn hooks_for_a_mira_name_it_for_every_event() {
+        let mira = Path::new("/home/me/.mirador/bin/mira-1.2.3");
+        let hooks = hooks_for(mira);
+        assert_eq!(hooks.as_object().unwrap().len(), HOOK_EVENTS.len());
+        for (event, cli) in HOOK_EVENTS {
+            assert_eq!(hooks[*event][0]["hooks"][0]["command"], format!("\"{}\" claude-hook {cli}", mira.display()), "{event}");
+        }
     }
 
     #[test]

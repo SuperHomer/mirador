@@ -54,7 +54,7 @@ fn tasks_are_logged_as_agents_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: Some("plan the chart".into()), pane_id: Some(shell) });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: Some("plan the chart".into()), pane_id: Some(shell), host: None, dir: None });
     sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
     let planner = pane_of(&sb, "planner");
     let reviewer = pane_of(&sb, "reviewer");
@@ -281,7 +281,7 @@ fn a_codex_agent_s_card_follows_its_turns() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell) });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell), host: None, dir: None });
     sb.wait_for("the coder", LONG, || sb.member("coder"));
     let dev = pane_of(&sb, "dev");
     let coder = pane_of(&sb, "coder");
@@ -322,7 +322,7 @@ fn a_codex_turn_right_after_new_is_logged_once() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None });
     sb.wait_for("the coder", LONG, || sb.member("coder"));
     let dev = pane_of(&sb, "dev");
     let coder = pane_of(&sb, "coder");

@@ -24,7 +24,7 @@ fn an_agent_s_trail_shows_what_it_did() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None });
     sb.wait_for("the dev", LONG, || sb.member("dev"));
     let dev = sb.member("dev").and_then(|m| m["pane"].as_str().map(String::from)).unwrap();
     sb.wait_for("the dev's session", LONG, || sb.events("hooked", &dev).into_iter().next());
@@ -112,7 +112,7 @@ fn an_agent_s_activity_says_what_it_cost() {
     sb.launch();
     let shell = sb.first_pane();
     let agent = sb
-        .request(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(shell.clone()) })
+        .request(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(shell.clone()), host: None, dir: None })
         .map(|v| v["paneId"].as_str().unwrap().to_string())
         .unwrap();
     sb.wait_for("its session", LONG, || sb.events("hooked", &agent).into_iter().next());

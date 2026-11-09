@@ -470,6 +470,12 @@ pub enum Request {
         /// starts in; the focused pane when absent.
         #[serde(default)]
         pane_id: Option<String>,
+        /// An ssh host to run it on instead, in `dir` there. Both or
+        /// neither; Claude Code only, for now.
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
     },
     /// Every agent pane and what it is doing.
     AgentList,
@@ -563,6 +569,12 @@ pub enum Request {
         /// The title of the task's card, instead of one made from `task`.
         #[serde(default)]
         title: Option<String>,
+        /// An ssh host to run every member on instead, in `dir` there.
+        /// Both or neither.
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,
@@ -836,6 +848,30 @@ pub enum Request {
         #[serde(default)]
         cancel: bool,
     },
+    /// Forwards this app's socket to a remote pane's host, over its
+    /// ControlMaster: a `mira` there reaches the app with `MIRA_SOCKET`
+    /// set to the path it answers (`socket`).
+    SshForwardApp {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// The `mira` of this app's version on a remote pane's host, fetched
+    /// there from its release the first time: its path (`mira`). A socket
+    /// request with no CLI verb, for the e2e and by hand: starting an agent
+    /// on a remote calls `ssh::ensure_mira` directly.
+    SshMira {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Writes `text` to `path` on a remote pane's host, exactly, owner-only.
+    /// A socket request with no CLI verb, for the e2e and by hand: starting
+    /// an agent on a remote calls `ssh::put_file` directly.
+    SshPut {
+        #[serde(default)]
+        pane_id: Option<String>,
+        path: String,
+        text: String,
+    },
     /// Opens a commit-graph pane (split of the source pane, or a new tab),
     /// for the repository the calling pane sits in.
     GraphOpen {
@@ -1013,6 +1049,9 @@ pub struct AgentInfo {
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,
     pub branch: Option<String>,
+    /// The ssh host it runs on, for an agent on a remote computer.
+    #[serde(default)]
+    pub remote_host: Option<String>,
 }
 
 /// How far an agent is through the task list it keeps (`TaskCreate` /

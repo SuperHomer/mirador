@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 
 use cmux_protocol::{SeatState, SplitDir, TeamInfo, TeamMemberInfo, TeamRun, TeamSeat};
 
-use crate::commands::{emit_workspace, mark_launched, prepare_launch};
+use crate::commands::{emit_workspace, mark_launched, mark_remote_launched, prepare_launch, reach_remote, refuse_on_remote, send_remote_launch};
 use crate::AppState;
 
 /// The directory `pane_id` (the focused pane when absent) works in.
@@ -44,12 +44,18 @@ pub fn start_team(
     task: Option<String>,
     pane_id: Option<String>,
 ) -> Result<String, String> {
-    start_team_from(app, state, team, task, pane_id, None, "you".into())
+    start_team_from(app, state, team, task, pane_id, None, "you".into(), None)
 }
 
 /// [`start_team`], its task logged as given by `from`: a person, from the
 /// app; whoever ran `mira team start`, from the socket. `title` is the
-/// task's card's, instead of one made from the task.
+/// task's card's, instead of one made from the task. `remote` runs every
+/// member on that ssh host, in that directory there: the team and its
+/// roles are still this computer's, each member's files sent there as an
+/// agent's on a remote are (`commands::send_remote_launch`), all before
+/// the tab opens. Each is told its teammates call `mira` by its path
+/// there.
+#[allow(clippy::too_many_arguments)]
 pub fn start_team_from(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -58,6 +64,7 @@ pub fn start_team_from(
     pane_id: Option<String>,
     title: Option<String>,
     from: String,
+    remote: Option<(String, String)>,
 ) -> Result<String, String> {
     let cwd = cwd_of(&state, pane_id.as_deref());
     let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
@@ -70,17 +77,28 @@ pub fn start_team_from(
         return Err(format!("team `{team}`: {problem}"));
     }
     let seats = cmux_core::teams::seats(def);
-    let mira = mira_for_prompt();
+    if remote.is_some() {
+        for seat in &seats {
+            refuse_on_remote(&catalog, &seat.role).map_err(|e| format!("team `{team}`, member `{}`: {e}", seat.name))?;
+        }
+    }
+    let there = remote.as_ref().map(|(host, _)| reach_remote(host)).transpose()?;
+    let mira = there.as_ref().map_or_else(mira_for_prompt, |r| r.mira.clone());
+    let panes = cmux_core::state::Workspace::fresh_pane_ids(seats.len());
     let mut launches = Vec::new();
-    for seat in &seats {
+    for (seat, pane) in seats.iter().zip(&panes) {
         let roster = cmux_core::teams::seat_layers(&catalog, def, seat, &seats, &mira);
         let task = task.as_deref().filter(|_| seat.lead);
+        let member = |e: String| format!("team `{team}`, member `{}`: {e}", seat.name);
         let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task)
-            .map_err(|e| format!("team `{team}`, member `{}`: {e}", seat.name))?;
-        launches.push(launch);
+            .map_err(member)?;
+        let sent = match (&there, &remote) {
+            (Some(there), Some((_, dir))) => Some(send_remote_launch(there, pane, dir, &launch, task).map_err(member)?),
+            _ => None,
+        };
+        launches.push((launch, sent));
     }
 
-    let panes = cmux_core::state::Workspace::fresh_pane_ids(seats.len());
     let run = TeamRun {
         name: def.name.clone(),
         members: seats
@@ -93,8 +111,12 @@ pub fn start_team_from(
     let tab = state.workspace.lock().unwrap().new_team_tab(root, run, &def.name);
     {
         let mut meta = state.meta.lock().unwrap();
-        for (pane, launch) in panes.iter().zip(launches) {
-            mark_launched(meta.entry(pane.clone()).or_default(), launch, cwd.clone());
+        for (pane, (launch, sent)) in panes.iter().zip(launches) {
+            let entry = meta.entry(pane.clone()).or_default();
+            match (sent, &there) {
+                (Some(sent), Some(there)) => mark_remote_launched(entry, there, sent),
+                _ => mark_launched(entry, launch, cwd.clone()),
+            }
         }
     }
     emit_workspace(&app);
@@ -231,6 +253,11 @@ pub fn team_add_from(
     from: String,
 ) -> Result<String, String> {
     let (tab, run) = team_here(&state, pane_id.as_deref())?;
+    // It would start here, told its teammates call `mira` by their path
+    // on the remote.
+    if run.members.iter().any(|s| state.meta.lock().unwrap().get(&s.pane).is_some_and(|m| m.remote_host.is_some())) {
+        return Err(format!("team `{}` runs on a remote: adding a member there is not done yet", run.name));
+    }
     if let Some(n) = name.as_deref().filter(|n| !cmux_core::roles::is_name(n)) {
         return Err(format!("`{n}` cannot name a member"));
     }
@@ -288,6 +315,13 @@ pub fn team_restart(
     let (tab, run) = team_here(&state, pane_id.as_deref())?;
     if let Some(unknown) = members.iter().find(|m| !run.members.iter().any(|s| &&s.name == m)) {
         return Err(format!("no member `{unknown}` in team `{}`", run.name));
+    }
+    // A member on a remote reads as running whatever its agent does (no
+    // process there is seen), and has no shell here to type into: its pane
+    // runs again only on a keypress. Asked of the whole team, since a
+    // closed member's pane no longer says where it ran.
+    if run.members.iter().any(|s| state.meta.lock().unwrap().get(&s.pane).is_some_and(|m| m.remote_host.is_some())) {
+        return Err(format!("team `{}` runs on a remote: restarting its members is not done yet", run.name));
     }
     let wanted: Vec<&TeamSeat> = run
         .members

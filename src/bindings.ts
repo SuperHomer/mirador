@@ -333,6 +333,8 @@ export interface AgentInfo {
   sinceMs: number | null;
   cwd: string | null;
   branch: string | null;
+  /** The ssh host it runs on, for an agent on a remote computer. */
+  remoteHost: string | null;
 }
 
 /** How far an agent is through its task list (`cmux_protocol::TaskProgress`). */

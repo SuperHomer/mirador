@@ -620,6 +620,7 @@ dependencies = [
 name = "cmux-core"
 version = "0.1.45"
 dependencies = [
+ "base64 0.22.1",
  "cmux-protocol",
  "libc",
  "portable-pty",
