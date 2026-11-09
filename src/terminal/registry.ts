@@ -152,10 +152,20 @@ export function fitTerminal(paneId: string) {
  * here first.
  */
 export function terminalWithFocus(): Terminal | undefined {
+  const pane = paneWithFocus();
+  return pane ? terminals.get(pane)?.term : undefined;
+}
+
+/**
+ * The pane whose terminal holds keyboard focus, wherever it is drawn —
+ * the pane `terminalWithFocus` belongs to. Closing acts on it first for
+ * the same reason copy and paste do.
+ */
+export function paneWithFocus(): string | undefined {
   const active = document.activeElement;
   if (!active) return undefined;
-  for (const { term } of terminals.values()) {
-    if (term.element?.contains(active)) return term;
+  for (const [pane, { term }] of terminals) {
+    if (term.element?.contains(active)) return pane;
   }
   return undefined;
 }

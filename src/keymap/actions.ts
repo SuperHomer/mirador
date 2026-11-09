@@ -27,7 +27,7 @@ import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
-import { getTerminal, terminalWithFocus } from "../terminal/registry";
+import { getTerminal, paneWithFocus, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
 import { opensInTab } from "../state/configStore";
 
@@ -49,6 +49,18 @@ function focusedPane(): string | undefined {
   return activeTab(snapshot)?.focusedPane;
 }
 
+/**
+ * The pane a pane action — close, split, zoom, show activity — acts on:
+ * the one whose terminal holds the keyboard, as copy and paste look first,
+ * else the tab's focused pane. On the agent wall the two differ: clicking
+ * into an agent or picking one for Focus leaves the tab's focused pane
+ * where it was (`mark_pane_read`), so it can be another agent than the
+ * one being typed into.
+ */
+function actionPane(): string | undefined {
+  return paneWithFocus() ?? focusedPane();
+}
+
 /** Moves `offset` tabs along the sidebar's order, wrapping around. */
 function cycleTab(offset: number) {
   const { snapshot } = useWorkspaceStore.getState();
@@ -65,7 +77,7 @@ export const actions: ActionDef[] = [
     title: "Pane: Close",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void closePane(pane);
     },
   },
@@ -83,7 +95,7 @@ export const actions: ActionDef[] = [
     title: "Pane: Split Right…",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void splitPane(pane, "row");
     },
   },
@@ -92,7 +104,7 @@ export const actions: ActionDef[] = [
     title: "Pane: Split Down…",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void splitPane(pane, "column");
     },
   },
@@ -218,7 +230,7 @@ export const actions: ActionDef[] = [
     // The focused agent's task progress and its subagents, in a drawer:
     // the whole of what its status bar sums up.
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       const agent = useWorkspaceStore
         .getState()
         .snapshot?.agents.find((a) => a.paneId === pane);
@@ -260,7 +272,7 @@ export const actions: ActionDef[] = [
     group: "pane",
     // The focused pane alone, filling its tab — or the whole tab again.
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void zoomPane(pane);
     },
   },
