@@ -1848,20 +1848,20 @@ pub fn open_agent_from(
 
 /// Starts Claude Code on `host`, in `dir` there — plain, or as `role`,
 /// which comes from this computer's catalog (what `cwd` sees), as for an
-/// agent here — in a pane split from `source` (or a tab). Nothing is typed
-/// into it: the pane's PTY runs `ssh -tt <host> sh <run>`, a run script
-/// written there first ([`send_remote_launch`]), so no command line is
-/// quoted for the remote's login shell. Before any pane opens, the remote
-/// is reached ([`reach_remote`]): its `mira`, and this app's socket, named
-/// to the agent as `MIRA_SOCKET`, with its pane as `MIRA_PANE`.
+/// agent here — in a pane split from `source` (or a tab). Its files are
+/// sent there before any pane opens ([`send_remote_launch`]), once the
+/// remote is reached ([`reach_remote`]): its `mira`, and this app's socket,
+/// named to the agent as `MIRA_SOCKET`, with its pane as `MIRA_PANE`. The
+/// agent runs there under a holder ([`start_remote_agent`]), and the pane
+/// only attaches to it, over ssh, with that `mira attach`.
 ///
 /// Mirador sees no process on the remote, so the agent counts as ready at
 /// once (`handoff::readiness`) and its status comes from the hooks it is
 /// given. Restored at the next launch, the pane comes back idle like any
-/// SSH pane, and a keypress runs the script again — a fresh agent, not the
-/// conversation it had — after forwarding the socket again
-/// (`attach_pane_blocking`), so it reaches this app even once the old
-/// connection, and its forward, are gone.
+/// SSH pane, and a keypress attaches again — to the agent still running
+/// there; to its last screen and exit code, if it ended within its
+/// holder's grace; or, its holder gone, to `mira attach` saying so — after
+/// forwarding the socket again (`attach_pane_blocking`).
 #[allow(clippy::too_many_arguments)]
 fn open_remote_agent(
     app: AppHandle,
@@ -1885,26 +1885,25 @@ fn open_remote_agent(
     }
     let remote = reach_remote(host)?;
     let launch = prepare_launch(role, cmux_protocol::Harness::Claude, Some(&catalog), cwd, &[], None, task.as_deref())?;
-    let pane = if tab {
-        state.workspace.lock().unwrap().new_tab().1
-    } else {
-        state.workspace.lock().unwrap().split_pane(source, SplitDir::Row).ok_or_else(|| format!("no pane {source}"))?
-    };
-    let sent = match send_remote_launch(&remote, &pane, dir, &launch, task.as_deref()) {
-        Ok(sent) => sent,
-        Err(e) => {
-            // Nobody has seen the pane yet: it goes as if never opened.
-            state.workspace.lock().unwrap().close_pane(&pane);
-            return Err(e);
-        }
-    };
-    let run = sent.run.clone();
-    mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), &remote, sent);
-    if let Err(e) = start_remote_agent(&remote, &pane, &run) {
-        let killed = state.workspace.lock().unwrap().close_pane(&pane);
-        kill_panes(&app, &state, &killed);
-        return Err(e);
+    // A split's source is looked for before the upload, so a gone one
+    // leaves no files there that nothing starts; and again as the pane
+    // opens, since it could close during the round trip.
+    if !tab && !state.workspace.lock().unwrap().has_pane(source) {
+        return Err(format!("no pane {source}"));
     }
+    // Sent before its pane opens: an open pane not yet marked remote would
+    // be shown, by any snapshot sent meanwhile, and run a shell here.
+    let pane = cmux_core::state::Workspace::fresh_pane_ids(1).remove(0);
+    let sent = send_remote_launch(&remote, &pane, dir, &launch, task.as_deref())?;
+    {
+        let mut ws = state.workspace.lock().unwrap();
+        if tab {
+            ws.new_tab_with(pane.clone());
+        } else {
+            ws.split_pane_as(source, SplitDir::Row, pane.clone()).ok_or_else(|| format!("no pane {source}"))?;
+        }
+    }
+    start_remote_launched(&app, &state, &remote, &pane, sent)?;
     emit_workspace(&app);
     if let Some(task) = &task {
         crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &pane, task, None, title);
@@ -2044,6 +2043,22 @@ pub(crate) fn start_remote_agent(remote: &Remote, pane: &str, run: &str) -> Resu
     };
     #[cfg(not(windows))]
     cmux_core::ssh::start_held(&remote.host, &remote.mira, pane, run)
+}
+
+/// Marks `pane`, already in its tab, as running the agent `sent` to
+/// `remote`, then starts it there. In that order: the agent's first hook,
+/// which names its pane, comes at once, and is only believed for a remote
+/// pane in a tab (`server::resolve_pane`). A pane whose agent does not
+/// start goes as if never opened.
+pub(crate) fn start_remote_launched(app: &AppHandle, state: &State<'_, AppState>, remote: &Remote, pane: &str, sent: RemoteLaunch) -> Result<(), String> {
+    let run = sent.run.clone();
+    mark_remote_launched(state.meta.lock().unwrap().entry(pane.to_string()).or_default(), remote, sent);
+    if let Err(e) = start_remote_agent(remote, pane, &run) {
+        let killed = state.workspace.lock().unwrap().close_pane(pane);
+        kill_panes(app, state, &killed);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Marks a pane as running an agent on `remote`, as `mark_launched` does a

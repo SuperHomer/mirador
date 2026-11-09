@@ -9,7 +9,7 @@ use cmux_protocol::{SeatState, SplitDir, TeamInfo, TeamMemberInfo, TeamRemote, T
 
 use crate::commands::{
     emit_workspace, kill_panes, mark_launched, mark_remote_launched, prepare_launch, reach_remote, refuse_on_remote, send_remote_launch,
-    start_remote_agent,
+    start_remote_agent, start_remote_launched,
 };
 use crate::AppState;
 
@@ -306,33 +306,33 @@ pub fn team_add_from(
     let roster = roster_now(&run, &catalog, &seat, Some(&seat), &mira);
     let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task.as_deref())?;
 
-    let pane = {
+    let pane = cmux_core::state::Workspace::fresh_pane_ids(1).remove(0);
+    // On a remote, its files are sent before its pane opens
+    // (`open_remote_agent` says why), and its source looked for first, so a
+    // gone one leaves no files there that nothing starts.
+    let sent = match &there {
+        Some((there, dir)) => {
+            if !state.workspace.lock().unwrap().has_pane(&source) {
+                return Err(format!("no pane {source}"));
+            }
+            Some((there, send_remote_launch(there, &pane, dir, &launch, task.as_deref())?))
+        }
+        None => None,
+    };
+    {
         let mut ws = state.workspace.lock().unwrap();
-        let pane = ws.split_pane(&source, SplitDir::Row).ok_or_else(|| format!("no pane {source}"))?;
+        ws.split_pane_as(&source, SplitDir::Row, pane.clone()).ok_or_else(|| format!("no pane {source}"))?;
         if let Some(t) = ws.tab_mut(&tab).and_then(|t| t.team.as_mut()) {
             t.members.push(TeamSeat { name: seat.name.clone(), role, pane: pane.clone(), lead: false });
         }
-        pane
-    };
-    match &there {
-        Some((there, dir)) => {
-            // Marked before it starts, so its first hook finds its pane.
-            let started = send_remote_launch(there, &pane, dir, &launch, task.as_deref()).and_then(|sent| {
-                let run = sent.run.clone();
-                mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), there, sent);
-                start_remote_agent(there, &pane, &run)
-            });
-            if let Err(e) = started {
-                // Nobody has seen the pane yet: it goes as if never
-                // opened, and its seat with it.
-                let killed = {
-                    let mut ws = state.workspace.lock().unwrap();
-                    if let Some(t) = ws.tab_mut(&tab).and_then(|t| t.team.as_mut()) {
-                        t.members.retain(|s| s.pane != pane);
-                    }
-                    ws.close_pane(&pane)
-                };
-                kill_panes(&app, &state, &killed);
+    }
+    match sent {
+        Some((there, sent)) => {
+            if let Err(e) = start_remote_launched(&app, &state, there, &pane, sent) {
+                // Its pane went as if never opened: its seat goes with it.
+                if let Some(t) = state.workspace.lock().unwrap().tab_mut(&tab).and_then(|t| t.team.as_mut()) {
+                    t.members.retain(|s| s.pane != pane);
+                }
                 return Err(e);
             }
         }

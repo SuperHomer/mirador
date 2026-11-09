@@ -448,12 +448,20 @@ impl Workspace {
     /// Creates a tab (with one fresh pane) after the active one and
     /// activates it. Returns (tab_id, pane_id).
     pub fn new_tab(&mut self) -> (String, String) {
-        let (tab, pane) = Tab::new();
+        let pane = new_id();
+        (self.new_tab_with(pane.clone()), pane)
+    }
+
+    /// [`Self::new_tab`], its pane's id chosen beforehand
+    /// ([`Self::fresh_pane_ids`]): for a pane whose agent's files are sent
+    /// before it opens. Returns the tab id.
+    pub fn new_tab_with(&mut self, pane: String) -> String {
+        let tab = Tab::with_root(Node::Leaf { pane_id: pane });
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
         self.place_frame(&id);
-        (id, pane)
+        id
     }
 
     /// Opens a team's tab after the active one, its panes laid out as
@@ -1398,6 +1406,18 @@ mod tests {
         assert!(layout::contains(&ws.tabs[0].root, &id));
         assert_eq!(ws.focused_pane(), id);
         assert!(ws.tabs[0].cards.contains_key(&id), "it has a card, as any split does");
+    }
+
+    /// A tab opened under a pane id chosen beforehand opens with that pane,
+    /// and becomes the active one.
+    #[test]
+    fn a_new_tab_can_take_its_pane_id_from_the_caller() {
+        let mut ws = Workspace::default();
+        let id = Workspace::fresh_pane_ids(1).remove(0);
+        let tab = ws.new_tab_with(id.clone());
+        assert_eq!(ws.tabs[ws.active].id, tab);
+        assert_eq!(layout::pane_ids(&ws.tabs[ws.active].root), vec![id.clone()]);
+        assert_eq!(ws.focused_pane(), id);
     }
 
     #[test]
