@@ -388,6 +388,7 @@ mod tests {
                 cmux_protocol::TeamSeat { name: "lead".into(), role: "planner".into(), pane: panes[0].clone(), lead: true },
                 cmux_protocol::TeamSeat { name: "dev".into(), role: "dev".into(), pane: panes[1].clone(), lead: false },
             ],
+            remote: None,
         };
         let tab = ws.new_team_tab(crate::teams::layout(&panes, None), run.clone(), "squad");
         let file = capture(&ws, &HashMap::new());
@@ -398,6 +399,26 @@ mod tests {
         assert_eq!(t.title.as_deref(), Some("squad"));
         // A tab with no team writes nothing for it.
         assert!(!json.contains(r#""team":null"#));
+    }
+
+    /// A team on a remote comes back knowing where it runs, and one saved
+    /// before teams kept that loads as a local team.
+    #[test]
+    fn a_team_comes_back_knowing_where_it_runs() {
+        let mut ws = Workspace::default();
+        let panes = Workspace::fresh_pane_ids(1);
+        let run = cmux_protocol::TeamRun {
+            name: "squad".into(),
+            members: vec![cmux_protocol::TeamSeat { name: "lead".into(), role: "planner".into(), pane: panes[0].clone(), lead: true }],
+            remote: Some(cmux_protocol::TeamRemote { host: "box".into(), dir: "~/work".into() }),
+        };
+        let tab = ws.new_team_tab(crate::teams::layout(&panes, None), run.clone(), "squad");
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(back.tabs.iter().find(|t| t.id == tab).unwrap().team.as_ref(), Some(&run));
+
+        let old: cmux_protocol::TeamRun = serde_json::from_str(r#"{ "name": "squad", "members": [] }"#).unwrap();
+        assert_eq!(old.remote, None);
     }
 
     #[test]

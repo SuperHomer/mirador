@@ -1342,7 +1342,7 @@ mod tests {
         // goes right of every other.
         ws.new_tab();
         let panes = Workspace::fresh_pane_ids(2);
-        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![] };
+        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![], remote: None };
         ws.new_team_tab(crate::teams::layout(&panes, None), team, "t");
         ws.adopt_pane("orphan");
         assert_board_consistent(&ws);

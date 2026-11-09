@@ -5,7 +5,7 @@
 
 use tauri::{AppHandle, State};
 
-use cmux_protocol::{SeatState, SplitDir, TeamInfo, TeamMemberInfo, TeamRun, TeamSeat};
+use cmux_protocol::{SeatState, SplitDir, TeamInfo, TeamMemberInfo, TeamRemote, TeamRun, TeamSeat};
 
 use crate::commands::{emit_workspace, mark_launched, mark_remote_launched, prepare_launch, reach_remote, refuse_on_remote, send_remote_launch};
 use crate::AppState;
@@ -106,6 +106,7 @@ pub fn start_team_from(
             .zip(&panes)
             .map(|(s, p)| TeamSeat { name: s.name.clone(), role: s.role.clone(), pane: p.clone(), lead: s.lead })
             .collect(),
+        remote: remote.map(|(host, dir)| TeamRemote { host, dir }),
     };
     let root = cmux_core::teams::layout(&panes, def.layout.as_deref());
     let tab = state.workspace.lock().unwrap().new_team_tab(root, run, &def.name);
@@ -180,6 +181,7 @@ pub fn team_list(state: &AppState) -> Vec<TeamInfo> {
                         }
                     })
                     .collect(),
+                remote_host: run.remote.as_ref().map(|r| r.host.clone()),
             })
         })
         .collect()

@@ -134,6 +134,7 @@ mod tests {
                 .iter()
                 .map(|p| TeamSeat { name: format!("m-{p}"), pane: p.to_string(), ..Default::default() })
                 .collect(),
+            remote: None,
         }
     }
 

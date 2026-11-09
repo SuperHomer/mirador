@@ -928,7 +928,11 @@ members: []
 
     fn squad() -> TeamRun {
         let seat = |name: &str, pane: &str, lead: bool| cmux_protocol::TeamSeat { name: name.into(), role: name.into(), pane: pane.into(), lead };
-        TeamRun { name: "squad".into(), members: vec![seat("planner", "p1", true), seat("dev", "p2", false), seat("reviewer", "p3", false)] }
+        TeamRun {
+            name: "squad".into(),
+            members: vec![seat("planner", "p1", true), seat("dev", "p2", false), seat("reviewer", "p3", false)],
+            remote: None,
+        }
     }
 
     #[test]

@@ -335,6 +335,7 @@ fn a_team_runs_on_the_remote() {
         let names: Vec<String> = sb.teams().first()?["members"].as_array()?.iter().map(|m| m["name"].as_str().unwrap().to_string()).collect();
         (names == ["planner", "reviewer"]).then_some(())
     });
+    assert_eq!(sb.teams()[0]["remoteHost"], "box", "the team knows where it runs");
     let (planner, reviewer) = (pane_of(&sb, "planner"), pane_of(&sb, "reviewer"));
     for pane in [&planner, &reviewer] {
         let start = sb.wait_for("a member's start", LONG, || sb.events("start", pane).into_iter().next());
