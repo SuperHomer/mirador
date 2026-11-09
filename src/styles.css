@@ -98,13 +98,27 @@ body,
 
 /* ---------- Sidebar ---------- */
 
+/* 248px is the default; mirador.json's sidebarWidth, or a drag of the
+   edge, sets it inline (useDragWidth). */
 .sidebar {
+  position: relative;
   width: 248px;
   flex-shrink: 0;
   background: var(--bg-alt);
   border-right: 1px solid var(--surface);
   display: flex;
   flex-direction: column;
+}
+
+/* The sidebar's handle straddles its border: half over the sidebar,
+   half over the pane beside it, above the split dividers. */
+.sidebar > .width-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 7px;
+  z-index: 11;
 }
 
 .sidebar-tabs {
@@ -1391,6 +1405,30 @@ body,
 }
 
 .divider:hover::after {
+  background: var(--accent);
+}
+
+/* A handle that sets a width kept in mirador.json (useDragWidth): the
+   dividers' look, a line down its middle on hover and while dragged. */
+.width-handle {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.width-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 1px);
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.width-handle:hover::after,
+.width-handle.dragging::after {
   background: var(--accent);
 }
 
@@ -3541,13 +3579,16 @@ button.inbox-update:hover {
   overflow: hidden;
 }
 
-/* Focus (18a): one agent large, the rest down a rail by status. */
+/* Focus (18a): one agent large, the rest down a rail by status. The
+   middle column, where the gap was, is the rail's width handle; a width
+   set in mirador.json (focusRailWidth) or by a drag replaces these
+   columns inline (railColumns in FocusLayout.tsx). */
 .focus-layout {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 6px minmax(240px, 32%);
+  gap: 0;
   padding: 6px;
 }
 

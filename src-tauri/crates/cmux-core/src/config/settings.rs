@@ -7,7 +7,7 @@ use std::path::Path;
 use cmux_protocol::{ChoiceOption, SettingKind, SettingRow};
 use serde_json::{json, Value};
 
-use super::{config_path, default_font_family, Computer, Config};
+use super::{config_path, default_font_family, Computer, Config, FOCUS_RAIL_WIDTH, SIDEBAR_WIDTH, SIDEBAR_WIDTH_DEFAULT};
 
 /// One mirador.json key, as the Settings pane describes it.
 pub struct Setting {
@@ -28,6 +28,12 @@ fn choice(values: &[&str]) -> SettingKind {
 
 fn setting(key: &'static str, group: &'static str, kind: SettingKind, default: &str, description: &'static str) -> Setting {
     Setting { key, group, kind, default: default.into(), description }
+}
+
+/// A width in whole pixels within `range`. The kind allows a fraction in
+/// range; [`accepts`] refuses it, since [`Config`] reads a `u32`.
+fn pixels(range: &std::ops::RangeInclusive<u32>) -> SettingKind {
+    SettingKind::Number { min: f64::from(*range.start()), max: f64::from(*range.end()) }
 }
 
 /// What themeSource takes: the sources, then every named theme, so a
@@ -51,6 +57,8 @@ pub fn settings() -> Vec<Setting> {
         setting("fontSize", "Appearance", Number { min: 6.0, max: 72.0 }, "13", "The terminal font size, in points."),
         setting("colors", "Appearance", ReadOnly, "the theme's",
             "Colors that override the theme's: background, foreground, cursor, selection, palette."),
+        setting("sidebarWidth", "Appearance", pixels(&SIDEBAR_WIDTH), &SIDEBAR_WIDTH_DEFAULT.to_string(),
+            "The sidebar's width, in pixels. Dragging its edge sets it; a double-click on the edge clears it."),
         setting("scrollback", "Terminal", Number { min: 0.0, max: u32::MAX as f64 }, "10000", "Lines each terminal keeps above the screen."),
         setting("macOptionIsMeta", "Terminal", Bool, "false",
             "macOS only: Option+key sends Meta instead of typing its character, which non-US layouts need for [ ] { } |."),
@@ -62,6 +70,8 @@ pub fn settings() -> Vec<Setting> {
             "Keep terminals running when Mirador quits, and reattach to them next launch. Applies to new panes."),
         setting("agentsPerTab", "Agents", SettingKind::Choice { options: vec![option(json!(4)), option(json!(6)), option(json!(9))] }, "4",
             "How many agents a page of the wall's Grid layout holds."),
+        setting("focusRailWidth", "Agents", pixels(&FOCUS_RAIL_WIDTH), "a third of the wall",
+            "The width of Focus's column beside the agent shown large, in pixels. Dragging its edge sets it; a double-click on the edge clears it."),
         setting("teamCostWarnUsd", "Agents", Number { min: f64::MIN_POSITIVE, max: f64::MAX }, "0.5",
             "What starting a team may cost, in US dollars, before its weight in the editor warns."),
         setting("agentClick", "Agents", choice(&["wall", "pane"]), "wall",
@@ -394,6 +404,30 @@ mod tests {
         std::fs::write(&path, "{ broken").unwrap();
         assert!(set_config_value_in(&path, "fontSize", Some(json!(14))).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn widths_take_whole_pixels_in_their_range() {
+        let path = temp_config("widths");
+        // What a drag writes, and the Settings pane.
+        set_config_value_in(&path, "sidebarWidth", Some(json!(300))).unwrap();
+        set_config_value_in(&path, "focusRailWidth", Some(json!(520))).unwrap();
+        assert_eq!(read(&path), json!({ "sidebarWidth": 300, "focusRailWidth": 520 }));
+        for (key, value) in [
+            ("sidebarWidth", json!(159)),
+            ("sidebarWidth", json!(601)),
+            ("sidebarWidth", json!(300.5)), // in range, but no u32
+            ("focusRailWidth", json!(149)),
+            ("focusRailWidth", json!(1601)),
+            ("focusRailWidth", json!("wide")),
+        ] {
+            assert!(set_config_value_in(&path, key, Some(value.clone())).is_err(), "{key} = {value}");
+        }
+        assert_eq!(read(&path), json!({ "sidebarWidth": 300, "focusRailWidth": 520 }));
+        // A double-click on the edge: the key goes, the default is back.
+        set_config_value_in(&path, "focusRailWidth", None).unwrap();
+        assert_eq!(read(&path), json!({ "sidebarWidth": 300 }));
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
