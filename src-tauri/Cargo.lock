@@ -613,6 +613,7 @@ dependencies = [
  "cmux-core",
  "cmux-protocol",
  "libc",
+ "portable-pty",
  "serde_json",
 ]
 

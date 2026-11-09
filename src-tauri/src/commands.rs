@@ -18,6 +18,9 @@ struct PaneExitPayload {
     is_command: bool,
     /// True for SSH panes: a keypress reconnects.
     is_remote: bool,
+    /// True for a remote agent's pane: its agent runs on under a holder
+    /// there, so a lost connection reattaches by itself.
+    reconnects: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -890,14 +893,14 @@ fn attach_pane_blocking(
     // Remote panes run `ssh -tt <host>`; command panes run their command
     // directly in the PTY (exit detection, output capture); shell panes get
     // an interactive login shell.
-    let (cwd, pane_command, remote_host, remote_run) = {
+    let (cwd, pane_command, remote_host, remote_command) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(&pane_id);
         (
             m.and_then(|m| m.cwd.clone()),
             m.and_then(|m| m.command.clone()),
             m.and_then(|m| m.remote_host.clone()),
-            m.and_then(|m| m.remote_run.clone()),
+            m.and_then(|m| m.remote_command.clone()),
         )
     };
 
@@ -968,7 +971,7 @@ fn attach_pane_blocking(
 
     let command_builder = match remote_host.as_deref() {
         // Remote pane: the system ssh handles auth/agent/2FA/ProxyJump.
-        Some(host) => Some(cmux_core::ssh::interactive_command(host, remote_run.as_deref())),
+        Some(host) => Some(cmux_core::ssh::interactive_command(host, remote_command.as_deref())),
         None => pane_command
             .as_deref()
             .map(|cmd| cmux_core::pty::shell::run_command(cmd, cwd.as_deref())),
@@ -982,19 +985,19 @@ fn attach_pane_blocking(
 
     // A remote agent reaches this app through its forwarded socket, which
     // lives only as long as the connection that forwarded it: made sure of
-    // before its script runs (`forward_socket` leaves a working one
-    // alone), so a restored pane's rerun reaches the app too. Once per
-    // start, not per key. A failure is left to show in the pane, where ssh
-    // meets the same trouble.
+    // before the pane attaches (`forward_socket` leaves a working one
+    // alone), so an agent reattached after a drop, or from a restored
+    // pane, reaches the app again. Once per attach, not per key. A failure
+    // is left to show in the pane, where ssh meets the same trouble.
     #[cfg(not(windows))]
-    if let (Some(host), Some(_)) = (remote_host.as_deref(), remote_run.as_deref()) {
+    if let (Some(host), Some(_)) = (remote_host.as_deref(), remote_command.as_deref()) {
         if let Err(e) = cmux_core::ssh::forward_socket(host, &cmux_core::ipc::default_socket_path()) {
             eprintln!("mirador: forwarding the app to {host} for {pane_id}: {e}");
         }
     }
 
     let program = match (remote_host.as_deref(), pane_command.as_deref()) {
-        (Some(host), _) => Program::Ssh(host.to_string(), remote_run.clone()),
+        (Some(host), _) => Program::Ssh(host.to_string(), remote_command.clone()),
         (None, Some(cmd)) => Program::Command(cmd.to_string()),
         (None, None) => Program::Shell,
     };
@@ -1079,10 +1082,11 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
     let exit_app = app.clone();
     move |exited_id, exit_code| {
         let is_command = crate::runs::finish_run(&exit_app, exited_id, exit_code);
-        let is_remote = {
+        let (is_remote, reconnects) = {
             let state = exit_app.state::<AppState>();
             let meta = state.meta.lock().unwrap();
-            meta.get(exited_id).is_some_and(|m| m.remote_host.is_some())
+            let m = meta.get(exited_id);
+            (m.is_some_and(|m| m.remote_host.is_some()), m.is_some_and(|m| m.remote_command.is_some()))
         };
         let _ = exit_app.emit(
             "pane-exit",
@@ -1091,6 +1095,7 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
                 exit_code,
                 is_command,
                 is_remote,
+                reconnects,
             },
         );
     }
@@ -1100,7 +1105,8 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
 enum Program {
     Shell,
     Command(String),
-    /// The host, and the run script there it runs instead of a login shell.
+    /// The host, and the command line there it runs instead of a login
+    /// shell: for an agent, attaching to its holder there.
     Ssh(String, Option<String>),
 }
 
@@ -1129,7 +1135,7 @@ fn spawn_held<S: FnMut(&[u8]) + Send + 'static>(
     let held = match program {
         Program::Shell => Held::Shell,
         Program::Command(cmd) => Held::Command(cmd.clone()),
-        Program::Ssh(host, run) => Held::Ssh(host.clone(), run.clone()),
+        Program::Ssh(host, command) => Held::Ssh(host.clone(), command.clone()),
     };
     let state = app.state::<AppState>();
     let result = cmux_core::hold::launch(&mira, pane_id, &socket, cwd, cols, rows, &held)
@@ -1276,18 +1282,69 @@ pub fn repair_claude_hooks() {
 }
 
 /// Ends every terminal session — including ones still waiting in their
-/// holders — then quits. Cmd+Q leaves them running; this is the way to
-/// mean "everything".
+/// holders, and agents on remotes — then quits. Cmd+Q leaves them running;
+/// this is the way to mean "everything".
 #[tauri::command]
 pub async fn quit_ending_sessions(app: AppHandle) {
+    let remote: Vec<_> = {
+        let state = app.state::<AppState>();
+        let meta = state.meta.lock().unwrap();
+        meta.iter().filter_map(|(pane, m)| remote_agent(pane, m)).collect()
+    };
     let _ = tauri::async_runtime::spawn_blocking(|| {
-        let left = cmux_core::hold::end_all(std::time::Duration::from_secs(3));
+        let patience = std::time::Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + patience;
+        let remote = end_remote_agents(remote);
+        let left = cmux_core::hold::end_all(patience);
         if !left.is_empty() {
             eprintln!("mirador: holders still running at quit: {left:?}");
+        }
+        // A remote that is slow to answer does not hold the quit up.
+        while remote.iter().any(|h| !h.is_finished()) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
     })
     .await;
     app.exit(0);
+}
+
+/// A remote agent's pane, its host, and the `mira` there that ends it.
+// Ended only where remote agents are done (not Windows yet).
+#[cfg_attr(windows, allow(dead_code))]
+struct RemoteAgent {
+    pane: String,
+    host: String,
+    mira: String,
+}
+
+fn remote_agent(pane: &str, m: &cmux_core::state::PaneMeta) -> Option<RemoteAgent> {
+    Some(RemoteAgent {
+        pane: pane.to_string(),
+        host: m.remote_host.clone()?,
+        mira: cmux_core::ssh::mira_of(m.remote_command.as_deref()?)?,
+    })
+}
+
+/// Ends each agent on its remote, its holder there with it, each from a
+/// thread of its own: a remote can take seconds to answer, or never. One
+/// that fails lives on there, until someone attaches to it or ends it.
+fn end_remote_agents(agents: Vec<RemoteAgent>) -> Vec<std::thread::JoinHandle<()>> {
+    #[cfg(windows)]
+    return {
+        let _ = agents;
+        Vec::new()
+    };
+    #[cfg(not(windows))]
+    agents
+        .into_iter()
+        .map(|a| {
+            std::thread::spawn(move || {
+                if let Err(e) = cmux_core::ssh::end_held(&a.host, &a.mira, &a.pane) {
+                    eprintln!("mirador: could not end {} on {}: {e}; it runs on there", a.pane, a.host);
+                }
+            })
+        })
+        .collect()
 }
 
 /// The bundled `mira` CLI, which doubles as the session holder. It sits
@@ -1841,7 +1898,13 @@ fn open_remote_agent(
             return Err(e);
         }
     };
+    let run = sent.run.clone();
     mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), &remote, sent);
+    if let Err(e) = start_remote_agent(&remote, &pane, &run) {
+        let killed = state.workspace.lock().unwrap().close_pane(&pane);
+        kill_panes(&app, &state, &killed);
+        return Err(e);
+    }
     emit_workspace(&app);
     if let Some(task) = &task {
         crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &pane, task, None, title);
@@ -1895,10 +1958,12 @@ pub(crate) fn reach_remote(host: &str) -> Result<Remote, String> {
     })
 }
 
-/// What an agent on a remote was started with, its files there.
+/// What an agent on a remote is started with: its run script there, the
+/// command its pane runs there to attach to it, and its files there.
 #[cfg_attr(windows, allow(dead_code))]
 pub(crate) struct RemoteLaunch {
     pub run: String,
+    pub command: String,
     pub role: Option<cmux_protocol::AgentRole>,
     pub settings: String,
     pub prompt: Option<String>,
@@ -1907,7 +1972,8 @@ pub(crate) struct RemoteLaunch {
 /// Sends `pane`'s agent to `remote`: the role's prompt and settings
 /// `launch` worked out here (`prepare_launch` wrote them), sent as
 /// `<pane>.prompt.md` and `<pane>.settings.json` beside its run script,
-/// `<pane>.sh` (`ssh::run_script`), which starts it in `dir`. Every agent
+/// `<pane>.sh` (`ssh::run_script`), which starts it in `dir` once
+/// [`start_remote_agent`] runs it. Every agent
 /// there, role or plain, has Mirador's hooks added to its settings,
 /// calling the remote's `mira`: its status reaches this app whatever the
 /// remote's own Claude Code settings hold. Not the status line: that is
@@ -1959,16 +2025,34 @@ pub(crate) fn send_remote_launch(remote: &Remote, pane: &str, dir: &str, launch:
         let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
         cmux_core::ssh::put_file(host, &settings_file, text.as_bytes())?;
         cmux_core::ssh::put_file(host, &run, cmux_core::ssh::run_script(&run, pane, &remote.socket, dir, &line).as_bytes())?;
-        Ok(RemoteLaunch { run, role: launch.role.clone(), settings: settings_file, prompt: prompt.map(|_| prompt_file) })
+        let command = cmux_core::ssh::attach_line(&remote.mira, pane);
+        Ok(RemoteLaunch { run, command, role: launch.role.clone(), settings: settings_file, prompt: prompt.map(|_| prompt_file) })
     }
 }
 
+/// Starts the agent sent to `remote` for `pane` (its run script, `run`),
+/// under a holder there: it outlives the pane's connection, and the pane
+/// only attaches to it (`mira attach`). Only once the pane is marked
+/// remote (`mark_remote_launched`) and in a tab: the agent's first hook,
+/// which names its pane, comes at once, and is only believed for a remote
+/// pane the app has (`server::resolve_pane`).
+pub(crate) fn start_remote_agent(remote: &Remote, pane: &str, run: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    return {
+        let _ = (remote, pane, run);
+        Err("an agent on a remote is not done on Windows yet".into())
+    };
+    #[cfg(not(windows))]
+    cmux_core::ssh::start_held(&remote.host, &remote.mira, pane, run)
+}
+
 /// Marks a pane as running an agent on `remote`, as `mark_launched` does a
-/// local one: nothing to type, its run script instead, and for a role,
-/// what the sidebar and `agent list` show (its files are the remote's).
+/// local one: nothing to type, attaching to its holder there instead, and
+/// for a role, what the sidebar and `agent list` show (its files are the
+/// remote's).
 pub(crate) fn mark_remote_launched(entry: &mut cmux_core::state::PaneMeta, remote: &Remote, sent: RemoteLaunch) {
     entry.remote_host = Some(remote.host.clone());
-    entry.remote_run = Some(sent.run);
+    entry.remote_command = Some(sent.command);
     entry.agent_launched = true;
     entry.agent_started_at = Some(std::time::Instant::now());
     entry.agent_harness = Some(cmux_protocol::Harness::Claude);
@@ -2435,13 +2519,18 @@ pub async fn ack_pty(app: AppHandle, pane_id: String, bytes: u64) {
 pub(crate) fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
     let mut meta = state.meta.lock().unwrap();
     let mut agents = Vec::new();
+    let mut remote = Vec::new();
     for pane in panes {
         let _ = state.pty.close(pane);
-        if meta.remove(pane).is_some_and(|m| m.is_agent()) {
+        let Some(m) = meta.remove(pane) else { continue };
+        if m.is_agent() {
             agents.push(pane.clone());
         }
+        remote.extend(remote_agent(pane, &m));
     }
     drop(meta);
+    // Its pane gone, nothing would reach the agent there again.
+    end_remote_agents(remote);
     for pane in agents {
         let end = cmux_protocol::TurnEnd::Exited;
         crate::tasks::record(app, cmux_protocol::TaskEventKind::TurnEnded { pane, end });

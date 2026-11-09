@@ -80,10 +80,10 @@ pub fn launch(
         server::Program::Command(line) => {
             cmd.args(["--command", line]);
         }
-        server::Program::Ssh(host, run) => {
+        server::Program::Ssh(host, command) => {
             cmd.args(["--ssh", host]);
-            if let Some(run) = run {
-                cmd.args(["--ssh-run", run]);
+            if let Some(command) = command {
+                cmd.args(["--ssh-command", command]);
             }
         }
     }
@@ -179,14 +179,28 @@ pub fn end_all(patience: std::time::Duration) -> Vec<String> {
 /// Each connection stays open until its holder reports the exit: a holder
 /// whose child dies with nobody attached waits a day for someone to
 /// collect it, so hanging up straight after `Kill` would leave it there.
-fn end_all_in(location: &Path, patience: std::time::Duration) -> Vec<String> {
+pub fn end_all_in(location: &Path, patience: std::time::Duration) -> Vec<String> {
+    let panes = conn::live_panes(location);
+    let endpoints: Vec<PathBuf> = panes.iter().map(|p| conn::endpoint(location, p)).collect();
+    let left = end_these(&endpoints, patience);
+    panes.into_iter().zip(endpoints).filter(|(_, e)| left.contains(e)).map(|(p, _)| p).collect()
+}
+
+/// Ends `pane`'s holder at this user's location, as [`end_all`] does each
+/// one; whether it went within `patience`. None answering is gone already.
+pub fn end(pane: &str, patience: std::time::Duration) -> bool {
+    end_these(&[socket_path(pane)], patience).is_empty()
+}
+
+/// Ends the holders at `endpoints` all at once — `Kill` to each, then each
+/// waited for — and gives those still answering at the deadline.
+fn end_these(endpoints: &[PathBuf], patience: std::time::Duration) -> Vec<PathBuf> {
     use std::time::Instant;
     let deadline = Instant::now() + patience;
-    let panes = conn::live_panes(location);
     let mut attached = Vec::new();
-    for pane in &panes {
-        // Attaching takes the pane over from the app, which is quitting.
-        if let Ok(mut a) = client::attach(&conn::endpoint(location, pane), 80, 24) {
+    for endpoint in endpoints {
+        // Attaching takes the pane over from whoever had it: it is ending.
+        if let Ok(mut a) = client::attach(endpoint, 80, 24) {
             if wire::write_frame(&mut a.stream, &wire::Frame::Kill).is_ok() {
                 attached.push(a);
             }
@@ -206,11 +220,7 @@ fn end_all_in(location: &Path, patience: std::time::Duration) -> Vec<String> {
     }
     // A holder goes away as it exits; give the last ones a moment.
     loop {
-        let left: Vec<String> = panes
-            .iter()
-            .filter(|p| conn::is_alive(&conn::endpoint(location, p)))
-            .cloned()
-            .collect();
+        let left: Vec<PathBuf> = endpoints.iter().filter(|e| conn::is_alive(e)).cloned().collect();
         if left.is_empty() || Instant::now() >= deadline {
             return left;
         }

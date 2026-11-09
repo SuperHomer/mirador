@@ -948,9 +948,10 @@ Forwarding is what makes a remote dev server reviewable: `mira ssh forward
 3000` then `mira browser open http://localhost:3000` and the browser pane
 renders the remote app.
 
-Disconnects leave the pane idle with `[press any key to reconnect]`;
-restarting Mirador restores remote panes idle too — it never re-opens an
-SSH session behind your back.
+Disconnects leave a plain SSH pane idle with `[press any key to
+reconnect]`; restarting Mirador restores remote panes idle too — it never
+re-opens an SSH session behind your back. (An agent's pane on a remote
+reconnects by itself: below.)
 
 ### Agents and teams on a remote computer
 
@@ -985,47 +986,90 @@ setup` was also run there, both fire). The status line is not given:
 that is the person's own.
 
 An agent's pane opens only once the remote has its `mira`, this app's
-socket and the agent's files. It runs `ssh -tt <host> sh
-~/.mirador/run/<pane>.sh`, a script written there first: nothing is
+socket and the agent's files. The agent then runs there under a
+*holder*: the same `mira __hold` that keeps terminals running here when
+Mirador quits, started by the remote's `mira`. The holder runs
+`sh ~/.mirador/run/<pane>.sh`, a script written there first: nothing is
 typed into the pane, and nothing is quoted for the remote's login
-shell. The script starts the person's
-login shell as an interactive login shell, for the PATH their own
-terminal there would have (where nvm or `npm -g` put `claude`), and that
-shell runs the script again with `sh`, which goes to the directory (or
-says loudly there is none) and starts `claude` with `MIRA_PANE` and
-`MIRA_SOCKET` set. An rc file that execs tmux or fish takes the pane
-over before the agent starts: the pane shows tmux or a fish prompt, and
-no agent.
+shell. The script starts the person's login shell as an interactive
+login shell, for the PATH their own terminal there would have (where
+nvm or `npm -g` put `claude`), and that shell runs the script again with
+`sh`, which goes to the directory (or says loudly there is none) and
+starts `claude` with `MIRA_PANE` and `MIRA_SOCKET` set. An rc file that
+execs tmux or fish takes the agent's terminal over before the agent
+starts: the pane shows tmux or a fish prompt, and no agent.
+
+The pane only looks at the agent: it runs `ssh -tt <host> '<mira>'
+attach '<pane>'`. So the agent outlives the connection. When the
+connection drops (wifi gone, the laptop asleep), the agent keeps
+working, and the pane says `[disconnected] — reconnecting in 2s` and
+reattaches by itself. It waits 2s, then 4, 8 and so on up to 30s
+between tries while the host stays out of reach (ssh gives up on each
+after 15s), back to 2s once a connection has held a minute. A key
+retries at once. Reattached, the pane shows what the agent printed
+meanwhile. A send that meets the pane between tries is refused: `<name>
+on <host> is not attached right now: send again once its pane is back`.
+The agent's own exit shows as a command's does, `[done ✓]` or
+`[exit N]`, and is not retried.
+
+Closing the pane or its tab ends the agent there, holder and all; so
+does *Quit and end all sessions*. A remote that cannot be reached then
+keeps it running, and the app's log says so.
+A plain quit leaves the agent running: after a restart its pane comes
+back idle like any SSH pane, and a keypress reattaches to the same
+agent, if it still runs. Before each attach the socket's forward is
+checked, and made again if the connection it rode on is gone, so the
+agent reaches this app again; if that forward fails, the pane says so.
 
 Mirador sees no process on the remote, so a send does not wait for the
 agent to be seen running, as on Windows; its status comes from its
-hooks. After a restart, the pane comes back idle like any SSH pane, and
-a keypress starts a fresh agent with the same script. Before each start
-the socket's forward is checked, and made again if the connection it
-rode on is gone, so that agent reaches this app even once the old
-connection, and its forward, are gone; if that forward
-fails, the pane says so before the agent starts.
+hooks.
+
+On the remote, `~/.mirador/bin/mira-<version> attach <pane>` (the id
+from `mira agent list`; that `mira` is on no PATH there unless you put it
+there) shows an agent in any terminal there and takes its keys, as its
+pane does here; closing that terminal leaves the agent running. A
+holder has one viewer at a time, the newest: the pane here then says
+`taken by another attach` and waits for a key. With no session for
+that pane there it says `mira: no session <pane> on <host>: it has
+ended, or never started here`, and exits 1.
+
+The holder's socket is in the runtime directory there:
+`$XDG_RUNTIME_DIR/mirador/holders`, or `~/.mirador/holders` without one.
+Two things follow:
+- On a systemd remote, `/run/user/<uid>` goes when your last session
+  there ends, and with `KillUserProcesses=yes` your processes go too,
+  the agent's included, unless lingering is on for you:
+  `loginctl enable-linger`.
+- A shell startup file that sets `XDG_RUNTIME_DIR` itself sends `mira
+  attach` to a different directory than the holder's, and it finds no
+  session.
 
 `team start --host` starts every member as `agent new --host` starts
 one, in one tab here. Each member is told its teammates as usual, with
 `mira` named by its path on the remote. A team with a member a remote
 cannot run is refused, naming that member, before anything opens or
-reaches the remote; and every member's files are sent before the tab
-opens, so a team that cannot start opens nothing here.
+reaches the remote. Every member's files are sent before the tab opens,
+and each member starts once it has, so its first status finds its pane.
+A team that cannot start opens nothing here, and ends there any member
+it had started.
 
 The team keeps its host and directory with its tab, and `team list`
 names the host. `team add` starts the new member there, in that
 directory, as `team start` started the others, and refuses a role the
 remote cannot run before anything opens. `team restart` counts a member
-there as running while its pane's ssh does, since its agent is never
+there as running while its pane is attached, since its agent is never
 seen from here. It reopens one that exited or was closed: a fresh pane
 in the old one's place (else beside a teammate), started there again,
 with the old pane closed. Every member's files are sent before any pane
-opens. It is not rerun in its old pane: a remote pane runs again only
-on a keypress. So a member whose connection dropped, or whose pane has
-had no connection since a relaunch (idle until a keypress), reads as
-exited too, and a restart starts it afresh, not on the conversation it
-had.
+opens, and the members start once all their panes are in the tab. One
+that cannot start is named; its seat stays on its closed pane, so the
+next restart tries it again, and the others run on. It is not rerun in
+its old pane: a remote pane runs again only on a keypress. So a member
+whose pane is between reconnects, or idle since a relaunch, has no
+terminal here and reads as exited too, although its agent may still run
+there. A restart then starts it afresh, not on the conversation it had,
+and ends the old agent there with its old pane.
 
 Not done yet: Codex there; a role that keeps only some skills or
 plugins (listing them runs Claude Code here, which says nothing of the

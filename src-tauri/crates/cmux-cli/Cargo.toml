@@ -19,3 +19,7 @@ base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+# Runs `mira attach` under a real terminal in its test; already in the tree.
+portable-pty = "0.9"

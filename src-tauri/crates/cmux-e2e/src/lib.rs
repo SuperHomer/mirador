@@ -669,12 +669,14 @@ impl Sandbox {
     /// Starts an sshd of the sandbox's own, on a free local port, and adds a
     /// host `box` to the sandbox home's `~/.ssh/config` that reaches it with
     /// a key of its own: a remote computer, which is this one. A login
-    /// there looks like the sandbox — its home and runtime directory, its
-    /// `bin`, `mira` in it, first on the PATH, its agents' log — through
-    /// sshd's `SetEnv`, which overrides what sshd took from the passwd
-    /// entry. Not its config directory: a remote has no discovery file of
-    /// the app's, so a `mira` there finds the app only through what it is
-    /// given. sshd runs as the person running the tests, so it needs no
+    /// there looks like the sandbox — its home, its `bin`, `mira` in it,
+    /// first on the PATH, its agents' log — through sshd's `SetEnv`, which
+    /// overrides what sshd took from the passwd entry. Not its config
+    /// directory: a remote has no discovery file of the app's, so a `mira`
+    /// there finds the app only through what it is given. And a runtime
+    /// directory of its own ([`Sandbox::remote_holders`]): the app's holders
+    /// and the remote's must not be one set, or ending the app's would end
+    /// the remote's and hide whether anything ended those. sshd runs as the person running the tests, so it needs no
     /// root: a high port, a host key it owns, no PAM.
     pub fn sshd(&mut self) {
         assert!(self.sshd.is_none(), "sshd already running");
@@ -688,11 +690,12 @@ impl Sandbox {
             assert!(made.is_ok_and(|s| s.success()), "ssh-keygen {}", key.display());
         }
         std::fs::copy(ssh.join("id_ed25519.pub"), ssh.join("authorized_keys")).unwrap();
+        std::fs::create_dir_all(self.remote_runtime()).unwrap();
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let path = format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.root.join("bin").display());
         let set_env: String = [
             ("HOME", self.home.display().to_string()),
-            ("XDG_RUNTIME_DIR", self.runtime.display().to_string()),
+            ("XDG_RUNTIME_DIR", self.remote_runtime().display().to_string()),
             ("PATH", path),
             ("E2E_AGENT_LOG", self.agent_log.display().to_string()),
         ]
@@ -757,6 +760,16 @@ impl Sandbox {
         });
     }
 
+    /// `box`'s runtime directory: short, inside the sandbox's own.
+    fn remote_runtime(&self) -> PathBuf {
+        self.runtime.join("box")
+    }
+
+    /// Where `box` keeps its holders: an agent there runs under one.
+    pub fn remote_holders(&self) -> PathBuf {
+        self.remote_runtime().join("mirador").join("holders")
+    }
+
     /// Puts the debug `mira` where a remote keeps the `mira` of `version`
     /// (`ssh::ensure_mira`), as if fetched already: no test fetches one.
     /// Gives its path.
@@ -778,6 +791,11 @@ impl Sandbox {
 impl Drop for Sandbox {
     fn drop(&mut self) {
         self.quit();
+        // An agent on the remote runs under a holder there, which a quit
+        // ends only when asked to and able to. Those left are ended here,
+        // each waited for until it reports its child gone: a holder left
+        // alone keeps its agent for a day.
+        cmux_core::hold::end_all_in(&self.remote_holders(), Duration::from_secs(10));
         self.wait_for_agents();
         // After the app: its ssh panes have hung up by now. But the app asks
         // for ControlPersist, so the connection's master outlives them for

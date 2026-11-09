@@ -245,6 +245,143 @@ fn a_plain_agent_runs_on_the_remote() {
     });
 }
 
+/// The pid of the ssh this computer runs for `pane`'s attach, if any. The
+/// remote is this computer too, so its side of the attach is in the same
+/// process table: `mira attach <pane>`, and the login shell that ran it,
+/// given the line with the pane id still quoted. Only the pane's own ssh
+/// has `ssh` and `-tt` before that quoted id. The pattern starts at `ssh`
+/// for a second reason: pgrep takes one that starts with `-` as an option.
+fn attach_ssh(pane: &str) -> Option<String> {
+    let out = std::process::Command::new("pgrep").args(["-f", &format!("ssh .*-tt .*attach '{pane}'")]).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().next().map(String::from)
+}
+
+/// A remote agent runs under a holder there, and its pane only attaches to
+/// it: the connection dropped, the pane says so and the agent runs on,
+/// started once. The pane reattaches by itself, the agent's screen comes
+/// back from the holder, and it takes messages and reaches the app again.
+#[test]
+fn a_remote_agent_outlives_its_connection() {
+    e2e!();
+    let mut sb = Sandbox::new("rhold");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holder = cmux_core::hold::conn::endpoint(&sb.remote_holders(), &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
+    sb.wait_for_screen(&pane, "the agent, through the attach", LONG, |s| s.contains("❯"));
+    let socket = start["socket"].as_str().unwrap_or_default().to_string();
+    let first_ssh = attach_ssh(&pane).unwrap_or_else(|| sb.fail("no ssh for the pane's attach"));
+
+    // Drop the connection: its master goes, and every session over it.
+    let dropped = std::process::Command::new(sb.root.join("bin/ssh"))
+        .args(["-o", &format!("ControlPath={}/mirador/ssh/cm-%C", sb.runtime.display()), "-O", "exit", "box"])
+        .env("HOME", &sb.home)
+        .output()
+        .unwrap();
+    assert!(dropped.status.success(), "ssh -O exit: {}", String::from_utf8_lossy(&dropped.stderr));
+    sb.wait_for_screen(&pane, "the pane to say it lost the connection", LONG, |s| {
+        s.contains("[disconnected]") && s.contains("reconnecting in 2s")
+    });
+
+    assert!(cmux_core::hold::conn::is_alive(&holder), "the holder went with the connection");
+    assert!(running(&start["pid"]), "the agent ({}) went with the connection", start["pid"]);
+
+    // Back by itself: a new ssh, the agent's screen from the holder's
+    // replay, the app's socket forwarded again, and still one agent.
+    sb.wait_for("the pane's ssh to reattach", LONG, || attach_ssh(&pane).filter(|p| *p != first_ssh));
+    sb.wait_for_screen(&pane, "the agent back in the pane", LONG, |s| match s.rsplit_once("reconnecting in") {
+        Some((_, after)) => after.contains("❯"),
+        // The replay may clear the screen first.
+        None => s.contains("❯"),
+    });
+    sb.wait_for("the app's socket forwarded again", LONG, || std::os::unix::net::UnixStream::connect(&socket).ok());
+    sb.call(Request::AgentSend {
+        to: pane.clone(),
+        message: "hello after the drop".into(),
+        pane_id: Some(first.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message after the drop", LONG, || {
+        sb.events("message", &pane).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello after the drop")))
+    });
+    assert_eq!(sb.events("start", &pane).len(), 1, "the agent started more than once");
+}
+
+/// Starts a plain agent on `box` from `first`, and waits for its start
+/// event: its pane, and that event.
+fn start_remote_agent(sb: &Sandbox, first: &str) -> (String, serde_json::Value) {
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.to_string()),
+        host: Some("box".into()),
+        dir: Some(dir),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    (pane, start)
+}
+
+/// Whether the process `pid` (a JSON number, from a start event) runs.
+fn running(pid: &serde_json::Value) -> bool {
+    let kill = std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status();
+    kill.unwrap().success()
+}
+
+/// *Quit and end all sessions* ends a remote agent too, and its holder,
+/// before the app goes.
+#[test]
+fn quitting_and_ending_all_sessions_ends_remote_agents() {
+    e2e!();
+    let mut sb = Sandbox::new("rquit");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holders = sb.remote_holders();
+    let holder = cmux_core::hold::conn::endpoint(&holders, &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder) && running(&start["pid"]), "the agent is not running there");
+
+    sb.quit(); // with end_sessions, as the palette's *Quit and end all sessions*
+    sb.wait_for("the holder there to go", LONG, || (!cmux_core::hold::conn::is_alive(&holder)).then_some(()));
+    sb.wait_for("the agent there to go", LONG, || (!running(&start["pid"])).then_some(()));
+    assert_eq!(cmux_core::hold::conn::live_panes(&holders), Vec::<String>::new(), "a holder is left for the sandbox to end");
+}
+
+/// Closing a remote agent's pane ends the agent there, and its holder:
+/// nothing would reach it again.
+#[test]
+fn closing_a_remote_agents_pane_ends_it_there() {
+    e2e!();
+    let mut sb = Sandbox::new("rclose");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holders = sb.remote_holders();
+    let holder = cmux_core::hold::conn::endpoint(&holders, &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
+    assert!(running(&start["pid"]), "the agent ({}) is not running", start["pid"]);
+
+    sb.call(Request::ClosePane { pane_id: pane.clone() });
+    sb.wait_for("the holder there to go", LONG, || (!cmux_core::hold::conn::is_alive(&holder)).then_some(()));
+    sb.wait_for("the agent there to go", LONG, || (!running(&start["pid"])).then_some(()));
+    assert_eq!(cmux_core::hold::conn::live_panes(&holders), Vec::<String>::new(), "a holder is left for the sandbox to end");
+}
+
 /// A role from this computer's catalog runs on the remote: its model, its
 /// prompt and its settings — sent there, Mirador's hooks in them — and it
 /// reports: the hooks it runs reach this app through the forwarded
@@ -367,12 +504,16 @@ fn a_team_runs_on_the_remote() {
         sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
     });
 
-    // A member whose agent ends there, its pane's ssh with it, reads as
-    // exited; restarted, it gets a fresh pane, started there again.
+    // A member whose agent ends there: its holder sees the exit and goes,
+    // the pane's attach ends with it (1: killed, no code), and the member
+    // reads as exited. Restarted, it gets a fresh pane, started there again.
     let pid = sb.events("start", &reviewer)[0]["pid"].as_u64().expect("the agent's pid");
     assert!(std::process::Command::new("kill").arg(pid.to_string()).status().unwrap().success());
     let state = |name: &str| sb.member(name).and_then(|m| m["state"].as_str().map(String::from));
     sb.wait_for("the reviewer to read as exited", LONG, || (state("reviewer").as_deref() == Some("exited")).then_some(()));
+    sb.wait_for_screen(&reviewer, "the reviewer's exit in its pane", LONG, |s| s.contains("[exit 1]"));
+    let old_holder = cmux_core::hold::conn::endpoint(&sb.remote_holders(), &reviewer);
+    sb.wait_for("the reviewer's holder to go", LONG, || (!cmux_core::hold::conn::is_alive(&old_holder)).then_some(()));
     let outcome = |done: &serde_json::Value, name: &str| -> Option<(String, String)> {
         let m = done["members"].as_array()?.iter().find(|m| m["name"] == name)?;
         Some((m["outcome"].as_str()?.to_string(), m["pane"].as_str()?.to_string()))

@@ -46,14 +46,20 @@ fn control_opts() -> Vec<String> {
         "ControlMaster=auto".to_string(),
         format!("ControlPath={}", control_path()),
         "ControlPersist=30m".to_string(),
+        CONNECT_TIMEOUT.to_string(),
     ]
 }
 
 /// Windows' OpenSSH rejects the multiplexing options outright.
 #[cfg(windows)]
 fn control_opts() -> Vec<String> {
-    Vec::new()
+    vec![CONNECT_TIMEOUT.to_string()]
 }
+
+/// A host that is down is given up on in seconds, not after the system's
+/// TCP timeout: a remote agent's pane retries its connection, and each
+/// retry makes sure of the app's forward first.
+const CONNECT_TIMEOUT: &str = "ConnectTimeout=15";
 
 /// Splits a host spec into ssh args (`"-p 2222 host"` → `["-p","2222","host"]`).
 fn host_args(host: &str) -> Vec<String> {
@@ -61,10 +67,10 @@ fn host_args(host: &str) -> Vec<String> {
 }
 
 /// The interactive `ssh -tt` command for a remote pane: a login shell, or
-/// with `run`, an agent's run script there ([`run_script`]), as `sh <run>`
-/// — plain words ([`is_plain_path`]), which any login shell runs as they
-/// are.
-pub fn interactive_command(host: &str, run: Option<&str>) -> CommandBuilder {
+/// with `command`, that command line there, as one argument: ssh hands it
+/// to the remote's login shell, which parses it. For an agent it is
+/// `'<mira>' attach <pane>`, which any shell, fish included, reads alike.
+pub fn interactive_command(host: &str, command: Option<&str>) -> CommandBuilder {
     let mut cmd = CommandBuilder::new("ssh");
     cmd.arg("-tt");
     for opt in control_opts() {
@@ -74,9 +80,8 @@ pub fn interactive_command(host: &str, run: Option<&str>) -> CommandBuilder {
     for arg in host_args(host) {
         cmd.arg(arg);
     }
-    if let Some(run) = run {
-        cmd.arg("sh");
-        cmd.arg(run);
+    if let Some(command) = command {
+        cmd.arg(command);
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -297,8 +302,10 @@ pub fn is_plain_path(path: &str) -> bool {
     !path.is_empty() && path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
 }
 
-/// The script an agent's pane runs on a remote, saved there as `run` (a
-/// plain path). It runs twice. First through the person's login shell, as
+/// The script an agent runs on a remote, saved there as `run` (a plain
+/// path). The agent's holder there runs it (`mira __hold-start`), so the
+/// agent outlives the connection and the pane only attaches to it. It
+/// runs twice. First through the person's login shell, as
 /// an interactive login shell: what a terminal of theirs there would be,
 /// which reads their profile and their rc file alike. A command over ssh
 /// otherwise gets neither, and `claude` installed through nvm or `npm -g`
@@ -311,7 +318,6 @@ pub fn is_plain_path(path: &str) -> bool {
 /// its environment.
 #[cfg_attr(windows, allow(dead_code))]
 pub fn run_script(run: &str, pane: &str, socket: &str, dir: &str, launch: &str) -> String {
-    let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
     let shown = dir.replace(['"', '\\', '$', '`'], "_");
     [
         r#"if [ "$MIRA_RUN" != agent ]; then"#.to_string(),
@@ -327,6 +333,54 @@ pub fn run_script(run: &str, pane: &str, socket: &str, dir: &str, launch: &str) 
     ]
     .join("\n")
         + "\n"
+}
+
+/// `s` as one word for POSIX sh.
+fn quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// Starts the holder an agent on `host` runs under, running its run script
+/// (`run`, from [`run_script`]) as `pane`, with the remote's `mira`; returns
+/// once it answers. The agent then outlives any connection, and its pane
+/// attaches to it with [`attach_line`].
+#[cfg(not(windows))]
+pub fn start_held(host: &str, mira: &str, pane: &str, run: &str) -> Result<(), String> {
+    remote_shell(host, &start_held_script(mira, pane, run)).map(|_| ())
+}
+
+/// The script [`start_held`] runs. TERM is set here: a command over ssh
+/// with no tty has none to pass on, and the holder's terminal keeps the
+/// one it starts with. No `--cwd`: the run script goes to its directory
+/// itself, and says so when there is none.
+#[cfg_attr(windows, allow(dead_code))]
+fn start_held_script(mira: &str, pane: &str, run: &str) -> String {
+    format!(
+        "TERM=xterm-256color COLORTERM=truecolor {} __hold-start --pane {} --command {}\n",
+        quote(mira),
+        quote(pane),
+        quote(&format!("sh {run}"))
+    )
+}
+
+/// The command line a remote agent's pane runs over `ssh -tt`: attaching
+/// to its holder there. Both are plain words (`remote_home` saw to the
+/// home), so quoted they read the same to fish as to sh.
+pub fn attach_line(mira: &str, pane: &str) -> String {
+    format!("{} attach {}", quote(mira), quote(pane))
+}
+
+/// The remote's `mira` in a line from [`attach_line`].
+pub fn mira_of(attach_line: &str) -> Option<String> {
+    let (mira, _) = attach_line.strip_prefix('\'')?.split_once("' attach ")?;
+    Some(mira.replace(r"'\''", "'"))
+}
+
+/// Ends `pane`'s agent on `host`: its holder there, through the remote's
+/// `mira`, which waits for it to go.
+#[cfg(not(windows))]
+pub fn end_held(host: &str, mira: &str, pane: &str) -> Result<(), String> {
+    remote_shell(host, &format!("{} __hold-end --pane {}\n", quote(mira), quote(pane))).map(|_| ())
 }
 
 /// Writes `bytes` to `path` on `host`, exactly, owner-only (0600: prompts
@@ -346,7 +400,6 @@ pub fn put_file(host: &str, path: &str, bytes: &[u8]) -> Result<(), String> {
 #[cfg_attr(windows, allow(dead_code))]
 fn put_file_script(path: &str, bytes: &[u8]) -> String {
     use base64::Engine;
-    let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
     let lines: Vec<&str> = encoded.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap()).collect();
     let dir = path.rsplit_once('/').map(|(d, _)| d).filter(|d| !d.is_empty());
@@ -552,12 +605,12 @@ mod tests {
         }
     }
 
-    /// A remote pane runs a login shell there, or a run script as `sh` and
-    /// its path: plain words after the host.
+    /// A remote agent pane runs its command line there as one argument
+    /// after the host, for the remote's shell to parse.
     #[test]
-    fn a_remote_agent_pane_runs_its_script() {
-        let dbg = format!("{:?}", interactive_command("box", Some("/home/me/.mirador/run/p1.sh")));
-        assert!(dbg.contains(r#""box", "sh", "/home/me/.mirador/run/p1.sh""#), "{dbg}");
+    fn a_remote_agent_pane_runs_its_command_line() {
+        let dbg = format!("{:?}", interactive_command("box", Some("'/home/me/.mirador/bin/mira-1' attach p1")));
+        assert!(dbg.contains(r#""box", "'/home/me/.mirador/bin/mira-1' attach p1""#), "{dbg}");
     }
 
     /// A file sent to a remote: base64 between delimiters no base64 holds,
@@ -579,6 +632,26 @@ mod tests {
             "{script}"
         );
         assert!(!put_file_script("probe.txt", b"x").contains("mkdir"), "no directory to make");
+    }
+
+    /// The holder starts the run script, quoted for sh, with a terminal
+    /// type; the pane attaches with the same `mira`.
+    #[test]
+    fn a_remote_agent_starts_held_and_its_pane_attaches() {
+        assert_eq!(
+            start_held_script("/home/it's/.mirador/bin/mira-1", "p1", "/home/me/.mirador/run/p1.sh"),
+            "TERM=xterm-256color COLORTERM=truecolor '/home/it'\\''s/.mirador/bin/mira-1' __hold-start --pane 'p1' --command 'sh /home/me/.mirador/run/p1.sh'\n"
+        );
+        assert_eq!(attach_line("/home/me/.mirador/bin/mira-1", "p1"), "'/home/me/.mirador/bin/mira-1' attach 'p1'");
+    }
+
+    /// The `mira` a remote pane attaches with is the one that ends it.
+    #[test]
+    fn the_mira_comes_back_out_of_an_attach_line() {
+        for mira in ["/home/me/.mirador/bin/mira-1", "/home/it's/mira"] {
+            assert_eq!(mira_of(&attach_line(mira, "p1")).as_deref(), Some(mira));
+        }
+        assert_eq!(mira_of("sh /home/me/run.sh"), None);
     }
 
     #[test]
