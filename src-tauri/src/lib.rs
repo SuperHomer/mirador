@@ -349,6 +349,10 @@ pub fn run() {
             // Before session restore can want it for a rerun.
             cmux_core::pty::shell::warm_interactive_path();
             intel::spawn(app.handle().clone());
+            // The window's zoom from mirador.json, before the first paint
+            // settles; the watcher and the zoom commands keep it after.
+            let ui_zoom = app.state::<AppState>().config.lock().unwrap().ui_zoom;
+            settings::apply_ui_zoom(app.handle(), ui_zoom);
             config_watch::spawn(app.handle().clone());
             spawn_session_saver(app.handle().clone());
             commands::spawn_emit_coalescer(app.handle().clone());
@@ -411,6 +415,8 @@ pub fn run() {
             settings::open_settings,
             settings::settings_view,
             settings::set_config_value,
+            settings::zoom_terminals,
+            settings::zoom_window,
             settings::list_computers,
             settings::add_computer,
             teams::start_team,

@@ -754,6 +754,9 @@ export interface ResolvedConfig {
    *  a third of the wall. */
   focusRailWidth: number | null;
   focusRailPosition: RailPosition;
+  /** The whole window's zoom, 1 being 100 %. Rust applies it to the
+   *  webview; the page only reads it. */
+  uiZoom: number;
 }
 
 /** Where Focus shows the wall's other agents and tools: the rail on the
@@ -1062,6 +1065,12 @@ export const settingsView = () => invoke<SettingRow[]>("settings_view");
 /** Sets `key` in mirador.json, or removes it with null. */
 export const setConfigValue = (key: string, value: unknown) =>
   invoke<void>("set_config_value", { key, value });
+/** Zooms every terminal `steps` whole points, or back to the default with
+ *  0 (`fontSize`). Resolves to the new size. */
+export const zoomTerminals = (steps: number) => invoke<number>("zoom_terminals", { steps });
+/** Zooms the whole window `steps` levels, or back to 100 % with 0
+ *  (`uiZoom`). Resolves to the new zoom. */
+export const zoomWindow = (steps: number) => invoke<number>("zoom_window", { steps });
 
 /** An agent-editor pane, and the directory whose files it edits. */
 export interface AgentEditorPaneInfo {

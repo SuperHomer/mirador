@@ -1966,6 +1966,8 @@ pub struct ResolvedConfig {
     /// default, about a third of the wall.
     pub focus_rail_width: Option<u32>,
     pub focus_rail_position: RailPosition,
+    /// The whole window's zoom, 1 being 100 %.
+    pub ui_zoom: f64,
 }
 
 /// Where Focus shows the wall's agents and tools other than the one it

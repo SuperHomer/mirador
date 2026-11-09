@@ -22,6 +22,8 @@ import {
   setView,
   installUpdate,
   quitEndingSessions,
+  zoomTerminals,
+  zoomWindow,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
@@ -245,6 +247,45 @@ export const actions: ActionDef[] = [
       if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
     },
   },
+  // Zoom: the terminals' text (fontSize) or the whole window (uiZoom),
+  // both kept in mirador.json. Ctrl + wheel does the same by where the
+  // pointer is (useZoomWheel).
+  {
+    id: "terminal_zoom_in",
+    title: "View: Zoom Terminals In",
+    group: "view",
+    run: () => void zoomTerminals(1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_out",
+    title: "View: Zoom Terminals Out",
+    group: "view",
+    run: () => void zoomTerminals(-1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_reset",
+    title: "View: Reset Terminal Zoom",
+    group: "view",
+    run: () => void zoomTerminals(0).catch(zoomFailed),
+  },
+  {
+    id: "window_zoom_in",
+    title: "View: Zoom Window In",
+    group: "view",
+    run: () => void zoomWindow(1).catch(zoomFailed),
+  },
+  {
+    id: "window_zoom_out",
+    title: "View: Zoom Window Out",
+    group: "view",
+    run: () => void zoomWindow(-1).catch(zoomFailed),
+  },
+  {
+    id: "window_zoom_reset",
+    title: "View: Reset Window Zoom",
+    group: "view",
+    run: () => void zoomWindow(0).catch(zoomFailed),
+  },
   {
     id: "board_arrange",
     title: "View: Arrange Frames",
@@ -369,6 +410,11 @@ export const actions: ActionDef[] = [
     },
   },
 ];
+
+/** A zoom that could not be written: mirador.json does not parse. */
+function zoomFailed(err: unknown) {
+  console.warn(`mirador: zoom not saved: ${err}`);
+}
 
 export function runAction(id: string): boolean {
   const def = actions.find((a) => a.id === id);

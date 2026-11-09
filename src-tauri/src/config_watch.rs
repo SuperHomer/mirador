@@ -61,6 +61,8 @@ pub fn spawn(handle: tauri::AppHandle) {
                 }
             };
             if changed {
+                // A uiZoom typed in the Settings pane or the file.
+                crate::settings::apply_ui_zoom(&handle, resolved.ui_zoom);
                 let _ = handle.emit("config-changed", resolved);
             }
             // The wall's pages are in the snapshot, cut to agentsPerTab.

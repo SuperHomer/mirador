@@ -315,8 +315,26 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘I | Ctrl+Shift+I | Inbox |
 | ⌘B | Ctrl+Shift+B | toggle sidebar |
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
+| ⌘= / ⌘- | Ctrl+= or Ctrl+Plus / Ctrl+Minus | zoom the terminals in / out |
+| — | Ctrl+0 | reset the terminals' zoom |
+| — | Ctrl+Alt+= or Ctrl+Alt+Plus / Ctrl+Alt+Minus | zoom the whole window in / out |
 
-All rebindable in `mirador.json`.
+All rebindable in `mirador.json`, where `+` and `-` are spelled `plus` and
+`minus` (`"ctrl+plus"`). The zooms are Windows Terminal's keys: plain Ctrl
+with them types nothing a shell needs. Plus is the numpad's, or Shift and
+whichever key makes `+` on your layout.
+
+### Zoom
+
+Ctrl + wheel zooms what is under the pointer: over a terminal, every
+terminal's text; anywhere else, the whole window — the sidebar, the wall,
+every pane but a browser page, which keeps its own zoom. On the board it
+zooms the board, as before. Both zooms are kept in `mirador.json`, the
+terminals' as `fontSize` (6–72, a point a step) and the window's as
+`uiZoom` (0.5–3, a browser's steps), so they outlive a restart and show
+in *App: Settings*. The palette has every zoom and both resets (*View:
+Reset Terminal Zoom*, *View: Reset Window Zoom*); the window's reset has
+no key, because AltGr+0 types `}` on a German keyboard.
 
 On macOS, Option types the character your layout puts there — `[ ] { } |`
 on Swiss, German, French and other non-US layouts — rather than acting as
