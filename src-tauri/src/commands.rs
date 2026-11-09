@@ -1282,18 +1282,69 @@ pub fn repair_claude_hooks() {
 }
 
 /// Ends every terminal session — including ones still waiting in their
-/// holders — then quits. Cmd+Q leaves them running; this is the way to
-/// mean "everything".
+/// holders, and agents on remotes — then quits. Cmd+Q leaves them running;
+/// this is the way to mean "everything".
 #[tauri::command]
 pub async fn quit_ending_sessions(app: AppHandle) {
+    let remote: Vec<_> = {
+        let state = app.state::<AppState>();
+        let meta = state.meta.lock().unwrap();
+        meta.iter().filter_map(|(pane, m)| remote_agent(pane, m)).collect()
+    };
     let _ = tauri::async_runtime::spawn_blocking(|| {
-        let left = cmux_core::hold::end_all(std::time::Duration::from_secs(3));
+        let patience = std::time::Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + patience;
+        let remote = end_remote_agents(remote);
+        let left = cmux_core::hold::end_all(patience);
         if !left.is_empty() {
             eprintln!("mirador: holders still running at quit: {left:?}");
+        }
+        // A remote that is slow to answer does not hold the quit up.
+        while remote.iter().any(|h| !h.is_finished()) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
     })
     .await;
     app.exit(0);
+}
+
+/// A remote agent's pane, its host, and the `mira` there that ends it.
+// Ended only where remote agents are done (not Windows yet).
+#[cfg_attr(windows, allow(dead_code))]
+struct RemoteAgent {
+    pane: String,
+    host: String,
+    mira: String,
+}
+
+fn remote_agent(pane: &str, m: &cmux_core::state::PaneMeta) -> Option<RemoteAgent> {
+    Some(RemoteAgent {
+        pane: pane.to_string(),
+        host: m.remote_host.clone()?,
+        mira: cmux_core::ssh::mira_of(m.remote_command.as_deref()?)?,
+    })
+}
+
+/// Ends each agent on its remote, its holder there with it, each from a
+/// thread of its own: a remote can take seconds to answer, or never. One
+/// that fails lives on there, until someone attaches to it or ends it.
+fn end_remote_agents(agents: Vec<RemoteAgent>) -> Vec<std::thread::JoinHandle<()>> {
+    #[cfg(windows)]
+    return {
+        let _ = agents;
+        Vec::new()
+    };
+    #[cfg(not(windows))]
+    agents
+        .into_iter()
+        .map(|a| {
+            std::thread::spawn(move || {
+                if let Err(e) = cmux_core::ssh::end_held(&a.host, &a.mira, &a.pane) {
+                    eprintln!("mirador: could not end {} on {}: {e}; it runs on there", a.pane, a.host);
+                }
+            })
+        })
+        .collect()
 }
 
 /// The bundled `mira` CLI, which doubles as the session holder. It sits
@@ -2468,13 +2519,18 @@ pub async fn ack_pty(app: AppHandle, pane_id: String, bytes: u64) {
 pub(crate) fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
     let mut meta = state.meta.lock().unwrap();
     let mut agents = Vec::new();
+    let mut remote = Vec::new();
     for pane in panes {
         let _ = state.pty.close(pane);
-        if meta.remove(pane).is_some_and(|m| m.is_agent()) {
+        let Some(m) = meta.remove(pane) else { continue };
+        if m.is_agent() {
             agents.push(pane.clone());
         }
+        remote.extend(remote_agent(pane, &m));
     }
     drop(meta);
+    // Its pane gone, nothing would reach the agent there again.
+    end_remote_agents(remote);
     for pane in agents {
         let end = cmux_protocol::TurnEnd::Exited;
         crate::tasks::record(app, cmux_protocol::TaskEventKind::TurnEnded { pane, end });

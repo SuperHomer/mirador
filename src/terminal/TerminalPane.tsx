@@ -331,25 +331,29 @@ export const TerminalPane = memo(function TerminalPane({
         // mouse tracking left armed the dead pane can't even be selected.
         term.write(IDLE_MODE_RESET);
         const code = event.payload.exit_code;
+        // For a remote agent, 255 is ssh's own failure, the connection
+        // lost; the agent runs on under its holder there. Any other code
+        // is the attach's: the agent's own exit, or 1 when the session is
+        // gone, which it has just said.
+        const lost = event.payload.reconnects
+          ? code === 255
+          : event.payload.is_remote;
         const status =
           code === null
             ? "exited"
-            : event.payload.is_remote
+            : lost
               ? "disconnected"
               : code === 0
                 ? "done ✓"
                 : `exit ${code}`;
         const color =
-          event.payload.is_remote || code === null
+          lost || code === null
             ? "\x1b[2m"
             : code === 0
               ? "\x1b[32m"
               : "\x1b[31m";
-        // 255 is ssh's own failure, the connection lost; the agent runs on
-        // under its holder there. Any other code is the attach's: 1 when
-        // the session is gone, which it has just said.
         let wait = 0;
-        if (event.payload.reconnects && code === 255) {
+        if (event.payload.reconnects && lost) {
           if (Date.now() - attachedAt > RETRY_HELD_MS) {
             retryDelay = RETRY_FIRST_MS;
           }

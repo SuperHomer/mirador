@@ -329,6 +329,47 @@ fn a_remote_agent_outlives_its_connection() {
     assert_eq!(sb.events("start", &pane).len(), 1, "the agent started more than once");
 }
 
+/// Closing a remote agent's pane ends the agent there, and its holder:
+/// nothing would reach it again.
+#[test]
+fn closing_a_remote_agents_pane_ends_it_there() {
+    e2e!();
+    let mut sb = Sandbox::new("rclose");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.clone()),
+        host: Some("box".into()),
+        dir: Some(dir),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    let holders = sb.runtime.join("mirador").join("holders");
+    let holder = cmux_core::hold::conn::endpoint(&holders, &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
+    let pid = start["pid"].to_string();
+    let alive = || {
+        let kill = std::process::Command::new("kill").args(["-0", &pid]).stderr(std::process::Stdio::null()).status();
+        kill.unwrap().success()
+    };
+    assert!(alive(), "the agent ({pid}) is not running");
+
+    sb.call(Request::ClosePane { pane_id: pane.clone() });
+    sb.wait_for("the holder there to go", LONG, || (!cmux_core::hold::conn::is_alive(&holder)).then_some(()));
+    sb.wait_for("the agent there to go", LONG, || (!alive()).then_some(()));
+    assert_eq!(cmux_core::hold::conn::live_panes(&holders), Vec::<String>::new(), "a holder is left for the sandbox to end");
+}
+
 /// A role from this computer's catalog runs on the remote: its model, its
 /// prompt and its settings — sent there, Mirador's hooks in them — and it
 /// reports: the hooks it runs reach this app through the forwarded

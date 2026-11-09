@@ -130,6 +130,33 @@ fn a_started_session_is_attached_typed_into_and_ends_with_its_code() {
 }
 
 #[test]
+fn a_started_session_is_ended_and_its_holder_goes() {
+    let runtime = Runtime::new("end");
+    let mira = |args: &[&str]| Command::new(MIRA).args(args).env("XDG_RUNTIME_DIR", &runtime.0).output().unwrap();
+    let started = mira(&["__hold-start", "--pane", "t2", "--command", "sleep 60"]);
+    assert!(started.status.success(), "{}", String::from_utf8_lossy(&started.stderr));
+    let socket = runtime.socket("t2");
+    let holder = || {
+        let out = Command::new("pgrep").args(["-f", &format!("__hold --pane t2 --socket {}", socket.display())]).output().unwrap();
+        !out.stdout.is_empty()
+    };
+    assert!(holder(), "no holder process");
+
+    let ended = mira(&["__hold-end", "--pane", "t2"]);
+    assert!(ended.status.success(), "{}", String::from_utf8_lossy(&ended.stderr));
+    assert!(!conn::is_alive(&socket), "the holder still answers");
+    let deadline = Instant::now() + PATIENCE;
+    while holder() {
+        assert!(Instant::now() < deadline, "the holder process is still there");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // Nothing to end is not an error.
+    let nobody = mira(&["__hold-end", "--pane", "nobody"]);
+    assert!(nobody.status.success(), "{}", String::from_utf8_lossy(&nobody.stderr));
+}
+
+#[test]
 fn attaching_to_no_session_says_so() {
     let runtime = Runtime::new("nobody");
     let mut term = attach(&runtime.0, "nobody");

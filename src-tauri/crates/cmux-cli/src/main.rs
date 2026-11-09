@@ -253,6 +253,13 @@ enum Command {
         #[arg(long)]
         cwd: Option<String>,
     },
+    /// End a pane's holder and what it runs, waiting for it to go: what
+    /// Mirador runs on a remote when an agent's pane there is closed.
+    #[command(name = "__hold-end", hide = true)]
+    HoldEnd {
+        #[arg(long)]
+        pane: String,
+    },
     /// Attach this terminal to a pane's held session on this computer;
     /// closing the terminal leaves the session running.
     Attach { pane: String },
@@ -1122,6 +1129,7 @@ fn run(cli: Cli) -> Result<(), String> {
             ssh_command,
         } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_command),
         Command::HoldStart { pane, command, cwd } => return hold_start(&pane, &command, cwd.as_deref()),
+        Command::HoldEnd { pane } => return hold_end(&pane),
         Command::Attach { pane } => return attach(&pane),
     };
 
@@ -2152,6 +2160,21 @@ fn hold_start(pane: &str, command: &str, cwd: Option<&str>) -> Result<(), String
         &Program::Command(command.into()),
     )
     .map_err(|e| e.to_string())
+}
+
+/// Nothing answering is nothing to end: not an error.
+#[cfg(unix)]
+fn hold_end(pane: &str) -> Result<(), String> {
+    if cmux_core::hold::end(pane, std::time::Duration::from_secs(10)) {
+        Ok(())
+    } else {
+        Err(format!("the holder of {pane} still answers"))
+    }
+}
+
+#[cfg(not(unix))]
+fn hold_end(_pane: &str) -> Result<(), String> {
+    Err("__hold-end is not available on Windows".into())
 }
 
 #[cfg(not(unix))]

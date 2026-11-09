@@ -46,14 +46,20 @@ fn control_opts() -> Vec<String> {
         "ControlMaster=auto".to_string(),
         format!("ControlPath={}", control_path()),
         "ControlPersist=30m".to_string(),
+        CONNECT_TIMEOUT.to_string(),
     ]
 }
 
 /// Windows' OpenSSH rejects the multiplexing options outright.
 #[cfg(windows)]
 fn control_opts() -> Vec<String> {
-    Vec::new()
+    vec![CONNECT_TIMEOUT.to_string()]
 }
+
+/// A host that is down is given up on in seconds, not after the system's
+/// TCP timeout: a remote agent's pane retries its connection, and each
+/// retry makes sure of the app's forward first.
+const CONNECT_TIMEOUT: &str = "ConnectTimeout=15";
 
 /// Splits a host spec into ssh args (`"-p 2222 host"` → `["-p","2222","host"]`).
 fn host_args(host: &str) -> Vec<String> {
@@ -364,6 +370,19 @@ pub fn attach_line(mira: &str, pane: &str) -> String {
     format!("{} attach {}", quote(mira), quote(pane))
 }
 
+/// The remote's `mira` in a line from [`attach_line`].
+pub fn mira_of(attach_line: &str) -> Option<String> {
+    let (mira, _) = attach_line.strip_prefix('\'')?.split_once("' attach ")?;
+    Some(mira.replace(r"'\''", "'"))
+}
+
+/// Ends `pane`'s agent on `host`: its holder there, through the remote's
+/// `mira`, which waits for it to go.
+#[cfg(not(windows))]
+pub fn end_held(host: &str, mira: &str, pane: &str) -> Result<(), String> {
+    remote_shell(host, &format!("{} __hold-end --pane {}\n", quote(mira), quote(pane))).map(|_| ())
+}
+
 /// Writes `bytes` to `path` on `host`, exactly, owner-only (0600: prompts
 /// and settings are the person's), making its directory if needed.
 #[cfg(not(windows))]
@@ -624,6 +643,15 @@ mod tests {
             "TERM=xterm-256color COLORTERM=truecolor '/home/it'\\''s/.mirador/bin/mira-1' __hold-start --pane 'p1' --command 'sh /home/me/.mirador/run/p1.sh'\n"
         );
         assert_eq!(attach_line("/home/me/.mirador/bin/mira-1", "p1"), "'/home/me/.mirador/bin/mira-1' attach 'p1'");
+    }
+
+    /// The `mira` a remote pane attaches with is the one that ends it.
+    #[test]
+    fn the_mira_comes_back_out_of_an_attach_line() {
+        for mira in ["/home/me/.mirador/bin/mira-1", "/home/it's/mira"] {
+            assert_eq!(mira_of(&attach_line(mira, "p1")).as_deref(), Some(mira));
+        }
+        assert_eq!(mira_of("sh /home/me/run.sh"), None);
     }
 
     #[test]
