@@ -240,6 +240,21 @@ enum Command {
         #[arg(long, requires = "ssh")]
         ssh_run: Option<String>,
     },
+    /// Start a holder for a pane, detached, and return once it answers:
+    /// what Mirador runs on a remote, so an agent there outlives the ssh
+    /// connection that started it.
+    #[command(name = "__hold-start", hide = true)]
+    HoldStart {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Attach this terminal to a pane's held session on this computer;
+    /// closing the terminal leaves the session running.
+    Attach { pane: String },
 }
 
 #[derive(Subcommand)]
@@ -1105,6 +1120,8 @@ fn run(cli: Cli) -> Result<(), String> {
             ssh,
             ssh_run,
         } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_run),
+        Command::HoldStart { pane, command, cwd } => return hold_start(&pane, &command, cwd.as_deref()),
+        Command::Attach { pane } => return attach(&pane),
     };
 
     let response = send_request(req)?;
@@ -2118,6 +2135,178 @@ fn close_inherited_fds() {
             libc::close(fd);
         }
     }
+}
+
+#[cfg(unix)]
+fn hold_start(pane: &str, command: &str, cwd: Option<&str>) -> Result<(), String> {
+    use cmux_core::hold::{self, server::Program};
+    let mira = std::env::current_exe().map_err(|e| e.to_string())?;
+    hold::launch(
+        &mira,
+        pane,
+        &hold::socket_path(pane),
+        cwd,
+        80,
+        24,
+        &Program::Command(command.into()),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(not(unix))]
+fn hold_start(_pane: &str, _command: &str, _cwd: Option<&str>) -> Result<(), String> {
+    Err("__hold-start is not available on Windows".into())
+}
+
+/// Set by SIGWINCH; the input loop sends the new size.
+#[cfg(unix)]
+static RESIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set before `attach` detaches, so the holder hanging up after is not
+/// taken for the session being lost.
+#[cfg(unix)]
+static DETACHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn on_winch(_: libc::c_int) {
+    RESIZED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The terminal's settings before raw mode, put back on every way out.
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+struct Cooked(libc::termios);
+
+#[cfg(unix)]
+impl Cooked {
+    fn restore(&self) {
+        unsafe {
+            libc::tcsetattr(0, libc::TCSANOW, &self.0);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn terminal_size() -> (u16, u16) {
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    if unsafe { libc::ioctl(0, libc::TIOCGWINSZ, &mut ws) } == 0 && ws.ws_col > 0 && ws.ws_row > 0 {
+        (ws.ws_col, ws.ws_row)
+    } else {
+        (80, 24)
+    }
+}
+
+#[cfg(unix)]
+fn hostname() -> String {
+    let mut buf = [0u8; 256];
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return "this computer".into();
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..end]).into_owned()
+}
+
+#[cfg(unix)]
+fn attach(pane: &str) -> Result<(), String> {
+    use cmux_core::hold::{self, client, wire::{read_frame, write_frame, Frame}};
+    use std::io::Write;
+
+    if unsafe { libc::isatty(0) } != 1 {
+        return Err("attach needs a terminal".into());
+    }
+    let (cols, rows) = terminal_size();
+    let Ok(attached) = client::attach(&hold::socket_path(pane), cols, rows) else {
+        return Err(format!(
+            "no session {pane} on {}: it has ended, or never started here",
+            hostname()
+        ));
+    };
+
+    let mut cooked: libc::termios = unsafe { std::mem::zeroed() };
+    if unsafe { libc::tcgetattr(0, &mut cooked) } != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    let cooked = Cooked(cooked);
+    let mut raw = cooked.0;
+    unsafe {
+        libc::cfmakeraw(&mut raw);
+        libc::tcsetattr(0, libc::TCSANOW, &raw);
+        // No SA_RESTART: a resize wakes the poll below at once.
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = on_winch as *const () as libc::sighandler_t;
+        libc::sigaction(libc::SIGWINCH, &sa, std::ptr::null_mut());
+    }
+
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(&attached.replay);
+    let _ = stdout.flush();
+    let mut frames = attached.stream.try_clone().map_err(|e| {
+        cooked.restore();
+        e.to_string()
+    })?;
+    let gone = format!("\r\nmira: session {pane} was taken by another attach, or its holder went away\r\n");
+    std::thread::spawn(move || {
+        let mut stdout = std::io::stdout();
+        loop {
+            match read_frame(&mut frames) {
+                Ok(Some(Frame::Output(bytes))) => {
+                    let _ = stdout.write_all(&bytes);
+                    let _ = stdout.flush();
+                }
+                Ok(Some(Frame::Exited(code))) => {
+                    cooked.restore();
+                    std::process::exit(code.unwrap_or(1));
+                }
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => {
+                    if DETACHING.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
+                    cooked.restore();
+                    let _ = stdout.write_all(gone.as_bytes());
+                    std::process::exit(1);
+                }
+            }
+        }
+    });
+
+    let mut stream = attached.stream;
+    let mut buf = [0u8; 4096];
+    loop {
+        let mut fds = libc::pollfd {
+            fd: 0,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // A timeout as well, for a resize that lands just before the poll.
+        let ready = unsafe { libc::poll(&mut fds, 1, 500) };
+        if RESIZED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let (cols, rows) = terminal_size();
+            let _ = write_frame(&mut stream, &Frame::Resize { cols, rows });
+        }
+        if ready <= 0 {
+            continue;
+        }
+        let n = unsafe { libc::read(0, buf.as_mut_ptr().cast(), buf.len()) };
+        if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        if n <= 0 {
+            break;
+        }
+        if write_frame(&mut stream, &Frame::Input(buf[..n as usize].to_vec())).is_err() {
+            break;
+        }
+    }
+    DETACHING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = write_frame(&mut stream, &Frame::Detach);
+    cooked.restore();
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn attach(_pane: &str) -> Result<(), String> {
+    Err("attach is not available on Windows".into())
 }
 
 /// The Claude Code daemon job this process runs under, if any. A session

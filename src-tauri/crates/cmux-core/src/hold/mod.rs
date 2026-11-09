@@ -179,7 +179,7 @@ pub fn end_all(patience: std::time::Duration) -> Vec<String> {
 /// Each connection stays open until its holder reports the exit: a holder
 /// whose child dies with nobody attached waits a day for someone to
 /// collect it, so hanging up straight after `Kill` would leave it there.
-fn end_all_in(location: &Path, patience: std::time::Duration) -> Vec<String> {
+pub fn end_all_in(location: &Path, patience: std::time::Duration) -> Vec<String> {
     use std::time::Instant;
     let deadline = Instant::now() + patience;
     let panes = conn::live_panes(location);
