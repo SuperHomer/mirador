@@ -152,22 +152,93 @@ pub fn keystrokes(message: &str, from: Option<&str>) -> Result<(Vec<u8>, Vec<u8>
 /// comes on its own read and submits rather than joining the text.
 ///
 /// Codex needs longer. Where it gets no bracketed paste (Windows' console
-/// input gives it none), plain characters arriving 8 ms apart or less
+/// input gives it none), plain characters handled 8 ms apart or less
 /// (`PASTE_BURST_CHAR_INTERVAL`) are a paste burst, and an Enter during
 /// one, or within 120 ms of its last character
 /// (`PASTE_ENTER_SUPPRESS_WINDOW`), is a newline in the input box. On
 /// Windows a burst ends only after 60 ms with nothing typed
 /// (`PASTE_BURST_ACTIVE_IDLE_TIMEOUT`), all in codex-rs
-/// `tui/src/bottom_pane/paste_burst.rs`. That is 180 ms after the text at
-/// the least; ConPTY's own delay in delivering it comes on top, so 400 ms
-/// leaves it more than the whole window again. The same holds for `/new`,
-/// four plain characters in one write.
+/// `tui/src/bottom_pane/paste_burst.rs`. Those times are when Codex
+/// handles each key, not when it arrived, so for a long message the gap
+/// must count from the burst's flush, not from the write: the app waits
+/// for the flush on Codex's screen first, and 400 ms from there leaves
+/// more than the whole 180 ms window again. `/new`, four plain characters
+/// in one write, is short enough for 400 ms from the write.
 pub fn enter_delay(harness: Option<cmux_protocol::Harness>) -> std::time::Duration {
     use std::time::Duration;
     match harness {
         Some(cmux_protocol::Harness::Codex) => Duration::from_millis(400),
         _ => Duration::from_millis(120),
     }
+}
+
+/// How long the app gives Codex to show a paste of `chars` characters
+/// before its Enter goes anyway ([`PasteWatch`] says why it waits at all).
+/// Measured on Windows with Codex 0.167.0, a paste shows about 0.5 ms per
+/// character after the write (5075 characters took some 2.5 s); 2 ms is
+/// four times that, for slower machines, on top of 5 s for the rest.
+pub fn paste_wait(chars: usize) -> std::time::Duration {
+    std::time::Duration::from_secs(5) + std::time::Duration::from_millis(2) * chars as u32
+}
+
+/// Whether a paste has landed in an agent's input box, by its screen: the
+/// screen read before the paste, then each read after it.
+///
+/// Codex on Windows gets no bracketed paste, so each character is a key
+/// event, and its paste-burst guard times them by when it handles them,
+/// not when they arrived. A long message takes it longer than any fixed
+/// gap to work through, and an Enter queued behind the text lands inside
+/// the burst and becomes a newline: the message sits unsent. Codex redraws
+/// its input box once the burst flushes — the text, or `[Pasted Content N
+/// chars]` — so an input box that changed and then held still is that
+/// flush, and [`enter_delay`] counts from there.
+///
+/// Only the input box is compared, from its line to the end of the screen.
+/// A working Codex redraws a status line above it every second (a timer, a
+/// spinner), and two reads of the whole screen could match each other, and
+/// differ from the one before, while the burst is still being worked
+/// through. A screen with no input box line is compared whole.
+#[derive(Debug, Clone)]
+pub struct PasteWatch {
+    before: String,
+    last: Option<String>,
+}
+
+impl PasteWatch {
+    pub fn new(before: String) -> Self {
+        PasteWatch { before: input_box(&before).to_string(), last: None }
+    }
+
+    /// One read of the screen: true once its input box differs from the one
+    /// before the paste and is the same as on the read before this one.
+    pub fn landed(&mut self, screen: &str) -> bool {
+        let shown = input_box(screen);
+        let still = self.last.as_deref() == Some(shown);
+        self.last = Some(shown.to_string());
+        still && shown != self.before
+    }
+}
+
+/// `screen` from its last selection line on (see [`showing`]), or all of
+/// it when it has none.
+fn input_box(screen: &str) -> &str {
+    selection_line(screen).map_or(screen, |at| &screen[at..])
+}
+
+/// Where `screen`'s last selection line starts: a glyph (Claude Code's
+/// `❯`, Codex's `›`, or the ASCII `>` some of Codex's menus draw) alone or
+/// before a space.
+fn selection_line(screen: &str) -> Option<usize> {
+    let mut found = None;
+    let mut at = 0;
+    for line in screen.split_inclusive('\n') {
+        let mut chars = line.trim().chars();
+        if matches!(chars.next(), Some('❯' | '›' | '>')) && chars.next().is_none_or(char::is_whitespace) {
+            found = Some(at);
+        }
+        at += line.len();
+    }
+    found
 }
 
 /// The line that starts `harness` on a new conversation, typed as plain
@@ -201,21 +272,18 @@ pub enum Showing<'a> {
     Neither,
 }
 
-/// What `screen` shows, judged by its last selection line: a glyph
-/// (Claude Code's `❯`, Codex's `›`, or the ASCII `>` some of Codex's
-/// menus draw) alone or before a space. A menu row has a number, a dot
-/// and a space after it (`❯ 1. Yes`); any other is the input box.
+/// What `screen` shows, judged by its last selection line
+/// ([`selection_line`]). A menu row has a number, a dot and a space after
+/// the glyph (`❯ 1. Yes`); any other is the input box.
 pub fn showing(screen: &str) -> Showing<'_> {
     // The last such line, not any: while the input box is up its line
     // (`❯ `, `› Ask Codex…`) is the last, below past messages echoed as
     // `› 1. do X`; a dialog takes its place, and then its cursor is the
     // last.
-    let Some(line) = screen.lines().map(str::trim).rev().find(|l| {
-        let mut chars = l.chars();
-        matches!(chars.next(), Some('❯' | '›' | '>')) && chars.next().is_none_or(char::is_whitespace)
-    }) else {
+    let Some(at) = selection_line(screen) else {
         return Showing::Neither;
     };
+    let line = screen[at..].lines().next().unwrap_or_default().trim();
     let mut rest = line.chars();
     rest.next();
     let rest = rest.as_str().trim_start();
@@ -353,6 +421,59 @@ mod tests {
         for other in [Some(Harness::Claude), Some(Harness::Aider), None] {
             assert_eq!(enter_delay(other), Duration::from_millis(120));
         }
+    }
+
+    #[test]
+    fn a_screen_that_never_changes_is_no_paste() {
+        let mut watch = PasteWatch::new("› ".into());
+        assert!((0..5).all(|_| !watch.landed("› ")));
+    }
+
+    #[test]
+    fn a_changed_screen_lands_on_its_second_read() {
+        let mut watch = PasteWatch::new("› ".into());
+        assert!(!watch.landed("› [Pasted Content 1059 chars]"), "not on its first");
+        assert!(watch.landed("› [Pasted Content 1059 chars]"));
+    }
+
+    #[test]
+    fn a_screen_still_changing_is_waited_for() {
+        let mut watch = PasteWatch::new("› ".into());
+        for screen in ["› h", "› he", "› hel", "› hell", "› hello"] {
+            assert!(!watch.landed(screen), "{screen}");
+        }
+    }
+
+    #[test]
+    fn a_screen_back_to_where_it_was_has_not_landed() {
+        let mut watch = PasteWatch::new("› ".into());
+        assert!(!watch.landed("› hello"));
+        assert!(!watch.landed("› "));
+        assert!(!watch.landed("› "), "still and unchanged is no paste");
+    }
+
+    #[test]
+    fn a_status_line_ticking_above_the_input_box_is_no_paste() {
+        let screen = |secs: u32| format!("• Working ({secs}s • esc to interrupt)\n\n› \n\n  100% context left\n");
+        let mut watch = PasteWatch::new(screen(2));
+        assert!((3..8).all(|secs| !watch.landed(&screen(secs))));
+    }
+
+    #[test]
+    fn a_paste_lands_under_a_ticking_status_line() {
+        let screen = |secs: u32, input: &str| format!("• Working ({secs}s • esc to interrupt)\n\n› {input}\n");
+        let mut watch = PasteWatch::new(screen(2, ""));
+        assert!(!watch.landed(&screen(3, "")));
+        assert!(!watch.landed(&screen(4, "")));
+        assert!(!watch.landed(&screen(5, "[Pasted Content 1700 chars]")), "not on its first");
+        assert!(watch.landed(&screen(6, "[Pasted Content 1700 chars]")));
+    }
+
+    #[test]
+    fn a_paste_waits_longer_the_longer_it_is() {
+        use std::time::Duration;
+        assert_eq!(paste_wait(0), Duration::from_secs(5));
+        assert_eq!(paste_wait(5000), Duration::from_secs(15));
     }
 
     #[test]
