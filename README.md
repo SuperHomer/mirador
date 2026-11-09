@@ -246,10 +246,14 @@ Each release also carries the `mira` CLI alone for Linux,
 ([build-linux-cli.yml](.github/workflows/build-linux-cli.yml)), static
 against musl so that they run on any distribution, and for Windows,
 `mira-windows-x86_64.exe`, the `mira.exe` the installers carry. Mirador
-has no Linux app; these are the first piece of running agents on a remote
-Linux or Windows computer over SSH, which a later release wires up — on
-their own they reach no app. They are named by OS and architecture,
-x86_64 or aarch64 as `uname -m` spells them, and are not updater payloads.
+has no Linux app; these are the `mira` a remote computer runs its agents
+with. The first time a remote needs one, it fetches the one for its
+system from the release of the app's own version and keeps it as
+`~/.mirador/bin/mira-<version>` (*Teams on a remote computer*, below, and
+[`docs/AGENTS.md`](docs/AGENTS.md) section 8). Only the Linux ones are
+fetched for now: Windows remotes are not done yet. They are named by OS
+and architecture, x86_64 or aarch64 as `uname -m` spells them, and are
+not updater payloads.
 
 ## Development
 
@@ -779,8 +783,10 @@ alias), then keeps it in mirador.json:
 ```
 
 A name is letters, digits, `-`, `_` and `.`, and no two computers share
-one. Teams do not start on a computer yet; the directory is for that, in
-a later release.
+one. An agent or a team already runs on a computer with `mira agent new`
+or `mira team start`, given its `--host` and `--dir` (*Teams on a remote
+computer*, below). What is not done yet is picking a saved computer by
+its name for them, from the CLI or the app.
 
 ### Teams on a remote computer
 
