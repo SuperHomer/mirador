@@ -739,7 +739,9 @@ pub fn set_view(app: AppHandle, state: State<'_, AppState>, view: View) {
 
 /// Saved with the session but never broadcast: the board moving it shows
 /// it already, and a snapshot per frame of a pan would re-render every
-/// pane.
+/// pane. `seen` comes with the board's own save: how many cameras set
+/// from outside it had been told of (`Workspace::set_camera`). None is
+/// one set from outside, through the socket.
 #[tauri::command]
 pub fn set_camera(
     state: State<'_, AppState>,
@@ -748,19 +750,18 @@ pub fn set_camera(
     zoom: f64,
     width: Option<f64>,
     height: Option<f64>,
+    seen: Option<u64>,
 ) -> Result<(), String> {
     let camera = cmux_core::board::camera(x, y, zoom)?;
-    let mut ws = state.workspace.lock().unwrap();
-    ws.camera = camera;
-    if let (Some(w), Some(h)) = (width, height) {
-        if w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 {
-            ws.viewport = Some((w, h));
-        }
+    let viewport = match (width, height) {
+        (Some(w), Some(h)) if w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 => Some((w, h)),
+        _ => None,
+    };
+    if state.workspace.lock().unwrap().set_camera(camera, viewport, seen) {
+        state
+            .session_dirty
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    drop(ws);
-    state
-        .session_dirty
-        .store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 

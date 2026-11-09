@@ -668,6 +668,8 @@ export interface WorkspaceSnapshot {
   agents: AgentInfo[];
   view: View;
   camera: Camera;
+  /** Cameras set from outside since launch: what the board's saves say they have seen. */
+  cameraSets: number;
 }
 
 export interface NotificationDto {
@@ -811,7 +813,8 @@ export const setView = (view: View) => invoke<void>("set_view", { view });
 export const setCamera = (
   camera: Camera,
   viewport: { width: number; height: number },
-) => invoke<void>("set_camera", { ...camera, ...viewport });
+  seen: number,
+) => invoke<void>("set_camera", { ...camera, ...viewport, seen });
 /** The camera showing the whole board in a viewport of this size. */
 export const boardFit = (width: number, height: number) =>
   invoke<Camera>("board_fit", { width, height });
