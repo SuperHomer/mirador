@@ -367,8 +367,39 @@ fn a_team_runs_on_the_remote() {
         sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
     });
 
-    let err = sb.request(Request::TeamRestart { members: vec![], pane_id: Some(planner.clone()) }).expect_err("not on a remote yet");
-    assert!(err.contains("not done yet"), "{err}");
+    // A member whose agent ends there, its pane's ssh with it, reads as
+    // exited; restarted, it gets a fresh pane, started there again.
+    let pid = sb.events("start", &reviewer)[0]["pid"].as_u64().expect("the agent's pid");
+    assert!(std::process::Command::new("kill").arg(pid.to_string()).status().unwrap().success());
+    let state = |name: &str| sb.member(name).and_then(|m| m["state"].as_str().map(String::from));
+    sb.wait_for("the reviewer to read as exited", LONG, || (state("reviewer").as_deref() == Some("exited")).then_some(()));
+    let outcome = |done: &serde_json::Value, name: &str| -> Option<(String, String)> {
+        let m = done["members"].as_array()?.iter().find(|m| m["name"] == name)?;
+        Some((m["outcome"].as_str()?.to_string(), m["pane"].as_str()?.to_string()))
+    };
+    let done = sb.call(Request::TeamRestart { members: vec!["reviewer".into()], pane_id: Some(planner.clone()) });
+    let (what, reopened) = outcome(&done, "reviewer").unwrap_or_else(|| sb.fail(&format!("no reviewer: {done}")));
+    assert_eq!(what, "reopened", "{done}");
+    assert_ne!(reopened, reviewer, "a fresh pane");
+    assert_eq!(pane_of(&sb, "reviewer"), reopened, "the seat follows it");
+    assert!(!sb.snapshot()["tabs"].to_string().contains(&reviewer), "the old pane is closed");
+    let start = sb.wait_for("the restarted reviewer's start", LONG, || sb.events("start", &reopened).into_iter().next());
+    assert_eq!(start["cwd"], dir.as_str(), "{start}");
+    sb.call(Request::AgentSend {
+        to: "reviewer".into(),
+        message: "welcome back".into(),
+        pane_id: Some(planner.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message to the restarted reviewer", LONG, || {
+        sb.events("message", &reopened).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("welcome back")))
+    });
+    let done = sb.call(Request::TeamRestart { members: vec![], pane_id: Some(planner.clone()) });
+    assert_eq!(outcome(&done, "planner"), Some(("running".into(), planner.clone())), "{done}");
+    assert_eq!(outcome(&done, "reviewer"), Some(("running".into(), reopened.clone())), "{done}");
+    let reviewer = reopened;
 
     // A member added to the team starts on the remote too, as its
     // teammates did: in the team's directory, with Mirador's hooks, told

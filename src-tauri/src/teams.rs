@@ -167,10 +167,13 @@ pub fn team_list(state: &AppState) -> Vec<TeamInfo> {
                     .iter()
                     .map(|seat| {
                         let m = meta.get(&seat.pane);
-                        let state = cmux_core::teams::seat_state(
-                            in_tab.contains(&seat.pane),
-                            m.is_some_and(|m| m.is_agent()),
-                        );
+                        // On a remote, its agent is never seen here, only
+                        // the pane's ssh: it runs while that does.
+                        let running = match run.remote {
+                            Some(_) => state.pty.is_running(&seat.pane),
+                            None => m.is_some_and(|m| m.is_agent()),
+                        };
+                        let state = cmux_core::teams::seat_state(in_tab.contains(&seat.pane), running);
                         TeamMemberInfo {
                             name: seat.name.clone(),
                             role: seat.role.clone(),
@@ -330,6 +333,16 @@ pub struct Restarted {
 /// when empty) whose agent exited — typed into its shell, when that shell
 /// is idle — or whose pane was closed — in a new pane beside a teammate.
 /// A running member is left alone.
+///
+/// On a team running on a remote, a member runs while its pane's ssh
+/// does: its agent is never seen here. One that exited, or whose pane was
+/// closed, gets a fresh pane, started on the remote again ("reopened"):
+/// in its old pane's place, which then closes, else beside a teammate
+/// still in the tab. Not rerun in its old pane, because a remote pane runs
+/// again only on a keypress and nothing of ours types into it. Every
+/// member's files are sent before any pane opens, so a restart that cannot
+/// start opens nothing. A member whose connection dropped looks exited
+/// too, and gets a fresh agent rather than the conversation it had.
 #[tauri::command(async)]
 pub fn team_restart(
     app: AppHandle,
@@ -341,13 +354,6 @@ pub fn team_restart(
     if let Some(unknown) = members.iter().find(|m| !run.members.iter().any(|s| &&s.name == m)) {
         return Err(format!("no member `{unknown}` in team `{}`", run.name));
     }
-    // A member on a remote reads as running whatever its agent does (no
-    // process there is seen), and has no shell here to type into: its pane
-    // runs again only on a keypress. Asked of the whole team, since a
-    // closed member's pane no longer says where it ran.
-    if run.members.iter().any(|s| state.meta.lock().unwrap().get(&s.pane).is_some_and(|m| m.remote_host.is_some())) {
-        return Err(format!("team `{}` runs on a remote: restarting its members is not done yet", run.name));
-    }
     let wanted: Vec<&TeamSeat> = run
         .members
         .iter()
@@ -355,6 +361,9 @@ pub fn team_restart(
         .collect();
     let cwd = cwd_of(&state, pane_id.as_deref());
     let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
+    if let Some(remote) = &run.remote {
+        return restart_on_remote(&app, &state, &tab, &run, remote, wanted, cwd.as_deref(), &catalog);
+    }
     #[cfg(unix)]
     let procs = cmux_core::agents::process_table();
     let shell_pids: std::collections::HashMap<String, u32> = state.pty.pids().into_iter().collect();
@@ -441,6 +450,79 @@ pub fn team_restart(
         }
     }
     emit_workspace(&app);
+    Ok(out)
+}
+
+/// [`team_restart`] for a team running on a remote.
+#[allow(clippy::too_many_arguments)]
+fn restart_on_remote(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    tab: &str,
+    run: &TeamRun,
+    remote: &TeamRemote,
+    wanted: Vec<&TeamSeat>,
+    cwd: Option<&str>,
+    catalog: &cmux_protocol::RoleCatalog,
+) -> Result<Vec<Restarted>, String> {
+    let report = |seat: &TeamSeat, pane: &str, outcome: &str| Restarted {
+        name: seat.name.clone(),
+        pane: pane.to_string(),
+        outcome: outcome.to_string(),
+    };
+    let mut out = Vec::new();
+    let mut gone = Vec::new();
+    for seat in wanted {
+        if state.pty.is_running(&seat.pane) {
+            out.push(report(seat, &seat.pane, "running"));
+        } else {
+            gone.push(seat);
+        }
+    }
+    if gone.is_empty() {
+        return Ok(out);
+    }
+
+    let there = reach_remote(&remote.host)?;
+    let panes = cmux_core::state::Workspace::fresh_pane_ids(gone.len());
+    let mut sent = Vec::new();
+    for (seat, pane) in gone.iter().zip(&panes) {
+        let member = |e: String| format!("member `{}`: {e}", seat.name);
+        let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
+        let roster = roster_now(run, catalog, &me, None, &there.mira);
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(catalog), cwd, &roster, Some(&seat.name), None)
+            .map_err(member)?;
+        sent.push(send_remote_launch(&there, pane, &remote.dir, &launch, None).map_err(member)?);
+    }
+
+    let mut killed = Vec::new();
+    for ((seat, pane), sent) in gone.into_iter().zip(panes).zip(sent) {
+        {
+            let mut ws = state.workspace.lock().unwrap();
+            let Some(t) = ws.tabs.iter().find(|t| t.id == tab) else {
+                return Err("the team's tab has closed".into());
+            };
+            let teammates = t.team.iter().flat_map(|r| &r.members).map(|s| s.pane.clone());
+            let beside = std::iter::once(seat.pane.clone())
+                .chain(teammates)
+                .find(|p| cmux_core::layout::contains(&t.root, p))
+                .unwrap_or_else(|| t.focused.clone());
+            ws.split_pane_as(&beside, SplitDir::Row, pane.clone()).ok_or("could not split the team's tab")?;
+            if let Some(s) = ws
+                .tab_mut(tab)
+                .and_then(|t| t.team.as_mut())
+                .and_then(|r| r.members.iter_mut().find(|s| s.name == seat.name))
+            {
+                s.pane = pane.clone();
+            }
+            // An exited member's old pane, its ssh gone, makes way.
+            killed.extend(ws.close_pane(&seat.pane));
+        }
+        mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), &there, sent);
+        out.push(report(seat, &pane, "reopened"));
+    }
+    crate::commands::kill_panes(app, state, &killed);
+    emit_workspace(app);
     Ok(out)
 }
 
