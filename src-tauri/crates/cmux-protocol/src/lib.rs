@@ -1360,6 +1360,17 @@ fn one() -> u32 {
 pub struct TeamRun {
     pub name: String,
     pub members: Vec<TeamSeat>,
+    /// Where it runs, for a team started on a remote computer.
+    #[serde(default)]
+    pub remote: Option<TeamRemote>,
+}
+
+/// The ssh host a team runs on, and its directory there.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamRemote {
+    pub host: String,
+    pub dir: String,
 }
 
 /// A member of a running team: its name, its role, and its pane — which
@@ -1420,6 +1431,8 @@ pub struct TeamInfo {
     pub tab_id: String,
     pub name: String,
     pub members: Vec<TeamMemberInfo>,
+    /// The ssh host it runs on, for a team on a remote computer.
+    pub remote_host: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

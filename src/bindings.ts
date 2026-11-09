@@ -100,6 +100,8 @@ export interface CardRect extends BoardRect {
 export interface TeamRun {
   name: string;
   members: { name: string; role: string; pane: string; lead: boolean }[];
+  /** Where it runs, for a team started on a remote computer. */
+  remote: { host: string; dir: string } | null;
 }
 
 /** A team definition (`cmux_protocol::AgentTeam`). */

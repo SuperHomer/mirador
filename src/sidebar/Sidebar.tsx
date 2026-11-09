@@ -587,6 +587,7 @@ function TabRow({
                 title={`Team ${tab.team.name}: ${tab.team.members.map((m) => m.name).join(", ")}`}
               >
                 team · {tab.team.name}
+                {tab.team.remote && ` · on ${tab.team.remote.host}`}
                 {tab.team.members.length > 4 && ` · ${tab.team.members.length}`}
               </span>
             )}

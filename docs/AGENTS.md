@@ -587,12 +587,11 @@ tab, `agent new --role` is `team add`, and so is a role opened from the
 app there (+ New, a pane's menu, the palette). A member added either way
 belongs to the running team, kept with its tab, never to the team's
 file: the next `team start` does not have it.
-`team restart` and `team add` refuse a team running on a remote, for
-now: no process there is seen, so its members always read as running,
-and each pane runs ssh, not a shell to type into; an added member would
-start here (section 8). And `agent new --role --host` in a team's tab is
-refused, for now: it would be a member on a remote, which `team add`
-cannot make yet, or an agent there outside the team.
+On a team running on a remote, `team add` and `team restart` start the
+member there, and a restart reopens it in a fresh pane rather than typing
+into its old one (section 8). `agent new --role --host` in a team's tab
+is refused, for now, whatever the host, the team's own included: `team
+add` there is the way to add a member where the team runs.
 
 A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
@@ -1055,12 +1054,27 @@ and each member starts once it has, so its first status finds its pane.
 A team that cannot start opens nothing here, and ends there any member
 it had started.
 
+The team keeps its host and directory with its tab, and `team list`
+names the host. `team add` starts the new member there, in that
+directory, as `team start` started the others, and refuses a role the
+remote cannot run before anything opens. `team restart` counts a member
+there as running while its pane's ssh does, since its agent is never
+seen from here. It reopens one that exited or was closed: a fresh pane
+in the old one's place (else beside a teammate), started there again,
+with the old pane closed. Every member's files are sent before any pane
+opens. It is not rerun in its old pane: a remote pane runs again only
+on a keypress. So a member whose connection dropped, or whose pane has
+had no connection since a relaunch (idle until a keypress), reads as
+exited too, and a restart starts it afresh, not on the conversation it
+had.
+
 Not done yet: Codex there; a role that keeps only some skills or
 plugins (listing them runs Claude Code here, which says nothing of the
-remote's); `team restart` and `team add` on a team running there; a
-Windows remote, or Mirador on Windows driving one; and picking a
-computer saved in `computers` for an agent or a team: `--host` and
-`--dir` name it.
+remote's); resuming a save of a member there (`team save` and `agent
+save` write one, but `team resume` and `agent resume` start it on this
+computer, where its conversation is not); a Windows remote, or Mirador
+on Windows driving one; and picking a computer saved in `computers` for
+an agent or a team: `--host` and `--dir` name it.
 
 ### How a remote reaches this app
 

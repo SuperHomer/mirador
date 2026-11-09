@@ -794,7 +794,13 @@ mira team start squad --host prod --dir /srv/app "add OAuth"                    
 ```
 
 `--host` is an alias from `~/.ssh/config` or a destination; `--dir` is the
-directory there the agents work in. What the remote needs:
+directory there the agents work in. A team started there stays there:
+`mira team list` names its host, and `team add` starts the new member on
+that computer, in that directory. `team restart` starts a member whose
+agent ended there again, in a fresh pane. A member whose connection
+dropped, or whose pane has sat idle since Mirador was relaunched, reads as
+ended too, and is started afresh rather than on the conversation it had.
+What the remote needs:
 
 - **Linux on x86_64 or aarch64**, for now.
 - **ssh by key or agent**: nothing answers a password prompt.
@@ -834,11 +840,12 @@ status line is not installed there — that is yours. Nothing of this
 machine's logins is copied.
 
 Not done yet: Codex on a remote; a role that keeps only some skills or
-plugins; `team restart` and `team add` on a team running there; Windows
-remotes, or Mirador on Windows driving one; and a computer saved from the
-palette (*Computers*, above) cannot yet be picked for a team: `--host` and
-`--dir` name it. [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has
-how it works.
+plugins; resuming a save of a member there (`team save` and `agent save`
+write one, but a resume starts it on this computer, where its
+conversation is not); Windows remotes, or Mirador on Windows driving one;
+and a computer saved from the palette (*Computers*, above) cannot yet be
+picked for a team: `--host` and `--dir` name it.
+[`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has how it works.
 
 ## Terminals that keep running when you quit
 
