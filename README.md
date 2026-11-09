@@ -87,7 +87,8 @@ downloads, the feature tour and the keybinding reference.
   Claude Code on an API key where the model's price is known. Claude's
   plan limits come from Claude Code's status line once `mira hooks setup`
   wraps it (your own line still shows), or read "limit reached" after a
-  refused request. The Usage pane (`mira usage --tab`, *App: Usage*) and
+  refused request. An account on a gateway or a custom Codex provider
+  says where it connects. The Usage pane (`mira usage --tab`, *App: Usage*) and
   `mira usage` show it in full. Read from local files, never the network
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
@@ -107,10 +108,11 @@ downloads, the feature tour and the keybinding reference.
 - **Claude Code integration**: lights up tabs when your agent needs you,
   enables per-pane session resume, adds a `/mira-diff` skill for reviewing
   the turn's work and a `mira` skill that teaches Claude the CLI, and
-  (macOS, Linux) wraps your status line to keep your plan's limits, your
-  own line still shown. Mirador offers to set it up on first launch when
-  it finds Claude Code (or: palette → *Set Up Claude Code Integration*,
-  or `mira install && mira hooks setup`)
+  wraps your status line to keep your plan's limits, your own line still
+  shown (on Windows through Git Bash, which Claude Code runs the status
+  line with). Mirador offers to set it up on first launch when it finds
+  Claude Code (or: palette → *Set Up Claude Code Integration*, or
+  `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself

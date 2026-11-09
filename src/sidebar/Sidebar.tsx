@@ -334,6 +334,7 @@ function UsageRow({
             <span>{LOGIN_LABEL[a.login]}</span>
             <span>{a.plan ?? ""}</span>
           </div>
+          {a.provider && <div className="usage-note">via {a.provider}</div>}
           {a.note && <div className="usage-note">{a.note}</div>}
           {a.limits.map((w) => (
             <div key={w.windowMinutes} className="usage-kv">
