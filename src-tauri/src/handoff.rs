@@ -204,7 +204,15 @@ pub fn send(
     let to_tab = state.workspace.lock().unwrap().tab_of_pane(&pane).map(|t| t.id.clone());
     let from = caller.as_deref().and_then(|c| sender_in(state, c, to_tab.as_deref()));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
+    let before = (harness == Some(cmux_protocol::Harness::Codex))
+        .then(|| crate::server::read_screen(app, &pane, None, std::time::Duration::from_secs(2)).ok())
+        .flatten();
     state.pty.write(&pane, &paste)?;
+    if let Some(before) = before {
+        // Characters, not bytes: Codex handles one key per character.
+        let chars = std::str::from_utf8(&paste).map_or(paste.len(), |s| s.chars().count());
+        wait_pasted(app, &pane, before, chars);
+    }
     // Enter on its own read: a TUI that gets it with the paste can take it
     // as part of the paste and leave the message unsent.
     std::thread::sleep(cmux_core::handoff::enter_delay(harness));
@@ -212,6 +220,30 @@ pub fn send(
     let from = from.unwrap_or_else(|| "you".into());
     crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card, title);
     Ok(pane)
+}
+
+/// Reads `pane`'s screen until the paste of `chars` characters written
+/// after `before` was read shows there (`cmux_core::handoff::PasteWatch`,
+/// which says why). A screen that cannot be read, or a Codex that never
+/// shows the paste, must not hang the send, so this returns anyway once
+/// the read fails or the budget runs out, and the Enter goes as it would
+/// have. The budget grows with the paste (`cmux_core::handoff::paste_wait`,
+/// beside the measurement it comes from).
+fn wait_pasted(app: &tauri::AppHandle, pane: &str, before: String, chars: usize) {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + cmux_core::handoff::paste_wait(chars);
+    let mut watch = cmux_core::handoff::PasteWatch::new(before);
+    loop {
+        std::thread::sleep(Duration::from_millis(150));
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        let Ok(screen) = crate::server::read_screen(app, pane, None, left) else { return };
+        if watch.landed(&screen) {
+            return;
+        }
+    }
 }
 
 /// Starts the agent in `pane` on a new conversation, by typing its
