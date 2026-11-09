@@ -369,10 +369,58 @@ fn a_team_runs_on_the_remote() {
 
     let err = sb.request(Request::TeamRestart { members: vec![], pane_id: Some(planner.clone()) }).expect_err("not on a remote yet");
     assert!(err.contains("not done yet"), "{err}");
+
+    // A member added to the team starts on the remote too, as its
+    // teammates did: in the team's directory, with Mirador's hooks, told
+    // its teammates call the remote's `mira`.
+    let added = sb.call(Request::TeamAdd {
+        role: "reviewer".into(),
+        name: None,
+        pane_id: Some(planner.clone()),
+        task: Some("check the axes".into()),
+        title: None,
+    })["paneId"]
+        .as_str()
+        .expect("the new member's pane")
+        .to_string();
+    let name = sb.wait_for("the new member to list", LONG, || {
+        let members = sb.teams().first()?["members"].as_array()?.clone();
+        members.iter().find(|m| m["pane"] == added.as_str()).and_then(|m| m["name"].as_str().map(String::from))
+    });
+    let start = sb.wait_for("the new member's start", LONG, || sb.events("start", &added).into_iter().next());
+    assert_eq!(start["cwd"], dir.as_str(), "{start}");
+    let args = sb.nth_start(&added, 1);
+    assert_eq!(args.last().map(String::as_str), Some("check the axes"), "{args:?}");
+    let base = run_base(&sb, &added);
+    assert_eq!(flag(&args, "--settings"), Some(format!("{base}.settings.json")), "{args:?}");
+    assert_hooks(&format!("{base}.settings.json"), &mira);
+    let prompt = std::fs::read_to_string(flag(&args, "--append-system-prompt-file").unwrap()).unwrap();
+    assert!(prompt.contains("You review.") && prompt.contains(mira.to_str().unwrap()), "{prompt}");
+    assert!(!prompt.contains("target/debug/mira"), "never this machine's mira: {prompt}");
+    sb.wait_for("the new member's status, from its hooks", LONG, || {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.iter().any(|a| a["paneId"] == added.as_str() && a["remoteHost"] == "box" && !a["status"].is_null()).then_some(())
+    });
+    sb.call(Request::AgentSend {
+        to: name.clone(),
+        message: "hello, new one".into(),
+        pane_id: Some(planner.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message to the new member", LONG, || {
+        sb.events("message", &added).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello, new one")))
+    });
+
+    // A Codex member is not done on a remote: refused, and no seat taken.
+    let seats = || sb.teams()[0]["members"].as_array().map_or(0, Vec::len);
+    let before = seats();
     let err = sb
-        .request(Request::TeamAdd { role: "reviewer".into(), name: None, pane_id: Some(planner), task: None, title: None })
-        .expect_err("not on a remote yet");
-    assert!(err.contains("adding a member there is not done yet"), "{err}");
+        .request(Request::TeamAdd { role: "coder".into(), name: None, pane_id: Some(planner), task: None, title: None })
+        .expect_err("Codex is not done on a remote");
+    assert!(err.contains("not done yet"), "{err}");
+    assert_eq!(seats(), before, "a refused member takes no seat");
     // A role on a remote asked for in a team's tab would be a member there,
     // or an agent outside the team: neither is done yet.
     let err = sb

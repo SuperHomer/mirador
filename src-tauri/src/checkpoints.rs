@@ -169,7 +169,7 @@ pub fn team_resume(app: &tauri::AppHandle, name: &str) -> Result<String, String>
     let mut launches = Vec::new();
     for (m, seat) in checkpoint.members.iter().zip(&run.members) {
         let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
-        let roster = crate::teams::roster_now(&run, &catalog, &me, None);
+        let roster = crate::teams::roster_now(&run, &catalog, &me, None, &crate::teams::mira_for_prompt());
         let cwd = m.cwd.as_deref().or(checkpoint.cwd.as_deref());
         launches.push((resume_launch(m, &catalog, cwd, &roster)?, cwd.map(str::to_string)));
     }

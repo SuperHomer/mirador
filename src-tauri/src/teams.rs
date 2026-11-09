@@ -207,6 +207,7 @@ pub(crate) fn roster_now(
     catalog: &cmux_protocol::RoleCatalog,
     seat: &cmux_core::teams::Seat,
     extra: Option<&cmux_core::teams::Seat>,
+    mira: &str,
 ) -> Vec<cmux_protocol::PromptLayer> {
     let mut seats: Vec<cmux_core::teams::Seat> = run
         .members
@@ -221,7 +222,7 @@ pub(crate) fn roster_now(
     let def = catalog.teams.iter().find(|t| t.name == run.name).cloned().unwrap_or_else(|| {
         cmux_protocol::AgentTeam { name: run.name.clone(), ..Default::default() }
     });
-    cmux_core::teams::seat_layers(catalog, &def, seat, &seats, &mira_for_prompt())
+    cmux_core::teams::seat_layers(catalog, &def, seat, &seats, mira)
 }
 
 /// Adds a `role` member to the team of `pane_id`'s tab, split from that
@@ -242,7 +243,9 @@ pub fn team_add(
 
 /// [`team_add`], its task logged as given by `from`: a person, from the
 /// app; whoever ran `mira team add`, from the socket. `title` is the
-/// task's card's, instead of one made from the task.
+/// task's card's, instead of one made from the task. A team running on a
+/// remote gets its new member there, in its directory, as its other
+/// members were started.
 #[allow(clippy::too_many_arguments)]
 pub fn team_add_from(
     app: AppHandle,
@@ -255,11 +258,6 @@ pub fn team_add_from(
     from: String,
 ) -> Result<String, String> {
     let (tab, run) = team_here(&state, pane_id.as_deref())?;
-    // It would start here, told its teammates call `mira` by their path
-    // on the remote.
-    if run.members.iter().any(|s| state.meta.lock().unwrap().get(&s.pane).is_some_and(|m| m.remote_host.is_some())) {
-        return Err(format!("team `{}` runs on a remote: adding a member there is not done yet", run.name));
-    }
     if let Some(n) = name.as_deref().filter(|n| !cmux_core::roles::is_name(n)) {
         return Err(format!("`{n}` cannot name a member"));
     }
@@ -272,7 +270,17 @@ pub fn team_add_from(
     let source = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
     let cwd = cwd_of(&state, Some(&source));
     let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
-    let roster = roster_now(&run, &catalog, &seat, Some(&seat));
+    // On a remote team's computer, as its members were started
+    // (`start_team_from`).
+    let there = match &run.remote {
+        Some(remote) => {
+            refuse_on_remote(&catalog, &role).map_err(|e| format!("team `{}`: {e}", run.name))?;
+            Some((reach_remote(&remote.host)?, remote.dir.clone()))
+        }
+        None => None,
+    };
+    let mira = there.as_ref().map_or_else(mira_for_prompt, |(r, _)| r.mira.clone());
+    let roster = roster_now(&run, &catalog, &seat, Some(&seat), &mira);
     let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task.as_deref())?;
 
     let pane = {
@@ -283,7 +291,22 @@ pub fn team_add_from(
         }
         pane
     };
-    mark_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), launch, cwd);
+    match &there {
+        Some((there, dir)) => match send_remote_launch(there, &pane, dir, &launch, task.as_deref()) {
+            Ok(sent) => mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), there, sent),
+            Err(e) => {
+                // Nobody has seen the pane yet: it goes as if never
+                // opened, and its seat with it.
+                let mut ws = state.workspace.lock().unwrap();
+                ws.close_pane(&pane);
+                if let Some(t) = ws.tab_mut(&tab).and_then(|t| t.team.as_mut()) {
+                    t.members.retain(|s| s.pane != pane);
+                }
+                return Err(e);
+            }
+        },
+        None => mark_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), launch, cwd),
+    }
     emit_workspace(&app);
     if let Some(task) = &task {
         crate::tasks::given(&app, cmux_protocol::TaskSource::AgentNew, from, &pane, task, None, title);
@@ -368,7 +391,7 @@ pub fn team_restart(
             }
         }
         let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
-        let roster = roster_now(&run, &catalog, &me, None);
+        let roster = roster_now(&run, &catalog, &me, None, &mira_for_prompt());
         let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), None)
             .map_err(|e| format!("member `{}`: {e}", seat.name))?;
 
