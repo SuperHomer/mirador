@@ -199,9 +199,8 @@ impl UsageCache {
         let (limits, as_of) =
             if on_plan { plan_limits(read_claude_limits(limits), &refused, now_ms) } else { (Vec::new(), None) };
         let no_limits = on_plan && limits.is_empty();
-        let limits_setup = no_limits
-            && cfg!(unix)
-            && !crate::claude_integration::status_line_installed(&claude_dir.join("settings.json"));
+        let limits_setup =
+            no_limits && !crate::claude_integration::status_line_installed(&claude_dir.join("settings.json"));
         let limits_note = no_limits.then(|| no_limits_note(limits_setup));
         AccountUsage {
             harness: Harness::Claude,
@@ -324,9 +323,7 @@ fn empty_if_reset(limits: &mut [LimitWindow], now_s: u64) {
 /// wrapper, or, once it is there, Claude Code's next reply. The app puts
 /// a button beside the first; the CLI has only the words.
 fn no_limits_note(needs_setup: bool) -> String {
-    if cfg!(windows) {
-        "Claude Code's plan limits are not read on Windows.".into()
-    } else if needs_setup {
+    if needs_setup {
         "Your plan's limits come from Claude Code's status line, which mira hooks setup wraps.".into()
     } else {
         "Limits appear after Claude Code's next reply.".into()
@@ -1168,7 +1165,6 @@ mod tests {
         assert_eq!(shown, [(300, 100.0, true), (10080, 71.0, false)]);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_plan_with_no_limits_says_how_to_get_them() {
         let none = plan_with("limits-note", None, &[]);
@@ -1181,8 +1177,9 @@ mod tests {
         write(&dir, "settings.json", r#"{"statusLine":{"type":"command","command":"~/bin/my-status"}}"#);
         assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot()).limits_setup);
         let dir = temp_dir("limits-note-ours");
-        let ours = format!(r#"{{"statusLine":{{"type":"command","command":"\"{}\" claude-statusline"}}}}"#, dir.join("mira").display());
-        write(&dir, "settings.json", &ours);
+        let ours = format!("\"{}\" claude-statusline", dir.join("mira").display());
+        let ours = serde_json::json!({ "statusLine": { "type": "command", "command": ours } });
+        write(&dir, "settings.json", &ours.to_string());
         let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
         assert_eq!(
             (usage.limits_note.as_deref(), usage.limits_setup),

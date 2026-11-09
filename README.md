@@ -107,10 +107,11 @@ downloads, the feature tour and the keybinding reference.
 - **Claude Code integration**: lights up tabs when your agent needs you,
   enables per-pane session resume, adds a `/mira-diff` skill for reviewing
   the turn's work and a `mira` skill that teaches Claude the CLI, and
-  (macOS, Linux) wraps your status line to keep your plan's limits, your
-  own line still shown. Mirador offers to set it up on first launch when
-  it finds Claude Code (or: palette → *Set Up Claude Code Integration*,
-  or `mira install && mira hooks setup`)
+  wraps your status line to keep your plan's limits, your own line still
+  shown (on Windows through Git Bash, which Claude Code runs the status
+  line with). Mirador offers to set it up on first launch when it finds
+  Claude Code (or: palette → *Set Up Claude Code Integration*, or
+  `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself

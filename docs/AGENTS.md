@@ -59,7 +59,7 @@ A launch that finds hooks from an earlier version, which installed fewer
 events, adds the missing ones — calling the same `mira` the hooks already
 call.
 
-On macOS and Linux it also puts `mira claude-statusline` in front of your
+It also puts `mira claude-statusline` in front of your
 `statusLine`, because the status line is the only place Claude Code tells
 your plan's limits (`rate_limits`): the wrapper keeps the latest in
 `claude-limits.json` in Mirador's data directory, then runs your own
@@ -68,9 +68,10 @@ command becomes `"<mira>" claude-statusline --run '<your command>'`, kept
 whole in one quoted argument, its other keys (`padding`, …) untouched;
 `mira hooks remove` puts it back exactly. With no status line of your own,
 setup adds the bare wrapper, which prints nothing; remove takes it out. A
-status line that is not a `command` is left as it is. Windows is skipped:
-Claude Code runs status lines there through Git Bash or PowerShell, and
-the wrapper does not run your command on Windows.
+status line that is not a `command` is left as it is. The wrapper runs
+your command with `sh -c` on every platform: on Windows, Claude Code runs
+the status line through Git Bash, whose `sh` the wrapper finds on the
+PATH it inherits.
 
 `/mira-diff` is the human's side of `mira diff`: typing it in a Claude Code
 pane opens the same review surface, with the same arguments. It sets

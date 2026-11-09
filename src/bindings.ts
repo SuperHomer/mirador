@@ -414,7 +414,7 @@ export interface AccountUsage {
   /** Why a plan shows no limits, and how to get them. */
   limitsNote: string | null;
   /** No limits until the integration wraps Claude Code's status line:
-   *  setting it up (the user's click) would show them. Never on Windows. */
+   *  setting it up (the user's click) would show them. */
   limitsSetup: boolean;
   fiveHours: TokenTotals;
   sevenDays: TokenTotals;

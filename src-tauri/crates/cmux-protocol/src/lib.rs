@@ -2295,7 +2295,7 @@ pub struct AccountUsage {
     #[serde(default)]
     pub limits_note: Option<String>,
     /// A plan with no limits whose status line is not our wrapper yet:
-    /// setting the integration up would show them. Never on Windows.
+    /// setting the integration up would show them.
     #[serde(default)]
     pub limits_setup: bool,
     /// What it used in the last five hours and the last seven days: the
