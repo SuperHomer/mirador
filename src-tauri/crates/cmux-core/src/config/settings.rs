@@ -70,6 +70,8 @@ pub fn settings() -> Vec<Setting> {
             "Keep terminals running when Mirador quits, and reattach to them next launch. Applies to new panes."),
         setting("agentsPerTab", "Agents", SettingKind::Choice { options: vec![option(json!(4)), option(json!(6)), option(json!(9))] }, "4",
             "How many agents a page of the wall's Grid layout holds."),
+        setting("focusRailPosition", "Agents", choice(&["right", "top", "bottom"]), "right",
+            "Where Focus shows the wall's other agents and tools: a column on the right, tabs in the header of the one shown large, or a row of tabs under it."),
         setting("focusRailWidth", "Agents", pixels(&FOCUS_RAIL_WIDTH), "a third of the wall",
             "The width of Focus's column beside the agent shown large, in pixels. Dragging its edge sets it; a double-click on the edge clears it."),
         setting("teamCostWarnUsd", "Agents", Number { min: f64::MIN_POSITIVE, max: f64::MAX }, "0.5",
@@ -386,6 +388,9 @@ mod tests {
             ("themeSource", json!("solarized")), // not a choice
             ("scrollback", json!(u64::from(u32::MAX) + 1)),
             ("agentsPerTab", json!(5)),
+            ("focusRailPosition", json!("left")), // not a choice
+            ("focusRailPosition", json!("off")),
+            ("focusRailPosition", json!(true)),
             ("agentsPerTab", json!("6")), // a choice of numbers
             ("fontSize", json!(200)),     // out of range
             ("fontSize", json!(73)),
@@ -404,6 +409,17 @@ mod tests {
         std::fs::write(&path, "{ broken").unwrap();
         assert!(set_config_value_in(&path, "fontSize", Some(json!(14))).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn the_rail_position_takes_its_three_choices() {
+        // What the wall's Rail control writes.
+        let path = temp_config("rail");
+        for position in ["top", "bottom", "right"] {
+            set_config_value_in(&path, "focusRailPosition", Some(json!(position))).unwrap();
+            assert_eq!(read(&path), json!({ "focusRailPosition": position }));
+        }
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 

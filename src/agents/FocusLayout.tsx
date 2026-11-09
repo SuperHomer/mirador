@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { AgentInfo, agentLabel, focusPane, markPaneRead, TabSnapshot, WallTool } from "../bindings";
+import { AgentInfo, agentLabel, focusPane, markPaneRead, RailPosition, TabSnapshot, WallTool } from "../bindings";
 import { useUiStore, WallFilter } from "../state/uiStore";
 import { getTerminal } from "../terminal/registry";
 import { useAgentActivity } from "./ActivityPanel";
@@ -98,11 +98,22 @@ function useFocused(
   return agents.find((a) => a.paneId === focused) ?? tools.find((t) => t.paneId === focused);
 }
 
+/** What Focus says where it has nothing to show large, by where the rest
+ *  of the wall is to pick from. */
+const NOTHING_LARGE: Record<RailPosition, string> = {
+  right: "Pick a tool on the right to show it here.",
+  top: "Pick a tool above to show it here.",
+  bottom: "Pick a tool below to show it here.",
+};
+
 /**
  * Focus (18a): one agent large, with its terminal live and full size, and
- * the others down a rail by status — those that need you, then those at
- * work, as live thumbnails, then the idle as one line each, then the
- * tools as live thumbnails too. The chip filter narrows the rail, never
+ * the others where `focusRailPosition` puts them. On the right (the
+ * default) they go down a rail by status — those that need you, then
+ * those at work, as live thumbnails, then the idle as one line each, then
+ * the tools as live thumbnails too. Top, they are tabs in the large one's
+ * header, beside its name; bottom, a row of tabs under it, centered
+ * (`FocusRibbon`). The chip filter narrows the rail and the tabs, never
  * what is shown large.
  */
 export function FocusLayout({
@@ -140,6 +151,7 @@ export function FocusLayout({
     FOCUS_RAIL_WIDTH,
     "left",
   );
+  const position = useConfigStore((s) => s.config?.focusRailPosition ?? "right");
 
   // The keyboard goes to the agent shown large as the wall comes on screen,
   // and follows it when it changes — after a pin, or while it was in the
@@ -181,32 +193,63 @@ export function FocusLayout({
     .map((p) => agents.find((a) => a.paneId === p))
     .filter((a): a is AgentInfo => a?.status === "needsYou");
 
+  const ribbon = (placement: RibbonPlacement) => (
+    <FocusRibbon
+      agents={agents}
+      tools={tools}
+      filter={filter}
+      focusedPane={focusedPane}
+      now={now}
+      onPick={pin}
+      placement={placement}
+    />
+  );
+  // Top: the others as tabs in the large one's own header, beside its name.
+  const headTabs = position === "top" ? ribbon("head") : undefined;
+  const large =
+    focused && "kind" in focused ? (
+      <FocusedToolTile
+        key={focused.paneId}
+        tool={focused}
+        focused={current && tab.focusedPane === focused.paneId}
+        unread={unread.includes(focused.paneId)}
+        visible={visible}
+        current={current}
+        headTabs={headTabs}
+      />
+    ) : focused ? (
+      <FocusedTile
+        key={focused.paneId}
+        agent={focused}
+        waiting={waiting}
+        onPin={pin}
+        unread={unread.includes(focused.paneId)}
+        visible={visible}
+        current={current}
+        canSend={sendable.has(focused.paneId)}
+        now={now}
+        headTabs={headTabs}
+      />
+    ) : (
+      <div className="focus-none">{NOTHING_LARGE[position]}</div>
+    );
+
+  // Tabs, not thumbnails: the others' terminals stay in their own panes,
+  // and there is no width to drag. With nothing large there is no header
+  // to hold the top's tabs, so they get a row of their own.
+  if (position !== "right") {
+    return (
+      <div className={`focus-layout stacked ${position}`} ref={layoutRef}>
+        {position === "top" && !focused && ribbon("row")}
+        {large}
+        {position === "bottom" && ribbon("bottom")}
+      </div>
+    );
+  }
+
   return (
     <div className="focus-layout" ref={layoutRef} style={railColumns(rail.width)}>
-      {focused && "kind" in focused ? (
-        <FocusedToolTile
-          key={focused.paneId}
-          tool={focused}
-          focused={current && tab.focusedPane === focused.paneId}
-          unread={unread.includes(focused.paneId)}
-          visible={visible}
-          current={current}
-        />
-      ) : focused ? (
-        <FocusedTile
-          key={focused.paneId}
-          agent={focused}
-          waiting={waiting}
-          onPin={pin}
-          unread={unread.includes(focused.paneId)}
-          visible={visible}
-          current={current}
-          canSend={sendable.has(focused.paneId)}
-          now={now}
-        />
-      ) : (
-        <div className="focus-none">Pick a tool on the right to show it here.</div>
-      )}
+      {large}
       <div
         className={`width-handle${rail.dragging ? " dragging" : ""}`}
         title="Drag to resize · double-click for the default width"
@@ -280,10 +323,13 @@ function FocusedTile({
   current,
   canSend,
   now,
+  headTabs,
 }: {
   agent: AgentInfo;
   /** It has a next task to be sent. */
   canSend: boolean;
+  /** The others as tabs beside its name (focusRailPosition top). */
+  headTabs?: React.ReactNode;
   /** The others that need you, most urgent first. */
   waiting: AgentInfo[];
   onPin: (pane: string) => void;
@@ -310,6 +356,7 @@ function FocusedTile({
               {agent.sinceMs ? ` · ${elapsed(agent.sinceMs, now)}` : ""}
             </span>
           )}
+          {headTabs}
           {task && <span className="focus-task">{task}</span>}
           {waiting.length > 0 && (
             <button
@@ -369,6 +416,7 @@ function FocusedToolTile({
   unread,
   visible,
   current,
+  headTabs,
 }: {
   tool: WallTool;
   /** Its pane is the one the keyboard goes to. */
@@ -376,6 +424,8 @@ function FocusedToolTile({
   unread: boolean;
   visible: boolean;
   current: boolean;
+  /** The others as tabs beside its name (focusRailPosition top). */
+  headTabs?: React.ReactNode;
 }) {
   const pane = tool.paneId;
   const terminal = tool.kind === "terminal";
@@ -388,6 +438,7 @@ function FocusedToolTile({
             <ToolMark kind={tool.kind} />
           </span>
           <span className="focus-name">{tool.title}</span>
+          {headTabs}
         </div>
       </div>
       <div className="focus-body">
@@ -568,6 +619,111 @@ function useMiniFit(hostRef: React.RefObject<HTMLDivElement | null>) {
     ? ({ "--mini-scale": fit.scale, "--mini-term-h": `${fit.height}px` } as React.CSSProperties)
     : undefined;
   return { bodyRef, style };
+}
+
+/** Where a FocusRibbon sits: in the header of the one shown large, beside
+ *  its name (top); in a row of its own when nothing is large (top); or
+ *  under the one shown large, centered (bottom). */
+type RibbonPlacement = "head" | "row" | "bottom";
+
+/**
+ * The wall's agents and tools as tabs (focusRailPosition top or bottom),
+ * in the rail's order: those that need you, then at work, then idle, then
+ * the tools. A tab is a name and a status, never a thumbnail: the live
+ * terminals are the rail's. In the header, the header itself is the one
+ * shown large, so only the others have tabs; under it, every one does,
+ * the one shown large selected. The chip filter narrows the tabs as it
+ * does the rail but never takes the selected one away. Clicking a tab
+ * shows it large.
+ */
+function FocusRibbon({
+  agents,
+  tools,
+  filter,
+  focusedPane,
+  now,
+  onPick,
+  placement,
+}: {
+  agents: AgentInfo[];
+  tools: WallTool[];
+  filter: WallFilter;
+  focusedPane: string | undefined;
+  now: number;
+  onPick: (pane: string) => void;
+  placement: RibbonPlacement;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const withSelected = placement === "bottom";
+  const keep = (pane: string, matches: boolean) =>
+    pane === focusedPane ? withSelected : matches;
+  // Agents with no known status are with the working, as on the rail.
+  const group = (a: AgentInfo) => (a.status === "needsYou" ? 0 : a.status === "idle" ? 2 : 1);
+  const shownAgents = agents
+    .filter((a) => keep(a.paneId, filter === "all" || a.status === filter))
+    .sort((a, b) => group(a) - group(b));
+  const shownTools = tools.filter((t) => keep(t.paneId, filter === "all" || filter === "tools"));
+
+  // The selected tab stays in view as Focus moves to another. The row is
+  // scrolled by hand: scrollIntoView would scroll every ancestor too.
+  useEffect(() => {
+    const list = listRef.current;
+    const selected = list?.querySelector<HTMLElement>(".ribbon-tab.selected");
+    if (!list || !selected) return;
+    const left = selected.offsetLeft;
+    const right = left + selected.offsetWidth;
+    if (left < list.scrollLeft) list.scrollLeft = left;
+    else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+  }, [focusedPane]);
+
+  // Beside the large one's name, no others means no tabs at all.
+  if (placement === "head" && shownAgents.length + shownTools.length === 0) return null;
+  const tabClass = (pane: string, kind: string | undefined) =>
+    `ribbon-tab${kind ? ` ${kind}` : ""}${pane === focusedPane ? " selected" : ""}`;
+  return (
+    <div
+      className={`focus-ribbon ${placement}`}
+      role="tablist"
+      ref={listRef}
+      // A wheel turned over the row scrolls it sideways: it has no other way.
+      onWheel={(e) => {
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+      }}
+    >
+      {shownAgents.map((a) => (
+        <div
+          key={a.paneId}
+          role="tab"
+          aria-selected={a.paneId === focusedPane}
+          className={tabClass(a.paneId, a.status ?? undefined)}
+          title={`Show ${agentLabel(a)} large`}
+          onClick={() => onPick(a.paneId)}
+        >
+          <StatusMark status={a.status} small />
+          <span className="ribbon-name">{agentLabel(a)}</span>
+          {a.status && a.sinceMs && <span className={`mini-elapsed ${a.status}`}>{elapsed(a.sinceMs, now)}</span>}
+        </div>
+      ))}
+      {shownTools.map((t) => (
+        <div
+          key={t.paneId}
+          role="tab"
+          aria-selected={t.paneId === focusedPane}
+          className={tabClass(t.paneId, "tool")}
+          title={`Show ${t.title} large`}
+          onClick={() => onPick(t.paneId)}
+        >
+          <span className="tool-mark">
+            <ToolMark kind={t.kind} />
+          </span>
+          <span className="ribbon-name">{t.title}</span>
+        </div>
+      ))}
+      {shownAgents.length + shownTools.length === 0 && (
+        <span className="ribbon-empty">Nothing matches this filter.</span>
+      )}
+    </div>
+  );
 }
 
 /** An idle agent on the rail, in one line. Clicking it pins it large. */

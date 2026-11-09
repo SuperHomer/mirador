@@ -2,7 +2,9 @@ import { memo, useMemo, useRef } from "react";
 import {
   AgentInfo,
   agentLabel,
+  RailPosition,
   setAgentsPerTab,
+  setConfigValue,
   setWallMode,
   WallMode,
   TabSnapshot,
@@ -38,10 +40,19 @@ const FILTERS: [WallFilter, string][] = [
   ["tools", "Tools"],
 ];
 
+/** Where Focus can show the rest of the wall, as the Rail control
+ *  offers it: label, and what the button says it does. */
+const RAIL_POSITIONS: [RailPosition, string, string][] = [
+  ["right", "Right", "The rest of the wall down a column on the right"],
+  ["top", "Top", "The rest of the wall as tabs in the header of the one shown large"],
+  ["bottom", "Bottom", "The rest of the wall as a row of tabs under the one shown large"],
+];
+
 /**
  * The wall's one row of controls: which agents it shows, by status, or
- * its tools; then, in Focus, who it shows large and whether that follows
- * whoever needs you; in Grid, how many a page holds; then Focus | Grid.
+ * its tools; then, in Focus, who it shows large, whether that follows
+ * whoever needs you, and where the rest go (Rail); in Grid, how many a
+ * page holds; then Focus | Grid.
  * A new agent comes from the tab bar's + New.
  */
 function WallToolbar({
@@ -59,6 +70,7 @@ function WallToolbar({
 }) {
   const pinnedPane = useUiStore((s) => s.pinned[tab.id]);
   const perTab = useConfigStore((s) => s.config?.agentsPerTab ?? 4);
+  const rail = useConfigStore((s) => s.config?.focusRailPosition ?? "right");
   const pinned =
     agents.find((a) => a.paneId === pinnedPane) ?? tools.find((t) => t.paneId === pinnedPane);
   // Who Focus shows: the pinned agent or tool while it is here, else the
@@ -96,6 +108,26 @@ function WallToolbar({
               {pinned ? "Unpin" : `Pin ${"title" in focus ? focus.title : agentLabel(focus)}`}
             </button>
           )}
+          <span className="wall-toolbar-label">Rail</span>
+          <span className="wall-segments">
+            {RAIL_POSITIONS.map(([position, label, title]) => (
+              <button
+                key={position}
+                className={rail === position ? "selected" : undefined}
+                title={title}
+                // As Focus | Grid: the keyboard stays in the terminal.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() =>
+                  rail !== position &&
+                  setConfigValue("focusRailPosition", position).catch((err) =>
+                    console.warn(`mirador: focusRailPosition was not saved: ${err}`),
+                  )
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </span>
         </>
       ) : (
         <>
