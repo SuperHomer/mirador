@@ -10,19 +10,32 @@
 //! records the answer in `.claude.json`'s `customApiKeyResponses`, each
 //! list holding a suffix of a key approved or rejected. Only how many
 //! entries each list has is read, never an entry. Claude Code writes its
-//! limits nowhere on disk, so it has none here.
+//! limits nowhere on disk of its own: they come from what it pipes to its
+//! status line, which `mira claude-statusline` keeps as a snapshot
+//! (`claude-limits.json` in Mirador's data directory). `ANTHROPIC_BASE_URL`
+//! set is a gateway it sends to instead of Anthropic's API, shown by host.
 //!
 //! Codex keeps its login in `$CODEX_HOME/auth.json` (`~/.codex`):
 //! `auth_mode` is `chatgpt` for a plan, `apikey` for a key, and a key
 //! stored in `OPENAI_API_KEY` is one too; `tokens` without a mode is an
 //! older Codex's ChatGPT sign-in. `OPENAI_API_KEY` in the environment is
 //! used only when that file holds no login at all — the opposite of
-//! Claude Code, whose key wins. Its limits are in its rollouts:
-//! each `event_msg` `token_count` carries the `rate_limits` the server
-//! last sent for one bucket, told apart by `limit_id` (`codex`,
+//! Claude Code, whose key wins. A `model_provider` in `config.toml` that
+//! names one of its `model_providers` (any but the built-in `openai`) is
+//! where Codex sends instead, whatever `auth.json` holds: the account is
+//! that provider's (its `name` and `base_url`'s host), on a key when the
+//! variable its `env_key` names is set — whether it is set, never what it
+//! holds — or, for one with `requires_openai_auth`, on the same login as
+//! OpenAI's, since it is a proxy Codex signs in to as to OpenAI. On
+//! OpenAI, `OPENAI_BASE_URL` set is shown by host. Codex's limits are in
+//! its rollouts: each `event_msg` `token_count` carries the `rate_limits`
+//! the server last sent for one bucket, told apart by `limit_id` (`codex`,
 //! `premium`, …): a `primary` and a `secondary` window, either possibly
 //! null, and the `plan_type`. A bucket's newest line with a window is its
-//! latest word; the account's limits are every bucket's.
+//! latest word; the account's limits are every bucket's. Only rollouts on
+//! the provider Codex is set to now count for limits and the plan: a
+//! rollout's `session_meta` line names its `model_provider` (none from an
+//! older Codex, which ran on OpenAI).
 //!
 //! What each used over the plans' windows (five hours, seven days) is
 //! added up from the same files: Claude Code's transcripts
@@ -94,6 +107,57 @@ struct CodexAuth {
     tokens: Option<IgnoredAny>,
 }
 
+/// What of Codex's `config.toml` says where it sends its requests.
+#[derive(Deserialize, Default)]
+struct CodexConfig {
+    model_provider: Option<String>,
+    #[serde(default)]
+    model_providers: std::collections::HashMap<String, CodexProvider>,
+}
+
+/// One of `model_providers`: `env_key` names the variable holding its key,
+/// and `requires_openai_auth` says it takes Codex's own OpenAI login instead.
+#[derive(Deserialize)]
+struct CodexProvider {
+    name: Option<String>,
+    base_url: Option<String>,
+    env_key: Option<String>,
+    #[serde(default)]
+    requires_openai_auth: bool,
+}
+
+/// How Codex signs in to OpenAI: the login it stored in `auth.json`, and
+/// only with none there a key in the environment.
+fn codex_login(codex_home: &Path, is_set: &dyn Fn(&str) -> bool) -> Login {
+    let auth = read_json::<CodexAuth>(&codex_home.join("auth.json"));
+    match auth.auth_mode.as_deref() {
+        _ if auth.api_key.is_some() => Login::ApiKey,
+        Some("apikey") => Login::ApiKey,
+        Some("chatgpt") => Login::Subscription,
+        None if auth.tokens.is_some() => Login::Subscription,
+        _ if is_set("OPENAI_API_KEY") => Login::ApiKey,
+        _ => Login::None,
+    }
+}
+
+/// A provider as the account shows it: its name and its base URL's host,
+/// `Azure OpenAI · llm.example:4000`, or whichever of them there is.
+fn provider(name: Option<&str>, base_url: Option<&str>) -> Option<String> {
+    let name = name.filter(|n| !n.is_empty());
+    match (name, base_url.and_then(url_host)) {
+        (Some(name), Some(host)) => Some(format!("{name} · {host}")),
+        (name, host) => name.or(host).map(String::from),
+    }
+}
+
+/// The `host:port` of a URL, without any user or password in it.
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    (!host.is_empty()).then_some(host)
+}
+
 /// A JSON file as `T`, or its default when it is missing or does not parse.
 fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
     std::fs::read(path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
@@ -101,17 +165,26 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
 
 /// Claude Code's account, from its `.claude.json`, and its settings and
 /// transcripts under `claude_dir`, `api_key_in_env` being whether
-/// `ANTHROPIC_API_KEY` is set and `now_ms` the time the windows end.
-/// The plan's windows come from the status line's snapshot at `limits`.
-pub fn claude_usage(claude_json: &Path, claude_dir: &Path, api_key_in_env: bool, now_ms: u64, limits: &Path) -> AccountUsage {
-    UsageCache::default().claude(claude_json, claude_dir, api_key_in_env, now_ms, limits)
+/// `ANTHROPIC_API_KEY` is set, `base_url` `ANTHROPIC_BASE_URL`'s value and
+/// `now_ms` the time the windows end. The plan's windows come from the
+/// status line's snapshot at `limits`.
+pub fn claude_usage(
+    claude_json: &Path,
+    claude_dir: &Path,
+    api_key_in_env: bool,
+    base_url: Option<&str>,
+    now_ms: u64,
+    limits: &Path,
+) -> AccountUsage {
+    UsageCache::default().claude(claude_json, claude_dir, api_key_in_env, base_url, now_ms, limits)
 }
 
-/// Codex's account, from `auth.json` under `codex_home` and the limits in
-/// its newest rollout, `api_key_in_env` being whether `OPENAI_API_KEY` is
-/// set and `now_ms` the time the windows end.
-pub fn codex_usage(codex_home: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
-    UsageCache::default().codex(codex_home, api_key_in_env, now_ms)
+/// Codex's account, from `config.toml` and `auth.json` under `codex_home`
+/// and the limits in its newest rollout, `is_set` saying whether an
+/// environment variable is set (never what it holds), `base_url` being
+/// `OPENAI_BASE_URL`'s value and `now_ms` the time the windows end.
+pub fn codex_usage(codex_home: &Path, is_set: &dyn Fn(&str) -> bool, base_url: Option<&str>, now_ms: u64) -> AccountUsage {
+    UsageCache::default().codex(codex_home, is_set, base_url, now_ms)
 }
 
 /// What every recent transcript and rollout counted, kept between reads:
@@ -137,11 +210,19 @@ impl UsageCache {
         let api_key_in_env = crate::pty::shell::interactive_anthropic_key() == Some(true)
             || std::env::var_os("ANTHROPIC_API_KEY").is_some_and(|v| !v.is_empty());
         let codex_home = std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from);
-        let openai_key_in_env = std::env::var_os("OPENAI_API_KEY").is_some_and(|v| !v.is_empty());
+        let is_set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+        let value = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
         let now_ms = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         vec![
-            self.claude(&claude_json, &claude_dir, api_key_in_env, now_ms, &claude_limits_path()),
-            self.codex(&codex_home, openai_key_in_env, now_ms),
+            self.claude(
+                &claude_json,
+                &claude_dir,
+                api_key_in_env,
+                value("ANTHROPIC_BASE_URL").as_deref(),
+                now_ms,
+                &claude_limits_path(),
+            ),
+            self.codex(&codex_home, &is_set, value("OPENAI_BASE_URL").as_deref(), now_ms),
         ]
     }
 
@@ -151,6 +232,7 @@ impl UsageCache {
         claude_json: &Path,
         claude_dir: &Path,
         api_key_in_env: bool,
+        base_url: Option<&str>,
         now_ms: u64,
         limits: &Path,
     ) -> AccountUsage {
@@ -209,6 +291,7 @@ impl UsageCache {
             plan: plan.filter(|_| matches!(login, Login::Subscription | Login::PlanOrApiKey)),
             email,
             note,
+            provider: provider(None, base_url),
             limits,
             as_of,
             limits_note,
@@ -220,16 +303,32 @@ impl UsageCache {
     }
 
     /// [`codex_usage`], reading only what changed since the last call.
-    pub fn codex(&mut self, codex_home: &Path, api_key_in_env: bool, now_ms: u64) -> AccountUsage {
-        let auth = read_json::<CodexAuth>(&codex_home.join("auth.json"));
-        // Codex prefers the login it stored over a key in the environment.
-        let login = match auth.auth_mode.as_deref() {
-            _ if auth.api_key.is_some() => Login::ApiKey,
-            Some("apikey") => Login::ApiKey,
-            Some("chatgpt") => Login::Subscription,
-            None if auth.tokens.is_some() => Login::Subscription,
-            _ if api_key_in_env => Login::ApiKey,
-            _ => Login::None,
+    pub fn codex(
+        &mut self,
+        codex_home: &Path,
+        is_set: &dyn Fn(&str) -> bool,
+        base_url: Option<&str>,
+        now_ms: u64,
+    ) -> AccountUsage {
+        let mut config: CodexConfig = std::fs::read_to_string(codex_home.join("config.toml"))
+            .ok()
+            .and_then(|text| toml::from_str(&text).ok())
+            .unwrap_or_default();
+        let provider_id = config.model_provider.clone().unwrap_or_else(|| "openai".into());
+        let custom = config.model_provider.filter(|id| id != "openai").and_then(|id| config.model_providers.remove(&id));
+        let (login, note, provider) = match custom {
+            // A proxy in front of OpenAI: Codex signs in to it as to OpenAI.
+            Some(p) if p.requires_openai_auth => {
+                (codex_login(codex_home, is_set), None, provider(p.name.as_deref(), p.base_url.as_deref()))
+            }
+            // Codex sends there, with that key, whatever auth.json holds.
+            Some(p) => {
+                let key = p.env_key.as_deref();
+                let login = if key.is_some_and(is_set) { Login::ApiKey } else { Login::None };
+                let note = key.filter(|k| !is_set(k)).map(|k| format!("{k} not set"));
+                (login, note, provider(p.name.as_deref(), p.base_url.as_deref()))
+            }
+            None => (codex_login(codex_home, is_set), None, provider(None, base_url)),
         };
         // `pricing` has no OpenAI rates, so never a cost.
         let mut totals = Totals::new(now_ms, false);
@@ -244,6 +343,12 @@ impl UsageCache {
             let Some(calls) = self.codex.read(rollout) else { continue };
             for c in &calls.counted {
                 totals.add(c.at_ms, c.usage, None);
+            }
+            // Tokens were used whichever provider took them, but limits and
+            // a plan are the account's a rollout ran on: one from before a
+            // switch of provider is another account's.
+            if calls.provider.as_deref().unwrap_or("openai") != provider_id {
+                continue;
             }
             for b in &calls.buckets {
                 keep_bucket(&mut buckets, b.clone());
@@ -271,7 +376,8 @@ impl UsageCache {
             login,
             plan,
             email: None,
-            note: None,
+            note,
+            provider,
             limits,
             as_of,
             limits_note: None,
@@ -504,6 +610,9 @@ struct Calls {
     buckets: Vec<Bucket>,
     /// The newest `plan_type` any line gave, and when.
     plan: Option<(u64, String)>,
+    /// The `model_provider` its `session_meta` line says it ran on; none
+    /// from an older Codex, which ran on OpenAI.
+    provider: Option<String>,
 }
 
 /// One bucket of Codex's limits as its newest line with a window gave it:
@@ -545,6 +654,10 @@ impl Feed for Calls {
     fn feed(&mut self, line: &str) {
         let Ok(entry) = serde_json::from_str::<Value>(line) else { return };
         let p = &entry["payload"];
+        if entry["type"] == "session_meta" {
+            self.provider = p["model_provider"].as_str().map(str::to_string);
+            return;
+        }
         if entry["type"] != "event_msg" || p["type"] != "token_count" {
             return;
         }
@@ -693,6 +806,16 @@ mod tests {
     use std::io::Write;
 
     /// A snapshot path with nothing there: the tests never read the real one.
+    /// An environment with no variable set.
+    fn unset(_: &str) -> bool {
+        false
+    }
+
+    /// An environment with only `OPENAI_API_KEY` set.
+    fn openai_key(name: &str) -> bool {
+        name == "OPENAI_API_KEY"
+    }
+
     fn no_snapshot() -> PathBuf {
         std::env::temp_dir().join(format!("mira-usage-{}-none/claude-limits.json", std::process::id()))
     }
@@ -762,7 +885,7 @@ mod tests {
     fn claude_totals_count_each_reply_once_by_its_own_time() {
         let dir = temp_dir("claude-totals");
         claude_projects(&dir);
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &no_snapshot());
         let (five, seven) = (&usage.five_hours, &usage.seven_days);
         // The repeated reply at its last entry's usage, and the subagent's.
         assert_eq!((five.input, five.output), (105, 10));
@@ -777,7 +900,7 @@ mod tests {
     fn claude_totals_on_an_api_key_cost_the_priced_replies() {
         let dir = temp_dir("claude-cost");
         claude_projects(&dir);
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, true, now(), &no_snapshot());
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, true, None, now(), &no_snapshot());
         let opus = crate::pricing::rates("claude-opus-5-5").unwrap();
         let priced = crate::pricing::cost(opus, Usage { input: 105, output: 10, ..Default::default() });
         // The unknown model's tokens are counted, with no cost.
@@ -810,7 +933,7 @@ mod tests {
         write_at(&dir, "sessions/2026/11/02/rollout-2026-11-02T06-00-00-a.jsonl", &rollout, now());
         let old = count("2026-11-02T11:00:00.000Z", 7777, 0, 0);
         write_at(&dir, "sessions/2026/10/20/rollout-2026-10-20T06-00-00-b.jsonl", &old, now() - 8 * DAY_MS);
-        let usage = codex_usage(&dir, false, now());
+        let usage = codex_usage(&dir, &unset, None, now());
         let five = &usage.five_hours;
         assert_eq!((five.input, five.cache_read, five.output, five.cost), (400, 600, 50, None));
         let seven = &usage.seven_days;
@@ -822,7 +945,7 @@ mod tests {
 
     /// One session's five-hour input, read through `cache`.
     fn input_5h(cache: &mut UsageCache, dir: &Path, now_ms: u64) -> (u64, u64) {
-        let usage = cache.claude(&dir.join(".claude.json"), dir, false, now_ms, &no_snapshot());
+        let usage = cache.claude(&dir.join(".claude.json"), dir, false, None, now_ms, &no_snapshot());
         (usage.five_hours.input, usage.seven_days.input)
     }
 
@@ -887,7 +1010,7 @@ mod tests {
     #[test]
     fn a_claude_sign_in_is_a_subscription_with_its_plan() {
         let dir = temp_dir("claude-sub");
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &no_snapshot());
         assert_eq!(usage.login, Login::Subscription);
         assert_eq!(usage.plan.as_deref(), Some("claude_max"));
         assert_eq!(usage.email.as_deref(), Some("dev@example.com"));
@@ -905,17 +1028,17 @@ mod tests {
     fn an_approved_env_key_wins_over_a_claude_sign_in() {
         let dir = temp_dir("claude-key");
         let json = write(&dir, ".claude.json", &oauth_with(r#""abcdefghij0123456789""#, ""));
-        let usage = claude_usage(&json, &dir, true, now(), &no_snapshot());
+        let usage = claude_usage(&json, &dir, true, None, now(), &no_snapshot());
         assert_eq!((usage.login, usage.plan, usage.note), (Login::ApiKey, None, None));
         // Without the key in the environment, the approval is moot.
-        assert_eq!(claude_usage(&json, &dir, false, now(), &no_snapshot()).login, Login::Subscription);
+        assert_eq!(claude_usage(&json, &dir, false, None, now(), &no_snapshot()).login, Login::Subscription);
     }
 
     #[test]
     fn a_declined_env_key_leaves_the_plan_with_a_note() {
         let dir = temp_dir("claude-declined");
         let json = write(&dir, ".claude.json", &oauth_with("", r#""abcdefghij0123456789""#));
-        let usage = claude_usage(&json, &dir, true, now(), &no_snapshot());
+        let usage = claude_usage(&json, &dir, true, None, now(), &no_snapshot());
         assert_eq!(usage.login, Login::Subscription);
         assert_eq!(usage.plan.as_deref(), Some("claude_max"));
         assert_eq!(usage.note.as_deref(), Some("API key in env, declined"));
@@ -923,14 +1046,14 @@ mod tests {
         assert_eq!(usage.five_hours.cost, None);
         // Declined with no sign-in: nothing is billed at all.
         let alone = write(&dir, "alone.json", r#"{"customApiKeyResponses":{"approved":[],"rejected":["x"]}}"#);
-        assert_eq!(claude_usage(&alone, &dir, true, now(), &no_snapshot()).login, Login::None);
+        assert_eq!(claude_usage(&alone, &dir, true, None, now(), &no_snapshot()).login, Login::None);
     }
 
     #[test]
     fn a_key_both_approved_and_rejected_is_plan_or_key() {
         let dir = temp_dir("claude-both");
         let json = write(&dir, ".claude.json", &oauth_with(r#""a""#, r#""b""#));
-        let usage = claude_usage(&json, &dir, true, now(), &no_snapshot());
+        let usage = claude_usage(&json, &dir, true, None, now(), &no_snapshot());
         assert_eq!((usage.login, usage.plan.as_deref()), (Login::PlanOrApiKey, Some("claude_max")));
         assert_eq!(usage.five_hours.cost, None);
     }
@@ -939,9 +1062,9 @@ mod tests {
     fn a_key_never_asked_about_is_taken_as_a_key() {
         let dir = temp_dir("claude-unasked");
         let json = write(&dir, ".claude.json", OAUTH);
-        assert_eq!(claude_usage(&json, &dir, true, now(), &no_snapshot()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&json, &dir, true, None, now(), &no_snapshot()).login, Login::ApiKey);
         let empty = write(&dir, "empty.json", &oauth_with("", ""));
-        assert_eq!(claude_usage(&empty, &dir, true, now(), &no_snapshot()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&empty, &dir, true, None, now(), &no_snapshot()).login, Login::ApiKey);
     }
 
     #[test]
@@ -949,17 +1072,17 @@ mod tests {
         let dir = temp_dir("claude-helper");
         let json = write(&dir, ".claude.json", &oauth_with("", r#""b""#));
         write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
-        assert_eq!(claude_usage(&json, &dir, false, now(), &no_snapshot()).login, Login::ApiKey);
-        assert_eq!(claude_usage(&json, &dir, true, now(), &no_snapshot()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&json, &dir, false, None, now(), &no_snapshot()).login, Login::ApiKey);
+        assert_eq!(claude_usage(&json, &dir, true, None, now(), &no_snapshot()).login, Login::ApiKey);
     }
 
     #[test]
     fn claude_signed_out_or_missing_is_no_login() {
         let dir = temp_dir("claude-none");
-        let out = claude_usage(&write(&dir, ".claude.json", r#"{"hasCompletedOnboarding":true}"#), &dir, false, now(), &no_snapshot());
+        let out = claude_usage(&write(&dir, ".claude.json", r#"{"hasCompletedOnboarding":true}"#), &dir, false, None, now(), &no_snapshot());
         assert_eq!((out.login, out.plan, out.email), (Login::None, None, None));
-        assert_eq!(claude_usage(&dir.join("missing.json"), &dir, false, now(), &no_snapshot()).login, Login::None);
-        assert_eq!(claude_usage(&write(&dir, "bad.json", "{not json"), &dir, false, now(), &no_snapshot()).login, Login::None);
+        assert_eq!(claude_usage(&dir.join("missing.json"), &dir, false, None, now(), &no_snapshot()).login, Login::None);
+        assert_eq!(claude_usage(&write(&dir, "bad.json", "{not json"), &dir, false, None, now(), &no_snapshot()).login, Login::None);
     }
 
     #[test]
@@ -983,11 +1106,11 @@ mod tests {
         ]
         .join("\n");
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-b.jsonl", &rollout);
-        let usage = codex_usage(&dir, false, now());
+        let usage = codex_usage(&dir, &unset, None, now());
         assert_eq!(usage.login, Login::Subscription);
         assert_eq!(usage.plan.as_deref(), Some("plus"));
         // The sign-in Codex stored wins over a key in the environment.
-        assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
+        assert_eq!(codex_usage(&dir, &openai_key, None, now()).login, Login::Subscription);
         let five_hours = LimitWindow { used_percent: 42.5, window_minutes: 300, name: "5h".into(), resets_at: Some(1795590902), limit_reached: false };
         assert_eq!(usage.limits, vec![five_hours]);
     }
@@ -997,13 +1120,13 @@ mod tests {
         let dir = temp_dir("in-use");
         let none = dir.join("missing.json");
         // Signed out, nothing used: a harness never used here.
-        assert!(!claude_usage(&none, &dir, false, now(), &no_snapshot()).in_use);
+        assert!(!claude_usage(&none, &dir, false, None, now(), &no_snapshot()).in_use);
         // Signed in, nothing used yet.
-        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot()).in_use);
+        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &no_snapshot()).in_use);
         // Signed out, but used lately: a key since removed.
         let line = reply("2026-11-02T11:00:00.000Z", "msg_a", "claude-opus-5-5", 10, 0);
         write_at(&dir, "projects/-repo/s1.jsonl", &format!("{line}\n"), now());
-        assert!(claude_usage(&none, &dir, false, now(), &no_snapshot()).in_use);
+        assert!(claude_usage(&none, &dir, false, None, now(), &no_snapshot()).in_use);
     }
 
     #[test]
@@ -1011,7 +1134,7 @@ mod tests {
         let dir = temp_dir("codex-worst");
         let line = r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":12.0,"window_minutes":300},"secondary":{"used_percent":64.0,"window_minutes":10080}}}}"#;
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{line}\n"));
-        let names: Vec<String> = codex_usage(&dir, false, now()).limits.into_iter().map(|w| w.name).collect();
+        let names: Vec<String> = codex_usage(&dir, &unset, None, now()).limits.into_iter().map(|w| w.name).collect();
         assert_eq!(names, ["weekly", "5h"]);
     }
 
@@ -1081,7 +1204,7 @@ mod tests {
         if !transcript.is_empty() {
             write_at(&dir, "projects/-repo/s1.jsonl", &format!("{}\n", transcript.join("\n")), now());
         }
-        claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &limits)
+        claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &limits)
     }
 
     const HOUR_MS: u64 = 3600 * 1000;
@@ -1107,7 +1230,7 @@ mod tests {
         let limits = dir.join("claude-limits.json");
         save_claude_limits(&limits, STATUSLINE.as_bytes(), now()).unwrap();
         write(&dir, "settings.json", r#"{"apiKeyHelper":"~/bin/key.sh"}"#);
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &limits);
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &limits);
         assert_eq!(
             (usage.login, usage.limits.len(), usage.as_of, usage.limits_note, usage.limits_setup),
             (Login::ApiKey, 0, None, None, false)
@@ -1157,7 +1280,7 @@ mod tests {
         let dir = temp_dir("limits-two-files");
         write_at(&dir, "projects/-repo/a.jsonl", &format!("{}\n", both[0]), now());
         write_at(&dir, "projects/-repo/b.jsonl", &format!("{}\n", both[1]), now());
-        let across = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
+        let across = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &no_snapshot());
         assert_eq!(across.limits.iter().filter(|w| w.limit_reached).count(), 2);
         // A snapshot between the two beats only the older, weekly refusal.
         let between = plan_with("limits-between", Some((STATUSLINE, now() - 2 * HOUR_MS)), &both);
@@ -1175,12 +1298,12 @@ mod tests {
         // The user's own status line is not ours: setup would wrap it.
         let dir = temp_dir("limits-note-theirs");
         write(&dir, "settings.json", r#"{"statusLine":{"type":"command","command":"~/bin/my-status"}}"#);
-        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot()).limits_setup);
+        assert!(claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &no_snapshot()).limits_setup);
         let dir = temp_dir("limits-note-ours");
         let ours = format!("\"{}\" claude-statusline", dir.join("mira").display());
         let ours = serde_json::json!({ "statusLine": { "type": "command", "command": ours } });
         write(&dir, "settings.json", &ours.to_string());
-        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, now(), &no_snapshot());
+        let usage = claude_usage(&write(&dir, ".claude.json", OAUTH), &dir, false, None, now(), &no_snapshot());
         assert_eq!(
             (usage.limits_note.as_deref(), usage.limits_setup),
             (Some("Limits appear after Claude Code's next reply."), false)
@@ -1192,7 +1315,7 @@ mod tests {
         let dir = temp_dir("codex-as-of");
         let line = r#"{"timestamp":"2026-11-02T11:00:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":5,"window_minutes":300}}}}"#;
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{line}\n"));
-        assert_eq!(codex_usage(&dir, false, now()).as_of, Some(now() - HOUR_MS));
+        assert_eq!(codex_usage(&dir, &unset, None, now()).as_of, Some(now() - HOUR_MS));
     }
 
     /// A `token_count` line at `at` for the bucket `id`, its primary
@@ -1215,7 +1338,7 @@ mod tests {
             bucket_line("2026-11-02T11:00:01.000Z", "premium", "null", "plus"),
         ];
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{}\n", lines.join("\n")));
-        let usage = codex_usage(&dir, false, now());
+        let usage = codex_usage(&dir, &unset, None, now());
         let shown: Vec<(&str, f64)> = usage.limits.iter().map(|w| (w.name.as_str(), w.used_percent)).collect();
         assert_eq!(shown, [("30 days", 98.0)]);
         assert_eq!((usage.as_of, usage.plan.as_deref()), (Some(now() - HOUR_MS), Some("go")));
@@ -1230,7 +1353,7 @@ mod tests {
             bucket_line("2026-11-02T11:00:01.000Z", "premium", premium, "go"),
         ];
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{}\n", lines.join("\n")));
-        let shown: Vec<(String, f64)> = codex_usage(&dir, false, now()).limits.into_iter().map(|w| (w.name, w.used_percent)).collect();
+        let shown: Vec<(String, f64)> = codex_usage(&dir, &unset, None, now()).limits.into_iter().map(|w| (w.name, w.used_percent)).collect();
         assert_eq!(shown, [("30 days".to_string(), 98.0), ("premium 30 days".to_string(), 40.0)]);
     }
 
@@ -1241,7 +1364,7 @@ mod tests {
         let full = format!(r#"{{"used_percent":100.0,"window_minutes":43200,"resets_at":{reset}}}"#);
         let line = bucket_line("2026-10-28T10:00:00.000Z", "codex", &full, "go");
         write(&dir, "sessions/2026/10/28/rollout-2026-10-28T09-00-00-a.jsonl", &format!("{line}\n"));
-        let limits = codex_usage(&dir, false, now()).limits;
+        let limits = codex_usage(&dir, &unset, None, now()).limits;
         assert_eq!((limits[0].used_percent, limits[0].resets_at), (0.0, Some(reset)));
     }
 
@@ -1253,7 +1376,7 @@ mod tests {
         // A session on its first turn: tokens, no limits yet.
         let first_turn = r#"{"timestamp":"2026-11-02T11:30:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":1}},"rate_limits":null}}"#;
         write(&dir, "sessions/2026/11/02/rollout-2026-11-02T11-29-00-b.jsonl", &format!("{first_turn}\n"));
-        let usage = codex_usage(&dir, false, now());
+        let usage = codex_usage(&dir, &unset, None, now());
         assert_eq!(usage.limits.iter().map(|w| w.used_percent).collect::<Vec<_>>(), [98.0]);
         assert_eq!(usage.as_of, Some(now() - 2 * HOUR_MS));
         assert_eq!(usage.five_hours.input, 10, "the new rollout still counts its tokens");
@@ -1275,28 +1398,146 @@ mod tests {
     fn codex_on_a_key_is_an_api_key() {
         let dir = temp_dir("codex-key");
         write(&dir, "auth.json", r#"{"auth_mode":"apikey"}"#);
-        assert_eq!(codex_usage(&dir, false, now()).login, Login::ApiKey);
+        assert_eq!(codex_usage(&dir, &unset, None, now()).login, Login::ApiKey);
         // A stored key is a key whatever the mode says.
         write(&dir, "auth.json", r#"{"OPENAI_API_KEY":"sk-test"}"#);
-        let usage = codex_usage(&dir, false, now());
+        let usage = codex_usage(&dir, &unset, None, now());
         assert_eq!((usage.login, usage.limits), (Login::ApiKey, vec![]));
     }
 
     #[test]
     fn codex_uses_a_key_from_the_environment_only_with_no_login_stored() {
         let dir = temp_dir("codex-env");
-        assert_eq!(codex_usage(&dir, true, now()).login, Login::ApiKey);
+        assert_eq!(codex_usage(&dir, &openai_key, None, now()).login, Login::ApiKey);
         write(&dir, "auth.json", r#"{"auth_mode":null,"OPENAI_API_KEY":null,"tokens":null}"#);
-        assert_eq!(codex_usage(&dir, true, now()).login, Login::ApiKey);
+        assert_eq!(codex_usage(&dir, &openai_key, None, now()).login, Login::ApiKey);
         // An older Codex's sign-in: tokens, no mode.
         write(&dir, "auth.json", r#"{"tokens":{"id_token":"x"}}"#);
-        assert_eq!(codex_usage(&dir, true, now()).login, Login::Subscription);
+        assert_eq!(codex_usage(&dir, &openai_key, None, now()).login, Login::Subscription);
+    }
+
+    const AZURE: &str = r#"model = "gpt-6"
+model_provider = "azure"
+
+[model_providers.azure]
+name = "Azure OpenAI"
+base_url = "http://llm.example:4000/v1"
+env_key = "AZURE_KEY"
+"#;
+
+    #[test]
+    fn codex_on_a_custom_provider_is_on_its_key() {
+        let dir = temp_dir("codex-provider");
+        write(&dir, "config.toml", AZURE);
+        // Codex sends to the provider, not to OpenAI: a sign-in stored for
+        // OpenAI is not what it uses.
+        write(&dir, "auth.json", r#"{"auth_mode":"chatgpt"}"#);
+        let usage = codex_usage(&dir, &|name| name == "AZURE_KEY", Some("https://ignored.example/v1"), now());
+        assert_eq!(
+            (usage.login, usage.note, usage.provider.as_deref()),
+            (Login::ApiKey, None, Some("Azure OpenAI · llm.example:4000"))
+        );
+    }
+
+    const OPENAI_PROXY: &str = r#"model_provider = "proxy"
+
+[model_providers.proxy]
+name = "Team Proxy"
+base_url = "https://proxy.example/v1"
+requires_openai_auth = true
+"#;
+
+    #[test]
+    fn a_provider_on_openai_auth_takes_codexs_own_login() {
+        let dir = temp_dir("codex-openai-proxy");
+        write(&dir, "config.toml", OPENAI_PROXY);
+        write(&dir, "auth.json", r#"{"auth_mode":"chatgpt"}"#);
+        let usage = codex_usage(&dir, &unset, None, now());
+        assert_eq!(
+            (usage.login, usage.note, usage.provider.as_deref()),
+            (Login::Subscription, None, Some("Team Proxy · proxy.example"))
+        );
+        std::fs::remove_file(dir.join("auth.json")).unwrap();
+        let usage = codex_usage(&dir, &openai_key, None, now());
+        assert_eq!((usage.login, usage.note), (Login::ApiKey, None));
+    }
+
+    /// A rollout's first line, saying which provider it ran on.
+    fn session_meta(provider: &str) -> String {
+        format!(r#"{{"timestamp":"2026-11-02T09:00:00.000Z","type":"session_meta","payload":{{"model_provider":"{provider}"}}}}"#)
+    }
+
+    /// A turn's tokens, with no limits.
+    fn tokens_line(at: &str, input: u64) -> String {
+        format!(
+            r#"{{"timestamp":"{at}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":{input},"output_tokens":1}}}},"rate_limits":null}}}}"#
+        )
+    }
+
+    #[test]
+    fn a_custom_provider_shows_none_of_the_limits_from_before_the_switch() {
+        let dir = temp_dir("codex-provider-switch");
+        write(&dir, "config.toml", AZURE);
+        let key = |name: &str| name == "AZURE_KEY";
+        // On OpenAI, with its limits and plan; then on the gateway, which
+        // sends none.
+        let on_openai = [
+            session_meta("openai"),
+            tokens_line("2026-11-02T10:00:00.000Z", 100),
+            bucket_line("2026-11-02T10:00:00.000Z", "codex", THIRTY_DAYS_98, "plus"),
+        ]
+        .join("\n");
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T09-00-00-a.jsonl", &format!("{on_openai}\n"));
+        let on_azure = [session_meta("azure"), tokens_line("2026-11-02T11:00:00.000Z", 10)].join("\n");
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T10-30-00-b.jsonl", &format!("{on_azure}\n"));
+        let usage = codex_usage(&dir, &key, None, now());
+        assert_eq!(
+            (usage.login, usage.provider.as_deref(), usage.plan, usage.limits, usage.as_of),
+            (Login::ApiKey, Some("Azure OpenAI · llm.example:4000"), None, vec![], None)
+        );
+        assert_eq!(usage.five_hours.input, 110, "tokens were used on both");
+
+        // A rollout on the gateway that does carry limits counts.
+        let with_limits = [session_meta("azure"), bucket_line("2026-11-02T11:30:00.000Z", "codex", THIRTY_DAYS_98, "pro")].join("\n");
+        write(&dir, "sessions/2026/11/02/rollout-2026-11-02T11-00-00-c.jsonl", &format!("{with_limits}\n"));
+        let usage = codex_usage(&dir, &key, None, now());
+        assert_eq!((usage.plan.as_deref(), usage.limits.len()), (Some("pro"), 1));
+    }
+
+    #[test]
+    fn codex_on_a_custom_provider_without_its_key_says_which_is_missing() {
+        let dir = temp_dir("codex-provider-unset");
+        write(&dir, "config.toml", AZURE);
+        let usage = codex_usage(&dir, &openai_key, None, now());
+        assert_eq!(
+            (usage.login, usage.note.as_deref(), usage.provider.as_deref()),
+            (Login::None, Some("AZURE_KEY not set"), Some("Azure OpenAI · llm.example:4000"))
+        );
+    }
+
+    #[test]
+    fn codex_on_openai_names_only_a_base_url_it_is_given() {
+        let dir = temp_dir("codex-base-url");
+        write(&dir, "config.toml", "model_provider = \"openai\"\n");
+        write(&dir, "auth.json", r#"{"auth_mode":"chatgpt"}"#);
+        let usage = codex_usage(&dir, &unset, Some("https://user:secret@proxy.example:8443/v1"), now());
+        assert_eq!((usage.login, usage.provider.as_deref()), (Login::Subscription, Some("proxy.example:8443")));
+        assert_eq!(codex_usage(&dir, &unset, None, now()).provider, None);
+    }
+
+    #[test]
+    fn claude_names_the_host_of_its_base_url() {
+        let dir = temp_dir("claude-base-url");
+        let json = write(&dir, ".claude.json", OAUTH);
+        let usage = claude_usage(&json, &dir, false, Some("https://gateway.example/anthropic"), now(), &no_snapshot());
+        assert_eq!((usage.login, usage.provider.as_deref()), (Login::Subscription, Some("gateway.example")));
+        assert_eq!(claude_usage(&json, &dir, false, None, now(), &no_snapshot()).provider, None);
     }
 
     #[test]
     fn codex_with_nothing_on_disk_is_no_login() {
         let dir = temp_dir("codex-none");
-        let usage = codex_usage(&dir.join("missing"), false, now());
+        let usage = codex_usage(&dir.join("missing"), &unset, None, now());
         assert_eq!((usage.login, usage.plan, usage.limits), (Login::None, None, vec![]));
     }
 }

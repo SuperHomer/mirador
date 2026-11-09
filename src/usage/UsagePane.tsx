@@ -94,6 +94,7 @@ function Account({ account, onSetUpLimits }: { account: AccountUsage; onSetUpLim
             {account.email}
           </span>
         )}
+        {account.provider && <span className="usage-muted">via {account.provider}</span>}
         {account.note && <span className="usage-muted">{account.note}</span>}
       </div>
       {account.limits.map((w) => (

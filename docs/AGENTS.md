@@ -885,9 +885,19 @@ files, and never a credential — only the shape of the login.
   from the transcripts under `projects/`, subagents' included.
 - **Codex**: the login in `$CODEX_HOME/auth.json` (`~/.codex`); a key
   in `OPENAI_API_KEY` counts only when that file holds no login, as
-  Codex prefers its stored one. The limits and the plan are the ones
-  the newest rollout last recorded, so they are as of Codex's last turn.
-  It has no cost: Mirador knows no OpenAI prices.
+  Codex prefers its stored one. A `model_provider` in `config.toml`
+  that names one of its `model_providers` (a gateway, Azure) wins over
+  both, since Codex sends there instead: the login is an API key when
+  the variable its `env_key` names is set (only whether, never its
+  value), else not signed in, with `<VAR> not set`. The limits and the
+  plan are the ones the newest rollout on that provider last recorded,
+  so they are as of Codex's last turn there; a rollout from before a
+  switch of provider counts its tokens but not its limits. It has no
+  cost: Mirador knows no OpenAI prices.
+
+An account that does not talk to its maker's own API says where it does,
+as `via <name> · <host>`: Codex's custom provider, or the host of
+`OPENAI_BASE_URL` or, for Claude Code, `ANTHROPIC_BASE_URL`.
 
 Codex's limits are "as of" the rollout line that carried them.
 

@@ -2284,6 +2284,11 @@ pub struct AccountUsage {
     /// What else the login says: "API key in env, declined".
     #[serde(default)]
     pub note: Option<String>,
+    /// Where the harness sends its requests when not to its maker's own
+    /// API: the provider's name and host, `Azure OpenAI · llm.example:4000`,
+    /// or either alone. None for its default API.
+    #[serde(default)]
+    pub provider: Option<String>,
     /// The plan's windows, the most used first. Claude Code's come from
     /// its status line (`mira claude-statusline`) or a refused request.
     pub limits: Vec<LimitWindow>,

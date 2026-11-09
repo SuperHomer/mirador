@@ -87,7 +87,8 @@ downloads, the feature tour and the keybinding reference.
   Claude Code on an API key where the model's price is known. Claude's
   plan limits come from Claude Code's status line once `mira hooks setup`
   wraps it (your own line still shows), or read "limit reached" after a
-  refused request. The Usage pane (`mira usage --tab`, *App: Usage*) and
+  refused request. An account on a gateway or a custom Codex provider
+  says where it connects. The Usage pane (`mira usage --tab`, *App: Usage*) and
   `mira usage` show it in full. Read from local files, never the network
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for

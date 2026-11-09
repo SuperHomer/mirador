@@ -407,6 +407,9 @@ export interface AccountUsage {
   email: string | null;
   /** What else the login says: "API key in env, declined". */
   note: string | null;
+  /** Where it sends when not to its maker's own API: the provider's name
+   *  and host, `Azure OpenAI · llm.example:4000`, or either alone. */
+  provider: string | null;
   /** The most used first; empty for Claude Code, which keeps none on disk. */
   limits: LimitWindow[];
   /** Unix millis of what the limits were read from. */

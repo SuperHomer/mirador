@@ -1971,8 +1971,9 @@ fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
     };
     let plan = account.plan.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
     let email = account.email.as_deref().map(|e| format!(" · {e}")).unwrap_or_default();
+    let provider = account.provider.as_deref().map(|p| format!(" · via {p}")).unwrap_or_default();
     let note = account.note.as_deref().map(|n| format!(" · {n}")).unwrap_or_default();
-    let mut lines = vec![format!("{} — {login}{plan}{email}{note}", account.harness.label())];
+    let mut lines = vec![format!("{} — {login}{plan}{email}{provider}{note}", account.harness.label())];
     for w in &account.limits {
         let resets = match w.resets_at {
             Some(at) if at > now => format!(", resets in {}", until(at - now)),
@@ -2514,6 +2515,7 @@ mod tests {
             plan: Some("claude_max".into()),
             email: Some("you@example.com".into()),
             note: None,
+            provider: None,
             limits: vec![],
             as_of: None,
             limits_note: None,
@@ -2532,6 +2534,7 @@ mod tests {
             plan: None,
             email: None,
             note: None,
+            provider: None,
             as_of: None,
             limits_note: None,
             limits_setup: false,
@@ -2557,6 +2560,12 @@ mod tests {
                 "  last 7d: 0 tokens · $0.00",
             ]
         );
+        let gateway = AccountUsage {
+            provider: Some("Azure OpenAI · llm.example:4000".into()),
+            note: Some("AZURE_KEY not set".into()),
+            ..codex.clone()
+        };
+        assert_eq!(usage_lines(&gateway, now)[0], "Codex — API key · via Azure OpenAI · llm.example:4000 · AZURE_KEY not set");
         let declined = AccountUsage { email: None, note: Some("API key in env, declined".into()), ..claude.clone() };
         assert_eq!(usage_lines(&declined, now)[0], "Claude Code — subscription (claude_max) · API key in env, declined");
         let either = AccountUsage { login: Login::PlanOrApiKey, email: None, ..claude.clone() };
