@@ -18,6 +18,9 @@ struct PaneExitPayload {
     is_command: bool,
     /// True for SSH panes: a keypress reconnects.
     is_remote: bool,
+    /// True for a remote agent's pane: its agent runs on under a holder
+    /// there, so a lost connection reattaches by itself.
+    reconnects: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -1079,10 +1082,11 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
     let exit_app = app.clone();
     move |exited_id, exit_code| {
         let is_command = crate::runs::finish_run(&exit_app, exited_id, exit_code);
-        let is_remote = {
+        let (is_remote, reconnects) = {
             let state = exit_app.state::<AppState>();
             let meta = state.meta.lock().unwrap();
-            meta.get(exited_id).is_some_and(|m| m.remote_host.is_some())
+            let m = meta.get(exited_id);
+            (m.is_some_and(|m| m.remote_host.is_some()), m.is_some_and(|m| m.remote_command.is_some()))
         };
         let _ = exit_app.emit(
             "pane-exit",
@@ -1091,6 +1095,7 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
                 exit_code,
                 is_command,
                 is_remote,
+                reconnects,
             },
         );
     }

@@ -50,6 +50,14 @@ const WEBGL_RELEASE_DELAY_MS = 30_000;
 const BOARD_WEBGL_RELEASE_DELAY_MS = 1_000;
 
 /**
+ * A remote agent's reconnects: the first wait, the longest, and how long
+ * one must hold before the next loss starts over from the first.
+ */
+const RETRY_FIRST_MS = 2_000;
+const RETRY_MAX_MS = 30_000;
+const RETRY_HELD_MS = 60_000;
+
+/**
  * Moves a background pane's terminal out of the viewport. Tabs stack with
  * `visibility: hidden`, which still counts as on-screen to the
  * IntersectionObserver xterm pauses rendering with — so every hidden pane
@@ -141,6 +149,14 @@ export const TerminalPane = memo(function TerminalPane({
     let exited = true;
     let attaching = false;
     let pendingAck = 0;
+    // A remote agent's pane reattaches by itself when ssh loses the
+    // connection: after `retryDelay`, doubled each time a reconnect is
+    // lost again soon, and back to the shortest once one has held. Not
+    // "once an attach succeeds": ssh starts, and the attach succeeds,
+    // even when it then fails to connect.
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryDelay = RETRY_FIRST_MS;
+    let attachedAt = 0;
 
     const term = createTerminal(cfg);
     termRef.current = term;
@@ -189,6 +205,7 @@ export const TerminalPane = memo(function TerminalPane({
       // lose to "pane already running".
       if (attaching) return;
       attaching = true;
+      clearTimeout(retryTimer);
       try {
         // Previous session's scrollback, once per pane per app run.
         if (!restoredScrollback.has(paneId)) {
@@ -226,6 +243,7 @@ export const TerminalPane = memo(function TerminalPane({
         // Not before: until the PTY exists, every keystroke written to it is
         // silently dropped.
         exited = false;
+        attachedAt = Date.now();
         pendingAck = 0;
         // Resizes while attaching were dropped (no PTY to take them), and
         // the layout often settles in exactly that window — right after a
@@ -303,6 +321,7 @@ export const TerminalPane = memo(function TerminalPane({
       exit_code: number | null;
       is_command: boolean;
       is_remote: boolean;
+      reconnects: boolean;
     }>(
       "pane-exit",
       (event) => {
@@ -326,11 +345,25 @@ export const TerminalPane = memo(function TerminalPane({
             : code === 0
               ? "\x1b[32m"
               : "\x1b[31m";
-        const hint = event.payload.is_remote
-          ? "press any key to reconnect"
-          : event.payload.is_command
-            ? "press any key to rerun"
-            : "press any key to start a new shell";
+        // 255 is ssh's own failure, the connection lost; the agent runs on
+        // under its holder there. Any other code is the attach's: 1 when
+        // the session is gone, which it has just said.
+        let wait = 0;
+        if (event.payload.reconnects && code === 255) {
+          if (Date.now() - attachedAt > RETRY_HELD_MS) {
+            retryDelay = RETRY_FIRST_MS;
+          }
+          wait = retryDelay;
+          retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+          retryTimer = setTimeout(() => void attach(true), wait);
+        }
+        const hint = wait
+          ? `reconnecting in ${wait / 1000}s (press any key to retry now)`
+          : event.payload.is_remote
+            ? "press any key to reconnect"
+            : event.payload.is_command
+              ? "press any key to rerun"
+              : "press any key to start a new shell";
         term.writeln(
           `\r\n${color}[${status}]\x1b[0m \x1b[2m— ${hint}\x1b[0m`,
         );
@@ -352,6 +385,7 @@ export const TerminalPane = memo(function TerminalPane({
 
     return () => {
       disposed = true;
+      clearTimeout(retryTimer);
       observer.disconnect();
       unlisten?.();
       termRef.current = null;
