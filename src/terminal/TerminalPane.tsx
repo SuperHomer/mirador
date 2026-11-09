@@ -9,6 +9,7 @@ import {
   isLent,
   reclaimTerminal,
   registerTerminal,
+  setPaneShown,
   unregisterTerminal,
   watchTerminal,
 } from "./registry";
@@ -115,6 +116,9 @@ export const TerminalPane = memo(function TerminalPane({
   // Lent to the agent wall: drawn there while this pane is under it, so it
   // keeps its renderer as if it were on screen.
   const [lent, setLent] = useState(false);
+  // For the registration below, which runs once per pane id.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   useEffect(() => {
     setLent(isLent(paneId));
@@ -166,7 +170,7 @@ export const TerminalPane = memo(function TerminalPane({
     fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
-    registerTerminal(paneId, term, serialize, fit, container);
+    registerTerminal(paneId, term, serialize, fit, container, visibleRef.current);
     // The renderer is the visibility effect's job.
     fit.fit();
 
@@ -399,6 +403,13 @@ export const TerminalPane = memo(function TerminalPane({
       term.dispose();
     };
   }, [paneId]);
+
+  // Tells the registry whether this pane is on screen: a terminal the wall
+  // gives back is sized to it only then, and once it shows again. After the
+  // registration above, which React runs first.
+  useEffect(() => {
+    setPaneShown(paneId, visible);
+  }, [visible, paneId]);
 
   // On the board every terminal counts as visible, and a browser allows
   // ~16 WebGL contexts. So there a terminal renders with WebGL only while

@@ -14,6 +14,9 @@ interface Entry {
   home: HTMLElement;
   /** The element the terminal is lent to, if it is. */
   borrower: HTMLElement | null;
+  /** The pane's own container is on screen (`setPaneShown`): only then is
+   *  a terminal given back sized to it. */
+  shown: boolean;
   /** Output arrived since the last save. */
   dirty: boolean;
 }
@@ -45,6 +48,7 @@ export function registerTerminal(
   serialize: SerializeAddon,
   fit: FitAddon,
   home: HTMLElement,
+  shown: boolean,
 ) {
   const entry: Entry = {
     term,
@@ -52,6 +56,7 @@ export function registerTerminal(
     fit,
     home,
     borrower: null,
+    shown,
     dirty: false,
   };
   term.onWriteParsed(() => {
@@ -100,8 +105,12 @@ export function isLentTo(paneId: string, host: HTMLElement): boolean {
  * `fit: false` lends it at the size it has: a wall's mini tile scales the
  * terminal down to fit instead. Focus moves between agents often, and
  * resizing the PTY each time would reflow the agent's screen into a
- * thumbnail's few columns and back. Giving it back still fits it to its
- * own pane, where it is drawn at full size again.
+ * thumbnail's few columns and back. Giving it back fits it to its own pane
+ * only while that pane is on screen. Under the wall it is not: fitting
+ * there sized the PTY to a split nobody saw, so an agent shown large and
+ * then moved to the rail came back at its pane's width, three columns for
+ * a much-split pane, and redrew once more for nothing. Its pane fits it
+ * when it shows (`setPaneShown`).
  */
 export function lendTerminal(
   paneId: string,
@@ -121,9 +130,23 @@ export function lendTerminal(
     entry.borrower = null;
     const el = entry.term.element;
     if (el) entry.home.appendChild(el);
-    entry.fit.fit();
+    if (entry.shown) entry.fit.fit();
     changed(paneId);
   };
+}
+
+/**
+ * Whether the pane's own container is on screen — not under its tab's
+ * wall, not behind a zoomed pane, its tab active. Shown again with its
+ * terminal at home, the terminal is fitted to it now: a give-back while it
+ * was hidden left it at the size it had elsewhere, and a hidden pane is
+ * moved off screen by a transform, so no resize will come to fit it.
+ */
+export function setPaneShown(paneId: string, shown: boolean) {
+  const entry = terminals.get(paneId);
+  if (!entry || entry.shown === shown) return;
+  entry.shown = shown;
+  if (shown && !entry.borrower) entry.fit.fit();
 }
 
 /**
