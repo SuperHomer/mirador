@@ -164,12 +164,12 @@ pub fn team_resume(app: &tauri::AppHandle, name: &str) -> Result<String, String>
         let role = m.role.clone().ok_or_else(|| format!("member `{}` has no role", m.name))?;
         members.push(TeamSeat { name: m.name.clone(), role, pane: pane.clone(), lead: m.lead });
     }
-    let run = TeamRun { name: team.clone(), members };
+    let run = TeamRun { name: team.clone(), members, remote: None };
     let catalog = cmux_core::roles::catalog(checkpoint.cwd.as_deref().map(std::path::Path::new));
     let mut launches = Vec::new();
     for (m, seat) in checkpoint.members.iter().zip(&run.members) {
         let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
-        let roster = crate::teams::roster_now(&run, &catalog, &me, None);
+        let roster = crate::teams::roster_now(&run, &catalog, &me, None, &crate::teams::mira_for_prompt());
         let cwd = m.cwd.as_deref().or(checkpoint.cwd.as_deref());
         launches.push((resume_launch(m, &catalog, cwd, &roster)?, cwd.map(str::to_string)));
     }

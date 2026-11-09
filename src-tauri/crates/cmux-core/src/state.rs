@@ -566,8 +566,14 @@ impl Workspace {
 
     /// Splits the pane, focusing the new pane. Returns its id.
     pub fn split_pane(&mut self, pane: &str, dir: SplitDir) -> Option<String> {
+        self.split_pane_as(pane, dir, new_id())
+    }
+
+    /// [`Self::split_pane`], the new pane's id chosen beforehand
+    /// ([`Self::fresh_pane_ids`]): for a pane whose agent's files are sent
+    /// before it opens.
+    pub fn split_pane_as(&mut self, pane: &str, dir: SplitDir, new_pane: String) -> Option<String> {
         let tab = self.tab_of_pane_mut(pane)?;
-        let new_pane = new_id();
         if layout::split(&mut tab.root, pane, dir, &new_pane) {
             tab.focused = new_pane.clone();
             tab.zoomed = None;
@@ -1342,7 +1348,7 @@ mod tests {
         // goes right of every other.
         ws.new_tab();
         let panes = Workspace::fresh_pane_ids(2);
-        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![] };
+        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![], remote: None };
         ws.new_team_tab(crate::teams::layout(&panes, None), team, "t");
         ws.adopt_pane("orphan");
         assert_board_consistent(&ws);
@@ -1379,6 +1385,18 @@ mod tests {
         let tab = ws.tabs.iter().find(|t| t.id == second).unwrap();
         let right = ws.tabs[0].frame_rect();
         assert_eq!(tab.frame, BoardPoint { x: right.x + right.w + board::FRAME_GAP, y: 0.0 });
+    }
+
+    /// A pane split under an id chosen beforehand opens under that id.
+    #[test]
+    fn a_split_can_take_its_id_from_the_caller() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let id = Workspace::fresh_pane_ids(1).remove(0);
+        assert_eq!(ws.split_pane_as(&a, SplitDir::Row, id.clone()), Some(id.clone()));
+        assert!(layout::contains(&ws.tabs[0].root, &id));
+        assert_eq!(ws.focused_pane(), id);
+        assert!(ws.tabs[0].cards.contains_key(&id), "it has a card, as any split does");
     }
 
     #[test]

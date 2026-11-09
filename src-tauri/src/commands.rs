@@ -2432,7 +2432,7 @@ pub async fn ack_pty(app: AppHandle, pane_id: String, bytes: u64) {
     app.state::<AppState>().pty.ack(&pane_id, bytes);
 }
 
-fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
+pub(crate) fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[String]) {
     let mut meta = state.meta.lock().unwrap();
     let mut agents = Vec::new();
     for pane in panes {

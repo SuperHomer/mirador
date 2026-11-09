@@ -127,6 +127,7 @@ fn a_team_starts_is_tracked_and_comes_back() {
     let teams = sb.teams();
     assert_eq!(teams.len(), 1);
     assert_eq!(teams[0]["tabId"], tab.as_str());
+    assert!(teams[0]["remoteHost"].is_null(), "a team here runs on no remote: {}", teams[0]);
     let after: Vec<(String, String)> = teams[0]["members"]
         .as_array()
         .unwrap()

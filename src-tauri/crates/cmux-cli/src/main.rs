@@ -1362,8 +1362,18 @@ fn render_teams(teams: &[serde_json::Value]) {
         println!("(no teams running — `mira team start <team>` starts one)");
         return;
     }
+    for line in team_lines(teams) {
+        println!("{line}");
+    }
+}
+
+/// A line per team, saying the host when it runs on a remote, then one per
+/// member.
+fn team_lines(teams: &[serde_json::Value]) -> Vec<String> {
+    let mut lines = Vec::new();
     for t in teams {
-        println!("{}  (tab {})", t["name"].as_str().unwrap_or(""), t["tabId"].as_str().unwrap_or(""));
+        let on = t["remoteHost"].as_str().map(|h| format!("  on {h}")).unwrap_or_default();
+        lines.push(format!("{}{on}  (tab {})", t["name"].as_str().unwrap_or(""), t["tabId"].as_str().unwrap_or("")));
         for m in t["members"].as_array().into_iter().flatten() {
             let status = match (m["state"].as_str(), m["status"].as_str()) {
                 (Some("running"), Some("needsYou")) => "needs-you",
@@ -1372,15 +1382,16 @@ fn render_teams(teams: &[serde_json::Value]) {
                 _ => "-",
             };
             let lead = if m["lead"].as_bool() == Some(true) { "  (lead)" } else { "" };
-            println!(
+            lines.push(format!(
                 "  {:<14}  {:<12}  {:<9}  {}{lead}",
                 m["name"].as_str().unwrap_or(""),
                 m["role"].as_str().unwrap_or(""),
                 status,
                 m["pane"].as_str().unwrap_or(""),
-            );
+            ));
         }
     }
+    lines
 }
 
 /// The board: a heading per column that has cards, then a line per card
@@ -2366,6 +2377,19 @@ mod tests {
         assert_eq!(usage_lines(&how, now)[1], "  Limits appear after Claude Code's next reply.");
         let signed_out = AccountUsage { login: Login::None, plan: None, email: None, ..claude };
         assert_eq!(usage_lines(&signed_out, now)[0], "Claude Code — not signed in");
+    }
+
+    #[test]
+    fn team_list_says_where_a_team_on_a_remote_runs() {
+        let member = serde_json::json!({ "name": "lead", "role": "planner", "pane": "p1", "lead": true, "state": "running", "status": "idle" });
+        let teams = [
+            serde_json::json!({ "name": "squad", "tabId": "t1", "remoteHost": "box", "members": [member] }),
+            serde_json::json!({ "name": "home", "tabId": "t2", "remoteHost": null, "members": [] }),
+        ];
+        let lines = team_lines(&teams);
+        assert_eq!(lines[0], "squad  on box  (tab t1)");
+        assert_eq!(lines[1], "  lead            planner       idle       p1  (lead)");
+        assert_eq!(lines[2], "home  (tab t2)");
     }
 
     #[test]
