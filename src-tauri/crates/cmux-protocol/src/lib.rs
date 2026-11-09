@@ -273,6 +273,10 @@ pub struct WorkspaceSnapshot {
     pub view: View,
     #[serde(default)]
     pub camera: Camera,
+    /// How many cameras were set from outside since launch (`SetCamera`):
+    /// what the board's own saves say they have seen.
+    #[serde(default)]
+    pub camera_sets: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
