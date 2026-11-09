@@ -29,7 +29,7 @@ pub enum Program {
     /// A command pane: one command line, handed to the shell.
     Command(String),
     /// A remote pane: `ssh -tt <host>`, running a login shell there, or the
-    /// run script at the path given (`ssh::interactive_command`).
+    /// command line given (`ssh::interactive_command`).
     Ssh(String, Option<String>),
 }
 
@@ -125,7 +125,7 @@ pub fn serve(config: HoldConfig) -> io::Result<Option<i32>> {
     let command = match &config.program {
         Program::Shell => None,
         Program::Command(cmd) => Some(crate::pty::shell::run_command(cmd, config.cwd.as_deref())),
-        Program::Ssh(host, run) => Some(crate::ssh::interactive_command(host, run.as_deref())),
+        Program::Ssh(host, command) => Some(crate::ssh::interactive_command(host, command.as_deref())),
     };
     let on_data = {
         let shared = Arc::clone(&shared);

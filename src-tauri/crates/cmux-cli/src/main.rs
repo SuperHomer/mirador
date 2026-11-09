@@ -236,9 +236,10 @@ enum Command {
         /// Run `ssh -tt <HOST>` instead of an interactive shell.
         #[arg(long)]
         ssh: Option<String>,
-        /// With --ssh: run this script on the host, not a login shell there.
+        /// With --ssh: run this command line on the host, not a login shell
+        /// there.
         #[arg(long, requires = "ssh")]
-        ssh_run: Option<String>,
+        ssh_command: Option<String>,
     },
     /// Start a holder for a pane, detached, and return once it answers:
     /// what Mirador runs on a remote, so an agent there outlives the ssh
@@ -1118,8 +1119,8 @@ fn run(cli: Cli) -> Result<(), String> {
             rows,
             command,
             ssh,
-            ssh_run,
-        } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_run),
+            ssh_command,
+        } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_command),
         Command::HoldStart { pane, command, cwd } => return hold_start(&pane, &command, cwd.as_deref()),
         Command::Attach { pane } => return attach(&pane),
     };
@@ -2083,7 +2084,7 @@ fn hold(
     rows: u16,
     command: Option<String>,
     ssh: Option<String>,
-    ssh_run: Option<String>,
+    ssh_command: Option<String>,
 ) -> Result<(), String> {
     use cmux_core::hold::server::{serve, HoldConfig, Program};
     // Nothing inherited survives: on macOS a socket becomes close-on-exec
@@ -2105,7 +2106,7 @@ fn hold(
     }
     let program = match (command, ssh) {
         (Some(cmd), _) => Program::Command(cmd),
-        (None, Some(host)) => Program::Ssh(host, ssh_run),
+        (None, Some(host)) => Program::Ssh(host, ssh_command),
         (None, None) => Program::Shell,
     };
     let code = serve(HoldConfig {

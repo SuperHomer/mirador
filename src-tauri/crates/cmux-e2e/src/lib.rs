@@ -778,6 +778,11 @@ impl Sandbox {
 impl Drop for Sandbox {
     fn drop(&mut self) {
         self.quit();
+        // An agent on the remote runs under a holder there, which no quit
+        // reaches. The remote's runtime directory is the sandbox's own, so
+        // its holders are ended here, each waited for until it reports its
+        // child gone: a holder left alone keeps its agent for a day.
+        cmux_core::hold::end_all_in(&self.runtime.join("mirador").join("holders"), Duration::from_secs(10));
         self.wait_for_agents();
         // After the app: its ssh panes have hung up by now. But the app asks
         // for ControlPersist, so the connection's master outlives them for

@@ -80,10 +80,10 @@ pub fn launch(
         server::Program::Command(line) => {
             cmd.args(["--command", line]);
         }
-        server::Program::Ssh(host, run) => {
+        server::Program::Ssh(host, command) => {
             cmd.args(["--ssh", host]);
-            if let Some(run) = run {
-                cmd.args(["--ssh-run", run]);
+            if let Some(command) = command {
+                cmd.args(["--ssh-command", command]);
             }
         }
     }

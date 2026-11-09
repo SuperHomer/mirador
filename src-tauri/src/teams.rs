@@ -7,7 +7,10 @@ use tauri::{AppHandle, State};
 
 use cmux_protocol::{SeatState, SplitDir, TeamInfo, TeamMemberInfo, TeamRun, TeamSeat};
 
-use crate::commands::{emit_workspace, mark_launched, mark_remote_launched, prepare_launch, reach_remote, refuse_on_remote, send_remote_launch};
+use crate::commands::{
+    emit_workspace, kill_panes, mark_launched, mark_remote_launched, prepare_launch, reach_remote, refuse_on_remote, send_remote_launch,
+    start_remote_agent,
+};
 use crate::AppState;
 
 /// The directory `pane_id` (the focused pane when absent) works in.
@@ -53,8 +56,8 @@ pub fn start_team(
 /// member on that ssh host, in that directory there: the team and its
 /// roles are still this computer's, each member's files sent there as an
 /// agent's on a remote are (`commands::send_remote_launch`), all before
-/// the tab opens. Each is told its teammates call `mira` by its path
-/// there.
+/// the tab opens; each starts there once its pane is in it. Each is told
+/// its teammates call `mira` by its path there.
 #[allow(clippy::too_many_arguments)]
 pub fn start_team_from(
     app: AppHandle,
@@ -109,13 +112,29 @@ pub fn start_team_from(
     };
     let root = cmux_core::teams::layout(&panes, def.layout.as_deref());
     let tab = state.workspace.lock().unwrap().new_team_tab(root, run, &def.name);
+    let mut runs = Vec::new();
     {
         let mut meta = state.meta.lock().unwrap();
         for (pane, (launch, sent)) in panes.iter().zip(launches) {
             let entry = meta.entry(pane.clone()).or_default();
             match (sent, &there) {
-                (Some(sent), Some(there)) => mark_remote_launched(entry, there, sent),
+                (Some(sent), Some(there)) => {
+                    runs.push(sent.run.clone());
+                    mark_remote_launched(entry, there, sent);
+                }
                 _ => mark_launched(entry, launch, cwd.clone()),
+            }
+        }
+    }
+    if let Some(there) = &there {
+        for ((seat, pane), run) in seats.iter().zip(&panes).zip(&runs) {
+            if let Err(e) = start_remote_agent(there, pane, run) {
+                // Nobody has seen the tab yet: it goes as if never opened,
+                // and with it what the members started before this one
+                // already reported. They run on there.
+                let killed = state.workspace.lock().unwrap().close_tab(&tab);
+                kill_panes(&app, &state, &killed);
+                return Err(format!("team `{team}`, member `{}`: {e}", seat.name));
             }
         }
     }

@@ -245,6 +245,55 @@ fn a_plain_agent_runs_on_the_remote() {
     });
 }
 
+/// A remote agent runs under a holder there, and its pane only attaches to
+/// it: the connection dropped, the pane says so and the agent runs on,
+/// started once.
+#[test]
+fn a_remote_agent_outlives_its_connection() {
+    e2e!();
+    let mut sb = Sandbox::new("rhold");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.clone()),
+        host: Some("box".into()),
+        dir: Some(dir),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    // The remote's runtime directory is the sandbox's (sshd's SetEnv).
+    let holder = cmux_core::hold::conn::endpoint(&sb.runtime.join("mirador").join("holders"), &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
+    sb.wait_for_screen(&pane, "the agent, through the attach", LONG, |s| s.contains("❯"));
+
+    // Drop the connection: its master goes, and every session over it.
+    let dropped = std::process::Command::new(sb.root.join("bin/ssh"))
+        .args(["-o", &format!("ControlPath={}/mirador/ssh/cm-%C", sb.runtime.display()), "-O", "exit", "box"])
+        .env("HOME", &sb.home)
+        .output()
+        .unwrap();
+    assert!(dropped.status.success(), "ssh -O exit: {}", String::from_utf8_lossy(&dropped.stderr));
+    sb.wait_for_screen(&pane, "the pane to say it lost the connection", LONG, |s| {
+        s.contains("[disconnected]") && s.contains("press any key to reconnect")
+    });
+
+    assert!(cmux_core::hold::conn::is_alive(&holder), "the holder went with the connection");
+    let pid = start["pid"].to_string();
+    let alive = std::process::Command::new("kill").args(["-0", &pid]).status().unwrap();
+    assert!(alive.success(), "the agent ({pid}) went with the connection");
+    assert_eq!(sb.events("start", &pane).len(), 1, "the agent started more than once");
+}
+
 /// A role from this computer's catalog runs on the remote: its model, its
 /// prompt and its settings — sent there, Mirador's hooks in them — and it
 /// reports: the hooks it runs reach this app through the forwarded
