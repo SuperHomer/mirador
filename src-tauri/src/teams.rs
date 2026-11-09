@@ -131,7 +131,8 @@ pub fn start_team_from(
             if let Err(e) = start_remote_agent(there, pane, run) {
                 // Nobody has seen the tab yet: it goes as if never opened,
                 // and with it what the members started before this one
-                // already reported. They run on there.
+                // already reported; they are ended there, as any closed
+                // remote agent is.
                 let killed = state.workspace.lock().unwrap().close_tab(&tab);
                 kill_panes(&app, &state, &killed);
                 return Err(format!("team `{team}`, member `{}`: {e}", seat.name));

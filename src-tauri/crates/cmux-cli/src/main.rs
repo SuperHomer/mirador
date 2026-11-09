@@ -250,8 +250,6 @@ enum Command {
         pane: String,
         #[arg(long)]
         command: String,
-        #[arg(long)]
-        cwd: Option<String>,
     },
     /// End a pane's holder and what it runs, waiting for it to go: what
     /// Mirador runs on a remote when an agent's pane there is closed.
@@ -1128,7 +1126,7 @@ fn run(cli: Cli) -> Result<(), String> {
             ssh,
             ssh_command,
         } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_command),
-        Command::HoldStart { pane, command, cwd } => return hold_start(&pane, &command, cwd.as_deref()),
+        Command::HoldStart { pane, command } => return hold_start(&pane, &command),
         Command::HoldEnd { pane } => return hold_end(&pane),
         Command::Attach { pane } => return attach(&pane),
     };
@@ -2147,14 +2145,14 @@ fn close_inherited_fds() {
 }
 
 #[cfg(unix)]
-fn hold_start(pane: &str, command: &str, cwd: Option<&str>) -> Result<(), String> {
+fn hold_start(pane: &str, command: &str) -> Result<(), String> {
     use cmux_core::hold::{self, server::Program};
     let mira = std::env::current_exe().map_err(|e| e.to_string())?;
     hold::launch(
         &mira,
         pane,
         &hold::socket_path(pane),
-        cwd,
+        None,
         80,
         24,
         &Program::Command(command.into()),
@@ -2178,7 +2176,7 @@ fn hold_end(_pane: &str) -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-fn hold_start(_pane: &str, _command: &str, _cwd: Option<&str>) -> Result<(), String> {
+fn hold_start(_pane: &str, _command: &str) -> Result<(), String> {
     Err("__hold-start is not available on Windows".into())
 }
 

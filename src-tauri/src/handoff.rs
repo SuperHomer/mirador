@@ -187,7 +187,13 @@ pub fn send(
     };
     cmux_core::handoff::can_receive(status(state)?.0, force).map_err(|e| format!("{to}: {e}"))?;
     if !state.pty.is_running(&pane) {
-        return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
+        // A remote agent's pane with no terminal is between attaches:
+        // reconnecting, waiting for a key, or done. The app cannot tell.
+        let remote = state.meta.lock().unwrap().get(&pane).filter(|m| m.remote_command.is_some()).and_then(|m| m.remote_host.clone());
+        return Err(match remote {
+            Some(host) => format!("{to} on {host} is not attached right now: send again once its pane is back"),
+            None => format!("{to}'s terminal has not started yet: show its tab once, then send again"),
+        });
     }
     wait_started(state, &pane).map_err(|e| format!("{to}: {e}"))?;
     // As it is once up, not as it was before the wait: still an agent, and
@@ -230,7 +236,15 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
     };
     agent(state)?;
     if !state.pty.is_running(pane) {
-        return Err(("not running", "its terminal has not started yet: show its tab once, then clear again".into()));
+        // As for a send: a remote agent's pane between attaches.
+        let remote = state.meta.lock().unwrap().get(pane).filter(|m| m.remote_command.is_some()).and_then(|m| m.remote_host.clone());
+        return Err((
+            "not running",
+            match remote {
+                Some(host) => format!("it is not attached on {host} right now: clear again once its pane is back"),
+                None => "its terminal has not started yet: show its tab once, then clear again".into(),
+            },
+        ));
     }
     wait_started(state, pane).map_err(|e| ("not running", e))?;
     // As it is once up, not as it was before the wait.

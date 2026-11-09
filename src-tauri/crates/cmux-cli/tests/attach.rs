@@ -130,6 +130,25 @@ fn a_started_session_is_attached_typed_into_and_ends_with_its_code() {
 }
 
 #[test]
+fn a_second_attach_takes_the_session_from_the_first() {
+    let runtime = Runtime::new("taken");
+    let started = Command::new(MIRA)
+        .args(["__hold-start", "--pane", "t3", "--command", "printf hi; cat"])
+        .env("XDG_RUNTIME_DIR", &runtime.0)
+        .output()
+        .unwrap();
+    assert!(started.status.success(), "{}", String::from_utf8_lossy(&started.stderr));
+    let mut first = attach(&runtime.0, "t3");
+    first.wait_for("hi");
+
+    let mut second = attach(&runtime.0, "t3");
+    second.wait_for("hi"); // the replay
+    assert_eq!(first.exit_code(), 1, "showed {:?}", first.seen);
+    first.wait_for("mira: session t3 was taken by another attach");
+    first.wait_for("tty: cooked");
+}
+
+#[test]
 fn a_started_session_is_ended_and_its_holder_goes() {
     let runtime = Runtime::new("end");
     let mira = |args: &[&str]| Command::new(MIRA).args(args).env("XDG_RUNTIME_DIR", &runtime.0).output().unwrap();

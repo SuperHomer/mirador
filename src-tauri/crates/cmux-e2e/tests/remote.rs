@@ -268,23 +268,8 @@ fn a_remote_agent_outlives_its_connection() {
     sb.place_remote_mira(VERSION);
     sb.launch();
     let first = sb.first_pane();
-    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
-    let pane = sb.call(Request::AgentNew {
-        role: None,
-        harness: None,
-        title: None,
-        task: Some("look around".into()),
-        target: None,
-        pane_id: Some(first.clone()),
-        host: Some("box".into()),
-        dir: Some(dir),
-    })["paneId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
-    // The remote's runtime directory is the sandbox's (sshd's SetEnv).
-    let holder = cmux_core::hold::conn::endpoint(&sb.runtime.join("mirador").join("holders"), &pane);
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holder = cmux_core::hold::conn::endpoint(&sb.remote_holders(), &pane);
     assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
     sb.wait_for_screen(&pane, "the agent, through the attach", LONG, |s| s.contains("❯"));
     let socket = start["socket"].as_str().unwrap_or_default().to_string();
@@ -302,9 +287,7 @@ fn a_remote_agent_outlives_its_connection() {
     });
 
     assert!(cmux_core::hold::conn::is_alive(&holder), "the holder went with the connection");
-    let pid = start["pid"].to_string();
-    let alive = std::process::Command::new("kill").args(["-0", &pid]).status().unwrap();
-    assert!(alive.success(), "the agent ({pid}) went with the connection");
+    assert!(running(&start["pid"]), "the agent ({}) went with the connection", start["pid"]);
 
     // Back by itself: a new ssh, the agent's screen from the holder's
     // replay, the app's socket forwarded again, and still one agent.
@@ -329,6 +312,54 @@ fn a_remote_agent_outlives_its_connection() {
     assert_eq!(sb.events("start", &pane).len(), 1, "the agent started more than once");
 }
 
+/// Starts a plain agent on `box` from `first`, and waits for its start
+/// event: its pane, and that event.
+fn start_remote_agent(sb: &Sandbox, first: &str) -> (String, serde_json::Value) {
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.to_string()),
+        host: Some("box".into()),
+        dir: Some(dir),
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    (pane, start)
+}
+
+/// Whether the process `pid` (a JSON number, from a start event) runs.
+fn running(pid: &serde_json::Value) -> bool {
+    let kill = std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status();
+    kill.unwrap().success()
+}
+
+/// *Quit and end all sessions* ends a remote agent too, and its holder,
+/// before the app goes.
+#[test]
+fn quitting_and_ending_all_sessions_ends_remote_agents() {
+    e2e!();
+    let mut sb = Sandbox::new("rquit");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holders = sb.remote_holders();
+    let holder = cmux_core::hold::conn::endpoint(&holders, &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder) && running(&start["pid"]), "the agent is not running there");
+
+    sb.quit(); // with end_sessions, as the palette's *Quit and end all sessions*
+    sb.wait_for("the holder there to go", LONG, || (!cmux_core::hold::conn::is_alive(&holder)).then_some(()));
+    sb.wait_for("the agent there to go", LONG, || (!running(&start["pid"])).then_some(()));
+    assert_eq!(cmux_core::hold::conn::live_panes(&holders), Vec::<String>::new(), "a holder is left for the sandbox to end");
+}
+
 /// Closing a remote agent's pane ends the agent there, and its holder:
 /// nothing would reach it again.
 #[test]
@@ -339,34 +370,15 @@ fn closing_a_remote_agents_pane_ends_it_there() {
     sb.place_remote_mira(VERSION);
     sb.launch();
     let first = sb.first_pane();
-    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
-    let pane = sb.call(Request::AgentNew {
-        role: None,
-        harness: None,
-        title: None,
-        task: Some("look around".into()),
-        target: None,
-        pane_id: Some(first.clone()),
-        host: Some("box".into()),
-        dir: Some(dir),
-    })["paneId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
-    let holders = sb.runtime.join("mirador").join("holders");
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holders = sb.remote_holders();
     let holder = cmux_core::hold::conn::endpoint(&holders, &pane);
     assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
-    let pid = start["pid"].to_string();
-    let alive = || {
-        let kill = std::process::Command::new("kill").args(["-0", &pid]).stderr(std::process::Stdio::null()).status();
-        kill.unwrap().success()
-    };
-    assert!(alive(), "the agent ({pid}) is not running");
+    assert!(running(&start["pid"]), "the agent ({}) is not running", start["pid"]);
 
     sb.call(Request::ClosePane { pane_id: pane.clone() });
     sb.wait_for("the holder there to go", LONG, || (!cmux_core::hold::conn::is_alive(&holder)).then_some(()));
-    sb.wait_for("the agent there to go", LONG, || (!alive()).then_some(()));
+    sb.wait_for("the agent there to go", LONG, || (!running(&start["pid"])).then_some(()));
     assert_eq!(cmux_core::hold::conn::live_panes(&holders), Vec::<String>::new(), "a holder is left for the sandbox to end");
 }
 
