@@ -504,12 +504,16 @@ fn a_team_runs_on_the_remote() {
         sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
     });
 
-    // A member whose agent ends there, its pane's ssh with it, reads as
-    // exited; restarted, it gets a fresh pane, started there again.
+    // A member whose agent ends there: its holder sees the exit and goes,
+    // the pane's attach ends with it (1: killed, no code), and the member
+    // reads as exited. Restarted, it gets a fresh pane, started there again.
     let pid = sb.events("start", &reviewer)[0]["pid"].as_u64().expect("the agent's pid");
     assert!(std::process::Command::new("kill").arg(pid.to_string()).status().unwrap().success());
     let state = |name: &str| sb.member(name).and_then(|m| m["state"].as_str().map(String::from));
     sb.wait_for("the reviewer to read as exited", LONG, || (state("reviewer").as_deref() == Some("exited")).then_some(()));
+    sb.wait_for_screen(&reviewer, "the reviewer's exit in its pane", LONG, |s| s.contains("[exit 1]"));
+    let old_holder = cmux_core::hold::conn::endpoint(&sb.remote_holders(), &reviewer);
+    sb.wait_for("the reviewer's holder to go", LONG, || (!cmux_core::hold::conn::is_alive(&old_holder)).then_some(()));
     let outcome = |done: &serde_json::Value, name: &str| -> Option<(String, String)> {
         let m = done["members"].as_array()?.iter().find(|m| m["name"] == name)?;
         Some((m["outcome"].as_str()?.to_string(), m["pane"].as_str()?.to_string()))

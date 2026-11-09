@@ -797,9 +797,10 @@ mira team start squad --host prod --dir /srv/app "add OAuth"                    
 directory there the agents work in. A team started there stays there:
 `mira team list` names its host, and `team add` starts the new member on
 that computer, in that directory. `team restart` starts a member whose
-agent ended there again, in a fresh pane. A member whose connection
-dropped, or whose pane has sat idle since Mirador was relaunched, reads as
-ended too, and is started afresh rather than on the conversation it had.
+agent ended there again, in a fresh pane. A member whose pane is
+reconnecting, or has sat idle since Mirador was relaunched, reads as
+ended too: it is started afresh rather than on the conversation it had,
+and its old agent, if it still runs there, is ended.
 What the remote needs:
 
 - **Linux on x86_64 or aarch64**, for now.
@@ -827,9 +828,8 @@ end all sessions*. A plain quit leaves it running, and after a restart a
 keypress in its pane reattaches. From any terminal on the remote,
 `~/.mirador/bin/mira-<version> attach <pane>` shows an agent (its id is
 in `mira agent list`; that `mira` is on no PATH there unless you put
-it there). On a systemd remote,
-run `loginctl enable-linger` there once, or your agents may end with
-your last login session there.
+it there). On a systemd remote, run `loginctl enable-linger` there once,
+or your agents may end with your last login session there.
 
 What lives where: roles and teams are this computer's, the ones the
 calling pane's directory sees, and a remote's own `.mirador` is not read.

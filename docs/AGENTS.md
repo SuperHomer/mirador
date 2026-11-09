@@ -1058,15 +1058,18 @@ The team keeps its host and directory with its tab, and `team list`
 names the host. `team add` starts the new member there, in that
 directory, as `team start` started the others, and refuses a role the
 remote cannot run before anything opens. `team restart` counts a member
-there as running while its pane's ssh does, since its agent is never
+there as running while its pane is attached, since its agent is never
 seen from here. It reopens one that exited or was closed: a fresh pane
 in the old one's place (else beside a teammate), started there again,
 with the old pane closed. Every member's files are sent before any pane
-opens. It is not rerun in its old pane: a remote pane runs again only
-on a keypress. So a member whose connection dropped, or whose pane has
-had no connection since a relaunch (idle until a keypress), reads as
-exited too, and a restart starts it afresh, not on the conversation it
-had.
+opens, and the members start once all their panes are in the tab. One
+that cannot start is named; its seat stays on its closed pane, so the
+next restart tries it again, and the others run on. It is not rerun in
+its old pane: a remote pane runs again only on a keypress. So a member
+whose pane is between reconnects, or idle since a relaunch, has no
+terminal here and reads as exited too, although its agent may still run
+there. A restart then starts it afresh, not on the conversation it had,
+and ends the old agent there with its old pane.
 
 Not done yet: Codex there; a role that keeps only some skills or
 plugins (listing them runs Claude Code here, which says nothing of the

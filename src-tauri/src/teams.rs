@@ -315,19 +315,27 @@ pub fn team_add_from(
         pane
     };
     match &there {
-        Some((there, dir)) => match send_remote_launch(there, &pane, dir, &launch, task.as_deref()) {
-            Ok(sent) => mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), there, sent),
-            Err(e) => {
+        Some((there, dir)) => {
+            // Marked before it starts, so its first hook finds its pane.
+            let started = send_remote_launch(there, &pane, dir, &launch, task.as_deref()).and_then(|sent| {
+                let run = sent.run.clone();
+                mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), there, sent);
+                start_remote_agent(there, &pane, &run)
+            });
+            if let Err(e) = started {
                 // Nobody has seen the pane yet: it goes as if never
                 // opened, and its seat with it.
-                let mut ws = state.workspace.lock().unwrap();
-                ws.close_pane(&pane);
-                if let Some(t) = ws.tab_mut(&tab).and_then(|t| t.team.as_mut()) {
-                    t.members.retain(|s| s.pane != pane);
-                }
+                let killed = {
+                    let mut ws = state.workspace.lock().unwrap();
+                    if let Some(t) = ws.tab_mut(&tab).and_then(|t| t.team.as_mut()) {
+                        t.members.retain(|s| s.pane != pane);
+                    }
+                    ws.close_pane(&pane)
+                };
+                kill_panes(&app, &state, &killed);
                 return Err(e);
             }
-        },
+        }
         None => mark_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), launch, cwd),
     }
     emit_workspace(&app);
@@ -361,8 +369,9 @@ pub struct Restarted {
 /// still in the tab. Not rerun in its old pane, because a remote pane runs
 /// again only on a keypress and nothing of ours types into it. Every
 /// member's files are sent before any pane opens, so a restart that cannot
-/// start opens nothing. A member whose connection dropped looks exited
-/// too, and gets a fresh agent rather than the conversation it had.
+/// start opens nothing. A member whose pane is reconnecting (no terminal
+/// here between its tries) reads as exited too: it gets a fresh agent,
+/// and its old one, still running there, is ended with its old pane.
 #[tauri::command(async)]
 pub fn team_restart(
     app: AppHandle,
@@ -516,7 +525,8 @@ fn restart_on_remote(
     }
 
     let mut killed = Vec::new();
-    for ((seat, pane), sent) in gone.into_iter().zip(panes).zip(sent) {
+    let mut runs = Vec::new();
+    for ((seat, pane), sent) in gone.iter().zip(&panes).zip(sent) {
         {
             let mut ws = state.workspace.lock().unwrap();
             let Some(t) = ws.tabs.iter().find(|t| t.id == tab) else {
@@ -535,14 +545,37 @@ fn restart_on_remote(
             {
                 s.pane = pane.clone();
             }
-            // An exited member's old pane, its ssh gone, makes way.
+            // The old pane makes way. A member only reconnecting still has
+            // its agent running there: kill_panes ends it, below.
             killed.extend(ws.close_pane(&seat.pane));
         }
+        runs.push(sent.run.clone());
         mark_remote_launched(state.meta.lock().unwrap().entry(pane.clone()).or_default(), &there, sent);
-        out.push(report(seat, &pane, "reopened"));
+    }
+    // Every member marked before any starts, so each first hook finds its
+    // pane. A member that cannot start loses its fresh pane, and its seat
+    // stays on that closed pane: the next restart reopens it, as for any
+    // member whose pane was closed. The others run on.
+    let mut failed = Vec::new();
+    for ((seat, pane), run) in gone.iter().zip(&panes).zip(&runs) {
+        match start_remote_agent(&there, pane, run) {
+            Ok(()) => out.push(report(seat, pane, "reopened")),
+            Err(e) => {
+                killed.extend(state.workspace.lock().unwrap().close_pane(pane));
+                failed.push(format!("member `{}`: {e}", seat.name));
+            }
+        }
     }
     crate::commands::kill_panes(app, state, &killed);
     emit_workspace(app);
+    if !failed.is_empty() {
+        let started: Vec<&str> = out.iter().filter(|r| r.outcome == "reopened").map(|r| r.name.as_str()).collect();
+        return Err(format!(
+            "{}; started again: {}",
+            failed.join("; "),
+            if started.is_empty() { "none".to_string() } else { started.join(", ") }
+        ));
+    }
     Ok(out)
 }
 
