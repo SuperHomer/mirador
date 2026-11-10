@@ -218,6 +218,12 @@ pub(super) fn set_config_value_in(path: &Path, key: &str, value: Option<Value>) 
         }
     }
     let mut obj = read_object(path)?;
+    // Nothing to change, nothing written: a reset of a key the file does
+    // not hold (a double-click on an edge never dragged) or a value it
+    // already has would only reformat the person's file.
+    if obj.get(key) == value.as_ref() {
+        return Ok(());
+    }
     match value {
         Some(v) => {
             obj.insert(key.into(), v);
@@ -350,6 +356,25 @@ mod tests {
         fields.sort();
         keys.sort();
         assert_eq!(fields, keys);
+    }
+
+    /// A double-click on an edge never dragged resets a width the file does
+    /// not hold: the person's file is left byte for byte, not reformatted.
+    #[test]
+    fn a_change_that_changes_nothing_leaves_the_file_alone() {
+        let path = temp_config("noop");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mine = "{\"fontSize\":14,\n  \"shell\" : \"pwsh\"}";
+        std::fs::write(&path, mine).unwrap();
+
+        set_config_value_in(&path, "sidebarWidth", None).unwrap();
+        set_config_value_in(&path, "fontSize", Some(json!(14))).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine);
+
+        // Removing a key the file has still writes.
+        set_config_value_in(&path, "fontSize", None).unwrap();
+        assert_eq!(read(&path), json!({ "shell": "pwsh" }));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
     #[test]
