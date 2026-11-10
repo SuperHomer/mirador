@@ -4,6 +4,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
+use cmux_protocol::ResolvedConfig;
 use notify::{RecursiveMode, Watcher};
 use tauri::{Emitter, Manager};
 
@@ -42,33 +43,46 @@ pub fn spawn(handle: tauri::AppHandle) {
             // For the settings pane, on every change: config-changed comes
             // only when the file parses and resolves differently.
             let _ = handle.emit("config-file-changed", ());
-
-            let (cfg, err) = cmux_core::config::load();
-            if let Some(err) = err {
+            if let Err(err) = reload(&handle) {
                 eprintln!("mirador: config error, keeping previous config: {err}");
-                continue;
-            }
-            let resolved = cmux_core::config::resolve(&cfg);
-            let state = handle.state::<AppState>();
-            let (changed, pages_changed) = {
-                let mut current = state.config.lock().unwrap();
-                if *current != resolved {
-                    let pages_changed = current.agents_per_tab != resolved.agents_per_tab;
-                    *current = resolved.clone();
-                    (true, pages_changed)
-                } else {
-                    (false, false)
-                }
-            };
-            if changed {
-                // A uiZoom typed in the Settings pane or the file.
-                crate::settings::apply_ui_zoom(&handle, resolved.ui_zoom);
-                let _ = handle.emit("config-changed", resolved);
-            }
-            // The wall's pages are in the snapshot, cut to agentsPerTab.
-            if pages_changed {
-                crate::commands::broadcast_workspace(&handle);
             }
         }
     });
+}
+
+/// Makes the config files the app's config, and says so: the watcher's
+/// pass after an edit, and a zoom's right after its write, whose next step
+/// must start from this one (the watcher would come 300 ms later, too late
+/// for a key held down). The config in force afterwards, or the file's
+/// error, with the previous config kept.
+///
+/// One path for both, so neither misses what the other does: a changed
+/// `agentsPerTab` re-cuts the wall's pages whichever of them sees it
+/// first. And the file is loaded under the config lock, compared and
+/// stored there, and announced before the lock goes. Loaded before it, a
+/// pass that read the file just ahead of a zoom's write could store and
+/// announce the older config after the zoom, until the next pass.
+pub fn reload(handle: &tauri::AppHandle) -> Result<ResolvedConfig, String> {
+    let state = handle.state::<AppState>();
+    let (resolved, pages_changed) = {
+        let mut current = state.config.lock().unwrap();
+        let (cfg, err) = cmux_core::config::load();
+        if let Some(err) = err {
+            return Err(err);
+        }
+        let resolved = cmux_core::config::resolve(&cfg);
+        let mut pages_changed = false;
+        if *current != resolved {
+            pages_changed = current.agents_per_tab != resolved.agents_per_tab;
+            *current = resolved.clone();
+            let _ = handle.emit("config-changed", resolved.clone());
+        }
+        (resolved, pages_changed)
+    };
+    // The wall's pages are in the snapshot, cut to agentsPerTab. After the
+    // lock: building the snapshot reads the config.
+    if pages_changed {
+        crate::commands::broadcast_workspace(handle);
+    }
+    Ok(resolved)
 }

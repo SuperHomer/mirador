@@ -23,7 +23,6 @@ import {
   installUpdate,
   quitEndingSessions,
   zoomTerminals,
-  zoomWindow,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
@@ -247,9 +246,8 @@ export const actions: ActionDef[] = [
       if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
     },
   },
-  // Zoom: the terminals' text (fontSize) or the whole window (uiZoom),
-  // both kept in mirador.json. Ctrl + wheel does the same by where the
-  // pointer is (useZoomWheel).
+  // Zoom: the terminals' text, kept in mirador.json as fontSize. Ctrl +
+  // wheel over a terminal does the same (useZoomWheel).
   {
     id: "terminal_zoom_in",
     title: "View: Zoom Terminals In",
@@ -267,24 +265,6 @@ export const actions: ActionDef[] = [
     title: "View: Reset Terminal Zoom",
     group: "view",
     run: () => void zoomTerminals(0).catch(zoomFailed),
-  },
-  {
-    id: "window_zoom_in",
-    title: "View: Zoom Window In",
-    group: "view",
-    run: () => void zoomWindow(1).catch(zoomFailed),
-  },
-  {
-    id: "window_zoom_out",
-    title: "View: Zoom Window Out",
-    group: "view",
-    run: () => void zoomWindow(-1).catch(zoomFailed),
-  },
-  {
-    id: "window_zoom_reset",
-    title: "View: Reset Window Zoom",
-    group: "view",
-    run: () => void zoomWindow(0).catch(zoomFailed),
   },
   {
     id: "board_arrange",

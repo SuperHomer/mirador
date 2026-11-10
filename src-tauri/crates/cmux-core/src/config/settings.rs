@@ -7,7 +7,7 @@ use std::path::Path;
 use cmux_protocol::{ChoiceOption, SettingKind, SettingRow};
 use serde_json::{json, Value};
 
-use super::zoom::{ui_zoom_range, FONT_SIZE_MAX, FONT_SIZE_MIN};
+use super::zoom::{FONT_SIZE_MAX, FONT_SIZE_MIN};
 use super::{config_path, default_font_family, Computer, Config, FOCUS_RAIL_WIDTH, SIDEBAR_WIDTH, SIDEBAR_WIDTH_DEFAULT};
 
 /// One mirador.json key, as the Settings pane describes it.
@@ -57,8 +57,6 @@ pub fn settings() -> Vec<Setting> {
         setting("fontFamily", "Appearance", Text, default_font_family(), "The terminal font, as a CSS font list."),
         setting("fontSize", "Appearance", Number { min: f64::from(FONT_SIZE_MIN), max: f64::from(FONT_SIZE_MAX) }, "13",
             "The terminal font size, in points. Zooming the terminals (View: Zoom Terminals In / Out, or Ctrl + wheel over one) sets it; resetting their zoom clears it."),
-        setting("uiZoom", "Appearance", Number { min: ui_zoom_range().0, max: ui_zoom_range().1 }, "1",
-            "The whole window's zoom, 1 being 100 %. Zooming the window (View: Zoom Window In / Out, or Ctrl + wheel outside a terminal) sets it; resetting its zoom clears it."),
         setting("colors", "Appearance", ReadOnly, "the theme's",
             "Colors that override the theme's: background, foreground, cursor, selection, palette."),
         setting("sidebarWidth", "Appearance", pixels(&SIDEBAR_WIDTH), &SIDEBAR_WIDTH_DEFAULT.to_string(),

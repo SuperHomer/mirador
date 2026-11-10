@@ -89,10 +89,6 @@ pub struct Config {
     /// large) or "bottom" (a row of tabs under it). Anything else is
     /// "right". A string for the same reason as `agent_click`.
     pub focus_rail_position: Option<String>,
-    /// The whole window's zoom, 1 being 100 %: what the window-zoom keys
-    /// and Ctrl + wheel outside a terminal write (`zoom::zoom_window`).
-    /// Kept to `zoom::UI_ZOOM_LEVELS`' ends; unset, 1.
-    pub ui_zoom: Option<f64>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
@@ -319,8 +315,7 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+shift+o", "toggle_board"),
     ("mod+0", "board_fit"),
     // The terminals' zoom, as every Mac app's text zoom. Cmd+0, its usual
-    // reset, is the board's; the reset is in the palette. The window's
-    // zoom has no keys: Cmd+Option turns = and - into other characters.
+    // reset, is the board's; the reset is in the palette.
     ("mod+=", "terminal_zoom_in"),
     ("mod+plus", "terminal_zoom_in"),
     ("mod+shift+plus", "terminal_zoom_in"),
@@ -342,9 +337,7 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
 /// Zoom is the exception, on Windows Terminal's keys: plain Ctrl with the
 /// equals, plus, minus and zero keys zooms the terminals (plus being the
 /// numpad's, or Shift and whichever key makes it on the layout). They type
-/// nothing a shell needs. The window's zoom adds Alt, but only on plus and
-/// minus, which AltGr never turns into themselves; AltGr+0 is a brace on
-/// a German keyboard, so the window's reset is in the palette only.
+/// nothing a shell needs.
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+shift+t", "new_tab"),
@@ -381,10 +374,6 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+shift+plus", "terminal_zoom_in"),
     ("ctrl+minus", "terminal_zoom_out"),
     ("ctrl+0", "terminal_zoom_reset"),
-    ("ctrl+alt+=", "window_zoom_in"),
-    ("ctrl+alt+plus", "window_zoom_in"),
-    ("ctrl+alt+shift+plus", "window_zoom_in"),
-    ("ctrl+alt+minus", "window_zoom_out"),
 ];
 
 pub fn default_keybindings() -> HashMap<String, String> {
@@ -626,12 +615,6 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             Some("top") => RailPosition::Top,
             Some("bottom") => RailPosition::Bottom,
             _ => RailPosition::Right,
-        },
-        ui_zoom: {
-            let (lowest, highest) = zoom::ui_zoom_range();
-            cfg.ui_zoom
-                .filter(|z| z.is_finite())
-                .map_or(zoom::UI_ZOOM_DEFAULT, |z| z.clamp(lowest, highest))
         },
     }
 }
@@ -988,15 +971,6 @@ mod tests {
         assert_eq!(resolved.colors.background, "#000000");
         assert_eq!(resolved.keybindings["mod+t"], "split_right");
         assert!(!resolved.keybindings.contains_key("mod+w"));
-    }
-
-    #[test]
-    fn the_window_zoom_is_1_unless_set_and_kept_to_its_range() {
-        let ui_zoom = |json: &str| resolve(&serde_json::from_str(json).unwrap()).ui_zoom;
-        assert_eq!(ui_zoom("{}"), 1.0);
-        assert_eq!(ui_zoom(r#"{ "uiZoom": 1.25 }"#), 1.25);
-        assert_eq!(ui_zoom(r#"{ "uiZoom": 0.1 }"#), 0.5);
-        assert_eq!(ui_zoom(r#"{ "uiZoom": 9 }"#), 3.0);
     }
 
     #[test]

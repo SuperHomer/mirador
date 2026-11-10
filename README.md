@@ -317,24 +317,21 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
 | ⌘= / ⌘- | Ctrl+= or Ctrl+Plus / Ctrl+Minus | zoom the terminals in / out |
 | — | Ctrl+0 | reset the terminals' zoom |
-| — | Ctrl+Alt+= or Ctrl+Alt+Plus / Ctrl+Alt+Minus | zoom the whole window in / out |
 
 All rebindable in `mirador.json`, where `+` and `-` are spelled `plus` and
-`minus` (`"ctrl+plus"`). The zooms are Windows Terminal's keys: plain Ctrl
+`minus` (`"ctrl+plus"`). The zoom keys are Windows Terminal's: plain Ctrl
 with them types nothing a shell needs. Plus is the numpad's, or Shift and
 whichever key makes `+` on your layout.
 
 ### Zoom
 
-Ctrl + wheel zooms what is under the pointer: over a terminal, every
-terminal's text; anywhere else, the whole window — the sidebar, the wall,
-every pane but a browser page, which keeps its own zoom. On the board it
-zooms the board, as before. Both zooms are kept in `mirador.json`, the
-terminals' as `fontSize` (6–72, a point a step) and the window's as
-`uiZoom` (0.5–3, a browser's steps), so they outlive a restart and show
-in *App: Settings*. The palette has every zoom and both resets (*View:
-Reset Terminal Zoom*, *View: Reset Window Zoom*); the window's reset has
-no key, because AltGr+0 types `}` on a German keyboard.
+The zoom keys, and Ctrl + wheel over a terminal, zoom every terminal's
+text a point at a step. The size is kept in `mirador.json` as `fontSize`
+(6–72), so it outlives a restart and shows in *App: Settings*; *View:
+Reset Terminal Zoom* (Ctrl+0, or the palette on macOS, where ⌘0 fits the
+board) removes it again. A program in the terminal that reads the mouse,
+such as tmux or vim with the mouse on, gets Ctrl + wheel itself; the keys
+still zoom there. On the board, Ctrl + wheel zooms the board, as before.
 
 On macOS, Option types the character your layout puts there — `[ ] { } |`
 on Swiss, German, French and other non-US layouts — rather than acting as

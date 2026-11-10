@@ -153,9 +153,13 @@ export function fitTerminal(paneId: string) {
  */
 export function terminalWithFocus(): Terminal | undefined {
   const active = document.activeElement;
-  if (!active) return undefined;
+  return active ? terminalAt(active) : undefined;
+}
+
+/** The terminal drawn where `el` is, wherever that is: its pane or a wall tile. */
+export function terminalAt(el: Element): Terminal | undefined {
   for (const { term } of terminals.values()) {
-    if (term.element?.contains(active)) return term;
+    if (term.element?.contains(el)) return term;
   }
   return undefined;
 }
