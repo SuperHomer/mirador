@@ -27,7 +27,7 @@ import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
-import { getTerminal, paneWithFocus, terminalWithFocus } from "../terminal/registry";
+import { getTerminal, isLent, paneWithFocus, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
 import { opensInTab } from "../state/configStore";
 
@@ -51,14 +51,28 @@ function focusedPane(): string | undefined {
 
 /**
  * The pane a pane action — close, split, zoom, show activity — acts on:
- * the one whose terminal holds the keyboard, as copy and paste look first,
- * else the tab's focused pane. On the agent wall the two differ: clicking
- * into an agent or picking one for Focus leaves the tab's focused pane
- * where it was (`mark_pane_read`), so it can be another agent than the
- * one being typed into.
+ * the tab's focused pane, except on the agent wall. There, clicking into
+ * an agent or picking one for Focus leaves the tab's focused pane where it
+ * was (`mark_pane_read`), so it can be another agent than the one being
+ * typed into: the one whose terminal the wall borrowed and that holds the
+ * keyboard.
+ *
+ * Only there. Everywhere else the keyboard says nothing: only terminals
+ * take DOM focus, so a diff, graph or browser pane the tab focused leaves
+ * the last terminal holding it, and whether a tab switched away from
+ * blurs its terminal is up to the engine (WebView2 does). Asked there,
+ * the DOM can name a pane that is not the one shown as focused, or one in
+ * a tab nobody is looking at.
  */
 function actionPane(): string | undefined {
-  return paneWithFocus() ?? focusedPane();
+  const tab = activeTab(useWorkspaceStore.getState().snapshot);
+  const typed = paneWithFocus();
+  const onWall =
+    !!tab?.wall &&
+    !!typed &&
+    isLent(typed) &&
+    tab.wallPages.some((page) => page.includes(typed));
+  return onWall ? typed : tab?.focusedPane;
 }
 
 /** Moves `offset` tabs along the sidebar's order, wrapping around. */
