@@ -32,8 +32,37 @@ export function createTerminal(config: ResolvedConfig): Terminal {
       void openUrl(uri);
     }),
   );
+  // Hyperlinks a program prints (OSC 8: text with an address behind it,
+  // which is how Claude Code prints its links) open the same way. With no
+  // handler, xterm asked on every click with window.confirm ("This link
+  // could potentially be dangerous") and opened the page in a webview. The
+  // text need not be the address, so the address shows on hover. xterm
+  // passes only http(s) addresses (allowNonHttpProtocols is off); the check
+  // here keeps that true whatever its default becomes.
+  term.options.linkHandler = {
+    activate: (event, uri) => {
+      event.preventDefault();
+      if (isWebUrl(uri)) void openUrl(uri);
+    },
+    hover: (_event, uri) => {
+      if (term.element) term.element.title = uri;
+    },
+    leave: () => {
+      term.element?.removeAttribute("title");
+    },
+  };
 
   return term;
+}
+
+/** An address a click may open: http or https, as everywhere in the app. */
+function isWebUrl(uri: string): boolean {
+  try {
+    const { protocol } = new URL(uri);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /** Applies a hot-reloaded config to a live terminal. */
