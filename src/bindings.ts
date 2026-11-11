@@ -753,7 +753,13 @@ export interface ResolvedConfig {
   /** The width of Focus's rail in pixels, or null for the default, about
    *  a third of the wall. */
   focusRailWidth: number | null;
+  focusRailPosition: RailPosition;
 }
+
+/** Where Focus shows the wall's other agents and tools: the rail on the
+ *  right, tabs in the header of the one shown large, or a row of tabs
+ *  under it (`cmux_protocol::RailPosition`). */
+export type RailPosition = "right" | "top" | "bottom";
 
 /** A sidebar agent's click: its tab's wall on it, or its pane alone. */
 export type AgentClick = "wall" | "pane";

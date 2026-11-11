@@ -366,6 +366,15 @@ same two keys, in pixels, are in *App: Settings* to type exactly:
 range is brought into it. However wide the column is set, a narrow window
 keeps the agent shown large at least 240 pixels wide.
 
+The column can go elsewhere: the wall toolbar's **Rail** control, in Focus,
+switches between **Right** (the column, as above), **Top** — the other
+agents and tools as tabs in the header of the one shown large, beside its
+name — and **Bottom**, a centered row of tabs under it, the one shown
+large among them. A tab is a status mark, a name and how long it has been
+in that state; clicking it shows that agent large. The choice is
+`focusRailPosition` (`"right"`, `"top"` or `"bottom"`), also in
+*App: Settings*.
+
 ## Where the editor, diffs and the graph open
 
 Opened from the app — the palette, a frame's + menu, the wall — the roles,

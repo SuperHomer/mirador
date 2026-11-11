@@ -1965,6 +1965,19 @@ pub struct ResolvedConfig {
     /// The width of Focus's rail in pixels, or `None` for the layout's
     /// default, about a third of the wall.
     pub focus_rail_width: Option<u32>,
+    pub focus_rail_position: RailPosition,
+}
+
+/// Where Focus shows the wall's agents and tools other than the one it
+/// shows large: down a rail on the right, as tabs in that one's header,
+/// or as a row of tabs under it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RailPosition {
+    #[default]
+    Right,
+    Top,
+    Bottom,
 }
 
 /// Where a pane the app opens goes: in a new tab, or split beside the

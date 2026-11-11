@@ -11,7 +11,7 @@ pub mod wezterm;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig, UiColors};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, RailPosition, ResolvedColors, ResolvedConfig, UiColors};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -83,6 +83,11 @@ pub struct Config {
     /// in pixels: [`FOCUS_RAIL_WIDTH`], as `sidebar_width`. Unset → about
     /// a third of the wall, which a fixed width cannot say.
     pub focus_rail_width: Option<u32>,
+    /// Where Focus shows the wall's other agents and tools: "right" (the
+    /// rail, the default), "top" (tabs in the header of the one shown
+    /// large) or "bottom" (a row of tabs under it). Anything else is
+    /// "right". A string for the same reason as `agent_click`.
+    pub focus_rail_position: Option<String>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
@@ -585,6 +590,11 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         focus_rail_width: cfg
             .focus_rail_width
             .map(|w| w.clamp(*FOCUS_RAIL_WIDTH.start(), *FOCUS_RAIL_WIDTH.end())),
+        focus_rail_position: match cfg.focus_rail_position.as_deref() {
+            Some("top") => RailPosition::Top,
+            Some("bottom") => RailPosition::Bottom,
+            _ => RailPosition::Right,
+        },
     }
 }
 
@@ -848,6 +858,19 @@ mod tests {
         assert_eq!(resolved(r#"{ "focusRailWidth": 150 }"#).focus_rail_width, Some(150));
         assert_eq!(resolved(r#"{ "focusRailWidth": 1 }"#).focus_rail_width, Some(150));
         assert_eq!(resolved(r#"{ "focusRailWidth": 99999 }"#).focus_rail_width, Some(1600));
+    }
+
+    #[test]
+    fn the_rail_is_on_the_right_unless_set_to_top_or_bottom() {
+        let position = |json: &str| resolve(&serde_json::from_str(json).unwrap()).focus_rail_position;
+        assert_eq!(position("{}"), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "right" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "top" }"#), RailPosition::Top);
+        assert_eq!(position(r#"{ "focusRailPosition": "bottom" }"#), RailPosition::Bottom);
+        // A value it does not know is the default, not a failed file.
+        assert_eq!(position(r#"{ "focusRailPosition": "off" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "left" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "Top" }"#), RailPosition::Right);
     }
 
     #[test]
