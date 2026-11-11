@@ -6,6 +6,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 
 use crate::osc::StreamScanner;
 
+pub mod conpty;
 pub mod shell;
 
 pub type PaneId = String;
@@ -165,6 +166,7 @@ impl PtyManager {
         if self.inner.panes.lock().unwrap().contains_key(id) {
             return Err(format!("pane {id} already running"));
         }
+        conpty::prepare();
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {

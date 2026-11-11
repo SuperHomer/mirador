@@ -8,6 +8,7 @@ use cmux_protocol::{ChoiceOption, SettingKind, SettingRow};
 use serde_json::{json, Value};
 
 use super::{config_path, default_font_family, Computer, Config, FOCUS_RAIL_WIDTH, SIDEBAR_WIDTH, SIDEBAR_WIDTH_DEFAULT};
+use crate::pty::conpty;
 
 /// One mirador.json key, as the Settings pane describes it.
 pub struct Setting {
@@ -44,6 +45,55 @@ fn theme_sources() -> Vec<&'static str> {
     sources
 }
 
+/// What conpty takes: auto, system, and on Windows each folder on PATH
+/// that holds a conpty.dll, the ConPTYs this machine already has. A folder
+/// elsewhere is taken too ([`accepts`]), but only typed into the file.
+fn conpty_options() -> Vec<ChoiceOption> {
+    let mut options = vec![option(json!("auto")), option(json!("system"))];
+    if cfg!(windows) {
+        if let Some(path) = std::env::var_os("PATH") {
+            options.extend(conpty::on_path(&path).iter().map(|dir| option(json!(dir.to_string_lossy()))));
+        }
+    }
+    options
+}
+
+/// conpty's options as the pane offers them: what auto loads here, which
+/// folders hold a ConPTY that works (a conpty.dll without the
+/// OpenConsole.exe it starts does not), and the file's own folder when it
+/// is not one on PATH, so it shows as itself.
+fn conpty_view_options(mut options: Vec<ChoiceOption>, value: Option<&Value>) -> Vec<ChoiceOption> {
+    let first_on_path =
+        options.iter().filter_map(|o| o.value.as_str()).find(|v| *v != "auto" && *v != "system").map(String::from);
+    if let Some(v) = value.and_then(Value::as_str) {
+        let named = matches!(conpty::parse(Some(v)), Ok(conpty::Conpty::Auto | conpty::Conpty::System));
+        if !named && !options.iter().any(|o| o.value == *v) {
+            options.push(option(json!(v)));
+        }
+    }
+    if !cfg!(windows) {
+        return options;
+    }
+    options
+        .into_iter()
+        .map(|o| {
+            let (available, note) = match o.value.as_str() {
+                Some("auto") => match &first_on_path {
+                    Some(dir) => (true, Some(format!("Loads the conpty.dll in {dir}"))),
+                    None => (true, Some("No conpty.dll on PATH: Windows' own".to_string())),
+                },
+                Some("system") => (true, Some("Windows' own ConPTY".to_string())),
+                Some(dir) => match conpty::folder_problem(Path::new(dir)) {
+                    None => (true, None),
+                    Some(problem) => (false, Some(problem.to_string())),
+                },
+                None => (true, None),
+            };
+            ChoiceOption { available, note, ..o }
+        })
+        .collect()
+}
+
 /// Every key of [`Config`], in the order the Settings pane shows them.
 pub fn settings() -> Vec<Setting> {
     use SettingKind::{Bool, Number, ReadOnly, Text};
@@ -68,6 +118,8 @@ pub fn settings() -> Vec<Setting> {
             "Where a new tab's first pane starts; splits inherit their pane's directory."),
         setting("persistSessions", "Terminal", Bool, "true",
             "Keep terminals running when Mirador quits, and reattach to them next launch. Applies to new panes."),
+        setting("conpty", "Terminal", SettingKind::Choice { options: conpty_options() }, "auto",
+            "Windows only: the ConPTY panes run under. auto loads the first conpty.dll Windows finds, one on PATH included; system is Windows' own; or a folder with conpty.dll and OpenConsole.exe. Applies to new panes; with persistSessions off, after a restart."),
         setting("agentsPerTab", "Agents", SettingKind::Choice { options: vec![option(json!(4)), option(json!(6)), option(json!(9))] }, "4",
             "How many agents a page of the wall's Grid layout holds."),
         setting("focusRailWidth", "Agents", pixels(&FOCUS_RAIL_WIDTH), "a third of the wall",
@@ -94,6 +146,12 @@ pub fn settings() -> Vec<Setting> {
 /// (a fraction in `scrollback` is a number in range, and not a `u32`).
 fn accepts(setting: &Setting, value: &Value) -> bool {
     let kind_allows = match &setting.kind {
+        // Only what conpty::parse takes: auto, system, or a folder holding a
+        // ConPTY, wherever it is. Not by being offered: a folder on PATH is
+        // offered for its conpty.dll alone, and may lack the OpenConsole.exe.
+        SettingKind::Choice { .. } if setting.key == "conpty" => {
+            value.as_str().is_some_and(|v| conpty::parse(Some(v)).is_ok())
+        }
         SettingKind::Choice { options } => options.iter().any(|o| o.value == *value),
         SettingKind::Bool => value.is_boolean(),
         SettingKind::Number { min, max } => value.as_f64().is_some_and(|n| n >= *min && n <= *max),
@@ -136,6 +194,9 @@ fn settings_view_in(path: &Path, ghostty: &Path, wezterm_colors: Option<&Path>) 
             let kind = match s.kind.clone() {
                 SettingKind::Choice { options } if s.key == "themeSource" => {
                     SettingKind::Choice { options: theme_options(options, &obj, ghostty, wezterm_colors) }
+                }
+                SettingKind::Choice { options } if s.key == "conpty" => {
+                    SettingKind::Choice { options: conpty_view_options(options, value.as_ref()) }
                 }
                 kind => kind,
             };
@@ -539,9 +600,9 @@ mod tests {
         std::fs::copy(&scheme, colors.join("Light.toml")).unwrap();
         assert_eq!(choice_of(&theme_choices(&path, &ghostty), "wezterm"), (true, None));
 
-        // Other choices carry no notes.
+        // Other choices carry no notes, but conpty's, which has its own test.
         let rows = settings_view_in(&path, &ghostty, Some(&wezterm_colors(&path))).unwrap();
-        for row in rows.iter().filter(|r| r.key != "themeSource") {
+        for row in rows.iter().filter(|r| r.key != "themeSource" && r.key != "conpty") {
             if let SettingKind::Choice { options } = &row.kind {
                 assert!(options.iter().all(|o| o.available && o.note.is_none()), "{}", row.key);
             }
@@ -565,6 +626,85 @@ mod tests {
         set_config_value_in(&path, "themeSource", Some(json!("wezterm"))).unwrap();
         set_config_value_in(&path, "themeSource", Some(json!("none"))).unwrap();
         assert_eq!(read(&path), json!({ "themeSource": "none" }));
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    /// A folder on PATH is offered for its conpty.dll alone. Offered is not
+    /// taken: without its OpenConsole.exe it is refused, and shown so.
+    #[test]
+    fn an_offered_conpty_folder_without_its_host_is_refused_all_the_same() {
+        let dir = std::env::temp_dir().join(format!("mirador-settings-offered-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(conpty::DLL), b"").unwrap();
+        let named = json!(dir.to_str().unwrap());
+        let offered = Setting {
+            key: "conpty",
+            group: "Terminal",
+            kind: SettingKind::Choice { options: vec![option(json!("auto")), option(json!("system")), option(named.clone())] },
+            default: "auto".into(),
+            description: "",
+        };
+        assert!(!accepts(&offered, &named), "a folder without OpenConsole.exe is taken for being offered");
+        if cfg!(windows) {
+            let SettingKind::Choice { options } = offered.kind.clone() else { unreachable!() };
+            let shown = conpty_view_options(options, Some(&named));
+            let own = shown.iter().find(|o| o.value == named).unwrap();
+            assert!(!own.available);
+            assert_eq!(own.note.as_deref(), Some("no OpenConsole.exe beside its conpty.dll"));
+        }
+        std::fs::write(dir.join(conpty::HOST), b"").unwrap();
+        assert!(accepts(&offered, &named), "with both files it is a ConPTY");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn conpty_takes_auto_system_or_a_folder_with_a_conpty_in_it() {
+        let path = temp_config("conpty");
+        let dir = path.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "{}").unwrap();
+        let row = |path: &Path| {
+            let rows = settings_view_in(path, &no_ghostty(path), Some(&wezterm_colors(path))).unwrap();
+            rows.into_iter().find(|r| r.key == "conpty").unwrap()
+        };
+        let options = |row: &SettingRow| match &row.kind {
+            SettingKind::Choice { options } => options.clone(),
+            other => panic!("conpty is a choice, not {other:?}"),
+        };
+
+        // A folder with a ConPTY in it, on no PATH: auto, system and it are taken.
+        let folder = dir.join("openconsole");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(conpty::DLL), b"").unwrap();
+        std::fs::write(folder.join(conpty::HOST), b"").unwrap();
+        let named = json!(folder.to_str().unwrap());
+        for value in [json!("auto"), json!("system"), named.clone()] {
+            set_config_value_in(&path, "conpty", Some(value.clone())).unwrap();
+            assert_eq!(read(&path)["conpty"], value);
+        }
+        // The file's folder shows as itself, set, valid and available.
+        let shown = row(&path);
+        assert!(shown.set && shown.valid);
+        let own = options(&shown).into_iter().find(|o| o.value == named).expect("the file's folder is offered");
+        assert!(own.available);
+        assert!(options(&shown).iter().any(|o| o.value == "auto") && options(&shown).iter().any(|o| o.value == "system"));
+
+        // Without the OpenConsole.exe it starts, the folder is no ConPTY:
+        // refused, and so are a bare name and a number.
+        std::fs::remove_file(folder.join(conpty::HOST)).unwrap();
+        for value in [named.clone(), json!("WezTerm"), json!(1)] {
+            assert!(set_config_value_in(&path, "conpty", Some(value.clone())).is_err(), "{value}");
+        }
+        assert_eq!(read(&path)["conpty"], named, "the file is left alone");
+        // A file that still names it shows it invalid, and on Windows why.
+        let shown = row(&path);
+        assert!(shown.set && !shown.valid);
+        if cfg!(windows) {
+            let own = options(&shown).into_iter().find(|o| o.value == named).unwrap();
+            assert!(!own.available);
+            assert_eq!(own.note.as_deref(), Some("no OpenConsole.exe beside its conpty.dll"));
+        }
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

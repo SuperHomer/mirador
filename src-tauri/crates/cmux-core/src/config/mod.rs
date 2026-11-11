@@ -59,6 +59,11 @@ pub struct Config {
     /// the next launch. On unless set to `false`; read when a pane opens,
     /// so changing it applies to new panes.
     pub persist_sessions: Option<bool>,
+    /// Windows only: the ConPTY panes run under, "auto" (the default: the
+    /// first conpty.dll Windows finds, PATH included, else the system's),
+    /// "system", or the absolute path of a folder holding conpty.dll and
+    /// OpenConsole.exe. See `pty::conpty`.
+    pub conpty: Option<String>,
     /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
     /// Anything else is 4.
     pub agents_per_tab: Option<u32>,
