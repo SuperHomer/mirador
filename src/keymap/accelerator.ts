@@ -37,6 +37,8 @@ const KEY_NAMES: Record<string, { mac: string; pc: string }> = {
   enter: { mac: "↩", pc: "Enter" },
   escape: { mac: "⎋", pc: "Esc" },
   backspace: { mac: "⌫", pc: "Backspace" },
+  plus: { mac: "+", pc: "Plus" },
+  minus: { mac: "-", pc: "Minus" },
 };
 
 /**

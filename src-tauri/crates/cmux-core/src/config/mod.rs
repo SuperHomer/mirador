@@ -5,6 +5,7 @@
 
 pub mod ghostty;
 pub mod settings;
+pub mod zoom;
 pub mod ui;
 pub mod wezterm;
 
@@ -313,6 +314,12 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+9", "tab_9"),
     ("mod+shift+o", "toggle_board"),
     ("mod+0", "board_fit"),
+    // The terminals' zoom, as every Mac app's text zoom. Cmd+0, its usual
+    // reset, is the board's; the reset is in the palette.
+    ("mod+=", "terminal_zoom_in"),
+    ("mod+plus", "terminal_zoom_in"),
+    ("mod+shift+plus", "terminal_zoom_in"),
+    ("mod+minus", "terminal_zoom_out"),
 ];
 
 /// Windows/Linux: plain Ctrl belongs to the program in the pane — Ctrl+C
@@ -326,6 +333,11 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
 /// and would steal character input from anyone typing @ or [ with it. The
 /// pairs macOS spells with Shift therefore take a second letter here
 /// (split down is Ctrl+Shift+E) rather than a second modifier.
+///
+/// Zoom is the exception, on Windows Terminal's keys: plain Ctrl with the
+/// equals, plus, minus and zero keys zooms the terminals (plus being the
+/// numpad's, or Shift and whichever key makes it on the layout). They type
+/// nothing a shell needs.
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+shift+t", "new_tab"),
@@ -357,6 +369,11 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("alt+9", "tab_9"),
     ("ctrl+shift+o", "toggle_board"),
     ("ctrl+shift+0", "board_fit"),
+    ("ctrl+=", "terminal_zoom_in"),
+    ("ctrl+plus", "terminal_zoom_in"),
+    ("ctrl+shift+plus", "terminal_zoom_in"),
+    ("ctrl+minus", "terminal_zoom_out"),
+    ("ctrl+0", "terminal_zoom_reset"),
 ];
 
 pub fn default_keybindings() -> HashMap<String, String> {
@@ -563,7 +580,11 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             .or(imported.font_family)
             .unwrap_or_else(|| default_font_family().into()),
         // Outside 6–72 a terminal is unreadable or a few cells wide.
-        font_size: cfg.font_size.or(imported.font_size).unwrap_or(13.0).clamp(6.0, 72.0),
+        font_size: cfg
+            .font_size
+            .or(imported.font_size)
+            .unwrap_or(13.0)
+            .clamp(zoom::FONT_SIZE_MIN, zoom::FONT_SIZE_MAX),
         scrollback: cfg.scrollback.unwrap_or(10_000),
         mac_option_is_meta: cfg.mac_option_is_meta.unwrap_or(false),
         colors,

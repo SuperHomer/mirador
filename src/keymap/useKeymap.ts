@@ -31,6 +31,10 @@ function physicalKey(code: string): string | null {
   if (code === "Tab") return "tab";
   if (code === "BracketLeft") return "[";
   if (code === "BracketRight") return "]";
+  // The numpad's + and - are those on every layout. The main block's are
+  // not mapped: on many layouts that key types something else entirely.
+  if (code === "NumpadAdd") return "plus";
+  if (code === "NumpadSubtract") return "minus";
   return null;
 }
 
@@ -55,12 +59,12 @@ function eventAccels(e: KeyboardEvent): string[] {
   // Modifier-only presses aren't bindable.
   if (["shift", "control", "meta", "alt"].includes(key)) return [];
 
-  const accels = [[...mods, key].join("+")];
+  // + and - are spelled out, since + separates an accelerator's parts:
+  // "ctrl+plus", "ctrl+minus" ("ctrl+-" still matches, as it always did).
+  const keys = key === "+" ? ["plus"] : key === "-" ? ["-", "minus"] : [key];
   const physical = physicalKey(e.code);
-  if (physical && physical !== key) {
-    accels.push([...mods, physical].join("+"));
-  }
-  return accels;
+  if (physical && !keys.includes(physical)) keys.push(physical);
+  return keys.map((k) => [...mods, k].join("+"));
 }
 
 export function useKeymap() {

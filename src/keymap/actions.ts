@@ -22,6 +22,7 @@ import {
   setView,
   installUpdate,
   quitEndingSessions,
+  zoomTerminals,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
@@ -245,6 +246,26 @@ export const actions: ActionDef[] = [
       if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
     },
   },
+  // Zoom: the terminals' text, kept in mirador.json as fontSize. Ctrl +
+  // wheel over a terminal does the same (useZoomWheel).
+  {
+    id: "terminal_zoom_in",
+    title: "View: Zoom Terminals In",
+    group: "view",
+    run: () => void zoomTerminals(1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_out",
+    title: "View: Zoom Terminals Out",
+    group: "view",
+    run: () => void zoomTerminals(-1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_reset",
+    title: "View: Reset Terminal Zoom",
+    group: "view",
+    run: () => void zoomTerminals(0).catch(zoomFailed),
+  },
   {
     id: "board_arrange",
     title: "View: Arrange Frames",
@@ -369,6 +390,11 @@ export const actions: ActionDef[] = [
     },
   },
 ];
+
+/** A zoom that could not be written: mirador.json does not parse. */
+function zoomFailed(err: unknown) {
+  console.warn(`mirador: zoom not saved: ${err}`);
+}
 
 export function runAction(id: string): boolean {
   const def = actions.find((a) => a.id === id);
