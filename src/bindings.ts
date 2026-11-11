@@ -748,6 +748,11 @@ export interface ResolvedConfig {
   editorOpensIn: OpensIn;
   diffOpensIn: OpensIn;
   graphOpensIn: OpensIn;
+  /** The sidebar's width in pixels: mirador.json's or the default, 248. */
+  sidebarWidth: number;
+  /** The width of Focus's rail in pixels, or null for the default, about
+   *  a third of the wall. */
+  focusRailWidth: number | null;
 }
 
 /** A sidebar agent's click: its tab's wall on it, or its pane alone. */

@@ -1960,6 +1960,11 @@ pub struct ResolvedConfig {
     pub editor_opens_in: OpensIn,
     pub diff_opens_in: OpensIn,
     pub graph_opens_in: OpensIn,
+    /// The sidebar's width in pixels: mirador.json's, in range, or 248.
+    pub sidebar_width: u32,
+    /// The width of Focus's rail in pixels, or `None` for the layout's
+    /// default, about a third of the wall.
+    pub focus_rail_width: Option<u32>,
 }
 
 /// Where a pane the app opens goes: in a new tab, or split beside the

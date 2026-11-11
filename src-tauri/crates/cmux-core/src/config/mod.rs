@@ -76,6 +76,13 @@ pub struct Config {
     pub editor_opens_in: Option<String>,
     pub diff_opens_in: Option<String>,
     pub graph_opens_in: Option<String>,
+    /// The sidebar's width in pixels, set by dragging its edge or by hand:
+    /// [`SIDEBAR_WIDTH`], a value outside it brought in. Unset → 248.
+    pub sidebar_width: Option<u32>,
+    /// The width of Focus's rail, the column beside the agent shown large,
+    /// in pixels: [`FOCUS_RAIL_WIDTH`], as `sidebar_width`. Unset → about
+    /// a third of the wall, which a fixed width cannot say.
+    pub focus_rail_width: Option<u32>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
@@ -100,6 +107,23 @@ pub struct Computer {
     pub host: String,
     pub dir: String,
 }
+
+/// The sidebar's width in pixels unless `sidebarWidth` sets one.
+pub const SIDEBAR_WIDTH_DEFAULT: u32 = 248;
+
+/// What `sidebarWidth` takes, in pixels. Narrower cuts the tab rows to
+/// nothing, wider leaves a small window little else. The drag stays inside
+/// it too (`SIDEBAR_WIDTH` in `src/layout/useDragWidth.ts`), and a write
+/// outside it is refused (`settings::set_config_value`).
+pub const SIDEBAR_WIDTH: std::ops::RangeInclusive<u32> = 160..=600;
+
+/// What `focusRailWidth` takes, in pixels: down to 150, a rail of names
+/// and status marks beside an agent given nearly the whole wall, and up
+/// to more than a wide screen needs. Unset, the rail keeps its own 240
+/// (styles.css, `.focus-layout`); set, it may go narrower. The layout
+/// also leaves the agent shown large its own least width, however wide
+/// the rail is set.
+pub const FOCUS_RAIL_WIDTH: std::ops::RangeInclusive<u32> = 150..=1600;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -553,6 +577,14 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         editor_opens_in: opens_in(cfg.editor_opens_in.as_deref(), OpensIn::Tab),
         diff_opens_in: opens_in(cfg.diff_opens_in.as_deref(), OpensIn::Split),
         graph_opens_in: opens_in(cfg.graph_opens_in.as_deref(), OpensIn::Split),
+        // A hand-edited width out of range is brought into it, as fontSize
+        // is, rather than ignored: the nearest width is what was meant.
+        sidebar_width: cfg
+            .sidebar_width
+            .map_or(SIDEBAR_WIDTH_DEFAULT, |w| w.clamp(*SIDEBAR_WIDTH.start(), *SIDEBAR_WIDTH.end())),
+        focus_rail_width: cfg
+            .focus_rail_width
+            .map(|w| w.clamp(*FOCUS_RAIL_WIDTH.start(), *FOCUS_RAIL_WIDTH.end())),
     }
 }
 
@@ -801,6 +833,21 @@ mod tests {
             let cfg = Config { team_cost_warn_usd: Some(n), ..Default::default() };
             assert_eq!(resolve(&cfg).team_cost_warn_usd, 0.5, "{n}");
         }
+    }
+
+    #[test]
+    fn widths_are_the_default_or_kept_to_their_range() {
+        let resolved = |json: &str| resolve(&serde_json::from_str(json).unwrap());
+        assert_eq!(resolved("{}").sidebar_width, 248);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 320 }"#).sidebar_width, 320);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 20 }"#).sidebar_width, 160);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 5000 }"#).sidebar_width, 600);
+        // Unset, the rail is the layout's own default, not a width.
+        assert_eq!(resolved("{}").focus_rail_width, None);
+        assert_eq!(resolved(r#"{ "focusRailWidth": 520 }"#).focus_rail_width, Some(520));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 150 }"#).focus_rail_width, Some(150));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 1 }"#).focus_rail_width, Some(150));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 99999 }"#).focus_rail_width, Some(1600));
     }
 
     #[test]

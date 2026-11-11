@@ -37,6 +37,10 @@ import { fullness } from "../agents/AgentStatusBar";
 import { tokens } from "../agents/ActivityPanel";
 import { clock } from "../usage/UsagePane";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
+import { SIDEBAR_WIDTH, useDragWidth } from "../layout/useDragWidth";
+
+/** What the sidebar's edge leaves the rest of the window at least. */
+const MAIN_MIN_WIDTH = 320;
 
 export function Sidebar() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);
@@ -44,6 +48,12 @@ export function Sidebar() {
   const visible = useWorkspaceStore((s) => s.sidebarVisible);
   const accels = acceleratorsByAction(
     useConfigStore((s) => s.config?.keybindings),
+  );
+  const resize = useDragWidth(
+    "sidebarWidth",
+    useConfigStore((s) => s.config?.sidebarWidth ?? null),
+    SIDEBAR_WIDTH,
+    "right",
   );
   if (!snapshot || !visible) return null;
   const accelOf = (action: string) => {
@@ -54,7 +64,20 @@ export function Sidebar() {
   const waiting = waitingAgents(snapshot).length;
 
   return (
-    <div className="sidebar">
+    // Until the config is read the width is styles.css's, the default.
+    <div className="sidebar" style={resize.width === null ? undefined : { width: resize.width }}>
+      <div
+        className={`width-handle${resize.dragging ? " dragging" : ""}`}
+        title="Drag to resize · double-click for the default width"
+        onPointerDown={(e) =>
+          resize.onPointerDown(
+            e,
+            e.currentTarget.parentElement?.getBoundingClientRect().width ?? SIDEBAR_WIDTH.min,
+            window.innerWidth - MAIN_MIN_WIDTH,
+          )
+        }
+        onDoubleClick={resize.onDoubleClick}
+      />
       {tab && <ViewSwitch view={snapshot.view} tab={tab} accelOf={accelOf} />}
       <div className="sidebar-tabs">
         {/* Tabs, numbered for the tab shortcuts. The current tab's agents

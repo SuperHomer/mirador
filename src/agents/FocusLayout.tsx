@@ -12,10 +12,38 @@ import { useLentTerminal } from "./useLentTerminal";
 import { SendNextTask } from "./SendNextTask";
 import { ToolMark } from "./ToolMark";
 import { ToolView } from "./ToolView";
+import { useConfigStore } from "../state/configStore";
+import { FOCUS_RAIL_WIDTH, useDragWidth } from "../layout/useDragWidth";
 
 /** How long after the last keystroke into the focused agent Focus may
  *  move to another: never out from under someone typing. */
 const TYPING_GRACE_MS = 2000;
+
+/** The least width the agent shown large keeps beside a rail made wide. */
+const FOCUS_TILE_MIN = 240;
+/** The handle between the tile and the rail, in the column that was the
+ *  layout's gap (styles.css, `.focus-layout`). */
+const RAIL_HANDLE = 6;
+
+/** The layout's columns for a rail set `width` pixels wide, or undefined
+ *  for styles.css's default, about a third. However wide it is set, the
+ *  rail gives way in a narrow window, down to its own least width, before
+ *  the tile goes below FOCUS_TILE_MIN. */
+function railColumns(width: number | null): React.CSSProperties | undefined {
+  if (width === null) return undefined;
+  const most = `calc(100% - ${FOCUS_TILE_MIN + RAIL_HANDLE}px)`;
+  return {
+    gridTemplateColumns: `minmax(0, 1fr) ${RAIL_HANDLE}px minmax(${FOCUS_RAIL_WIDTH.min}px, min(${width}px, ${most}))`,
+  };
+}
+
+/** How wide a drag can make the rail in `layout`: all of it but the tile's
+ *  least width and the handle. */
+function focusLayoutRoom(layout: HTMLElement): number {
+  const style = getComputedStyle(layout);
+  const content = layout.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  return content - FOCUS_TILE_MIN - RAIL_HANDLE;
+}
 
 /**
  * What Focus shows large: the pinned agent or tool while it is in the tab,
@@ -105,6 +133,13 @@ export function FocusLayout({
   const focused = useFocused(tab, agents, tools);
   const pin = (pane: string) => useUiStore.getState().pinAgent(tab.id, pane);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const rail = useDragWidth(
+    "focusRailWidth",
+    useConfigStore((s) => s.config?.focusRailWidth ?? null),
+    FOCUS_RAIL_WIDTH,
+    "left",
+  );
 
   // The keyboard goes to the agent shown large as the wall comes on screen,
   // and follows it when it changes — after a pin, or while it was in the
@@ -147,7 +182,7 @@ export function FocusLayout({
     .filter((a): a is AgentInfo => a?.status === "needsYou");
 
   return (
-    <div className="focus-layout" ref={layoutRef}>
+    <div className="focus-layout" ref={layoutRef} style={railColumns(rail.width)}>
       {focused && "kind" in focused ? (
         <FocusedToolTile
           key={focused.paneId}
@@ -172,7 +207,18 @@ export function FocusLayout({
       ) : (
         <div className="focus-none">Pick a tool on the right to show it here.</div>
       )}
-      <div className="focus-rail">
+      <div
+        className={`width-handle${rail.dragging ? " dragging" : ""}`}
+        title="Drag to resize · double-click for the default width"
+        onPointerDown={(e) => {
+          const layout = layoutRef.current;
+          const shown = railRef.current;
+          if (!layout || !shown) return;
+          rail.onPointerDown(e, shown.getBoundingClientRect().width, focusLayoutRoom(layout));
+        }}
+        onDoubleClick={rail.onDoubleClick}
+      />
+      <div className="focus-rail" ref={railRef}>
         {others.length === 0 && otherTools.length === 0 && (
           <div className="rail-empty">
             {agents.length + tools.length > 1 ? "Nothing else matches this filter." : "Nothing else in this tab."}

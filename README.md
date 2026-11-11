@@ -349,6 +349,23 @@ where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
 
+## The sidebar's and Focus's widths
+
+Drag the sidebar's right edge, or the edge between the agent Focus shows
+large and the column beside it, and the width you leave is kept in
+`mirador.json`; a double-click on an edge goes back to the default. The
+same two keys, in pixels, are in *App: Settings* to type exactly:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "sidebarWidth": 300, "focusRailWidth": 520 }
+```
+
+`sidebarWidth` takes 160–600 (248 by default), `focusRailWidth` 150–1600
+(by default about a third of the wall, never under 240). A hand-edited value outside the
+range is brought into it. However wide the column is set, a narrow window
+keeps the agent shown large at least 240 pixels wide.
+
 ## Where the editor, diffs and the graph open
 
 Opened from the app — the palette, a frame's + menu, the wall — the roles,
