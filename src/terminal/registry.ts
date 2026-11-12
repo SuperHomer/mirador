@@ -179,6 +179,22 @@ export function terminalWithFocus(): Terminal | undefined {
   return active ? terminalAt(active) : undefined;
 }
 
+/**
+ * The pane whose terminal holds keyboard focus, wherever it is drawn —
+ * the pane `terminalWithFocus` belongs to. On the agent wall, pane
+ * actions act on it rather than on the tab's focused pane, for the same
+ * reason copy and paste look here first; elsewhere they do not ask it
+ * (see `actionPane`).
+ */
+export function paneWithFocus(): string | undefined {
+  const active = document.activeElement;
+  if (!active) return undefined;
+  for (const [pane, { term }] of terminals) {
+    if (term.element?.contains(active)) return pane;
+  }
+  return undefined;
+}
+
 /** The terminal drawn where `el` is, wherever that is: its pane or a wall tile. */
 export function terminalAt(el: Element): Terminal | undefined {
   for (const { term } of terminals.values()) {
