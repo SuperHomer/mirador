@@ -55,6 +55,7 @@ permissions = [
   "allow-open-settings",
   "allow-settings-view",
   "allow-set-config-value",
+  "allow-zoom-terminals",
   "allow-list-computers",
   "allow-add-computer",
   "allow-start-team",

@@ -87,7 +87,8 @@ downloads, the feature tour and the keybinding reference.
   Claude Code on an API key where the model's price is known. Claude's
   plan limits come from Claude Code's status line once `mira hooks setup`
   wraps it (your own line still shows), or read "limit reached" after a
-  refused request. The Usage pane (`mira usage --tab`, *App: Usage*) and
+  refused request. An account on a gateway or a custom Codex provider
+  says where it connects. The Usage pane (`mira usage --tab`, *App: Usage*) and
   `mira usage` show it in full. Read from local files, never the network
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
@@ -107,10 +108,11 @@ downloads, the feature tour and the keybinding reference.
 - **Claude Code integration**: lights up tabs when your agent needs you,
   enables per-pane session resume, adds a `/mira-diff` skill for reviewing
   the turn's work and a `mira` skill that teaches Claude the CLI, and
-  (macOS, Linux) wraps your status line to keep your plan's limits, your
-  own line still shown. Mirador offers to set it up on first launch when
-  it finds Claude Code (or: palette → *Set Up Claude Code Integration*,
-  or `mira install && mira hooks setup`)
+  wraps your status line to keep your plan's limits, your own line still
+  shown (on Windows through Git Bash, which Claude Code runs the status
+  line with). Mirador offers to set it up on first launch when it finds
+  Claude Code (or: palette → *Set Up Claude Code Integration*, or
+  `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself
@@ -242,11 +244,16 @@ GitHub resolves to the newest release, so no workflow rewrites any config.
 Each release also carries the `mira` CLI alone for Linux,
 `mira-linux-x86_64` and `mira-linux-aarch64`
 ([build-linux-cli.yml](.github/workflows/build-linux-cli.yml)), static
-against musl so that they run on any distribution. Mirador has no Linux
-app; these are the first piece of running agents on a remote Linux
-computer over SSH, which a later release wires up — on their own they
-reach no app. They are named by what `uname -m` prints there, and are not
-updater payloads.
+against musl so that they run on any distribution, and for Windows,
+`mira-windows-x86_64.exe`, the `mira.exe` the installers carry. Mirador
+has no Linux app; these are the `mira` a remote computer runs its agents
+with. The first time a remote needs one, it fetches the one for its
+system from the release of the app's own version and keeps it as
+`~/.mirador/bin/mira-<version>` (*Teams on a remote computer*, below, and
+[`docs/AGENTS.md`](docs/AGENTS.md) section 8). Only the Linux ones are
+fetched for now: Windows remotes are not done yet. They are named by OS
+and architecture, x86_64 or aarch64 as `uname -m` spells them, and are
+not updater payloads.
 
 ## Development
 
@@ -308,8 +315,23 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘I | Ctrl+Shift+I | Inbox |
 | ⌘B | Ctrl+Shift+B | toggle sidebar |
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
+| ⌘= / ⌘- | Ctrl+= or Ctrl+Plus / Ctrl+Minus | zoom the terminals in / out |
+| — | Ctrl+0 | reset the terminals' zoom |
 
-All rebindable in `mirador.json`.
+All rebindable in `mirador.json`, where `+` and `-` are spelled `plus` and
+`minus` (`"ctrl+plus"`). The zoom keys are Windows Terminal's: plain Ctrl
+with them types nothing a shell needs. Plus is the numpad's, or Shift and
+whichever key makes `+` on your layout.
+
+### Zoom
+
+The zoom keys, and Ctrl + wheel over a terminal, zoom every terminal's
+text a point at a step. The size is kept in `mirador.json` as `fontSize`
+(6–72), so it outlives a restart and shows in *App: Settings*; *View:
+Reset Terminal Zoom* (Ctrl+0, or the palette on macOS, where ⌘0 fits the
+board) removes it again. A program in the terminal that reads the mouse,
+such as tmux or vim with the mouse on, gets Ctrl + wheel itself; the keys
+still zoom there. On the board, Ctrl + wheel zooms the board, as before.
 
 On macOS, Option types the character your layout puts there — `[ ] { } |`
 on Swiss, German, French and other non-US layouts — rather than acting as
@@ -341,6 +363,32 @@ you split, which is almost always what you want. `defaultCwd` fills in only
 where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
+
+## The sidebar's and Focus's widths
+
+Drag the sidebar's right edge, or the edge between the agent Focus shows
+large and the column beside it, and the width you leave is kept in
+`mirador.json`; a double-click on an edge goes back to the default. The
+same two keys, in pixels, are in *App: Settings* to type exactly:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "sidebarWidth": 300, "focusRailWidth": 520 }
+```
+
+`sidebarWidth` takes 160–600 (248 by default), `focusRailWidth` 150–1600
+(by default about a third of the wall, never under 240). A hand-edited value outside the
+range is brought into it. However wide the column is set, a narrow window
+keeps the agent shown large at least 240 pixels wide.
+
+The column can go elsewhere: the wall toolbar's **Rail** control, in Focus,
+switches between **Right** (the column, as above), **Top** — the other
+agents and tools as tabs in the header of the one shown large, beside its
+name — and **Bottom**, a centered row of tabs under it, the one shown
+large among them. A tab is a status mark, a name and how long it has been
+in that state; clicking it shows that agent large. The choice is
+`focusRailPosition` (`"right"`, `"top"` or `"bottom"`), also in
+*App: Settings*.
 
 ## Where the editor, diffs and the graph open
 
@@ -776,8 +824,10 @@ alias), then keeps it in mirador.json:
 ```
 
 A name is letters, digits, `-`, `_` and `.`, and no two computers share
-one. Teams do not start on a computer yet; the directory is for that, in
-a later release.
+one. An agent or a team already runs on a computer with `mira agent new`
+or `mira team start`, given its `--host` and `--dir` (*Teams on a remote
+computer*, below). What is not done yet is picking a saved computer by
+its name for them, from the CLI or the app.
 
 ### Teams on a remote computer
 

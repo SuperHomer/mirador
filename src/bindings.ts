@@ -407,6 +407,9 @@ export interface AccountUsage {
   email: string | null;
   /** What else the login says: "API key in env, declined". */
   note: string | null;
+  /** Where it sends when not to its maker's own API: the provider's name
+   *  and host, `Azure OpenAI · llm.example:4000`, or either alone. */
+  provider: string | null;
   /** The most used first; empty for Claude Code, which keeps none on disk. */
   limits: LimitWindow[];
   /** Unix millis of what the limits were read from. */
@@ -414,7 +417,7 @@ export interface AccountUsage {
   /** Why a plan shows no limits, and how to get them. */
   limitsNote: string | null;
   /** No limits until the integration wraps Claude Code's status line:
-   *  setting it up (the user's click) would show them. Never on Windows. */
+   *  setting it up (the user's click) would show them. */
   limitsSetup: boolean;
   fiveHours: TokenTotals;
   sevenDays: TokenTotals;
@@ -665,6 +668,8 @@ export interface WorkspaceSnapshot {
   agents: AgentInfo[];
   view: View;
   camera: Camera;
+  /** Cameras set from outside since launch: what the board's saves say they have seen. */
+  cameraSets: number;
 }
 
 export interface NotificationDto {
@@ -743,7 +748,18 @@ export interface ResolvedConfig {
   editorOpensIn: OpensIn;
   diffOpensIn: OpensIn;
   graphOpensIn: OpensIn;
+  /** The sidebar's width in pixels: mirador.json's or the default, 248. */
+  sidebarWidth: number;
+  /** The width of Focus's rail in pixels, or null for the default, about
+   *  a third of the wall. */
+  focusRailWidth: number | null;
+  focusRailPosition: RailPosition;
 }
+
+/** Where Focus shows the wall's other agents and tools: the rail on the
+ *  right, tabs in the header of the one shown large, or a row of tabs
+ *  under it (`cmux_protocol::RailPosition`). */
+export type RailPosition = "right" | "top" | "bottom";
 
 /** A sidebar agent's click: its tab's wall on it, or its pane alone. */
 export type AgentClick = "wall" | "pane";
@@ -808,7 +824,8 @@ export const setView = (view: View) => invoke<void>("set_view", { view });
 export const setCamera = (
   camera: Camera,
   viewport: { width: number; height: number },
-) => invoke<void>("set_camera", { ...camera, ...viewport });
+  seen: number,
+) => invoke<void>("set_camera", { ...camera, ...viewport, seen });
 /** The camera showing the whole board in a viewport of this size. */
 export const boardFit = (width: number, height: number) =>
   invoke<Camera>("board_fit", { width, height });
@@ -1045,6 +1062,9 @@ export const settingsView = () => invoke<SettingRow[]>("settings_view");
 /** Sets `key` in mirador.json, or removes it with null. */
 export const setConfigValue = (key: string, value: unknown) =>
   invoke<void>("set_config_value", { key, value });
+/** Zooms every terminal `steps` whole points, or back to the default with
+ *  0 (`fontSize`). Resolves to the new size. */
+export const zoomTerminals = (steps: number) => invoke<number>("zoom_terminals", { steps });
 
 /** An agent-editor pane, and the directory whose files it edits. */
 export interface AgentEditorPaneInfo {

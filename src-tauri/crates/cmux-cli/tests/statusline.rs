@@ -2,8 +2,7 @@
 //! own status line: the user's command gets the same stdin, its output is
 //! ours, and the plan's limits are kept on the side.
 
-#![cfg(unix)]
-
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,6 +18,8 @@ fn statusline(home: &Path, args: &[&str], input: &str) -> (String, i32) {
         .args(args)
         .env("HOME", home)
         .env("XDG_DATA_HOME", home.join("data"))
+        .env("APPDATA", home.join("data"))
+        .env("PATH", path_with_sh())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -28,6 +29,28 @@ fn statusline(home: &Path, args: &[&str], input: &str) -> (String, i32) {
     let out = child.wait_with_output().unwrap();
     assert!(out.stderr.is_empty(), "nothing on stderr: {}", String::from_utf8_lossy(&out.stderr));
     (String::from_utf8(out.stdout).unwrap(), out.status.code().unwrap())
+}
+
+/// The PATH the wrapper runs with: this machine's, and on Windows, where
+/// it may not reach `sh`, Git for Windows' `usr/bin` in front of it, as
+/// Git Bash (which Claude Code runs a status line through) has it.
+fn path_with_sh() -> OsString {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    if cfg!(unix) || dir_with(&path, "sh.exe").is_some() {
+        return path;
+    }
+    let git = dir_with(&path, "git.exe").expect("git on PATH: Git for Windows has the sh a status line runs with");
+    let usr_bin = git
+        .ancestors()
+        .map(|d| d.join("usr").join("bin"))
+        .find(|d| d.join("sh.exe").is_file())
+        .unwrap_or_else(|| panic!("no usr/bin/sh.exe above {}", git.display()));
+    std::env::join_paths(std::iter::once(usr_bin).chain(std::env::split_paths(&path))).unwrap()
+}
+
+/// The first directory on `path` holding `exe`.
+fn dir_with(path: &OsStr, exe: &str) -> Option<PathBuf> {
+    std::env::split_paths(path).find(|d| d.join(exe).is_file())
 }
 
 /// Wherever the platform's data directory puts it, under `home`.

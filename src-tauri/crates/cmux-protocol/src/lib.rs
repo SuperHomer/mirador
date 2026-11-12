@@ -273,6 +273,10 @@ pub struct WorkspaceSnapshot {
     pub view: View,
     #[serde(default)]
     pub camera: Camera,
+    /// How many cameras were set from outside since launch (`SetCamera`):
+    /// what the board's own saves say they have seen.
+    #[serde(default)]
+    pub camera_sets: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1956,6 +1960,24 @@ pub struct ResolvedConfig {
     pub editor_opens_in: OpensIn,
     pub diff_opens_in: OpensIn,
     pub graph_opens_in: OpensIn,
+    /// The sidebar's width in pixels: mirador.json's, in range, or 248.
+    pub sidebar_width: u32,
+    /// The width of Focus's rail in pixels, or `None` for the layout's
+    /// default, about a third of the wall.
+    pub focus_rail_width: Option<u32>,
+    pub focus_rail_position: RailPosition,
+}
+
+/// Where Focus shows the wall's agents and tools other than the one it
+/// shows large: down a rail on the right, as tabs in that one's header,
+/// or as a row of tabs under it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RailPosition {
+    #[default]
+    Right,
+    Top,
+    Bottom,
 }
 
 /// Where a pane the app opens goes: in a new tab, or split beside the
@@ -2284,6 +2306,11 @@ pub struct AccountUsage {
     /// What else the login says: "API key in env, declined".
     #[serde(default)]
     pub note: Option<String>,
+    /// Where the harness sends its requests when not to its maker's own
+    /// API: the provider's name and host, `Azure OpenAI · llm.example:4000`,
+    /// or either alone. None for its default API.
+    #[serde(default)]
+    pub provider: Option<String>,
     /// The plan's windows, the most used first. Claude Code's come from
     /// its status line (`mira claude-statusline`) or a refused request.
     pub limits: Vec<LimitWindow>,
@@ -2295,7 +2322,7 @@ pub struct AccountUsage {
     #[serde(default)]
     pub limits_note: Option<String>,
     /// A plan with no limits whose status line is not our wrapper yet:
-    /// setting the integration up would show them. Never on Windows.
+    /// setting the integration up would show them.
     #[serde(default)]
     pub limits_setup: bool,
     /// What it used in the last five hours and the last seven days: the

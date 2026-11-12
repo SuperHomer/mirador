@@ -200,9 +200,8 @@ enum Command {
     },
     /// Install or remove the Claude Code integration: the hooks that light
     /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
-    /// teaches Claude this CLI, and (on macOS and Linux) a wrapper in front
-    /// of your status line that keeps your plan's limits, your own status
-    /// line still shown.
+    /// teaches Claude this CLI, and a wrapper in front of your status line
+    /// that keeps your plan's limits, your own status line still shown.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -1972,8 +1971,9 @@ fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
     };
     let plan = account.plan.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
     let email = account.email.as_deref().map(|e| format!(" · {e}")).unwrap_or_default();
+    let provider = account.provider.as_deref().map(|p| format!(" · via {p}")).unwrap_or_default();
     let note = account.note.as_deref().map(|n| format!(" · {n}")).unwrap_or_default();
-    let mut lines = vec![format!("{} — {login}{plan}{email}{note}", account.harness.label())];
+    let mut lines = vec![format!("{} — {login}{plan}{email}{provider}{note}", account.harness.label())];
     for w in &account.limits {
         let resets = match w.resets_at {
             Some(at) if at > now => format!(", resets in {}", until(at - now)),
@@ -2366,11 +2366,14 @@ fn claude_statusline(run: Option<&str>) -> ! {
 }
 
 /// Runs a status line command with `input` on its stdin and our stdout as
-/// its own; its exit code, or 1 when it could not be run.
-#[cfg(unix)]
+/// its own; its exit code, or 1 when it could not be run. Through `sh` on
+/// every platform: Claude Code runs the status line through Git Bash on
+/// Windows, whose `usr/bin` (and so `sh`) is on the PATH we inherit.
 fn run_statusline(command: &str, input: &[u8]) -> i32 {
     use std::process::{Command, Stdio};
     let Ok(mut child) = Command::new("sh").arg("-c").arg(command).stdin(Stdio::piped()).spawn() else {
+        // Otherwise the status line just vanishes, with nothing to say why.
+        eprintln!("mira claude-statusline: sh not found");
         return 1;
     };
     if let Some(mut stdin) = child.stdin.take() {
@@ -2378,14 +2381,6 @@ fn run_statusline(command: &str, input: &[u8]) -> i32 {
         let _ = stdin.write_all(input);
     }
     child.wait().ok().and_then(|s| s.code()).unwrap_or(1)
-}
-
-/// Windows has no `sh`, and which shell Claude Code runs a status line
-/// with there is not known here, so the wrapper runs nothing: Mirador does
-/// not put itself in front of a status line on Windows.
-#[cfg(not(unix))]
-fn run_statusline(_command: &str, _input: &[u8]) -> i32 {
-    0
 }
 
 fn claude_hook(event: &str) -> Result<(), String> {
@@ -2520,6 +2515,7 @@ mod tests {
             plan: Some("claude_max".into()),
             email: Some("you@example.com".into()),
             note: None,
+            provider: None,
             limits: vec![],
             as_of: None,
             limits_note: None,
@@ -2538,6 +2534,7 @@ mod tests {
             plan: None,
             email: None,
             note: None,
+            provider: None,
             as_of: None,
             limits_note: None,
             limits_setup: false,
@@ -2563,6 +2560,12 @@ mod tests {
                 "  last 7d: 0 tokens · $0.00",
             ]
         );
+        let gateway = AccountUsage {
+            provider: Some("Azure OpenAI · llm.example:4000".into()),
+            note: Some("AZURE_KEY not set".into()),
+            ..codex.clone()
+        };
+        assert_eq!(usage_lines(&gateway, now)[0], "Codex — API key · via Azure OpenAI · llm.example:4000 · AZURE_KEY not set");
         let declined = AccountUsage { email: None, note: Some("API key in env, declined".into()), ..claude.clone() };
         assert_eq!(usage_lines(&declined, now)[0], "Claude Code — subscription (claude_max) · API key in env, declined");
         let either = AccountUsage { login: Login::PlanOrApiKey, email: None, ..claude.clone() };

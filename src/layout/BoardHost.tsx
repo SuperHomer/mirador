@@ -20,6 +20,7 @@ import {
   atFullSize,
   fitBoard,
   flyToCard,
+  knowCameraSets,
   panToCard,
   takesPointer,
   useBoardStore,
@@ -222,17 +223,19 @@ export function BoardHost({ board, children }: { board: boolean; children: React
   // A camera set through the socket: shown, and not saved over, nor
   // moved off by bringing in a card focused before it was set.
   useEffect(() => {
-    const unlisten = listen<Camera>("camera-set", (e) => {
+    const unlisten = listen<{ camera: Camera; sets: number }>("camera-set", (e) => {
       const snap = useWorkspaceStore.getState().snapshot;
       focusAtAdopt.current = snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane ?? null;
-      useBoardStore.getState().adopt(e.payload);
+      useBoardStore.getState().adopt(e.payload.camera, e.payload.sets);
     });
     return () => void unlisten.then((fn) => fn());
   }, []);
 
   // The saved camera, once; from then on the board owns it.
   useEffect(() => {
-    const saved = useWorkspaceStore.getState().snapshot?.camera;
+    const snap = useWorkspaceStore.getState().snapshot;
+    if (snap) knowCameraSets(snap.cameraSets);
+    const saved = snap?.camera;
     if (saved && !useBoardStore.getState().camera) useBoardStore.getState().moveTo(saved);
   }, []);
 

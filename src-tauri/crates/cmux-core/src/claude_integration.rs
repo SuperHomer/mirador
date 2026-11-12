@@ -229,12 +229,7 @@ fn hooks_at(path: &Path, action: Action, mira: &Path) -> Result<Vec<String>, Str
         }
     }
 
-    // Windows runs a status line through Git Bash or PowerShell, where
-    // the wrapper does not run the user's command (it has no `sh`), so it
-    // is not put there.
-    if cfg!(unix) {
-        done.extend(status_line(&mut settings, action, mira));
-    }
+    done.extend(status_line(&mut settings, action, mira));
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -583,12 +578,10 @@ mod tests {
     /// of quotes, a command substitution, a pipe and a newline.
     const THEIR_LINE: &str = "input=$(cat); model=$(echo \"$input\" | jq -r '.model.display_name')\nprintf \"\\033[2m%s\\033[0m it's %s\" \"$model\" \"$(git branch --show-current 2>/dev/null)\"";
 
-    #[cfg(unix)]
     fn with_line(path: &Path, line: serde_json::Value) {
         std::fs::write(path, serde_json::json!({ "statusLine": line, "model": "opus" }).to_string()).unwrap();
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_status_line_is_wrapped_and_comes_back_exactly() {
         let dir = temp_dir("line-wrap");
@@ -611,6 +604,7 @@ mod tests {
 
     /// The shell hands `mira` the user's command as one argument, byte for
     /// byte: what `--run` then runs is what they wrote.
+    // Unix only: it needs an `sh` on the test machine's PATH.
     #[cfg(unix)]
     #[test]
     fn the_shell_reads_the_quoted_command_back_unchanged() {
@@ -621,7 +615,6 @@ mod tests {
         assert_eq!(sh_unquote("'a'b'"), None, "not one of ours");
     }
 
-    #[cfg(unix)]
     #[test]
     fn with_no_status_line_ours_goes_in_and_comes_out_again() {
         let dir = temp_dir("line-none");
@@ -635,7 +628,6 @@ mod tests {
         assert!(read(&path).get("statusLine").is_none());
     }
 
-    #[cfg(unix)]
     #[test]
     fn setup_twice_wraps_once_and_a_moved_mira_is_rewrapped() {
         let dir = temp_dir("line-twice");
@@ -658,7 +650,6 @@ mod tests {
     /// The app's own repair, run with no one asking: it re-points our
     /// wrapper at a moved `mira`, and never wraps the user's line, which
     /// only an explicit setup (whose offer says so) may do.
-    #[cfg(unix)]
     #[test]
     fn repair_follows_our_wrapper_and_never_wraps_theirs() {
         let dir = temp_dir("line-repair");
@@ -684,7 +675,6 @@ mod tests {
 
     /// Only the exact form we write is ours: a command that merely
     /// mentions the subcommand is the user's, wrapped and given back whole.
-    #[cfg(unix)]
     #[test]
     fn a_command_that_mentions_claude_statusline_is_theirs() {
         let mira = PathBuf::from("/opt/Mirador/mira");

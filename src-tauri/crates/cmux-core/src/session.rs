@@ -304,6 +304,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
         view: file.view,
         camera: file.camera,
         viewport: None,
+        camera_sets: 0,
     };
     // A session written before frames were kept apart may have them
     // overlapping; from here on they never do.

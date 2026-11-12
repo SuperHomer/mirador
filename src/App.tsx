@@ -11,6 +11,7 @@ import { useWorkspaceStore } from "./state/workspaceStore";
 import { useConfigStore } from "./state/configStore";
 import { useNotificationStore } from "./state/notificationStore";
 import { useKeymap } from "./keymap/useKeymap";
+import { useZoomWheel } from "./keymap/useZoomWheel";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
 import { BoardHost, TabLayer } from "./layout/BoardHost";
@@ -65,6 +66,7 @@ export default function App() {
   const wallBrowsers = useUiStore((s) => s.wallBrowsers);
   const newMenuOpen = useUiStore((s) => s.newMenuOpen);
   useKeymap();
+  useZoomWheel();
 
   // Native child webviews float above the host webview: hide the ones on
   // inactive tabs, and all of them while an overlay is open. A tab showing

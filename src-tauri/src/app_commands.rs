@@ -60,6 +60,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "open_settings",
     "settings_view",
     "set_config_value",
+    "zoom_terminals",
     "list_computers",
     "add_computer",
     "start_team",

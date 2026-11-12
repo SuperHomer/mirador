@@ -394,6 +394,8 @@ pub struct Workspace {
     /// the camera, where the board is being looked at. Not saved — unknown
     /// until the app has drawn the board.
     pub viewport: Option<(f64, f64)>,
+    /// Cameras set from outside since launch ([`Self::set_camera`]).
+    pub camera_sets: u64,
 }
 
 impl Default for Workspace {
@@ -405,6 +407,7 @@ impl Default for Workspace {
             view: View::default(),
             camera: Camera::default(),
             viewport: None,
+            camera_sets: 0,
         }
     }
 }
@@ -448,12 +451,20 @@ impl Workspace {
     /// Creates a tab (with one fresh pane) after the active one and
     /// activates it. Returns (tab_id, pane_id).
     pub fn new_tab(&mut self) -> (String, String) {
-        let (tab, pane) = Tab::new();
+        let pane = new_id();
+        (self.new_tab_with(pane.clone()), pane)
+    }
+
+    /// [`Self::new_tab`], its pane's id chosen beforehand
+    /// ([`Self::fresh_pane_ids`]): for a pane whose agent's files are sent
+    /// before it opens. Returns the tab id.
+    pub fn new_tab_with(&mut self, pane: String) -> String {
+        let tab = Tab::with_root(Node::Leaf { pane_id: pane });
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
         self.place_frame(&id);
-        (id, pane)
+        id
     }
 
     /// Opens a team's tab after the active one, its panes laid out as
@@ -879,7 +890,26 @@ impl Workspace {
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
+            camera_sets: self.camera_sets,
         }
+    }
+
+    /// Sets where the board is looked at. `seen` is the board's own save,
+    /// with how many cameras set from outside it had been told of; `None`
+    /// is one set from outside, which counts. A board save made before the
+    /// latest outside camera is dropped (false): it was sent before the
+    /// board knew of it, and would land over it.
+    pub fn set_camera(&mut self, camera: Camera, viewport: Option<(f64, f64)>, seen: Option<u64>) -> bool {
+        match seen {
+            Some(seen) if seen < self.camera_sets => return false,
+            Some(_) => {}
+            None => self.camera_sets += 1,
+        }
+        self.camera = camera;
+        if let Some(viewport) = viewport {
+            self.viewport = Some(viewport);
+        }
+        true
     }
 }
 
@@ -1400,6 +1430,18 @@ mod tests {
         assert!(ws.tabs[0].cards.contains_key(&id), "it has a card, as any split does");
     }
 
+    /// A tab opened under a pane id chosen beforehand opens with that pane,
+    /// and becomes the active one.
+    #[test]
+    fn a_new_tab_can_take_its_pane_id_from_the_caller() {
+        let mut ws = Workspace::default();
+        let id = Workspace::fresh_pane_ids(1).remove(0);
+        let tab = ws.new_tab_with(id.clone());
+        assert_eq!(ws.tabs[ws.active].id, tab);
+        assert_eq!(layout::pane_ids(&ws.tabs[ws.active].root), vec![id.clone()]);
+        assert_eq!(ws.focused_pane(), id);
+    }
+
     #[test]
     fn a_split_adds_a_card_in_its_frame_and_moves_none() {
         let mut ws = Workspace::default();
@@ -1431,6 +1473,24 @@ mod tests {
         ws.close_tab(&id);
         assert_eq!(ws.tabs[0].frame, BoardPoint { x: 700.0, y: -40.0 });
         assert_board_consistent(&ws);
+    }
+
+    /// A camera set from outside is the last word over a save the board
+    /// sent before it heard of it; the board's next save, made after,
+    /// counts again.
+    #[test]
+    fn a_board_save_from_before_an_outside_camera_is_dropped() {
+        let mut ws = Workspace::default();
+        let outside = Camera { x: -20000.0, y: -20000.0, zoom: 1.0 };
+        let board = Camera { x: 2500.0, y: 42.0, zoom: 1.0 };
+        assert!(ws.set_camera(board, None, Some(0)), "nothing set from outside yet");
+        assert!(ws.set_camera(outside, Some((1000.0, 800.0)), None));
+        assert_eq!((ws.camera_sets, ws.viewport), (1, Some((1000.0, 800.0))));
+        assert!(!ws.set_camera(board, Some((1.0, 1.0)), Some(0)), "sent before the board knew");
+        assert_eq!((ws.camera, ws.viewport), (outside, Some((1000.0, 800.0))), "untouched");
+        assert!(ws.set_camera(board, None, Some(1)));
+        assert_eq!(ws.camera, board);
+        assert_eq!(ws.snapshot(&HashMap::new()).camera_sets, 1);
     }
 
     #[test]

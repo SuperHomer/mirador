@@ -5,13 +5,14 @@
 
 pub mod ghostty;
 pub mod settings;
+pub mod zoom;
 pub mod ui;
 pub mod wezterm;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig, UiColors};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, RailPosition, ResolvedColors, ResolvedConfig, UiColors};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -76,6 +77,18 @@ pub struct Config {
     pub editor_opens_in: Option<String>,
     pub diff_opens_in: Option<String>,
     pub graph_opens_in: Option<String>,
+    /// The sidebar's width in pixels, set by dragging its edge or by hand:
+    /// [`SIDEBAR_WIDTH`], a value outside it brought in. Unset → 248.
+    pub sidebar_width: Option<u32>,
+    /// The width of Focus's rail, the column beside the agent shown large,
+    /// in pixels: [`FOCUS_RAIL_WIDTH`], as `sidebar_width`. Unset → about
+    /// a third of the wall, which a fixed width cannot say.
+    pub focus_rail_width: Option<u32>,
+    /// Where Focus shows the wall's other agents and tools: "right" (the
+    /// rail, the default), "top" (tabs in the header of the one shown
+    /// large) or "bottom" (a row of tabs under it). Anything else is
+    /// "right". A string for the same reason as `agent_click`.
+    pub focus_rail_position: Option<String>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
@@ -100,6 +113,23 @@ pub struct Computer {
     pub host: String,
     pub dir: String,
 }
+
+/// The sidebar's width in pixels unless `sidebarWidth` sets one.
+pub const SIDEBAR_WIDTH_DEFAULT: u32 = 248;
+
+/// What `sidebarWidth` takes, in pixels. Narrower cuts the tab rows to
+/// nothing, wider leaves a small window little else. The drag stays inside
+/// it too (`SIDEBAR_WIDTH` in `src/layout/useDragWidth.ts`), and a write
+/// outside it is refused (`settings::set_config_value`).
+pub const SIDEBAR_WIDTH: std::ops::RangeInclusive<u32> = 160..=600;
+
+/// What `focusRailWidth` takes, in pixels: down to 150, a rail of names
+/// and status marks beside an agent given nearly the whole wall, and up
+/// to more than a wide screen needs. Unset, the rail keeps its own 240
+/// (styles.css, `.focus-layout`); set, it may go narrower. The layout
+/// also leaves the agent shown large its own least width, however wide
+/// the rail is set.
+pub const FOCUS_RAIL_WIDTH: std::ops::RangeInclusive<u32> = 150..=1600;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -284,6 +314,12 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+9", "tab_9"),
     ("mod+shift+o", "toggle_board"),
     ("mod+0", "board_fit"),
+    // The terminals' zoom, as every Mac app's text zoom. Cmd+0, its usual
+    // reset, is the board's; the reset is in the palette.
+    ("mod+=", "terminal_zoom_in"),
+    ("mod+plus", "terminal_zoom_in"),
+    ("mod+shift+plus", "terminal_zoom_in"),
+    ("mod+minus", "terminal_zoom_out"),
 ];
 
 /// Windows/Linux: plain Ctrl belongs to the program in the pane — Ctrl+C
@@ -297,6 +333,11 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
 /// and would steal character input from anyone typing @ or [ with it. The
 /// pairs macOS spells with Shift therefore take a second letter here
 /// (split down is Ctrl+Shift+E) rather than a second modifier.
+///
+/// Zoom is the exception, on Windows Terminal's keys: plain Ctrl with the
+/// equals, plus, minus and zero keys zooms the terminals (plus being the
+/// numpad's, or Shift and whichever key makes it on the layout). They type
+/// nothing a shell needs.
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+shift+t", "new_tab"),
@@ -328,6 +369,11 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("alt+9", "tab_9"),
     ("ctrl+shift+o", "toggle_board"),
     ("ctrl+shift+0", "board_fit"),
+    ("ctrl+=", "terminal_zoom_in"),
+    ("ctrl+plus", "terminal_zoom_in"),
+    ("ctrl+shift+plus", "terminal_zoom_in"),
+    ("ctrl+minus", "terminal_zoom_out"),
+    ("ctrl+0", "terminal_zoom_reset"),
 ];
 
 pub fn default_keybindings() -> HashMap<String, String> {
@@ -534,7 +580,11 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             .or(imported.font_family)
             .unwrap_or_else(|| default_font_family().into()),
         // Outside 6–72 a terminal is unreadable or a few cells wide.
-        font_size: cfg.font_size.or(imported.font_size).unwrap_or(13.0).clamp(6.0, 72.0),
+        font_size: cfg
+            .font_size
+            .or(imported.font_size)
+            .unwrap_or(13.0)
+            .clamp(zoom::FONT_SIZE_MIN, zoom::FONT_SIZE_MAX),
         scrollback: cfg.scrollback.unwrap_or(10_000),
         mac_option_is_meta: cfg.mac_option_is_meta.unwrap_or(false),
         colors,
@@ -553,6 +603,19 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         editor_opens_in: opens_in(cfg.editor_opens_in.as_deref(), OpensIn::Tab),
         diff_opens_in: opens_in(cfg.diff_opens_in.as_deref(), OpensIn::Split),
         graph_opens_in: opens_in(cfg.graph_opens_in.as_deref(), OpensIn::Split),
+        // A hand-edited width out of range is brought into it, as fontSize
+        // is, rather than ignored: the nearest width is what was meant.
+        sidebar_width: cfg
+            .sidebar_width
+            .map_or(SIDEBAR_WIDTH_DEFAULT, |w| w.clamp(*SIDEBAR_WIDTH.start(), *SIDEBAR_WIDTH.end())),
+        focus_rail_width: cfg
+            .focus_rail_width
+            .map(|w| w.clamp(*FOCUS_RAIL_WIDTH.start(), *FOCUS_RAIL_WIDTH.end())),
+        focus_rail_position: match cfg.focus_rail_position.as_deref() {
+            Some("top") => RailPosition::Top,
+            Some("bottom") => RailPosition::Bottom,
+            _ => RailPosition::Right,
+        },
     }
 }
 
@@ -801,6 +864,34 @@ mod tests {
             let cfg = Config { team_cost_warn_usd: Some(n), ..Default::default() };
             assert_eq!(resolve(&cfg).team_cost_warn_usd, 0.5, "{n}");
         }
+    }
+
+    #[test]
+    fn widths_are_the_default_or_kept_to_their_range() {
+        let resolved = |json: &str| resolve(&serde_json::from_str(json).unwrap());
+        assert_eq!(resolved("{}").sidebar_width, 248);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 320 }"#).sidebar_width, 320);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 20 }"#).sidebar_width, 160);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 5000 }"#).sidebar_width, 600);
+        // Unset, the rail is the layout's own default, not a width.
+        assert_eq!(resolved("{}").focus_rail_width, None);
+        assert_eq!(resolved(r#"{ "focusRailWidth": 520 }"#).focus_rail_width, Some(520));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 150 }"#).focus_rail_width, Some(150));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 1 }"#).focus_rail_width, Some(150));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 99999 }"#).focus_rail_width, Some(1600));
+    }
+
+    #[test]
+    fn the_rail_is_on_the_right_unless_set_to_top_or_bottom() {
+        let position = |json: &str| resolve(&serde_json::from_str(json).unwrap()).focus_rail_position;
+        assert_eq!(position("{}"), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "right" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "top" }"#), RailPosition::Top);
+        assert_eq!(position(r#"{ "focusRailPosition": "bottom" }"#), RailPosition::Bottom);
+        // A value it does not know is the default, not a failed file.
+        assert_eq!(position(r#"{ "focusRailPosition": "off" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "left" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "Top" }"#), RailPosition::Right);
     }
 
     #[test]
