@@ -181,8 +181,10 @@ export function terminalWithFocus(): Terminal | undefined {
 
 /**
  * The pane whose terminal holds keyboard focus, wherever it is drawn —
- * the pane `terminalWithFocus` belongs to. Closing acts on it first for
- * the same reason copy and paste do.
+ * the pane `terminalWithFocus` belongs to. On the agent wall, pane
+ * actions act on it rather than on the tab's focused pane, for the same
+ * reason copy and paste look here first; elsewhere they do not ask it
+ * (see `actionPane`).
  */
 export function paneWithFocus(): string | undefined {
   const active = document.activeElement;

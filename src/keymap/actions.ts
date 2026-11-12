@@ -53,10 +53,12 @@ function focusedPane(): string | undefined {
 /**
  * The pane a pane action — close, split, zoom, show activity — acts on:
  * the tab's focused pane, except on the agent wall. There, clicking into
- * an agent or picking one for Focus leaves the tab's focused pane where it
- * was (`mark_pane_read`), so it can be another agent than the one being
- * typed into: the one whose terminal the wall borrowed and that holds the
- * keyboard.
+ * an agent of the active tab's wall or picking one for Focus leaves the
+ * tab's focused pane where it was (`mark_pane_read`), so it can be another
+ * agent than the one being typed into: the one whose terminal the wall
+ * borrowed and that holds the keyboard. (On the board, clicking into a
+ * tile of another tab's wall does move it: `focusPane` makes that tab the
+ * active one and the tile's agent its focused pane, so the two agree.)
  *
  * Only there. Everywhere else the keyboard says nothing: only terminals
  * take DOM focus, so a diff, graph or browser pane the tab focused leaves
