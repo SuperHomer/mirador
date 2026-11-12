@@ -2,6 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ResolvedConfig } from "../bindings";
 import { toXtermTheme, checkFontAvailable } from "../state/configStore";
@@ -23,6 +24,15 @@ export function createTerminal(config: ResolvedConfig): Terminal {
     theme: toXtermTheme(config),
   });
 
+  // Character widths as programs count them today: an emoji such as 💀 or
+  // ✅ is two cells. xterm's default table is Unicode 6's, where it is
+  // one, while Claude Code, ConPTY and every current terminal count two.
+  // Text drawn in one go looks right either way, but a program that then
+  // moves the cursor to update part of a line lands one cell off for each
+  // such character before it: a status line's "83%" updated to 84 showed
+  // as "834", the 4 written over the %.
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = "11";
   // OSC 52: let programs in the terminal read/write the system clipboard.
   term.loadAddon(new ClipboardAddon());
   // Clickable URLs, opened in the system browser (not the webview).
