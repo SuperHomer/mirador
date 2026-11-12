@@ -34,18 +34,27 @@ export function createTerminal(config: ResolvedConfig): Terminal {
   );
   // Hyperlinks a program prints (OSC 8: text with an address behind it,
   // which is how Claude Code prints its links) open the same way. With no
-  // handler, xterm asked on every click with window.confirm ("This link
-  // could potentially be dangerous") and opened the page in a webview. The
-  // text need not be the address, so the address shows on hover. xterm
-  // passes only http(s) addresses (allowNonHttpProtocols is off); the check
-  // here keeps that true whatever its default becomes.
+  // handler, xterm's default asked on every click with window.confirm
+  // ("This link could potentially be dangerous") and then opened nothing:
+  // it opens the address with window.open, and the app has no new-window
+  // handler, so wry refuses the window. WKWebView does not even show the
+  // confirm. The text need not be the address, so the address shows on
+  // hover.
+  //
+  // Unlike a plain URL, which WebLinksAddon's pattern bounds, the address
+  // here is whatever the program sent: quotes, spaces, backslashes, bidi
+  // controls, any length. So it is parsed once, and both the opener and
+  // the tooltip get the parser's spelling of it, never the raw string:
+  // what the tooltip shows is what opens.
   term.options.linkHandler = {
     activate: (event, uri) => {
       event.preventDefault();
-      if (isWebUrl(uri)) void openUrl(uri);
+      const url = webUrl(uri);
+      if (url) void openUrl(url);
     },
     hover: (_event, uri) => {
-      if (term.element) term.element.title = uri;
+      const url = webUrl(uri);
+      if (url && term.element) term.element.title = url;
     },
     leave: () => {
       term.element?.removeAttribute("title");
@@ -55,13 +64,20 @@ export function createTerminal(config: ResolvedConfig): Terminal {
   return term;
 }
 
-/** An address a click may open: http or https, as everywhere in the app. */
-function isWebUrl(uri: string): boolean {
+/**
+ * `uri` as a click may open it: http or https only, as everywhere in the
+ * app (xterm passes no other scheme while allowNonHttpProtocols is off;
+ * this keeps that true whatever its default becomes), spelled as the URL
+ * parser writes it. `href` percent-encodes quotes, spaces, angle brackets
+ * and bidi controls, turns backslashes into slashes and an IDN host into
+ * punycode. Null for anything else.
+ */
+function webUrl(uri: string): string | null {
   try {
-    const { protocol } = new URL(uri);
-    return protocol === "http:" || protocol === "https:";
+    const url = new URL(uri);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
