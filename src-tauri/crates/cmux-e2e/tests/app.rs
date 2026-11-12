@@ -37,6 +37,36 @@ fn a_pane_mounts_and_its_terminal_echoes() {
     assert!(cwd.ends_with("proj"), "the first pane works in defaultCwd, not {cwd:?}");
 }
 
+/// Output the app strips before the terminal sees it is not output the
+/// terminal owes an ack for. 3 MB of OSC 99 with an empty payload — a
+/// notification sequence the scanner drops, and that raises nothing —
+/// is more than the 2 MB a pane may have unacked. Counted, it parked the
+/// reader for good: the pane froze with the shell blocked on its write,
+/// and nothing typed afterwards ever showed.
+#[test]
+fn a_pane_keeps_running_through_output_it_never_shows() {
+    e2e!();
+    let mut sb = Sandbox::new("stripped");
+    sb.launch();
+    let pane = sb.first_pane();
+    // The sums are the shell's, as above: the typed line shows `$((…))`,
+    // so only output past the flood prints `flood-42`.
+    sb.type_into(
+        &pane,
+        "yes $'\\e]99;;\\a' | head -n 450000 | tr -d '\\n'; echo; echo flood-$((6*7))\r",
+    );
+    sb.wait_for_screen(
+        &pane,
+        "output after 3 MB of stripped notifications",
+        LONG,
+        |s| s.lines().any(|l| l.trim() == "flood-42"),
+    );
+    sb.type_into(&pane, "echo alive-$((6*7+1))\r");
+    sb.wait_for_screen(&pane, "typing after the flood", LONG, |s| {
+        s.lines().any(|l| l.trim() == "alive-43")
+    });
+}
+
 /// The app's own webview keeps its plugins now that the capability names
 /// it, `"webviews": ["main"]`, rather than its window. It learns of a
 /// pane added after launch, and answers `read-screen`, through Tauri's
