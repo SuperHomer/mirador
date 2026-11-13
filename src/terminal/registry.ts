@@ -14,6 +14,8 @@ interface Entry {
   home: HTMLElement;
   /** The element the terminal is lent to, if it is. */
   borrower: HTMLElement | null;
+  /** Lent with `fit: false`: the borrower keeps it at the size it has. */
+  keepsSize: boolean;
   /** The pane's own container is on screen (`setPaneShown`): only then is
    *  a terminal given back sized to it. */
   shown: boolean;
@@ -56,6 +58,7 @@ export function registerTerminal(
     fit,
     home,
     borrower: null,
+    keepsSize: false,
     shown,
     dirty: false,
   };
@@ -121,6 +124,7 @@ export function lendTerminal(
   const element = entry?.term.element;
   if (!entry || !element || entry.borrower) return null;
   entry.borrower = host;
+  entry.keepsSize = !fit;
   host.appendChild(element);
   if (fit) entry.fit.fit();
   changed(paneId);
@@ -128,6 +132,7 @@ export function lendTerminal(
     // The pane may have closed, or remounted with a new terminal, since.
     if (terminals.get(paneId) !== entry || entry.borrower !== host) return;
     entry.borrower = null;
+    entry.keepsSize = false;
     const el = entry.term.element;
     if (el) entry.home.appendChild(el);
     if (entry.shown) entry.fit.fit();
@@ -158,15 +163,22 @@ export function reclaimTerminal(paneId: string) {
   const entry = terminals.get(paneId);
   if (!entry?.borrower) return;
   entry.borrower = null;
+  entry.keepsSize = false;
   const el = entry.term.element;
   if (el) entry.home.appendChild(el);
   entry.fit.fit();
   changed(paneId);
 }
 
-/** Refits the pane's terminal to wherever it is drawn now. */
+/**
+ * Refits the pane's terminal to wherever it is drawn now, unless it is
+ * lent to a tile that keeps its size (`fit: false`): fitted to that tile,
+ * it would take the tile's box, which is the terminal itself less its
+ * scrollbar, and lose two columns each time.
+ */
 export function fitTerminal(paneId: string) {
-  terminals.get(paneId)?.fit.fit();
+  const entry = terminals.get(paneId);
+  if (entry && !entry.keepsSize) entry.fit.fit();
 }
 
 /**

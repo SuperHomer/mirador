@@ -6,6 +6,7 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
 import {
+  fitTerminal,
   isLent,
   reclaimTerminal,
   registerTerminal,
@@ -111,7 +112,6 @@ export const TerminalPane = memo(function TerminalPane({
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<ReturnType<typeof createTerminal> | null>(null);
   const config = useConfigStore((s) => s.config);
-  const fitRef = useRef<FitAddon | null>(null);
   const webglRef = useRef<WebglAddon | null>(null);
   // Lent to the agent wall: drawn there while this pane is under it, so it
   // keeps its renderer as if it were on screen.
@@ -130,14 +130,16 @@ export const TerminalPane = memo(function TerminalPane({
     if (visible && lent) reclaimTerminal(paneId);
   }, [visible, lent, paneId]);
 
-  // Hot-reloaded config applies to the live terminal without recreating it.
+  // Hot-reloaded config applies to the live terminal without recreating it,
+  // refitted to a new font wherever it is drawn, unless a rail's thumbnail
+  // keeps its size (`fitTerminal`). Given back, its pane fits it when shown.
   useEffect(() => {
     const term = termRef.current;
     if (term && config) {
       applyConfig(term, config);
-      fitRef.current?.fit();
+      fitTerminal(paneId);
     }
-  }, [config]);
+  }, [config, paneId]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -166,7 +168,6 @@ export const TerminalPane = memo(function TerminalPane({
     const serialize = new SerializeAddon();
     term.loadAddon(serialize);
     const fit = new FitAddon();
-    fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
     registerTerminal(paneId, term, serialize, fit, container, visibleRef.current);
