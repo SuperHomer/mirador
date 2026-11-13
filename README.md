@@ -199,9 +199,10 @@ every folder on PATH that has one.
 
 It applies to new panes. With `persistSessions` off the app runs panes
 itself and keeps the ConPTY its first pane loaded, so there a change
-applies after a restart. A value Mirador cannot use (a relative name, a
-folder without both files, a `conpty.dll` that does not load) runs panes
-under Windows' own, with a line on stderr saying why.
+applies after a restart. A value Mirador cannot use runs panes under
+Windows' own. The Settings pane marks a relative name or a folder without
+both files, with the reason; a `conpty.dll` that is there but does not
+load falls back without a word.
 
 Two Windows caveats: notifications only appear once the app is installed
 (Windows toasts need a Start Menu entry — a bare `mirador.exe` stays

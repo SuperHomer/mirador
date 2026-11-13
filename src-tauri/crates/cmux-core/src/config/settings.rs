@@ -2,6 +2,7 @@
 //! group, kind, default and description, the values a file sets them to,
 //! and the one function that writes a key back.
 
+use std::ffi::OsStr;
 use std::path::Path;
 
 use cmux_protocol::{ChoiceOption, SettingKind, SettingRow};
@@ -45,26 +46,23 @@ fn theme_sources() -> Vec<&'static str> {
     sources
 }
 
-/// What conpty takes: auto, system, and on Windows each folder on PATH
-/// that holds a conpty.dll, the ConPTYs this machine already has. A folder
-/// elsewhere is taken too ([`accepts`]), but only typed into the file.
-fn conpty_options() -> Vec<ChoiceOption> {
-    let mut options = vec![option(json!("auto")), option(json!("system"))];
-    if cfg!(windows) {
-        if let Some(path) = std::env::var_os("PATH") {
-            options.extend(conpty::on_path(&path).iter().map(|dir| option(json!(dir.to_string_lossy()))));
-        }
-    }
-    options
-}
-
-/// conpty's options as the pane offers them: what auto loads here, which
+/// conpty's options as the pane offers them. [`settings`] gives auto and
+/// system; a folder anywhere is taken too ([`accepts`]). Only here, for the
+/// pane, is PATH (`path`) looked at: [`settings`] runs on every config
+/// write, a zoom step or a sidebar drop included, and one PATH folder on a
+/// drive that does not answer would hold each of them up. On Windows the
+/// pane offers each folder on PATH that holds a conpty.dll, the ConPTYs
+/// this machine already has, and says what auto loads here and which
 /// folders hold a ConPTY that works (a conpty.dll without the
-/// OpenConsole.exe it starts does not), and the file's own folder when it
-/// is not one on PATH, so it shows as itself.
-fn conpty_view_options(mut options: Vec<ChoiceOption>, value: Option<&Value>) -> Vec<ChoiceOption> {
-    let first_on_path =
-        options.iter().filter_map(|o| o.value.as_str()).find(|v| *v != "auto" && *v != "system").map(String::from);
+/// OpenConsole.exe it starts does not). The file's own folder, when it is
+/// not one of those, shows as itself.
+fn conpty_view_options(mut options: Vec<ChoiceOption>, value: Option<&Value>, path: Option<&OsStr>) -> Vec<ChoiceOption> {
+    let on_path = match path {
+        Some(path) if cfg!(windows) => conpty::on_path(path),
+        _ => Vec::new(),
+    };
+    let first_on_path = on_path.first().map(|dir| dir.to_string_lossy().into_owned());
+    options.extend(on_path.iter().map(|dir| option(json!(dir.to_string_lossy()))));
     if let Some(v) = value.and_then(Value::as_str) {
         let named = matches!(conpty::parse(Some(v)), Ok(conpty::Conpty::Auto | conpty::Conpty::System));
         if !named && !options.iter().any(|o| o.value == *v) {
@@ -118,7 +116,7 @@ pub fn settings() -> Vec<Setting> {
             "Where a new tab's first pane starts; splits inherit their pane's directory."),
         setting("persistSessions", "Terminal", Bool, "true",
             "Keep terminals running when Mirador quits, and reattach to them next launch. Applies to new panes."),
-        setting("conpty", "Terminal", SettingKind::Choice { options: conpty_options() }, "auto",
+        setting("conpty", "Terminal", choice(&["auto", "system"]), "auto",
             "Windows only: the ConPTY panes run under. auto loads the first conpty.dll Windows finds, one on PATH included; system is Windows' own; or a folder with conpty.dll and OpenConsole.exe. Applies to new panes; with persistSessions off, after a restart."),
         setting("agentsPerTab", "Agents", SettingKind::Choice { options: vec![option(json!(4)), option(json!(6)), option(json!(9))] }, "4",
             "How many agents a page of the wall's Grid layout holds."),
@@ -183,8 +181,10 @@ pub fn settings_view() -> Result<Vec<SettingRow>, String> {
 /// that value is valid. A file that does not parse is that error, not a
 /// view of the defaults, which would show as if nothing were set.
 /// `ghostty` is where a Ghostty config would be and `wezterm_colors` where
-/// wezterm schemes are by name, for themeSource's notes; nothing else on
-/// disk is looked at.
+/// wezterm schemes are by name, for themeSource's notes. On Windows the
+/// folders on PATH are looked at too, for conpty's ([`conpty_view_options`]):
+/// a PATH folder on a drive that does not answer slows this view, never a
+/// write. Nothing else on disk is looked at.
 fn settings_view_in(path: &Path, ghostty: &Path, wezterm_colors: Option<&Path>) -> Result<Vec<SettingRow>, String> {
     let obj = read_object(path)?;
     Ok(settings()
@@ -196,7 +196,9 @@ fn settings_view_in(path: &Path, ghostty: &Path, wezterm_colors: Option<&Path>) 
                     SettingKind::Choice { options: theme_options(options, &obj, ghostty, wezterm_colors) }
                 }
                 SettingKind::Choice { options } if s.key == "conpty" => {
-                    SettingKind::Choice { options: conpty_view_options(options, value.as_ref()) }
+                    SettingKind::Choice {
+                        options: conpty_view_options(options, value.as_ref(), std::env::var_os("PATH").as_deref()),
+                    }
                 }
                 kind => kind,
             };
@@ -629,8 +631,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
-    /// A folder on PATH is offered for its conpty.dll alone. Offered is not
-    /// taken: without its OpenConsole.exe it is refused, and shown so.
+    /// The probe the test below runs in a process of its own, with a PATH
+    /// it chose: prints the conpty options of the list every config write
+    /// goes through. Run alone, without the variable, it does nothing.
+    #[test]
+    #[ignore = "run in a process of its own by writing_a_setting_does_not_look_at_path"]
+    fn probe_conpty_options_of_a_write() {
+        if std::env::var_os("MIRADOR_SETTINGS_PROBE").is_none() {
+            return;
+        }
+        let row = settings().into_iter().find(|s| s.key == "conpty").unwrap();
+        let SettingKind::Choice { options } = row.kind else { panic!("conpty is a choice") };
+        println!("\noptions: {}", json!(options.into_iter().map(|o| o.value).collect::<Vec<_>>()));
+    }
+
+    /// What every config write goes through offers conpty auto and system
+    /// only: it does not look at PATH, where one folder on a drive that does
+    /// not answer would hold up each write. The pane's view does. Checked in
+    /// a process whose PATH is one folder holding a conpty.dll, so the
+    /// result does not depend on this machine's PATH.
+    #[test]
+    fn writing_a_setting_does_not_look_at_path() {
+        let dir = std::env::temp_dir().join(format!("mirador-settings-write-path-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(conpty::DLL), b"").unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "config::settings::tests::probe_conpty_options_of_a_write", "--ignored", "--nocapture", "--test-threads=1"])
+            .env("MIRADOR_SETTINGS_PROBE", "1")
+            .env("PATH", std::env::join_paths([&dir]).unwrap())
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let options = stdout.lines().find_map(|l| l.strip_prefix("options: ")).unwrap_or_else(|| panic!("no probe line: {stdout}"));
+        assert_eq!(serde_json::from_str::<Value>(options).unwrap(), json!(["auto", "system"]), "{stdout}");
+    }
+
+    /// A folder on PATH is offered, in the pane, for its conpty.dll alone.
+    /// Offered is not taken: without its OpenConsole.exe it is refused, and
+    /// shown so.
     #[test]
     fn an_offered_conpty_folder_without_its_host_is_refused_all_the_same() {
         let dir = std::env::temp_dir().join(format!("mirador-settings-offered-{}", std::process::id()));
@@ -638,23 +678,20 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(conpty::DLL), b"").unwrap();
         let named = json!(dir.to_str().unwrap());
-        let offered = Setting {
-            key: "conpty",
-            group: "Terminal",
-            kind: SettingKind::Choice { options: vec![option(json!("auto")), option(json!("system")), option(named.clone())] },
-            default: "auto".into(),
-            description: "",
-        };
-        assert!(!accepts(&offered, &named), "a folder without OpenConsole.exe is taken for being offered");
+        let setting = settings().into_iter().find(|s| s.key == "conpty").unwrap();
+        assert!(!accepts(&setting, &named), "a folder without OpenConsole.exe is taken for being offered");
         if cfg!(windows) {
-            let SettingKind::Choice { options } = offered.kind.clone() else { unreachable!() };
-            let shown = conpty_view_options(options, Some(&named));
-            let own = shown.iter().find(|o| o.value == named).unwrap();
-            assert!(!own.available);
-            assert_eq!(own.note.as_deref(), Some("no OpenConsole.exe beside its conpty.dll"));
+            let SettingKind::Choice { options } = setting.kind.clone() else { unreachable!() };
+            let path = std::env::join_paths([&dir]).unwrap();
+            let shown = conpty_view_options(options, None, Some(&path));
+            let offered = shown.iter().find(|o| o.value == named).expect("a folder on PATH with a conpty.dll is offered");
+            assert!(!offered.available);
+            assert_eq!(offered.note.as_deref(), Some("no OpenConsole.exe beside its conpty.dll"));
+            let auto = shown.iter().find(|o| o.value == "auto").unwrap();
+            assert_eq!(auto.note, Some(format!("Loads the conpty.dll in {}", dir.display())));
         }
         std::fs::write(dir.join(conpty::HOST), b"").unwrap();
-        assert!(accepts(&offered, &named), "with both files it is a ConPTY");
+        assert!(accepts(&setting, &named), "with both files it is a ConPTY");
         let _ = std::fs::remove_dir_all(dir);
     }
 

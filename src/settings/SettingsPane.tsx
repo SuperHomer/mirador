@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { SettingRow, closePane, focusPane, setConfigValue, settingsView } from "../bindings";
 
@@ -26,13 +26,20 @@ export function SettingsPane({ paneId, path, focused }: Props) {
   const [rows, setRows] = useState<SettingRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // The view is read off the main thread, so two reads in a row can come
+  // back in either order: only the latest one is shown.
+  const latest = useRef(0);
   const read = useCallback(() => {
+    const n = ++latest.current;
     void settingsView()
       .then((r) => {
+        if (n !== latest.current) return;
         setRows(r);
         setError(null);
       })
-      .catch((e: unknown) => setError(String(e)));
+      .catch((e: unknown) => {
+        if (n === latest.current) setError(String(e));
+      });
   }, []);
 
   useEffect(() => {

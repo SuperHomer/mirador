@@ -102,7 +102,11 @@ fn same_folder(a: &Path, b: &Path) -> bool {
 
 /// Settles which ConPTY this process's PTYs run under, once, before the
 /// first: portable-pty loads it with the first PTY and keeps it for the
-/// life of the process. Whatever cannot be honoured is reported.
+/// life of the process. Whatever cannot be honoured goes to stderr, which
+/// only a run from a console shows: a holder's stderr is null and the
+/// installed app has no console. What a person sees is the Settings pane
+/// marking a value it cannot use; a conpty.dll that does not load falls
+/// back without a word.
 pub fn prepare() {
     #[cfg(windows)]
     {
@@ -140,6 +144,17 @@ fn settle(choice: &Conpty) -> Result<(), String> {
 fn wide(s: &OsStr) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
     s.encode_wide().chain(std::iter::once(0)).collect()
+}
+
+/// `path` as [`wide`] gives it, with every `/` turned into `\`. JSON
+/// invites `"C:/Tools/conpty"`, which `is_absolute` accepts, but
+/// LoadLibraryExW asks for backslashes, and LOAD_WITH_ALTERED_SEARCH_PATH
+/// is undefined for a path it does not take as absolute. Done on the
+/// UTF-16 units, so a path that is not valid Unicode keeps its spelling.
+#[cfg(windows)]
+fn wide_backslashed(path: &Path) -> Vec<u16> {
+    let (slash, backslash) = (u16::from(b'/'), u16::from(b'\\'));
+    wide(path.as_os_str()).into_iter().map(|unit| if unit == slash { backslash } else { unit }).collect()
 }
 
 /// Whether this process already has a module named conpty.dll, which a
@@ -188,7 +203,7 @@ fn apply(choice: &Conpty) -> Result<(), String> {
             use windows_sys::Win32::System::Diagnostics::Debug::{
                 SetThreadErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX,
             };
-            let file = wide(dir.join(DLL).as_os_str());
+            let file = wide_backslashed(&dir.join(DLL));
             // A file that is no dll for this process makes the loader ask
             // with a dialog, and a holder has nobody to answer it: this
             // thread fails such a load quietly instead, for this load only.
@@ -382,6 +397,38 @@ mod tests {
         for d in [dir, broken] {
             let _ = std::fs::remove_dir_all(d);
         }
+    }
+
+    /// The point of a folder: its conpty.dll, not one beside the program,
+    /// which a load by name searches first and `auto` takes. Written with
+    /// backslashes or, as JSON invites, with forward slashes.
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_wins_over_a_conpty_dll_beside_the_program() {
+        let (dir, exe) = probe_binary("folder-wins");
+        let beside = std::fs::canonicalize(dir.join(DLL)).unwrap();
+        let chosen = folder("folder-wins-chosen", &[HOST]);
+        let system32 = PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())).join("System32");
+        std::fs::copy(system32.join("version.dll"), chosen.join(DLL)).unwrap();
+        let wanted = std::fs::canonicalize(chosen.join(DLL)).unwrap();
+        assert_ne!(wanted, beside);
+
+        let backslashed = chosen.to_str().unwrap().to_string();
+        let forward = backslashed.replace('\\', "/");
+        assert!(forward.contains('/') && !forward.contains('\\'), "{forward}");
+        for value in [backslashed, forward] {
+            assert_eq!(run_probe(&exe, &value), (None, Some(wanted.clone())), "{value}");
+        }
+        for d in [dir, chosen] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_path_goes_to_the_loader_with_backslashes() {
+        assert_eq!(wide_backslashed(Path::new("C:/Tools/conpty/conpty.dll")), wide(OsStr::new("C:\\Tools\\conpty\\conpty.dll")));
+        assert_eq!(wide_backslashed(Path::new("C:\\Tools/conpty")), wide(OsStr::new("C:\\Tools\\conpty")));
     }
 
     #[test]
