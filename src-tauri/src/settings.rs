@@ -54,6 +54,16 @@ pub fn set_config_value(key: String, value: Option<serde_json::Value>) -> Result
     cmux_core::config::settings::set_config_value(&key, value)
 }
 
+/// Zooms every terminal `steps` whole points, or back to the default with
+/// 0, through `fontSize`. The new size: the file is reloaded at once, the
+/// watcher's way (`config_watch::reload`), so the next step starts from it.
+#[tauri::command]
+pub fn zoom_terminals(app: AppHandle, state: State<'_, AppState>, steps: i32) -> Result<f32, String> {
+    let current = state.config.lock().unwrap().font_size;
+    cmux_core::config::zoom::zoom_terminals(current, steps)?;
+    Ok(crate::config_watch::reload(&app)?.font_size)
+}
+
 /// The usable computers mirador.json lists, for the palette.
 #[tauri::command]
 pub fn list_computers() -> Vec<cmux_core::config::Computer> {

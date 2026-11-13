@@ -10,6 +10,7 @@ import {
   isLent,
   reclaimTerminal,
   registerTerminal,
+  setPaneShown,
   unregisterTerminal,
   watchTerminal,
 } from "./registry";
@@ -115,6 +116,9 @@ export const TerminalPane = memo(function TerminalPane({
   // Lent to the agent wall: drawn there while this pane is under it, so it
   // keeps its renderer as if it were on screen.
   const [lent, setLent] = useState(false);
+  // For the registration below, which runs once per pane id.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   useEffect(() => {
     setLent(isLent(paneId));
@@ -128,7 +132,7 @@ export const TerminalPane = memo(function TerminalPane({
 
   // Hot-reloaded config applies to the live terminal without recreating it,
   // refitted to a new font wherever it is drawn, unless a rail's thumbnail
-  // keeps its size (`fitTerminal`). Given back, it is fitted to its pane.
+  // keeps its size (`fitTerminal`). Given back, its pane fits it when shown.
   useEffect(() => {
     const term = termRef.current;
     if (term && config) {
@@ -150,7 +154,6 @@ export const TerminalPane = memo(function TerminalPane({
     // dropped while it holds — there is nothing to write to.
     let exited = true;
     let attaching = false;
-    let pendingAck = 0;
     // A remote agent's pane reattaches by itself when ssh loses the
     // connection: after `retryDelay`, doubled each time a reconnect is
     // lost again soon, and back to the shortest once one has held. Not
@@ -167,7 +170,7 @@ export const TerminalPane = memo(function TerminalPane({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
-    registerTerminal(paneId, term, serialize, fit, container);
+    registerTerminal(paneId, term, serialize, fit, container, visibleRef.current);
     // The renderer is the visibility effect's job.
     fit.fit();
 
@@ -178,9 +181,18 @@ export const TerminalPane = memo(function TerminalPane({
      * dropped channel tells the webview to unregister the callback for good.
      * Reusing that object would send the next spawn's output into a void: the
      * process runs, the pane stays frozen.
+     *
+     * Each channel acks its own output, whatever the attach is doing. Rust
+     * counts the bytes it hands a channel and starts over at zero for a new
+     * one, so what a channel delivered is that channel's to ack: output that
+     * arrives before its attach resolves (a holder's replay, a first prompt)
+     * included. Dropped instead, it stays counted in Rust for good, and past
+     * 512 KB of such debt the pane freezes the next time it pauses.
      */
     const newChannel = () => {
       const channel = new Channel<PtyData>();
+      // Delivered and drawn, not yet acked.
+      let pendingAck = 0;
       channel.onmessage = (data) => {
         const size =
           data instanceof ArrayBuffer
@@ -191,7 +203,8 @@ export const TerminalPane = memo(function TerminalPane({
         const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
         term.write(bytes, () => {
           pendingAck += size;
-          if (pendingAck >= ACK_THRESHOLD && !exited) {
+          // After an exit too: Rust ignores a pane it no longer has.
+          if (pendingAck >= ACK_THRESHOLD) {
             void ackPty(paneId, pendingAck);
             pendingAck = 0;
           }
@@ -245,7 +258,6 @@ export const TerminalPane = memo(function TerminalPane({
         // silently dropped.
         exited = false;
         attachedAt = Date.now();
-        pendingAck = 0;
         // Resizes while attaching were dropped (no PTY to take them), and
         // the layout often settles in exactly that window — right after a
         // split. A shell left at the old width redraws its line for a
@@ -400,6 +412,13 @@ export const TerminalPane = memo(function TerminalPane({
       term.dispose();
     };
   }, [paneId]);
+
+  // Tells the registry whether this pane is on screen: a terminal the wall
+  // gives back is sized to it only then, and once it shows again. After the
+  // registration above, which React runs first.
+  useEffect(() => {
+    setPaneShown(paneId, visible);
+  }, [visible, paneId]);
 
   // On the board every terminal counts as visible, and a browser allows
   // ~16 WebGL contexts. So there a terminal renders with WebGL only while

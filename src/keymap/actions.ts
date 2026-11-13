@@ -22,12 +22,13 @@ import {
   setView,
   installUpdate,
   quitEndingSessions,
+  zoomTerminals,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
-import { getTerminal, terminalWithFocus } from "../terminal/registry";
+import { getTerminal, isLent, paneWithFocus, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
 import { opensInTab } from "../state/configStore";
 
@@ -49,6 +50,34 @@ function focusedPane(): string | undefined {
   return activeTab(snapshot)?.focusedPane;
 }
 
+/**
+ * The pane a pane action — close, split, zoom, show activity — acts on:
+ * the tab's focused pane, except on the agent wall. There, clicking into
+ * an agent of the active tab's wall or picking one for Focus leaves the
+ * tab's focused pane where it was (`mark_pane_read`), so it can be another
+ * agent than the one being typed into: the one whose terminal the wall
+ * borrowed and that holds the keyboard. (On the board, clicking into a
+ * tile of another tab's wall does move it: `focusPane` makes that tab the
+ * active one and the tile's agent its focused pane, so the two agree.)
+ *
+ * Only there. Everywhere else the keyboard says nothing: only terminals
+ * take DOM focus, so a diff, graph or browser pane the tab focused leaves
+ * the last terminal holding it, and whether a tab switched away from
+ * blurs its terminal is up to the engine (WebView2 does). Asked there,
+ * the DOM can name a pane that is not the one shown as focused, or one in
+ * a tab nobody is looking at.
+ */
+function actionPane(): string | undefined {
+  const tab = activeTab(useWorkspaceStore.getState().snapshot);
+  const typed = paneWithFocus();
+  const onWall =
+    !!tab?.wall &&
+    !!typed &&
+    isLent(typed) &&
+    tab.wallPages.some((page) => page.includes(typed));
+  return onWall ? typed : tab?.focusedPane;
+}
+
 /** Moves `offset` tabs along the sidebar's order, wrapping around. */
 function cycleTab(offset: number) {
   const { snapshot } = useWorkspaceStore.getState();
@@ -65,7 +94,7 @@ export const actions: ActionDef[] = [
     title: "Pane: Close",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void closePane(pane);
     },
   },
@@ -83,7 +112,7 @@ export const actions: ActionDef[] = [
     title: "Pane: Split Right…",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void splitPane(pane, "row");
     },
   },
@@ -92,7 +121,7 @@ export const actions: ActionDef[] = [
     title: "Pane: Split Down…",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void splitPane(pane, "column");
     },
   },
@@ -218,7 +247,7 @@ export const actions: ActionDef[] = [
     // The focused agent's task progress and its subagents, in a drawer:
     // the whole of what its status bar sums up.
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       const agent = useWorkspaceStore
         .getState()
         .snapshot?.agents.find((a) => a.paneId === pane);
@@ -245,6 +274,26 @@ export const actions: ActionDef[] = [
       if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
     },
   },
+  // Zoom: the terminals' text, kept in mirador.json as fontSize. Ctrl +
+  // wheel over a terminal does the same (useZoomWheel).
+  {
+    id: "terminal_zoom_in",
+    title: "View: Zoom Terminals In",
+    group: "view",
+    run: () => void zoomTerminals(1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_out",
+    title: "View: Zoom Terminals Out",
+    group: "view",
+    run: () => void zoomTerminals(-1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_reset",
+    title: "View: Reset Terminal Zoom",
+    group: "view",
+    run: () => void zoomTerminals(0).catch(zoomFailed),
+  },
   {
     id: "board_arrange",
     title: "View: Arrange Frames",
@@ -260,7 +309,7 @@ export const actions: ActionDef[] = [
     group: "pane",
     // The focused pane alone, filling its tab — or the whole tab again.
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void zoomPane(pane);
     },
   },
@@ -369,6 +418,11 @@ export const actions: ActionDef[] = [
     },
   },
 ];
+
+/** A zoom that could not be written: mirador.json does not parse. */
+function zoomFailed(err: unknown) {
+  console.warn(`mirador: zoom not saved: ${err}`);
+}
 
 export function runAction(id: string): boolean {
   const def = actions.find((a) => a.id === id);

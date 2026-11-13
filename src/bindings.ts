@@ -1062,6 +1062,9 @@ export const settingsView = () => invoke<SettingRow[]>("settings_view");
 /** Sets `key` in mirador.json, or removes it with null. */
 export const setConfigValue = (key: string, value: unknown) =>
   invoke<void>("set_config_value", { key, value });
+/** Zooms every terminal `steps` whole points, or back to the default with
+ *  0 (`fontSize`). Resolves to the new size. */
+export const zoomTerminals = (steps: number) => invoke<number>("zoom_terminals", { steps });
 
 /** An agent-editor pane, and the directory whose files it edits. */
 export interface AgentEditorPaneInfo {

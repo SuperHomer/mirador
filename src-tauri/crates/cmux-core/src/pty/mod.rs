@@ -42,18 +42,32 @@ struct FlowControl {
 }
 
 impl FlowControl {
-    /// Called by the reader thread after forwarding `n` bytes; blocks while
-    /// the high watermark is exceeded. Returns false if the pane was closed.
-    fn add_and_wait(&self, n: u64) -> bool {
+    /// Counts `n` bytes handed to the consumer. Called under the pane's sink
+    /// lock, in the same step as the hand-off — see `forward_chunk`.
+    fn add(&self, n: u64) {
         let mut s = self.state.lock().unwrap();
-        if s.unthrottled {
-            return !s.closed;
+        if !s.unthrottled {
+            s.unacked += n;
         }
-        s.unacked += n;
-        while s.unacked >= HIGH_WATERMARK && !s.closed {
+    }
+
+    /// Called by the reader thread after each hand-off; blocks while the
+    /// high watermark is exceeded. Returns false if the pane was closed.
+    fn wait(&self) -> bool {
+        let mut s = self.state.lock().unwrap();
+        while !s.unthrottled && s.unacked >= HIGH_WATERMARK && !s.closed {
             s = self.cond.wait(s).unwrap();
         }
         !s.closed
+    }
+
+    /// A new consumer starts with nothing in flight. Whatever the previous
+    /// one was handed and never acked went with it: the new one acks only
+    /// what it receives, so that remainder would never come down — and once
+    /// it sat above the low watermark, a paused reader would never wake.
+    fn reset(&self) {
+        self.state.lock().unwrap().unacked = 0;
+        self.cond.notify_all();
     }
 
     fn ack(&self, n: u64) {
@@ -71,6 +85,34 @@ impl FlowControl {
 }
 
 type Sink = Arc<Mutex<Box<dyn FnMut(&[u8]) + Send>>>;
+
+/// Passes one chunk of the child's output to the pane's current sink, then
+/// waits out the flow-control window. Returns false once the pane is closed.
+///
+/// What is counted is what the sink was handed, not what was read: the
+/// scanner strips notification sequences, and the UI can only ack bytes it
+/// received. Counting the input made every stripped byte a debt nothing
+/// would ever pay — 2 MB of notifications and the reader stopped for good,
+/// the pane frozen and its child blocked on its next write.
+///
+/// The count is taken under the sink lock, with the hand-off. `set_sink`
+/// swaps the sink and resets the count under the same lock, so a chunk is
+/// always counted against the consumer that got it; counted after the lock
+/// was let go, a chunk handed to the old sink could land on the new count.
+fn forward_chunk(
+    scanner: &mut dyn StreamScanner,
+    sink: &Sink,
+    flow: &FlowControl,
+    chunk: &[u8],
+) -> bool {
+    let out = scanner.scan(chunk);
+    if !out.is_empty() {
+        let mut sink = sink.lock().unwrap();
+        (sink)(&out);
+        flow.add(out.len() as u64);
+    }
+    flow.wait()
+}
 
 /// The pane's exit callback, held so whichever thread observes the exit
 /// first can consume it. `FnOnce` behind a lock is the one-shot guard.
@@ -261,12 +303,7 @@ impl PtyManager {
                         if !forwarding {
                             continue;
                         }
-                        let n = batch.len() as u64;
-                        let out = scanner.scan(&batch);
-                        if !out.is_empty() {
-                            (sink.lock().unwrap())(&out);
-                        }
-                        if !flow.add_and_wait(n) {
+                        if !forward_chunk(scanner.as_mut(), &sink, &flow, &batch) {
                             forwarding = false;
                         }
                     }
@@ -296,14 +333,26 @@ impl PtyManager {
     }
 
     /// Redirects a running pane's output to a new callback (frontend
-    /// remount). Returns false if the pane is not running.
+    /// remount), whose flow-control count starts from zero: the old
+    /// callback's unacked bytes will never be acked. Returns false if the
+    /// pane is not running.
     pub fn set_sink(&self, id: &str, on_data: impl FnMut(&[u8]) + Send + 'static) -> bool {
-        if let Some(pane) = self.inner.panes.lock().unwrap().get(id) {
-            *pane.sink.lock().unwrap() = Box::new(on_data);
-            true
-        } else {
-            false
-        }
+        let Some((sink, flow)) = self
+            .inner
+            .panes
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|pane| (Arc::clone(&pane.sink), Arc::clone(&pane.flow)))
+        else {
+            return false;
+        };
+        // One step under the sink lock, as the reader counts — see
+        // `forward_chunk`.
+        let mut sink = sink.lock().unwrap();
+        *sink = Box::new(on_data);
+        flow.reset();
+        true
     }
 
     pub fn is_running(&self, id: &str) -> bool {
@@ -517,14 +566,7 @@ impl PtyManager {
             .spawn(move || {
                 let mut forwarding = true;
                 let mut forward = |scanner: &mut Box<dyn StreamScanner>, bytes: &[u8]| {
-                    if !forwarding {
-                        return;
-                    }
-                    let out = scanner.scan(bytes);
-                    if !out.is_empty() {
-                        (sink.lock().unwrap())(&out);
-                    }
-                    if !flow.add_and_wait(bytes.len() as u64) {
+                    if forwarding && !forward_chunk(scanner.as_mut(), &sink, &flow, bytes) {
                         forwarding = false;
                     }
                 };
@@ -959,5 +1001,169 @@ mod tests {
         exit_rx
             .recv_timeout(Duration::from_secs(10))
             .expect("close must unblock the paused reader thread");
+    }
+}
+
+/// Flow-control accounting, driven through `forward_chunk` — the step both
+/// readers take — with no child process, so it runs on every platform.
+/// Each case here once left bytes counted that the UI could never ack:
+/// past the low watermark, the reader paused at the high one for good, and
+/// the pane froze with its child blocked on its next write.
+#[cfg(test)]
+mod flow_tests {
+    use super::*;
+    use crate::osc::{OscScanner, PassthroughScanner};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn unacked(flow: &FlowControl) -> u64 {
+        flow.state.lock().unwrap().unacked
+    }
+
+    /// A running pane as `attach_held` leaves it, minus the holder: the map
+    /// entry `set_sink` and `ack` work on, with its flow and sink handed
+    /// back for the test to feed.
+    fn pane(
+        mgr: &PtyManager,
+        id: &str,
+        on_data: impl FnMut(&[u8]) + Send + 'static,
+    ) -> (Sink, Arc<FlowControl>) {
+        let flow = Arc::new(FlowControl::default());
+        let sink: Sink = Arc::new(Mutex::new(Box::new(on_data)));
+        let (input, _) = mpsc::channel();
+        let (control, _) = mpsc::channel();
+        mgr.inner.panes.lock().unwrap().insert(
+            id.to_string(),
+            PtyPane {
+                input,
+                backend: Backend::Held { control },
+                flow: Arc::clone(&flow),
+                sink: Arc::clone(&sink),
+                pid: None,
+            },
+        );
+        (sink, flow)
+    }
+
+    /// Runs `forward_chunk` on its own thread, as a reader does, and says
+    /// whether it came back within `timeout` (false: parked at the high
+    /// watermark).
+    fn forwards_within(
+        scanner: Box<dyn StreamScanner>,
+        sink: &Sink,
+        flow: &Arc<FlowControl>,
+        chunk: Vec<u8>,
+        timeout: Duration,
+    ) -> bool {
+        let (sink, flow) = (Arc::clone(sink), Arc::clone(flow));
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut scanner = scanner;
+            let open = forward_chunk(scanner.as_mut(), &sink, &flow, &chunk);
+            let _ = done_tx.send(open);
+        });
+        done_rx.recv_timeout(timeout).is_ok()
+    }
+
+    #[test]
+    fn stripped_notifications_are_not_counted_against_the_ui() {
+        let mgr = PtyManager::new();
+        let (got_tx, got_rx) = mpsc::channel::<Vec<u8>>();
+        let (sink, flow) = pane(&mgr, "pane-osc", move |bytes| {
+            let _ = got_tx.send(bytes.to_vec());
+        });
+
+        // 3 MB of OSC 99 with an empty payload: stripped from the stream,
+        // and raising nothing. Then something the UI does get to see.
+        let mut chunk = b"\x1b]99;;\x07".repeat(3 * 1024 * 1024 / 7);
+        chunk.extend_from_slice(b"visible");
+        assert!(chunk.len() as u64 > HIGH_WATERMARK);
+
+        let scanner = Box::new(OscScanner::new(|_| {}));
+        assert!(
+            forwards_within(scanner, &sink, &flow, chunk, Duration::from_secs(5)),
+            "the reader parked on bytes the UI never received, so can never ack"
+        );
+        let got: Vec<u8> = got_rx.try_iter().flatten().collect();
+        assert_eq!(got, b"visible");
+        assert_eq!(
+            unacked(&flow),
+            got.len() as u64,
+            "the count is what the sink was handed, not what was read"
+        );
+    }
+
+    #[test]
+    fn a_new_sink_starts_with_nothing_in_flight() {
+        let mgr = PtyManager::new();
+        let (sink, flow) = pane(&mgr, "pane-remount", |_| {});
+
+        // The mount that is going away was handed 1.5 MB it never acked —
+        // under the high watermark, so nothing paused yet.
+        let chunk = vec![b'x'; 1536 * 1024];
+        assert!(forwards_within(
+            Box::new(PassthroughScanner),
+            &sink,
+            &flow,
+            chunk,
+            Duration::from_secs(5)
+        ));
+        assert_eq!(unacked(&flow), 1536 * 1024);
+
+        let (got_tx, got_rx) = mpsc::channel::<Vec<u8>>();
+        assert!(mgr.set_sink("pane-remount", move |bytes| {
+            let _ = got_tx.send(bytes.to_vec());
+        }));
+        assert_eq!(
+            unacked(&flow),
+            0,
+            "the new mount can only ack what it receives: the old one's debt would stay forever"
+        );
+
+        // The new mount gets the next 1 MB, and acking all of it clears the
+        // count — with the old debt kept it would sit at 1.5 MB, above the
+        // low watermark, and the next pause would be the last.
+        assert!(forwards_within(
+            Box::new(PassthroughScanner),
+            &sink,
+            &flow,
+            vec![b'y'; 1024 * 1024],
+            Duration::from_secs(5)
+        ));
+        let got = got_rx.try_iter().map(|b| b.len() as u64).sum::<u64>();
+        assert_eq!(got, 1024 * 1024);
+        mgr.ack("pane-remount", got);
+        assert_eq!(unacked(&flow), 0);
+    }
+
+    #[test]
+    fn a_new_sink_wakes_a_reader_the_old_one_left_paused() {
+        let mgr = PtyManager::new();
+        let (sink, flow) = pane(&mgr, "pane-paused", |_| {});
+
+        // The old mount stopped acking (unmounted mid-burst): the reader
+        // parks at the high watermark, and nothing the new mount will ever
+        // receive can ack it free.
+        let (woke_tx, woke_rx) = mpsc::channel();
+        {
+            let (sink, flow) = (Arc::clone(&sink), Arc::clone(&flow));
+            std::thread::spawn(move || {
+                let mut scanner = PassthroughScanner;
+                let burst = vec![b'x'; HIGH_WATERMARK as usize];
+                let _ = woke_tx.send(forward_chunk(&mut scanner, &sink, &flow, &burst));
+            });
+        }
+        assert!(
+            woke_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            "with nothing acked the reader must pause at the high watermark"
+        );
+
+        assert!(mgr.set_sink("pane-paused", |_| {}));
+        assert_eq!(
+            woke_rx.recv_timeout(Duration::from_secs(5)),
+            Ok(true),
+            "the remount must release the reader, or the pane stays frozen"
+        );
+        assert_eq!(unacked(&flow), 0);
     }
 }

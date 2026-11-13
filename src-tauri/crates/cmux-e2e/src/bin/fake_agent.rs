@@ -240,8 +240,9 @@ fn hook(event: &str, payload: serde_json::Value) -> bool {
 fn main() {
     let mut args = std::env::args();
     let argv0 = args.next().unwrap_or_default();
+    // The name without its extension: `claude.exe` on Windows is claude.
     let kind = std::path::Path::new(&argv0)
-        .file_name()
+        .file_stem()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let args: Vec<String> = args.collect();
