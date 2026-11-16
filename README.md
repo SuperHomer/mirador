@@ -183,6 +183,27 @@ status light up. Nothing needs Git Bash. If you want it anyway:
 `mira run "npm test"` hands the command to whichever shell that is, so
 quoting follows your shell's rules.
 
+**Which ConPTY?** Panes run under the first `conpty.dll` Windows finds,
+and that can be another program's: WezTerm puts one on PATH, with its own
+`OpenConsole.exe`, and with it installed every pane runs under that one
+instead of Windows' own. The two draw a resized screen differently.
+`conpty` picks: `"auto"` (that, the default), `"system"` (Windows' own,
+whatever is on PATH), or a folder holding `conpty.dll` and the
+`OpenConsole.exe` it starts, such as WezTerm's. The Settings pane offers
+every folder on PATH that has one.
+
+```jsonc
+// %APPDATA%\mirador\mirador.json
+{ "conpty": "system" }
+```
+
+It applies to new panes. With `persistSessions` off the app runs panes
+itself and keeps the ConPTY its first pane loaded, so there a change
+applies after a restart. A value Mirador cannot use runs panes under
+Windows' own. The Settings pane marks a relative name or a folder without
+both files, with the reason; a `conpty.dll` that is there but does not
+load falls back without a word.
+
 Two Windows caveats: notifications only appear once the app is installed
 (Windows toasts need a Start Menu entry — a bare `mirador.exe` stays
 silent), and `mira ssh forward` opens its own `ssh -N -L` connection

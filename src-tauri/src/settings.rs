@@ -41,10 +41,16 @@ pub fn open_settings(
 }
 
 /// Every setting with the value mirador.json gives it, or the reason the
-/// file cannot be read.
+/// file cannot be read. Off the main thread: on Windows the view looks at
+/// each PATH folder for conpty's choices, and an open Settings pane, in
+/// any tab, reads it again after every config change, a zoom step
+/// included. A PATH folder on a drive that does not answer then slows the
+/// pane's refresh, not the app.
 #[tauri::command]
-pub fn settings_view() -> Result<Vec<SettingRow>, String> {
-    cmux_core::config::settings::settings_view()
+pub async fn settings_view() -> Result<Vec<SettingRow>, String> {
+    tauri::async_runtime::spawn_blocking(cmux_core::config::settings::settings_view)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Sets `key` in mirador.json to `value`, or removes it when null. The
