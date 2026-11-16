@@ -664,8 +664,9 @@ function FocusRibbon({
     .sort((a, b) => group(a) - group(b));
   const shownTools = tools.filter((t) => keep(t.paneId, filter === "all" || filter === "tools"));
 
-  // The selected tab stays in view as Focus moves to another. The row is
-  // scrolled by hand: scrollIntoView would scroll every ancestor too.
+  // The selected tab stays in view as Focus moves to another, and when a
+  // filter chip changes which tabs come before it. The row is scrolled by
+  // hand: scrollIntoView would scroll every ancestor too.
   useEffect(() => {
     const list = listRef.current;
     const selected = list?.querySelector<HTMLElement>(".ribbon-tab.selected");
@@ -674,7 +675,7 @@ function FocusRibbon({
     const right = left + selected.offsetWidth;
     if (left < list.scrollLeft) list.scrollLeft = left;
     else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
-  }, [focusedPane]);
+  }, [focusedPane, filter]);
 
   // Beside the large one's name, no others means no tabs at all.
   if (placement === "head" && shownAgents.length + shownTools.length === 0) return null;
@@ -697,6 +698,10 @@ function FocusRibbon({
           aria-selected={a.paneId === focusedPane}
           className={tabClass(a.paneId, a.status ?? undefined)}
           title={`Show ${agentLabel(a)} large`}
+          // As the rail's and Focus | Grid: the keyboard stays in the
+          // terminal. Clicking the tab already shown changes no
+          // focusedPane, so nothing would give it back.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => onPick(a.paneId)}
         >
           <StatusMark status={a.status} small />
@@ -711,6 +716,7 @@ function FocusRibbon({
           aria-selected={t.paneId === focusedPane}
           className={tabClass(t.paneId, "tool")}
           title={`Show ${t.title} large`}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => onPick(t.paneId)}
         >
           <span className="tool-mark">
