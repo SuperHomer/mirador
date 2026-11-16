@@ -62,12 +62,12 @@ export function useDragWidth(key: string, configured: number | null, range: Widt
     // pointer's events still reach once the capture is gone, or the edge
     // itself (the sidebar hidden by its shortcut mid-drag).
     //
-    // An app switch mid-drag (Alt+Tab, Cmd+Tab) can end with no pointer
-    // event at all: the button comes up while another app is in front, and
-    // WebKit fires no pointerup, pointercancel or lostpointercapture for a
-    // mouse when the window loses focus. So the window's blur ends the
-    // drag, at the moment it happens, instead of the width following the
-    // mouse until the next click, which used to write it.
+    // An app switch mid-drag (Alt+Tab, Cmd+Tab) takes the window's focus
+    // with the button down, and the button comes up while another app is
+    // in front. Traced on macOS in two drags, the pointerup for that
+    // release reached the page 400 and 640 ms after the blur. So the
+    // window's blur ends the drag, at the moment it happens, instead of
+    // the drag going on under another app until the button comes up.
     const edge = down.currentTarget as HTMLElement;
     const pointer = down.pointerId;
     try {
@@ -80,8 +80,12 @@ export function useDragWidth(key: string, configured: number | null, range: Widt
 
     const onMove = (e: PointerEvent) => {
       if (e.pointerId !== pointer) return;
-      // The button came up where no pointerup reached us: over.
-      if ((e.buttons & 1) === 0) return finish(false);
+      // A move with the button up is the release. Traced on macOS, one
+      // arrives 1 to 16 ms before the pointerup when the release point is
+      // not where the last held move was (0.11 px was enough), so it is a
+      // drop: finish writes `live`, the width of the last move with the
+      // button down, since this one returns before touching it.
+      if ((e.buttons & 1) === 0) return finish(true);
       const delta = grows === "right" ? e.clientX - startX : startX - e.clientX;
       const width = Math.round(Math.max(range.min, Math.min(max, from + delta)));
       live.current = width;
