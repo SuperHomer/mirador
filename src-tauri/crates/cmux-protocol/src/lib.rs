@@ -1377,6 +1377,20 @@ pub struct TeamRemote {
     pub dir: String,
 }
 
+/// What testing a computer found there, changing nothing on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerCheck {
+    /// Its system and machine, as `uname -s` and `-m` say: `Linux x86_64`.
+    pub system: String,
+    /// Whether an agent started there would find its directory.
+    pub dir_found: bool,
+    /// Whether `claude` is on the PATH an agent there gets.
+    pub claude_found: bool,
+    /// Why agents cannot run there, in one line; none when they can.
+    pub agents: Option<String>,
+}
+
 /// A member of a running team: its name, its role, and its pane — which
 /// may since have been closed.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

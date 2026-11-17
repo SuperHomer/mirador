@@ -284,6 +284,69 @@ pub fn ensure_mira(host: &str, version: &str) -> Result<String, String> {
     Ok(path.trim().to_string())
 }
 
+/// Tests `host` as a computer for agents of this app's `version`, working
+/// in `dir` there: one connection, which never prompts, and nothing made
+/// or fetched there. An error is ssh's own — a host it cannot reach or
+/// log in to — or an answer that is not the check's.
+#[cfg(not(windows))]
+pub fn check_computer(host: &str, dir: &str, version: &str) -> Result<cmux_protocol::ComputerCheck, String> {
+    let answer = remote_shell(host, &check_computer_script(dir, version))?;
+    computer_check_in(&answer, version).ok_or_else(|| format!("{host} did not answer the test: {}", answer.trim()))
+}
+
+/// The script [`check_computer`] runs, printing `key=value` lines. Each
+/// thing is looked at as an agent's start there would meet it. Its `mira`
+/// as [`ENSURE_MIRA`] finds one. Its directory from the home, where its
+/// holder starts, quoted as [`run_script`] quotes it: a `~` there is a
+/// directory named `~`, as it is for the agent's `cd`. And `claude` under
+/// the PATH of the login shell [`run_script`] goes through, given only
+/// plain words, its stdin closed so it cannot read this script; anything
+/// the person's rc files print comes before its last line.
+#[cfg_attr(windows, allow(dead_code))]
+fn check_computer_script(dir: &str, version: &str) -> String {
+    [
+        r#"printf 'os=%s\n' "$(uname -s)""#.to_string(),
+        r#"printf 'arch=%s\n' "$(uname -m)""#.into(),
+        format!(r#"if [ -x "$HOME/.mirador/bin/mira-{version}" ]; then echo mira=yes; else echo mira=no; fi"#),
+        format!("if (cd {}) 2>/dev/null; then echo dir=yes; else echo dir=no; fi", quote(dir)),
+        r#"p=$("${SHELL:-/bin/sh}" -l -i -c 'printenv PATH' </dev/null 2>/dev/null | tail -n 1)"#.into(),
+        r#"if [ -n "$p" ] && (PATH=$p; command -v claude) >/dev/null 2>&1; then echo claude=yes; else echo claude=no; fi"#.into(),
+    ]
+    .join("\n")
+        + "\n"
+}
+
+/// What a [`check_computer_script`] answer says, or none when it is not
+/// one: every key there, the last of each winning, since what a remote's
+/// rc files print on connecting comes first, and none of them empty or
+/// other than `yes` or `no` where that is the answer.
+#[cfg_attr(windows, allow(dead_code))]
+fn computer_check_in(answer: &str, version: &str) -> Option<cmux_protocol::ComputerCheck> {
+    let get = |key: &str| {
+        answer.lines().rev().find_map(|l| l.trim_end().strip_prefix(key)?.strip_prefix('=')).filter(|v| !v.is_empty())
+    };
+    let yes = |key: &str| match get(key)? {
+        "yes" => Some(true),
+        "no" => Some(false),
+        _ => None,
+    };
+    let (os, arch) = (get("os")?, get("arch")?);
+    let (mira, dir_found, claude_found) = (yes("mira")?, yes("dir")?, yes("claude")?);
+    let system = format!("{os} {arch}");
+    // ENSURE_MIRA's case for a published mira: change the two together.
+    let published = os.eq_ignore_ascii_case("linux") && matches!(arch, "x86_64" | "aarch64" | "arm64");
+    let agents = if !mira && !published {
+        Some(format!("no mira is published for {system}: put a mira of version {version} at ~/.mirador/bin/mira-{version} there"))
+    } else if !claude_found {
+        Some("Claude Code is not on the PATH of a login shell there".to_string())
+    } else if !dir_found {
+        Some("the directory is not there".to_string())
+    } else {
+        None
+    };
+    Some(cmux_protocol::ComputerCheck { system, dir_found, claude_found, agents })
+}
+
 /// The remote's home directory, where an agent's run script goes. It ends
 /// up in commands given to ssh as plain words, so one with a space or
 /// anything a shell would read is refused rather than quoted for a shell
@@ -568,6 +631,114 @@ mod tests {
             "{script}"
         );
         assert!(!script.contains('@'), "every placeholder filled: {script}");
+    }
+
+    /// A computer's test, as read from its answer: its system, its
+    /// directory, its `claude`, and whether agents can run there — and the
+    /// one reason when they cannot.
+    #[test]
+    fn a_computers_test_says_whether_agents_can_run_there() {
+        let answer = |os: &str, arch: &str, mira: &str, dir: &str, claude: &str| {
+            format!("os={os}\narch={arch}\nmira={mira}\ndir={dir}\nclaude={claude}\n")
+        };
+        let check = computer_check_in(&answer("Linux", "x86_64", "no", "yes", "yes"), "1.2.3").unwrap();
+        assert_eq!(
+            check,
+            cmux_protocol::ComputerCheck { system: "Linux x86_64".into(), dir_found: true, claude_found: true, agents: None }
+        );
+        for arch in ["aarch64", "arm64"] {
+            assert_eq!(computer_check_in(&answer("Linux", arch, "no", "yes", "yes"), "1.2.3").unwrap().agents, None, "{arch}");
+        }
+
+        let missing = computer_check_in(&answer("Linux", "x86_64", "no", "no", "yes"), "1.2.3").unwrap();
+        assert!(!missing.dir_found, "{missing:?}");
+        assert_eq!(missing.agents.as_deref(), Some("the directory is not there"));
+
+        let mac = computer_check_in(&answer("Darwin", "arm64", "no", "yes", "yes"), "1.2.3").unwrap();
+        assert_eq!(mac.system, "Darwin arm64");
+        assert_eq!(
+            mac.agents.as_deref(),
+            Some("no mira is published for Darwin arm64: put a mira of version 1.2.3 at ~/.mirador/bin/mira-1.2.3 there")
+        );
+        // One put there by hand is the one an agent uses, as ENSURE_MIRA does.
+        assert_eq!(computer_check_in(&answer("Darwin", "arm64", "yes", "yes", "yes"), "1.2.3").unwrap().agents, None);
+        let riscv = computer_check_in(&answer("Linux", "riscv64", "no", "yes", "yes"), "1.2.3").unwrap();
+        assert!(riscv.agents.unwrap().starts_with("no mira is published for Linux riscv64"));
+
+        let no_claude = computer_check_in(&answer("Linux", "x86_64", "no", "yes", "no"), "1.2.3").unwrap();
+        assert!(!no_claude.claude_found);
+        assert_eq!(no_claude.agents.as_deref(), Some("Claude Code is not on the PATH of a login shell there"));
+    }
+
+    /// What a remote's rc files print on connecting is not the answer, and
+    /// an answer missing any part of the test, or saying something else
+    /// than the test does, is none.
+    #[test]
+    fn a_computers_test_is_read_past_noise_and_never_guessed() {
+        let noisy = "Welcome!\nos=Plan9\nlast login: today\nos=Linux\narch=x86_64\nmira=no\ndir=yes\nclaude=yes\r\n";
+        assert_eq!(computer_check_in(noisy, "1").unwrap().system, "Linux x86_64");
+        for odd in [
+            "",
+            "garbage\n",
+            "sh: 1: Syntax error\n",
+            "os=Linux\narch=x86_64\nmira=no\ndir=yes\n",
+            "os=Linux\narch=x86_64\nmira=no\ndir=yes\nclaude=maybe\n",
+            "os=\narch=x86_64\nmira=no\ndir=yes\nclaude=yes\n",
+        ] {
+            assert_eq!(computer_check_in(odd, "1"), None, "{odd:?}");
+        }
+    }
+
+    /// The test's script, run by sh in a home of its own: `claude` found
+    /// on the PATH only the login shell's profile sets, as an agent's run
+    /// script finds it; the directory as the agent's `cd` sees it, from
+    /// the home, where a `~` is no home; and nothing made there.
+    #[cfg(unix)]
+    #[test]
+    fn a_computers_test_sees_what_an_agent_would() {
+        let home = std::env::temp_dir().join(format!("mira-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("work/app")).unwrap();
+        std::fs::create_dir_all(home.join("tools")).unwrap();
+        // The whole PATH: the system's profile would add its own, which may
+        // hold a claude of this machine's.
+        std::fs::write(home.join(".profile"), "echo welcome\nPATH=\"$HOME/tools:/usr/bin:/bin\"; export PATH\n").unwrap();
+        let run = |dir: &str| {
+            let output = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(check_computer_script(dir, "1.2.3"))
+                .env_clear()
+                .env("HOME", &home)
+                .env("SHELL", "/bin/sh")
+                .env("PATH", "/usr/bin:/bin")
+                .current_dir(&home)
+                .output()
+                .unwrap();
+            computer_check_in(&String::from_utf8_lossy(&output.stdout), "1.2.3").unwrap()
+        };
+        let listing = || {
+            let mut names: Vec<_> = std::fs::read_dir(&home).unwrap().map(|e| e.unwrap().file_name()).collect();
+            names.sort();
+            names
+        };
+        let before = listing();
+
+        let check = run("work/app");
+        assert!(check.dir_found && !check.claude_found, "{check:?}");
+        let uname = |flag: &str| String::from_utf8_lossy(&Command::new("uname").arg(flag).output().unwrap().stdout).trim().to_string();
+        assert_eq!(check.system, format!("{} {}", uname("-s"), uname("-m")));
+        assert!(run(home.join("work/app").to_str().unwrap()).dir_found);
+        assert!(!run("~/work/app").dir_found, "a quoted ~ is no home, for the agent's cd as here");
+        assert!(!run("work/none").dir_found);
+
+        let claude = home.join("tools/claude");
+        std::fs::write(&claude, "#!/bin/sh\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(run("work/app").claude_found, "on the login shell's PATH");
+
+        assert_eq!(listing(), before, "nothing made in the home");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// An agent's run script: through the login shell with nothing but
