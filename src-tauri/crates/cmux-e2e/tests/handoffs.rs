@@ -36,7 +36,7 @@ fn agents_hand_each_other_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
     sb.wait_for("the planner", LONG, || sb.member("planner"));
     let planner = pane_of(&sb, "planner");
     let r1 = pane_of(&sb, "reviewer-1");
@@ -126,7 +126,7 @@ fn another_tabs_team_is_reached_by_team_and_name() {
     sb.launch();
     let shell = sb.first_pane();
     let start_squad = |sb: &Sandbox| -> String {
-        let started = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None });
+        let started = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
         started["tabId"].as_str().unwrap().to_string()
     };
     let squad_tab = start_squad(&sb);
@@ -143,6 +143,7 @@ fn another_tabs_team_is_reached_by_team_and_name() {
         pane_id: Some(shell.clone()),
         host: None,
         dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -190,7 +191,7 @@ fn another_tabs_team_is_reached_by_team_and_name() {
 
     // Between two teams' tabs: the header is `<team>/<name>`, and that
     // exact string, sent back, reaches the sender.
-    sb.call(Request::TeamStart { title: None, team: "gate".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None });
+    sb.call(Request::TeamStart { title: None, team: "gate".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
     sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
     let reviewer = pane_of(&sb, "reviewer");
     for pane in [&dev, &reviewer] {
@@ -245,6 +246,7 @@ fn a_message_sent_before_its_agent_is_up_waits_for_it() {
         pane_id: Some(first.clone()),
         host: None,
         dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -278,6 +280,7 @@ fn an_agent_showing_a_menu_is_not_typed_into() {
         pane_id: Some(first.clone()),
         host: None,
         dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -334,6 +337,7 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
         pane_id: Some(first.clone()),
         host: None,
         dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()

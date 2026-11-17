@@ -841,14 +841,14 @@ asks for the host, the directory and a name (by default the host's
 alias), then keeps it in mirador.json:
 
 ```jsonc
-{ "computers": [{ "name": "devbox", "host": "devbox", "dir": "~/work/app" }] }
+{ "computers": [{ "name": "devbox", "host": "devbox", "dir": "/home/me/app" }] }
 ```
 
 A name is letters, digits, `-`, `_` and `.`, and no two computers share
-one. An agent or a team already runs on a computer with `mira agent new`
-or `mira team start`, given its `--host` and `--dir` (*Teams on a remote
-computer*, below). What is not done yet is picking a saved computer by
-its name for them, from the CLI or the app.
+one. `mira agent new --on <name>` and `mira team start --on <name>` run an
+agent or a team on a saved computer, its host and directory standing in
+for `--host` and `--dir` (*Teams on a remote computer*, below). Picking
+one for them from the app is not done yet.
 
 ### Teams on a remote computer
 
@@ -862,10 +862,12 @@ another tab as `<team>/<name>`.
 mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
 mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
 mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+mira team start squad --on prod "add OAuth"                                         # a saved computer's host and dir
 ```
 
 `--host` is an alias from `~/.ssh/config` or a destination; `--dir` is the
-directory there the agents work in. A team started there stays there:
+directory there the agents work in. `--on` names a computer saved in
+mirador.json (*Computers*, above) instead, and stands for both. A team started there stays there:
 `mira team list` names its host, and `team add` starts the new member on
 that computer, in that directory. `team restart` starts a member whose
 agent ended there again, in a fresh pane. A member whose pane is
@@ -914,8 +916,8 @@ Not done yet: Codex on a remote; a role that keeps only some skills or
 plugins; resuming a save of a member there (`team save` and `agent save`
 write one, but a resume starts it on this computer, where its
 conversation is not); Windows remotes, or Mirador on Windows driving one;
-and a computer saved from the palette (*Computers*, above) cannot yet be
-picked for a team: `--host` and `--dir` name it.
+and picking a saved computer for an agent or a team from the app, rather
+than with `--on`.
 [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has how it works.
 
 ## Terminals that keep running when you quit

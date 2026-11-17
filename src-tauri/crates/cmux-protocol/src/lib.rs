@@ -480,6 +480,10 @@ pub enum Request {
         host: Option<String>,
         #[serde(default)]
         dir: Option<String>,
+        /// A saved computer's name, standing for its host and dir, which
+        /// the app looks up in its own config. Not with `host` or `dir`.
+        #[serde(default)]
+        on: Option<String>,
     },
     /// Every agent pane and what it is doing.
     AgentList,
@@ -579,6 +583,10 @@ pub enum Request {
         host: Option<String>,
         #[serde(default)]
         dir: Option<String>,
+        /// A saved computer's name, standing for its host and dir, which
+        /// the app looks up in its own config. Not with `host` or `dir`.
+        #[serde(default)]
+        on: Option<String>,
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,

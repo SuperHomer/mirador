@@ -125,6 +125,7 @@ fn a_role_pane_comes_back_resumed_with_its_model_and_limits() {
         pane_id: Some(first.clone()),
         host: None,
         dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -227,6 +228,7 @@ fn a_codex_records_its_thread_through_notify_and_keeps_the_persons_own() {
         pane_id: Some(first.clone()),
         host: None,
         dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -265,6 +267,7 @@ fn a_codex_role_pane_comes_back_resuming_its_thread() {
         pane_id: Some(first),
         host: None,
         dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -553,7 +556,7 @@ fn the_wall_is_a_view_of_its_tab_and_comes_back() {
     sb.launch();
     let first = sb.first_pane();
     sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
-    let agent = sb.call(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()), host: None, dir: None })
+    let agent = sb.call(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()), host: None, dir: None, on: None })
         ["paneId"]
         .as_str()
         .unwrap()

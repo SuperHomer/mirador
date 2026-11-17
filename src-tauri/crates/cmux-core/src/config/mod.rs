@@ -107,10 +107,11 @@ pub struct Config {
 
 /// A computer agents can work on: an ssh host — an alias from
 /// ~/.ssh/config, or a destination as `ssh` takes it — and the directory
-/// on it where the work is. `name` is what the palette and, later, `mira
-/// team start --on` call it. Every field defaults, as `AgentRole`'s do,
-/// so a hand-edited entry missing one is dropped by [`computers_in`]
-/// rather than failing the whole file, and every other setting with it.
+/// on it where the work is. `name` is what the palette and the `--on` of
+/// `mira agent new` and `mira team start` call it. Every field defaults,
+/// as `AgentRole`'s do, so a hand-edited entry missing one is dropped by
+/// [`computers_in`] rather than failing the whole file, and every other
+/// setting with it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Computer {

@@ -287,9 +287,9 @@ export function CommandPalette() {
       })),
     };
     // Computers: an ssh host and the directory there, kept in mirador.json.
-    // A row opens an SSH pane. The directory is kept for starting agents
-    // and teams there by the computer's name, not done yet: today
-    // `--host` and `--dir` name it.
+    // A row opens an SSH pane. The directory is where agents and teams
+    // work when started there by the computer's name: `--on` of
+    // `mira agent new` and `mira team start`.
     const question = (next: Ask) => {
       setStepId(null);
       setQuery("");
@@ -299,7 +299,7 @@ export function CommandPalette() {
     const askDir = (host: string) =>
       question({
         crumb: "Directory",
-        placeholder: `The directory on ${host} where the work is, e.g. ~/work/app`,
+        placeholder: `The directory on ${host} where the work is, e.g. /home/me/app`,
         answer: (dir) =>
           question({
             crumb: "Name",

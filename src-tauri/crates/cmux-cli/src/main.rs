@@ -279,6 +279,11 @@ enum TeamAction {
         /// With --host: the directory there the team works in.
         #[arg(long, requires = "host")]
         dir: Option<String>,
+        /// Run every member on a saved computer (`computers` in
+        /// mirador.json, the palette's Add a computer…): its host and
+        /// directory, instead of --host and --dir.
+        #[arg(long, conflicts_with_all = ["host", "dir"])]
+        on: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -386,6 +391,11 @@ enum AgentAction {
         /// With --host: the directory there it works in.
         #[arg(long, requires = "host")]
         dir: Option<String>,
+        /// Run it on a saved computer (`computers` in mirador.json, the
+        /// palette's Add a computer…): its host and directory, instead of
+        /// --host and --dir.
+        #[arg(long, conflicts_with_all = ["host", "dir"])]
+        on: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -836,11 +846,12 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Agent { action } => match action {
-            AgentAction::New { role, harness, tab, title, host, dir, task } => Request::AgentNew {
+            AgentAction::New { role, harness, tab, title, host, dir, on, task } => Request::AgentNew {
                 role,
                 title,
                 host,
                 dir,
+                on,
                 harness: harness.map(|h| match h.as_str() {
                     "codex" => cmux_protocol::Harness::Codex,
                     _ => cmux_protocol::Harness::Claude,
@@ -932,10 +943,11 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Team { action } => match action {
-            TeamAction::Start { team, title, host, dir, task } => Request::TeamStart {
+            TeamAction::Start { team, title, host, dir, on, task } => Request::TeamStart {
                 team,
                 host,
                 dir,
+                on,
                 task: (!task.is_empty()).then(|| task.join(" ")),
                 pane_id: own_pane(),
                 title,
@@ -2697,6 +2709,26 @@ mod tests {
         };
         assert_eq!((host.as_deref(), dir.as_deref()), (Some("box"), Some("/srv")));
         assert!(Cli::try_parse_from(["mira", "team", "start", "squad", "--host", "box", "go"]).is_err());
+    }
+
+    /// `--on` names a saved computer in place of `--host` and `--dir`:
+    /// alone, never with either.
+    #[test]
+    fn on_a_saved_computer_stands_for_host_and_directory() {
+        let Command::Agent { action: AgentAction::New { host, dir, on, task, .. } } = parse(&["agent", "new", "--on", "box", "look"]) else {
+            panic!()
+        };
+        assert_eq!((host, dir, on.as_deref(), task), (None, None, Some("box"), vec!["look".to_string()]));
+        let Command::Team { action: TeamAction::Start { host, dir, on, .. } } = parse(&["team", "start", "squad", "--on", "box", "go"]) else {
+            panic!()
+        };
+        assert_eq!((host, dir, on.as_deref()), (None, None, Some("box")));
+        for with in [&["--host", "box"][..], &["--dir", "/srv"], &["--host", "box", "--dir", "/srv"]] {
+            let agent = [&["mira", "agent", "new", "--on", "box"][..], with, &["look"]].concat();
+            assert!(Cli::try_parse_from(agent).is_err(), "{with:?}");
+            let team = [&["mira", "team", "start", "squad", "--on", "box"][..], with, &["go"]].concat();
+            assert!(Cli::try_parse_from(team).is_err(), "{with:?}");
+        }
     }
 
     /// `ssh forward` takes a port, or --app for the app's socket: not both,

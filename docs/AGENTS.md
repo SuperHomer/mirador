@@ -977,10 +977,16 @@ anywhere, by pane id.
 mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
 mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
 mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+mira agent new --on prod "look at the failing job"                                  # a saved computer's host and dir
 ```
 
 `--host` is an alias from `~/.ssh/config` or a destination, and `--dir`
-the directory there the agents work in; the two go together. The remote
+the directory there the agents work in; the two go together. `--on
+<name>` stands for both: a computer saved in mirador.json's `computers`
+(`{ "name": "prod", "host": "prod", "dir": "/srv/app" }`), looked up by
+the app in its own config, since a `mira` on a remote has none. It is
+refused with `--host` or `--dir`, and an unknown name is refused with
+the names there are; neither opens a pane. The remote
 needs Linux on x86_64 or aarch64 (other systems: see its `mira`, below),
 ssh by key or agent (nothing answers a password prompt), and Claude
 Code, installed and signed in (`claude setup-token` for agents nobody
@@ -1087,8 +1093,8 @@ plugins (listing them runs Claude Code here, which says nothing of the
 remote's); resuming a save of a member there (`team save` and `agent
 save` write one, but `team resume` and `agent resume` start it on this
 computer, where its conversation is not); a Windows remote, or Mirador
-on Windows driving one; and picking a computer saved in `computers` for
-an agent or a team: `--host` and `--dir` name it.
+on Windows driving one; and picking a saved computer for an agent or a
+team from the app, rather than with `--on`.
 
 ### How a remote reaches this app
 

@@ -108,6 +108,28 @@ fn sender(state: &AppState, pane_id: Option<&str>) -> String {
     pane_id.and_then(|p| crate::handoff::sender(state, p)).unwrap_or_else(|| "you".into())
 }
 
+/// Where `agent new` and `team start` run: on `host` in `dir`, on the
+/// saved computer `on` names, or here. The app's own config names the
+/// computers, read now: a `mira` on a remote has no mirador.json.
+fn remote_of(host: Option<String>, dir: Option<String>, on: Option<String>) -> Result<Option<(String, String)>, String> {
+    match (host, dir, on) {
+        (None, None, None) => Ok(None),
+        (Some(host), Some(dir), None) => Ok(Some((host, dir))),
+        (None, None, Some(on)) => {
+            // A file that does not parse loads as the defaults, where no
+            // name is found: its problem is the answer, not "there are none".
+            let (cfg, problem) = cmux_core::config::load();
+            if let Some(problem) = problem {
+                return Err(problem);
+            }
+            let computer = cmux_core::config::computer_named(&cfg, &on)?;
+            Ok(Some((computer.host, computer.dir)))
+        }
+        (_, _, Some(_)) => Err("a saved computer stands for a host and a directory: give it, or them, not both".into()),
+        _ => Err("a host and a directory there go together: give both, or neither".into()),
+    }
+}
+
 fn focused_pane(state: &AppState) -> String {
     state.workspace.lock().unwrap().focused_pane()
 }
@@ -336,12 +358,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             pane_id,
             host,
             dir,
+            on,
         } => {
-            let remote = match (host, dir) {
-                (Some(host), Some(dir)) => Some((host, dir)),
-                (None, None) => None,
-                _ => return Err("a host and a directory there go together: give both, or neither".into()),
-            };
+            let remote = remote_of(host, dir, on)?;
             let from = sender(&state, pane_id.as_deref());
             let pane_id = crate::commands::open_agent_from(
                 app.clone(),
@@ -398,12 +417,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::TeamStart { team, task, pane_id, title, host, dir } => {
-            let remote = match (host, dir) {
-                (Some(host), Some(dir)) => Some((host, dir)),
-                (None, None) => None,
-                _ => return Err("a host and a directory there go together: give both, or neither".into()),
-            };
+        Request::TeamStart { team, task, pane_id, title, host, dir, on } => {
+            let remote = remote_of(host, dir, on)?;
             let from = sender(&state, pane_id.as_deref());
             let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from, remote)?;
             Ok(json!({ "tabId": tab }))
