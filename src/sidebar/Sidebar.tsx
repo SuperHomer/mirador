@@ -9,6 +9,7 @@ import {
   TabSnapshot,
   WallTool,
   focusPane,
+  newTab,
   zoomPane,
   closeTab,
   setActiveTab,
@@ -105,6 +106,22 @@ export function Sidebar() {
           );
         })}
       </div>
+      {/* A row of its own, pinned over Usage. In the footer it was the one
+          item that could shrink, and a narrow sidebar squeezed it to
+          nothing. Here nothing beside it takes its room: only the shortcut
+          gives way. */}
+      <button
+        className="sidebar-new-tab"
+        title={accelOf("new_tab") ? `New tab (${accelOf("new_tab")})` : "New tab"}
+        // The new tab's terminal takes the keyboard when it mounts; until
+        // then it stays where it was, as with the tab bar's + New.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => void newTab()}
+      >
+        <span className="tab-index">+</span>
+        <span className="sidebar-new-tab-label">New tab</span>
+        {accelOf("new_tab") && <span className="sidebar-accel">{accelOf("new_tab")}</span>}
+      </button>
       <UsageSection pane={tab?.focusedPane ?? null} />
       <div className="sidebar-footer">
         <button

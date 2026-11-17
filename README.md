@@ -796,7 +796,7 @@ an agent's row does (or, with `"pane"`, alone). Each tab's agents are
 its own: switch tabs and the tree moves with you,
 and every other tab shows a pip per agent with its status. The tab
 shortcuts (`mod+1…9`, next and previous tab) go over tabs only, by the
-number beside each. At the sidebar's foot, **Inbox** counts the agents that need you,
+number beside each. Under the list, **+ New tab** opens a tab, as `mod+T` does. At the sidebar's foot, **Inbox** counts the agents that need you,
 across every tab, and opens the notifications; **Commands** opens the
 palette.
 

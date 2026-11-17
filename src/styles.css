@@ -472,6 +472,46 @@ body,
   color: var(--text);
 }
 
+/* + New tab, between the tab list and Usage: a quiet row in the tab rows'
+   rhythm, its "+" in their index column and its label in line with their
+   titles. It draws no border: the line under it is Usage's top border, or
+   the footer's when there is no Usage. */
+.sidebar-new-tab {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 6px 6px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-new-tab:hover {
+  background: var(--tint-hover);
+  color: var(--text);
+}
+
+.sidebar-new-tab-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* The shortcut, at the right, is what gives way in a narrow sidebar. */
+.sidebar-new-tab .sidebar-accel {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Each account's usage, pinned above the footer. */
 .usage-section {
   flex-shrink: 0;
