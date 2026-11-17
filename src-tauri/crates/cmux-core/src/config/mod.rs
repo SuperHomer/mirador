@@ -672,6 +672,23 @@ pub fn computers_in(cfg: &Config) -> Vec<Computer> {
     computers
 }
 
+/// The usable computer called `name`, as `--on <name>` picks one. It goes
+/// through [`computers_in`], so an entry the palette would not list is not
+/// found here either.
+pub fn computer_named(cfg: &Config, name: &str) -> Result<Computer, String> {
+    let name = name.trim();
+    let computers = computers_in(cfg);
+    if let Some(c) = computers.iter().find(|c| c.name == name) {
+        return Ok(c.clone());
+    }
+    let known: Vec<&str> = computers.iter().map(|c| c.name.as_str()).collect();
+    Err(if known.is_empty() {
+        format!("no computer `{name}` — there are none; add one from the palette's Add a computer…")
+    } else {
+        format!("no computer `{name}` (there are: {})", known.join(", "))
+    })
+}
+
 /// The usable `agentRoles`, read from the config on disk now. Only part
 /// of the roles a pane sees — `roles::catalog` adds the role files.
 pub fn agent_roles() -> Vec<AgentRole> {
@@ -768,6 +785,32 @@ mod tests {
         let cfg: Config = serde_json::from_str(text).expect("the file still parses");
         assert_eq!(cfg.font_size, Some(15.0));
         assert_eq!(computers_in(&cfg), vec![Computer { name: "box".into(), host: "devbox".into(), dir: "~/work".into() }]);
+    }
+
+    /// A name finds the usable computer it means, trimmed as the saved one
+    /// is; an entry `computers_in` drops is not found, and the error names
+    /// the ones there are.
+    #[test]
+    fn a_computer_is_found_by_its_name() {
+        let cfg: Config = serde_json::from_str(
+            r#"{ "computers": [
+                { "name": "box", "host": "devbox", "dir": "~/work" },
+                { "name": "gpu", "host": "gpu.lan", "dir": "/srv" },
+                { "name": "nodir", "host": "devbox" }
+            ] }"#,
+        )
+        .unwrap();
+        let gpu = Computer { name: "gpu".into(), host: "gpu.lan".into(), dir: "/srv".into() };
+        assert_eq!(computer_named(&cfg, "gpu"), Ok(gpu.clone()));
+        assert_eq!(computer_named(&cfg, " gpu "), Ok(gpu));
+        assert_eq!(computer_named(&cfg, "nodir"), Err("no computer `nodir` (there are: box, gpu)".into()));
+        assert_eq!(computer_named(&cfg, "lab"), Err("no computer `lab` (there are: box, gpu)".into()));
+    }
+
+    #[test]
+    fn with_no_computers_the_error_says_how_to_add_one() {
+        let err = computer_named(&Config::default(), "box").unwrap_err();
+        assert_eq!(err, "no computer `box` — there are none; add one from the palette's Add a computer…");
     }
 
     #[cfg(unix)]
