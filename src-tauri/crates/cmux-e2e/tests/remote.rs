@@ -189,8 +189,8 @@ fn a_file_sent_to_the_remote_arrives_exact() {
 /// `agent new --host box --dir <dir>`: plain Claude Code on the remote, in
 /// that directory, told its pane and this app's socket, given Mirador's
 /// hooks, listed as an agent on `box` — and a message sent from a local
-/// pane reaches it. Codex there is not done yet, and a host goes with a
-/// directory.
+/// pane reaches it. A `~/` directory is the remote's home's. Codex there
+/// is not done yet, and a host goes with a directory.
 #[test]
 fn a_plain_agent_runs_on_the_remote() {
     e2e!();
@@ -243,6 +243,26 @@ fn a_plain_agent_runs_on_the_remote() {
     sb.wait_for("the message on the remote", LONG, || {
         sb.events("message", &pane).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
     });
+
+    // A directory typed from the home, as a terminal there takes it: `~`
+    // is the remote's home, not a directory named `~`.
+    std::fs::create_dir_all(sb.home.join("work")).unwrap();
+    let from_home = sb
+        .call(Request::AgentNew {
+            role: None,
+            harness: None,
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(first.clone()),
+            host: Some("box".into()),
+            dir: Some("~/work".into()),
+        })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the agent started in ~/work", LONG, || sb.events("start", &from_home).into_iter().next());
+    assert_eq!(start["cwd"], sb.home.join("work").canonicalize().unwrap().to_str().unwrap());
 }
 
 /// The pid of the ssh this computer runs for `pane`'s attach, if any. The

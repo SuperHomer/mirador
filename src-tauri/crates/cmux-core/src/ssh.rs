@@ -372,8 +372,8 @@ fn output_within(mut child: std::process::Child, input: String, limit: std::time
 /// The script [`check_computer`] runs, printing `key=value` lines. Each
 /// thing is looked at as an agent's start there would meet it. Its `mira`
 /// as [`ENSURE_MIRA`] finds one. Its directory from the home, where its
-/// holder starts, quoted as [`run_script`] quotes it: a `~` there is a
-/// directory named `~`, as it is for the agent's `cd`. And `claude` under
+/// holder starts, as [`remote_dir`] makes it the word the agent's `cd`
+/// in [`run_script`] takes: the two never disagree. And `claude` under
 /// the PATH of the login shell [`run_script`] goes through, given only
 /// plain words, its stdin closed so it cannot read this script; anything
 /// the person's rc files print comes before its last line.
@@ -383,7 +383,7 @@ fn check_computer_script(dir: &str, version: &str) -> String {
         r#"printf 'os=%s\n' "$(uname -s)""#.to_string(),
         r#"printf 'arch=%s\n' "$(uname -m)""#.into(),
         format!(r#"if [ -x "$HOME/.mirador/bin/mira-{version}" ]; then echo mira=yes; else echo mira=no; fi"#),
-        format!("if (cd {}) 2>/dev/null; then echo dir=yes; else echo dir=no; fi", quote(dir)),
+        format!("if (cd {}) 2>/dev/null; then echo dir=yes; else echo dir=no; fi", remote_dir(dir)),
         r#"p=$("${SHELL:-/bin/sh}" -l -i -c 'printenv PATH' </dev/null 2>/dev/null | tail -n 1)"#.into(),
         r#"if [ -n "$p" ] && (PATH=$p; command -v claude) >/dev/null 2>&1; then echo claude=yes; else echo claude=no; fi"#.into(),
     ]
@@ -463,7 +463,7 @@ pub fn run_script(run: &str, pane: &str, socket: &str, dir: &str, launch: &str) 
         format!(r#"  exec "${{SHELL:-/bin/sh}}" -l -i -c 'exec /bin/sh {run}'"#),
         "fi".into(),
         "unset MIRA_RUN".into(),
-        format!(r#"cd {} || {{ echo "mirador: no directory {shown} on $(hostname)" >&2; exit 1; }}"#, quote(dir)),
+        format!(r#"cd {} || {{ echo "mirador: no directory {shown} on $(hostname)" >&2; exit 1; }}"#, remote_dir(dir)),
         // A forward that failed before this start shows here; the agent
         // still works, it just never reports.
         r#"[ -S "$MIRA_SOCKET" ] || echo "mirador: nothing listens at $MIRA_SOCKET on $(hostname): this agent will not report to Mirador" >&2"#.into(),
@@ -471,6 +471,26 @@ pub fn run_script(run: &str, pane: &str, socket: &str, dir: &str, launch: &str) 
     ]
     .join("\n")
         + "\n"
+}
+
+/// `dir` on a remote as the one word POSIX sh's `cd` takes there. A `~`
+/// alone or before a `/` is the remote's home, as a terminal there reads
+/// it: `"$HOME"`, expanded by that sh, with the rest single-quoted so
+/// nothing else in it is read. Anything else is quoted whole. `~user` is
+/// not expanded: it stays a directory named so, and is not found. One
+/// that starts with `-` is given `./` first, so no word `cd` gets starts
+/// with `-`: `-L` and `-P` are its options, and `-` is `$OLDPWD` to it
+/// even after a `--`.
+#[cfg_attr(windows, allow(dead_code))]
+fn remote_dir(dir: &str) -> String {
+    if dir == "~" {
+        return r#""$HOME""#.into();
+    }
+    match dir.strip_prefix("~/") {
+        Some(rest) => format!(r#""$HOME"/{}"#, quote(rest)),
+        None if dir.starts_with('-') => quote(&format!("./{dir}")),
+        None => quote(dir),
+    }
 }
 
 /// `s` as one word for POSIX sh.
@@ -767,7 +787,7 @@ mod tests {
     /// The test's script, run by sh in a home of its own: `claude` found
     /// on the PATH only the login shell's profile sets, as an agent's run
     /// script finds it; the directory as the agent's `cd` sees it, from
-    /// the home, where a `~` is no home; and nothing made there.
+    /// the home, a `~` the home too; and nothing made there.
     #[cfg(unix)]
     #[test]
     fn a_computers_test_sees_what_an_agent_would() {
@@ -803,7 +823,9 @@ mod tests {
         let uname = |flag: &str| String::from_utf8_lossy(&Command::new("uname").arg(flag).output().unwrap().stdout).trim().to_string();
         assert_eq!(check.system, format!("{} {}", uname("-s"), uname("-m")));
         assert!(run(home.join("work/app").to_str().unwrap()).dir_found);
-        assert!(!run("~/work/app").dir_found, "a quoted ~ is no home, for the agent's cd as here");
+        assert!(run("~/work/app").dir_found, "a ~ is the home, for the agent's cd as here");
+        assert!(run("~").dir_found);
+        assert!(!run("~/nope").dir_found);
         assert!(!run("work/none").dir_found);
 
         let claude = home.join("tools/claude");
@@ -873,6 +895,66 @@ mod tests {
         );
         let odd = run_script(run, "p1", "/s", "/a\"$(x)`y`\\b", "claude");
         assert!(odd.contains(r#"no directory /a__(x)_y__b on"#), "{odd}");
+    }
+
+    /// A remote directory as `cd`'s word: a leading `~` the home, expanded
+    /// there, the rest quoted whole, `~user` left as typed. What the sh
+    /// that runs these words makes of them is pinned by the next test.
+    #[test]
+    fn a_remote_dir_is_one_word_with_its_tilde_the_home() {
+        assert_eq!(remote_dir("~"), r#""$HOME""#);
+        assert_eq!(remote_dir("~/a b"), r#""$HOME"/'a b'"#);
+        assert_eq!(remote_dir("/abs"), "'/abs'");
+        assert_eq!(remote_dir("rel"), "'rel'");
+        assert_eq!(remote_dir("~user/x"), "'~user/x'");
+        assert_eq!(remote_dir("~/it's $HOME"), r#""$HOME"/'it'\''s $HOME'"#);
+        assert_eq!(remote_dir("/a/$(x)"), "'/a/$(x)'");
+        assert_eq!(remote_dir("-"), "'./-'");
+        assert_eq!(remote_dir("-L"), "'./-L'");
+        assert_eq!(remote_dir("-x"), "'./-x'");
+    }
+
+    /// The `cd` of an agent's run script, run by a real sh from the home,
+    /// where a remote's holder starts it: a `~/` dir lands in the home's,
+    /// nothing else in it read by the shell; `-` and `-L` are directories
+    /// there, never `$OLDPWD`, an option or the home; and a missing one
+    /// says what was typed.
+    #[cfg(unix)]
+    #[test]
+    fn a_remote_agents_cd_takes_its_tilde_as_the_home() {
+        let home = std::env::temp_dir().join(format!("mira-cd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("work/a $b")).unwrap();
+        let home = home.canonicalize().unwrap();
+        let run = |dir: &str| {
+            let script = run_script("/unused", "p1", "/nowhere.sock", dir, "pwd");
+            // Past the login-shell hop, which this test is not about.
+            Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .env_clear()
+                .env("HOME", &home)
+                .env("OLDPWD", home.join("work"))
+                .env("MIRA_RUN", "agent")
+                .env("PATH", "/usr/bin:/bin")
+                .current_dir(&home)
+                .output()
+                .unwrap()
+        };
+        let landed = |dir: &str| String::from_utf8_lossy(&run(dir).stdout).trim().to_string();
+        assert_eq!(landed("~/work"), home.join("work").to_str().unwrap());
+        assert_eq!(landed("~"), home.to_str().unwrap());
+        assert_eq!(landed("~/work/a $b"), home.join("work/a $b").to_str().unwrap());
+        for dash in ["-", "-L"] {
+            let missing = run(dash);
+            assert_eq!((missing.status.code(), missing.stdout.as_slice()), (Some(1), &b""[..]), "{dash}: {missing:?}");
+            std::fs::create_dir_all(home.join(dash)).unwrap();
+            assert_eq!(landed(dash), home.join(dash).to_str().unwrap());
+        }
+        let missing = run("~/nope");
+        assert_eq!(missing.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&missing.stderr).contains("mirador: no directory ~/nope on "), "{missing:?}");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// A path every shell reads as one word, and those it might not.
