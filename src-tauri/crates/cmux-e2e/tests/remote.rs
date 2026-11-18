@@ -209,6 +209,7 @@ fn a_plain_agent_runs_on_the_remote() {
         pane_id: Some(first.clone()),
         host: Some("box".into()),
         dir: Some(dir.clone()),
+        on: None,
     };
 
     let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--host", "box", "look around"]);
@@ -257,12 +258,72 @@ fn a_plain_agent_runs_on_the_remote() {
             pane_id: Some(first.clone()),
             host: Some("box".into()),
             dir: Some("~/work".into()),
+            on: None,
         })["paneId"]
         .as_str()
         .unwrap()
         .to_string();
     let start = sb.wait_for("the agent started in ~/work", LONG, || sb.events("start", &from_home).into_iter().next());
     assert_eq!(start["cwd"], sb.home.join("work").canonicalize().unwrap().to_str().unwrap());
+}
+
+/// A computer saved in the app's mirador.json stands for its host and
+/// directory: `agent new --on` runs the agent there, in that directory,
+/// as --host and --dir do. An unknown name is refused with the names
+/// there are, a name given with a host too is refused, so is a name while
+/// mirador.json does not parse, with the file's problem; none opens a
+/// pane.
+#[test]
+fn an_agent_runs_on_a_saved_computer_named_by_on() {
+    e2e!();
+    let mut sb = Sandbox::new("ron");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    // Not the project, where an agent started here would be too.
+    let work = sb.home.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let dir = work.canonicalize().unwrap().to_str().unwrap().to_string();
+    let path = sb.config.join("mirador/mirador.json");
+    let mut cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    cfg["computers"] = serde_json::json!([{ "name": "devbox", "host": "box", "dir": dir }]);
+    std::fs::write(&path, cfg.to_string()).unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--on", "lab", "look around"]);
+    assert!(code != 0 && err.contains("no computer `lab` (there are: devbox)"), "{err}");
+    let err = sb
+        .request(Request::AgentNew {
+            role: None,
+            harness: None,
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(first.clone()),
+            host: Some("box".into()),
+            dir: None,
+            on: Some("devbox".into()),
+        })
+        .expect_err("a saved computer and a host");
+    assert!(err.contains("not both"), "{err}");
+    // The file is read at the request: one that does not parse is the
+    // answer, not "there are none" from the defaults it loads as.
+    let good = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, r#"{ "computers": [ }"#).unwrap();
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--on", "devbox", "look around"]);
+    assert!(code != 0 && err.contains("mirador.json: expected value"), "{err}");
+    std::fs::write(&path, good).unwrap();
+    assert_eq!(sb.panes().len(), 1, "a refusal opens no pane");
+
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--on", "devbox", "look around"]);
+    assert_eq!(code, 0, "{err}");
+    let pane = sb.panes().into_iter().find(|p| *p != first).unwrap_or_else(|| sb.fail("no agent pane"));
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    assert_eq!(start["kind"], "claude");
+    assert_eq!(start["cwd"], dir.as_str());
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+    let listed = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));
+    assert_eq!(listed["remoteHost"], "box", "{listed}");
 }
 
 /// The pid of the ssh this computer runs for `pane`'s attach, if any. The
@@ -345,6 +406,7 @@ fn start_remote_agent(sb: &Sandbox, first: &str) -> (String, serde_json::Value) 
         pane_id: Some(first.to_string()),
         host: Some("box".into()),
         dir: Some(dir),
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -427,6 +489,7 @@ fn a_role_runs_on_the_remote_and_reports_through_its_hooks() {
         pane_id: Some(first.clone()),
         host: Some("box".into()),
         dir: Some(dir.clone()),
+        on: None,
     };
 
     let err = sb.request(agent_new("charts")).expect_err("a skills list is not done on a remote");
@@ -481,6 +544,7 @@ fn a_team_runs_on_the_remote() {
         title: None,
         host: Some("box".into()),
         dir: Some(dir.clone()),
+        on: None,
     };
 
     let err = sb.request(team_start("mixed")).expect_err("Codex is not done on a remote");
@@ -625,6 +689,7 @@ fn a_team_runs_on_the_remote() {
             pane_id: Some(reviewer.clone()),
             host: Some("box".into()),
             dir: Some(dir.clone()),
+            on: None,
         })
         .expect_err("not in a team's tab yet");
     assert!(err.contains("in a team's tab is not done yet"), "{err}");
