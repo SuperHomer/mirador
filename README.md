@@ -846,9 +846,10 @@ and tests them, and keeps them in mirador.json:
 
 A name is letters, digits, `-`, `_` and `.`, and no two computers share
 one. From the app, an agent or a team runs on a computer when you start
-it from a pane there (*Remote terminals*, below). From `mira`, it runs
-there given its `--host` and `--dir` (*Teams on a remote computer*,
-below); picking a saved computer by its name is not done yet there.
+it from a pane there (*Remote terminals*, below). From `mira`, `mira
+agent new --on <name>` and `mira team start --on <name>` run it on a
+saved computer, its host and directory standing in for `--host` and
+`--dir` (*Teams on a remote computer*, below).
 
 In the pane, *+ Add a computer* — or the palette's *Pane: Add a Remote
 Computer* — starts a new one: a name, the SSH host (your `~/.ssh/config`
@@ -884,7 +885,7 @@ mira computer update devbox --dir /srv/app                 # --name, --host, --d
 mira computer test devbox                                  # or --host devbox --dir '~/work/app', before saving
 mira computer remove devbox
 mira computer open                                         # the pane; --tab or --split
-mira ssh open devbox --tab --dir '~/work/app'               # a computer's tab, its shell in its directory
+mira ssh open devbox --tab --dir '~/work/app'               # the same tab by hand: ssh open takes the host and directory, not a computer's name
 ```
 
 `mira computer test` prints the same three answers, a line each, and
@@ -916,9 +917,10 @@ question, and it starts here, when there is no choice:
 - on Windows, where agents on a remote are not done yet.
 
 `mira` asks nothing: `mira agent new` and `mira team start` run where
-`--host` and `--dir` say, or here, whatever pane they are run from. When
-a start fails — a remote that cannot take it, a pane closed meanwhile —
-a bar at the top of the window says why, until you dismiss it.
+`--host` and `--dir`, or `--on`, say, or here, whatever pane they are
+run from. When a start fails — a remote that cannot take it, a pane
+closed meanwhile — a bar at the top of the window says why, until you
+dismiss it.
 
 A remote pane from a session before this has no directory: its splits
 start in the home there, and a remote agent's until it is restarted.
@@ -937,16 +939,19 @@ another tab as `<team>/<name>`.
 mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
 mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
 mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+mira team start squad --on prod "add OAuth"                                         # a saved computer's host and dir
 ```
 
 `--host` is an alias from `~/.ssh/config` or a destination; `--dir` is the
-directory there the agents work in. A team started there stays there:
-`mira team list` names its host, and `team add` starts the new member on
-that computer, in that directory. `team restart` starts a member whose
-agent ended there again, in a fresh pane. A member whose pane is
-reconnecting, or has sat idle since Mirador was relaunched, reads as
-ended too: it is started afresh rather than on the conversation it had,
-and its old agent, if it still runs there, is ended.
+directory there the agents work in. `--on` names a computer saved in
+mirador.json (*Computers*, above) instead, and stands for both. A team
+started there stays there: `mira team list` names its host, and
+`team add` starts the new member on that computer, in that directory.
+`team restart` starts a member whose agent ended there again, in a
+fresh pane. A member whose pane is reconnecting, or has sat idle since
+Mirador was relaunched, reads as ended too: it is started afresh rather
+than on the conversation it had, and its old agent, if it still runs
+there, is ended.
 What the remote needs:
 
 - **Linux on x86_64 or aarch64**, for now.
@@ -988,10 +993,8 @@ machine's logins is copied.
 Not done yet: Codex on a remote; a role that keeps only some skills or
 plugins; resuming a save of a member there (`team save` and `agent save`
 write one, but a resume starts it on this computer, where its
-conversation is not); Windows remotes, or Mirador on Windows driving one;
-and, from `mira`, a saved computer by its name: `--host` and `--dir` name
-it there. From the app, start it from a pane on that computer (*Remote
-terminals*, above).
+conversation is not); and Windows remotes, or Mirador on Windows
+driving one.
 [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has how it works.
 
 ## Terminals that keep running when you quit

@@ -107,10 +107,11 @@ pub struct Config {
 
 /// A computer agents can work on: an ssh host — an alias from
 /// ~/.ssh/config, or a destination as `ssh` takes it — and the directory
-/// on it where the work is. `name` is what the palette and, later, `mira
-/// team start --on` call it. Every field defaults, as `AgentRole`'s do,
-/// so a hand-edited entry missing one is dropped by [`computers_in`]
-/// rather than failing the whole file, and every other setting with it.
+/// on it where the work is. `name` is what the palette and the `--on` of
+/// `mira agent new` and `mira team start` call it. Every field defaults,
+/// as `AgentRole`'s do, so a hand-edited entry missing one is dropped by
+/// [`computers_in`] rather than failing the whole file, and every other
+/// setting with it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Computer {
@@ -682,8 +683,8 @@ pub fn computer_label(cfg: &Config, host: &str, dir: &str) -> Option<String> {
 }
 
 /// The usable computer called `name`, as `--on <name>` picks one. It goes
-/// through [`computers_in`], so an entry the palette would not list is not
-/// found here either.
+/// through [`computers_in`], so an entry the Computers pane would not list
+/// is not found here either.
 pub fn computer_named(cfg: &Config, name: &str) -> Result<Computer, String> {
     let name = name.trim();
     let computers = computers_in(cfg);
@@ -692,7 +693,7 @@ pub fn computer_named(cfg: &Config, name: &str) -> Result<Computer, String> {
     }
     let known: Vec<&str> = computers.iter().map(|c| c.name.as_str()).collect();
     Err(if known.is_empty() {
-        format!("no computer `{name}` — there are none; add one from the palette's Add a computer…")
+        format!("no computer `{name}` — there are none; add one with `mira computer add` or in the Computers pane")
     } else {
         format!("no computer `{name}` (there are: {})", known.join(", "))
     })
@@ -836,7 +837,7 @@ mod tests {
     #[test]
     fn with_no_computers_the_error_says_how_to_add_one() {
         let err = computer_named(&Config::default(), "box").unwrap_err();
-        assert_eq!(err, "no computer `box` — there are none; add one from the palette's Add a computer…");
+        assert_eq!(err, "no computer `box` — there are none; add one with `mira computer add` or in the Computers pane");
     }
 
     #[cfg(unix)]

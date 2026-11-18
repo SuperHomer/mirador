@@ -1025,14 +1025,20 @@ anywhere, by pane id.
 mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
 mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
 mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+mira agent new --on prod "look at the failing job"                                  # a saved computer's host and dir
 ```
 
 `--host` is an alias from `~/.ssh/config` or a destination, and `--dir`
-the directory there the agents work in; the two go together. `agent new`
-and `team start` ask nothing and follow no pane: without `--host` they
-run here, even when run from a remote pane. (In the app, starting one
-from a remote pane asks *This computer* or *On <name>*; that is the
-person's question, not the socket's.) The remote
+the directory there the agents work in; the two go together. `--on
+<name>` stands for both: a computer saved in mirador.json's `computers`
+(*Saved computers*, above; `{ "name": "prod", "host": "prod", "dir":
+"/srv/app" }`), looked up by the app in its own config, since a `mira`
+on a remote has none. It is refused with `--host` or `--dir`, and an
+unknown name is refused with the names there are; neither opens a pane.
+`agent new` and `team start` ask nothing and follow no pane: without
+`--host` or `--on` they run here, even when run from a remote pane. (In
+the app, starting one from a remote pane asks *This computer* or *On
+<name>*; that is the person's question, not the socket's.) The remote
 needs Linux on x86_64 or aarch64 (other systems: see its `mira`, below),
 ssh by key or agent (nothing answers a password prompt), and Claude
 Code, installed and signed in (`claude setup-token` for agents nobody
@@ -1138,10 +1144,8 @@ Not done yet: Codex there; a role that keeps only some skills or
 plugins (listing them runs Claude Code here, which says nothing of the
 remote's); resuming a save of a member there (`team save` and `agent
 save` write one, but `team resume` and `agent resume` start it on this
-computer, where its conversation is not); a Windows remote, or Mirador
-on Windows driving one; and, from `mira`, a computer saved in `computers`
-by its name: `--host` and `--dir` name it. In the app, it is the pane an
-agent or a team is started from.
+computer, where its conversation is not); and a Windows remote, or
+Mirador on Windows driving one.
 
 ### How a remote reaches this app
 

@@ -312,7 +312,8 @@ inconsistency reviewers will notice.
   (`remote_of_source`). Never a host from the page, and never the
   focused pane in its place: the pane may close while the palette asks,
   leaving focus on another host. The socket's arms call the `_from`
-  functions with `--host`/`--dir` and ask nothing. The page's half: every
+  functions with `--host`/`--dir`, or `--on`'s (`server::remote_of`),
+  and ask nothing; the page never passes a host. The page's half: every
   start in the app goes through `startHere` (`src/agents/startHere.ts`).
   A new menu that calls `openAgent` or `startTeam` directly starts here
   from a remote pane without asking, and nothing fails to say so.
