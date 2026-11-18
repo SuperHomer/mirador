@@ -840,7 +840,7 @@ Computers* in the palette, or `mira computer open`) adds, edits, removes
 and tests them, and keeps them in mirador.json:
 
 ```jsonc
-{ "computers": [{ "name": "devbox", "host": "devbox", "dir": "/home/me/app" }] }
+{ "computers": [{ "name": "devbox", "host": "devbox", "dir": "~/work/app" }] }
 ```
 
 A name is letters, digits, `-`, `_` and `.`, and no two computers share
@@ -904,13 +904,14 @@ mira team start squad --on prod "add OAuth"                                     
 
 `--host` is an alias from `~/.ssh/config` or a destination; `--dir` is the
 directory there the agents work in. `--on` names a computer saved in
-mirador.json (*Computers*, above) instead, and stands for both. A team started there stays there:
-`mira team list` names its host, and `team add` starts the new member on
-that computer, in that directory. `team restart` starts a member whose
-agent ended there again, in a fresh pane. A member whose pane is
-reconnecting, or has sat idle since Mirador was relaunched, reads as
-ended too: it is started afresh rather than on the conversation it had,
-and its old agent, if it still runs there, is ended.
+mirador.json (*Computers*, above) instead, and stands for both. A team
+started there stays there: `mira team list` names its host, and
+`team add` starts the new member on that computer, in that directory.
+`team restart` starts a member whose agent ended there again, in a
+fresh pane. A member whose pane is reconnecting, or has sat idle since
+Mirador was relaunched, reads as ended too: it is started afresh rather
+than on the conversation it had, and its old agent, if it still runs
+there, is ended.
 What the remote needs:
 
 - **Linux on x86_64 or aarch64**, for now.

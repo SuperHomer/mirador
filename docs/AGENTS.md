@@ -1017,14 +1017,15 @@ mira agent new --on prod "look at the failing job"                              
 `--host` is an alias from `~/.ssh/config` or a destination, and `--dir`
 the directory there the agents work in; the two go together. `--on
 <name>` stands for both: a computer saved in mirador.json's `computers`
-(`{ "name": "prod", "host": "prod", "dir": "/srv/app" }`), looked up by
-the app in its own config, since a `mira` on a remote has none. It is
-refused with `--host` or `--dir`, and an unknown name is refused with
-the names there are; neither opens a pane. The remote
-needs Linux on x86_64 or aarch64 (other systems: see its `mira`, below),
-ssh by key or agent (nothing answers a password prompt), and Claude
-Code, installed and signed in (`claude setup-token` for agents nobody
-sits in front of). Nothing of this machine's logins is copied there.
+(*Saved computers*, above; `{ "name": "prod", "host": "prod", "dir":
+"/srv/app" }`), looked up by the app in its own config, since a `mira`
+on a remote has none. It is refused with `--host` or `--dir`, and an
+unknown name is refused with the names there are; neither opens a pane.
+The remote needs Linux on x86_64 or aarch64 (other systems: see its
+`mira`, below), ssh by key or agent (nothing answers a password
+prompt), and Claude Code, installed and signed in (`claude setup-token`
+for agents nobody sits in front of). Nothing of this machine's logins
+is copied there.
 
 Roles and teams are this computer's: the ones the calling pane's
 directory sees, as for agents here; the remote's own `.mirador` is not

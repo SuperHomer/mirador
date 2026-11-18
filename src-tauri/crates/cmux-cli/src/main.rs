@@ -284,9 +284,9 @@ enum TeamAction {
         /// With --host: the directory there the team works in.
         #[arg(long, requires = "host")]
         dir: Option<String>,
-        /// Run every member on a saved computer (`computers` in
-        /// mirador.json, the palette's Add a computer…): its host and
-        /// directory, instead of --host and --dir.
+        /// Run every member on a saved computer (`mira computer add`, or
+        /// the Computers pane): its host and directory, instead of --host
+        /// and --dir.
         #[arg(long, conflicts_with_all = ["host", "dir"])]
         on: Option<String>,
         #[arg(trailing_var_arg = true)]
@@ -396,9 +396,9 @@ enum AgentAction {
         /// With --host: the directory there it works in.
         #[arg(long, requires = "host")]
         dir: Option<String>,
-        /// Run it on a saved computer (`computers` in mirador.json, the
-        /// palette's Add a computer…): its host and directory, instead of
-        /// --host and --dir.
+        /// Run it on a saved computer (`mira computer add`, or the
+        /// Computers pane): its host and directory, instead of --host and
+        /// --dir.
         #[arg(long, conflicts_with_all = ["host", "dir"])]
         on: Option<String>,
         #[arg(trailing_var_arg = true)]

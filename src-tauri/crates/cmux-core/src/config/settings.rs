@@ -133,7 +133,7 @@ pub fn settings() -> Vec<Setting> {
         setting("agentRoles", "Agents", ReadOnly, "none",
             "Named ways to start a Claude Code agent, each with its own model and system prompt."),
         setting("computers", "Agents", ReadOnly, "none",
-            "Computers agents can work on over SSH: a name, an ssh host and the directory there. Added from the palette."),
+            "Computers agents can work on over SSH: a name, an ssh host and the directory there. Added, changed and removed in the Computers pane or with mira computer."),
         setting("editorOpensIn", "Panes", choice(&["tab", "split"]), "tab", "Where the roles, ways and teams editor opens."),
         setting("diffOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where a diff opens."),
         setting("graphOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where the commit graph opens."),

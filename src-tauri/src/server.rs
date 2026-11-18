@@ -116,13 +116,7 @@ fn remote_of(host: Option<String>, dir: Option<String>, on: Option<String>) -> R
         (None, None, None) => Ok(None),
         (Some(host), Some(dir), None) => Ok(Some((host, dir))),
         (None, None, Some(on)) => {
-            // A file that does not parse loads as the defaults, where no
-            // name is found: its problem is the answer, not "there are none".
-            let (cfg, problem) = cmux_core::config::load();
-            if let Some(problem) = problem {
-                return Err(problem);
-            }
-            let computer = cmux_core::config::computer_named(&cfg, &on)?;
+            let computer = cmux_core::config::computer_named(&crate::settings::saved_config()?, &on)?;
             Ok(Some((computer.host, computer.dir)))
         }
         (_, _, Some(_)) => Err("a saved computer stands for a host and a directory: give it, or them, not both".into()),

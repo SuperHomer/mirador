@@ -674,8 +674,8 @@ pub fn computers_in(cfg: &Config) -> Vec<Computer> {
 }
 
 /// The usable computer called `name`, as `--on <name>` picks one. It goes
-/// through [`computers_in`], so an entry the palette would not list is not
-/// found here either.
+/// through [`computers_in`], so an entry the Computers pane would not list
+/// is not found here either.
 pub fn computer_named(cfg: &Config, name: &str) -> Result<Computer, String> {
     let name = name.trim();
     let computers = computers_in(cfg);
@@ -684,7 +684,7 @@ pub fn computer_named(cfg: &Config, name: &str) -> Result<Computer, String> {
     }
     let known: Vec<&str> = computers.iter().map(|c| c.name.as_str()).collect();
     Err(if known.is_empty() {
-        format!("no computer `{name}` — there are none; add one from the palette's Add a computer…")
+        format!("no computer `{name}` — there are none; add one with `mira computer add` or in the Computers pane")
     } else {
         format!("no computer `{name}` (there are: {})", known.join(", "))
     })
@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn with_no_computers_the_error_says_how_to_add_one() {
         let err = computer_named(&Config::default(), "box").unwrap_err();
-        assert_eq!(err, "no computer `box` — there are none; add one from the palette's Add a computer…");
+        assert_eq!(err, "no computer `box` — there are none; add one with `mira computer add` or in the Computers pane");
     }
 
     #[cfg(unix)]
