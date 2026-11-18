@@ -11,7 +11,7 @@ import {
   splitPane,
 } from "../bindings";
 import { useBoardStore } from "../state/boardStore";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
 import { opensInTab } from "../state/configStore";
 import { useTeamOf } from "../agents/NewMenu";
 
@@ -93,7 +93,7 @@ export function FrameMenu({
 
   const run = (create: () => Promise<unknown>) => () => {
     onClose();
-    create().catch((e) => console.error(`mirador: ${e}`));
+    create().catch((e) => reportFailure("Open", e));
   };
 
   return createPortal(

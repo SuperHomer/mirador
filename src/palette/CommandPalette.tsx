@@ -17,7 +17,7 @@ import {
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { ActionGroup, actions, openComputersPane } from "../keymap/actions";
 import { useConfigStore } from "../state/configStore";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 
 interface Entry {
@@ -178,10 +178,10 @@ export function CommandPalette() {
       command: true,
       run: () => {
         if (c.target === "tab") {
-          void newTab(c.command);
+          void newTab(c.command).catch((e) => reportFailure(c.name, e));
         } else {
           const pane = focusedPane();
-          if (pane) void splitPane(pane, "row", c.command);
+          if (pane) void splitPane(pane, "row", c.command).catch((e) => reportFailure(c.name, e));
         }
       },
     }));
@@ -210,9 +210,7 @@ export function CommandPalette() {
           title: r.name,
           hint: roleHint(r),
           run: () => {
-            openAgent(r.name, null, focusedPane(), false).catch((e) =>
-              console.error(`mirador: role ${r.name}: ${e}`),
-            );
+            openAgent(r.name, null, focusedPane(), false).catch((e) => reportFailure(`Start ${r.name}`, e));
           },
         })),
       ],
@@ -244,9 +242,7 @@ export function CommandPalette() {
               .filter(Boolean)
               .join(" · "),
         run: () => {
-          startTeam(t.name, null, focusedPane()).catch((e) =>
-            console.error(`mirador: team ${t.name}: ${e}`),
-          );
+          startTeam(t.name, null, focusedPane()).catch((e) => reportFailure(`Start team ${t.name}`, e));
         },
       })),
     };

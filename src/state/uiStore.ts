@@ -35,6 +35,10 @@ interface UiStore {
   /** The tab bar's "+ New" menu is open, over the tab's panes. */
   newMenuOpen: boolean;
   setNewMenuOpen: (open: boolean) => void;
+  /** What the person last asked for that failed, said in the error bar
+   *  until dismissed; a new failure replaces it (`reportFailure`). */
+  error: string | null;
+  setError: (error: string | null) => void;
   /** A new computer was asked for: the computers pane starts a draft and
    *  clears this, whether it was open already or opens for it. */
   computerDraft: boolean;
@@ -80,6 +84,8 @@ export const useUiStore = create<UiStore>((set) => ({
     }),
   newMenuOpen: false,
   setNewMenuOpen: (newMenuOpen) => set({ newMenuOpen }),
+  error: null,
+  setError: (error) => set({ error }),
   computerDraft: false,
   setComputerDraft: (computerDraft) => set({ computerDraft }),
   togglePalette: () =>
@@ -99,3 +105,13 @@ export const useUiStore = create<UiStore>((set) => ({
     set({ activityPane: paneId, notificationsOpen: false, paletteOpen: false }),
   closeActivity: () => set({ activityPane: null }),
 }));
+
+/**
+ * Says that something the person asked for — opening a tab, a split, an
+ * agent, a team — failed: in the error bar, where nothing else would say
+ * it, and in the log.
+ */
+export function reportFailure(what: string, e: unknown) {
+  console.error(`mirador: ${what}: ${e}`);
+  useUiStore.getState().setError(`${what}: ${e}`);
+}

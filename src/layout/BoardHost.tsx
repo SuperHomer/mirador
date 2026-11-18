@@ -25,6 +25,7 @@ import {
   takesPointer,
   useBoardStore,
 } from "../state/boardStore";
+import { reportFailure } from "../state/uiStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -498,7 +499,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
             </button>
             <button
               title="A new tab, its frame where you are looking"
-              onClick={() => void newTab()}
+              onClick={() => void newTab().catch((e) => reportFailure("New frame", e))}
             >
               New frame
             </button>

@@ -9,7 +9,7 @@ import {
   openAgentEditor,
   RoleCatalog,
 } from "../bindings";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { opensInTab, useConfigStore } from "../state/configStore";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
@@ -109,7 +109,7 @@ export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }
     acted.current = true;
     onClose();
     openAgent(role, message.trim() || null, pane, false, harness).catch((e) =>
-      console.error(`mirador: ${role ?? harness}: ${e}`),
+      reportFailure(`Start ${role ?? HARNESS_LABEL[harness ?? "claude"]}`, e),
     );
   };
   const edit = () => {

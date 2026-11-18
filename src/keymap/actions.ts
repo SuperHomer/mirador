@@ -27,7 +27,7 @@ import {
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal, isLent, paneWithFocus, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
@@ -89,7 +89,7 @@ function cycleTab(offset: number) {
 }
 
 export const actions: ActionDef[] = [
-  { id: "new_tab", title: "Tab: New", group: "tabs", run: () => void newTab() },
+  { id: "new_tab", title: "Tab: New", group: "tabs", run: () => void newTab().catch((e) => reportFailure("New tab", e)) },
   {
     id: "close_pane",
     title: "Pane: Close",
@@ -114,7 +114,7 @@ export const actions: ActionDef[] = [
     group: "pane",
     run: () => {
       const pane = actionPane();
-      if (pane) void splitPane(pane, "row");
+      if (pane) void splitPane(pane, "row").catch((e) => reportFailure("Split right", e));
     },
   },
   {
@@ -123,7 +123,7 @@ export const actions: ActionDef[] = [
     group: "pane",
     run: () => {
       const pane = actionPane();
-      if (pane) void splitPane(pane, "column");
+      if (pane) void splitPane(pane, "column").catch((e) => reportFailure("Split down", e));
     },
   },
   {
@@ -320,7 +320,8 @@ export const actions: ActionDef[] = [
     group: "agents",
     hint: "Claude Code",
     // Beside the focused pane, in the tab you are working in.
-    run: () => void openAgent(null, null, focusedPane() ?? null, false),
+    run: () =>
+      void openAgent(null, null, focusedPane() ?? null, false).catch((e) => reportFailure("Start Claude Code", e)),
   },
   {
     id: "setup_claude_integration",
