@@ -611,6 +611,16 @@ enum ComputerAction {
     },
     /// Remove a saved computer.
     Remove { name: String },
+    /// Show the computers pane, or open it: where `editorOpensIn` says, or
+    /// as --tab or --split say.
+    Open {
+        /// Open in a new tab.
+        #[arg(long, conflicts_with = "split")]
+        tab: bool,
+        /// Open as a split of this pane.
+        #[arg(long)]
+        split: bool,
+    },
     /// Test a computer for agents, as starting one there would meet it: a
     /// saved one by NAME, or --host and --dir before saving it. Exits 0
     /// when agents can run there.
@@ -1063,6 +1073,14 @@ fn run(cli: Cli) -> Result<(), String> {
             ComputerAction::Add { name, host, dir } => Request::ComputerAdd { name, host, dir },
             ComputerAction::Update { name, new_name, host, dir } => Request::ComputerUpdate { name, new_name, host, dir },
             ComputerAction::Remove { name } => Request::ComputerRemove { name },
+            ComputerAction::Open { tab, split } => Request::ComputerOpen {
+                pane_id: own_pane(),
+                target: if tab {
+                    Some("tab".to_string())
+                } else {
+                    split.then(|| "split".to_string())
+                },
+            },
             ComputerAction::Test { name, host, dir } => Request::ComputerTest { name, host, dir },
         },
         Command::Browser { action } => match action {
@@ -2775,8 +2793,8 @@ mod tests {
         assert_eq!(own_pane(), None);
     }
 
-    /// `computer` add, update, remove and test, each as the pane's buttons
-    /// do: update changes at least one thing, and a test is a saved
+    /// `computer` add, update, remove, open and test, each as the pane
+    /// does: update changes at least one thing, and a test is a saved
     /// computer's name or a host and a directory, never both.
     #[test]
     fn computers_are_saved_changed_removed_and_tested() {
@@ -2805,6 +2823,11 @@ mod tests {
             panic!()
         };
         assert_eq!(name, "gpu");
+        let Command::Computer { action: ComputerAction::Open { tab, split } } = parse(&["computer", "open", "--tab"]) else {
+            panic!()
+        };
+        assert_eq!((tab, split), (true, false));
+        assert!(Cli::try_parse_from(["mira", "computer", "open", "--tab", "--split"]).is_err());
 
         let Command::Computer { action: ComputerAction::Test { name, host, dir } } = parse(&["computer", "test", "gpu"]) else {
             panic!()

@@ -17,6 +17,7 @@ import {
   openAgentEditor,
   openSettings,
   openUsage,
+  openComputers,
   openWhatsNew,
   zoomPane,
   setView,
@@ -407,6 +408,15 @@ export const actions: ActionDef[] = [
       const pane = focusedPane();
       if (pane) void openDiff(pane, opensInTab("diff"), null);
     },
+  },
+  {
+    id: "computers_pane",
+    title: "Pane: Computers",
+    group: "pane",
+    hint: "the saved computers",
+    // mirador.json's computers: the one pane, wherever it is, or a new one
+    // where the editor would open, as Settings and Usage do.
+    run: () => void openComputers(focusedPane() ?? null, opensInTab("editor")),
   },
   {
     id: "new_browser_pane",

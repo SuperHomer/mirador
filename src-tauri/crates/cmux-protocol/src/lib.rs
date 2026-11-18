@@ -266,6 +266,9 @@ pub struct WorkspaceSnapshot {
     /// Usage panes: at most one, showing each harness's account.
     #[serde(default)]
     pub usage_panes: Vec<UsagePane>,
+    /// Computers panes: at most one, showing the saved computers.
+    #[serde(default)]
+    pub computers_panes: Vec<ComputersPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -862,6 +865,15 @@ pub enum Request {
     },
     /// Removes the saved computer `name`.
     ComputerRemove { name: String },
+    /// Shows the computers pane, or opens one: a split of `pane_id`, or a
+    /// tab with `target` "tab"; without a target, where `editorOpensIn`
+    /// says.
+    ComputerOpen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+    },
     /// Tests a computer for agents, as an agent's start there would meet
     /// it: a saved one by `name`, or `host` and `dir` before saving one,
     /// never both. Answers a [`ComputerCheck`] (`check`), or ssh's error
@@ -2205,6 +2217,13 @@ pub struct SettingsPane {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsagePane {
+    pub pane_id: String,
+}
+
+/// A pane showing the computers saved in mirador.json.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputersPane {
     pub pane_id: String,
 }
 

@@ -70,10 +70,46 @@ pub fn zoom_terminals(app: AppHandle, state: State<'_, AppState>, steps: i32) ->
     Ok(crate::config_watch::reload(&app)?.font_size)
 }
 
-/// The usable computers mirador.json lists, for the palette.
+/// Shows the computers pane if one is open, in whatever tab: the
+/// computers are in mirador.json, one file, so a second pane would only
+/// show them twice. Otherwise opens one, a split of `pane_id` (the
+/// focused pane when absent) or a tab of its own.
 #[tauri::command]
-pub fn list_computers() -> Vec<cmux_core::config::Computer> {
-    cmux_core::config::computers_in(&cmux_core::config::load().0)
+pub fn open_computers(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+) -> Result<String, String> {
+    if let Some(pane) = show_existing_pane(&app, &state, |m| m.computers) {
+        return Ok(pane);
+    }
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let pane = if tab {
+        state.workspace.lock().unwrap().new_tab().1
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    state.meta.lock().unwrap().entry(pane.clone()).or_default().computers = true;
+    emit_workspace(&app);
+    Ok(pane)
+}
+
+/// The usable computers mirador.json lists, for the palette and the
+/// computers pane; or why the file cannot be read, rather than none.
+#[tauri::command]
+pub fn list_computers() -> Result<Vec<cmux_core::config::Computer>, String> {
+    match cmux_core::config::load() {
+        (_, Some(problem)) => Err(problem),
+        (config, None) => Ok(cmux_core::config::computers_in(&config)),
+    }
 }
 
 /// Adds a computer to mirador.json; refused for a name that is taken or

@@ -665,6 +665,7 @@ export interface WorkspaceSnapshot {
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
+  computersPanes: ComputersPaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;
@@ -1015,6 +1016,11 @@ export interface UsagePaneInfo {
   paneId: string;
 }
 
+/** The computers pane: at most one, showing the saved computers. */
+export interface ComputersPaneInfo {
+  paneId: string;
+}
+
 /** The settings pane: at most one, showing mirador.json's settings. */
 export interface SettingsPaneInfo {
   paneId: string;
@@ -1248,8 +1254,11 @@ export interface Computer {
   host: string;
   dir: string;
 }
-/** The computers mirador.json lists. */
+/** The computers mirador.json lists, or why it cannot be read. */
 export const listComputers = () => invoke<Computer[]>("list_computers");
+/** Shows the computers pane, or opens one beside `paneId` or in a tab. */
+export const openComputers = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_computers", { paneId, tab });
 /** Adds one; refused for a taken or unsafe name, or an empty host or dir. */
 export const addComputer = (name: string, host: string, dir: string) =>
   invoke<Computer>("add_computer", { name, host, dir });

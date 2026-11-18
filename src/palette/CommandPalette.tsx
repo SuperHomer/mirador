@@ -425,7 +425,9 @@ export function CommandPalette() {
   useEffect(() => {
     if (open) {
       void sshHosts().then(setHosts);
-      void listComputers().then(setComputers);
+      // A mirador.json that does not parse lists none here; the computers
+      // pane says why.
+      void listComputers().then(setComputers, () => setComputers([]));
       setAsk(null);
       const pane =
         activeTab(useWorkspaceStore.getState().snapshot)?.focusedPane ?? null;

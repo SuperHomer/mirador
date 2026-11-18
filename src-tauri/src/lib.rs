@@ -412,6 +412,7 @@ pub fn run() {
             settings::settings_view,
             settings::set_config_value,
             settings::zoom_terminals,
+            settings::open_computers,
             settings::list_computers,
             settings::add_computer,
             teams::start_team,

@@ -109,6 +109,9 @@ pub struct PaneMeta {
     /// Usage pane: each harness's account and what it used, read from the
     /// harnesses' own files, so at most one such pane is open.
     pub usage: bool,
+    /// Computers pane: the computers saved in mirador.json, one global
+    /// file, so at most one such pane is open.
+    pub computers: bool,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
     /// Remote agent pane: the command line its `ssh -tt` runs on
@@ -887,6 +890,7 @@ impl Workspace {
             agent_editor_panes: Vec::new(),
             settings_panes: Vec::new(),
             usage_panes: Vec::new(),
+            computers_panes: Vec::new(),
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
@@ -936,6 +940,8 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
         "Settings".to_string()
     } else if m.usage {
         "Usage".to_string()
+    } else if m.computers {
+        "Computers".to_string()
     } else if let Some(version) = &m.whats_new {
         format!("What's new in {version}")
     } else if let Some(url) = &m.browser_url {
@@ -1657,6 +1663,7 @@ mod tests {
         let title = |m: PaneMeta| ws.active_tab().resolved_title(&HashMap::from([(pane.clone(), m)]));
         assert_eq!(title(PaneMeta { settings: true, ..Default::default() }), "Settings");
         assert_eq!(title(PaneMeta { usage: true, ..Default::default() }), "Usage");
+        assert_eq!(title(PaneMeta { computers: true, ..Default::default() }), "Computers");
         assert_eq!(title(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
         assert_eq!(title(PaneMeta::default()), "shell");
         assert_eq!(ws.active_tab().resolved_title(&HashMap::new()), "shell");
