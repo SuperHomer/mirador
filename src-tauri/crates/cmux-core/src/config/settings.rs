@@ -313,13 +313,74 @@ pub fn add_computer(name: &str, host: &str, dir: &str) -> Result<Computer, Strin
     add_computer_in(&config_path(), name, host, dir)
 }
 
+/// Changes the computer `original` in mirador.json's `computers`.
+pub fn update_computer(original: &str, name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    update_computer_in(&config_path(), original, name, host, dir)
+}
+
+/// Removes the computer `name` from mirador.json's `computers`.
+pub fn remove_computer(name: &str) -> Result<(), String> {
+    remove_computer_in(&config_path(), name)
+}
+
 /// Appends a computer to `computers` in the file at `path`, as
 /// [`set_config_value_in`] edits a key: as JSON, so nothing else in the
 /// file changes. `computers` is read-only in the Settings pane, since it
-/// takes no single value, so this is the one way the app writes it. The
-/// name goes on command lines and in palette entries, so it is a role's
-/// kind of name (`roles::is_name`), and no two computers share one.
+/// takes no single value, so this, [`update_computer_in`] and
+/// [`remove_computer_in`] are the ways the app writes it.
 pub(super) fn add_computer_in(path: &Path, name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    let computer = checked_computer(name, host, dir)?;
+    let mut obj = read_object(path)?;
+    let mut list = computer_list(&obj)?;
+    unclaimed(&list, &computer.name)?;
+    list.push(serde_json::to_value(&computer).map_err(|e| e.to_string())?);
+    obj.insert("computers".into(), Value::Array(list));
+    write_object(path, obj)?;
+    Ok(computer)
+}
+
+/// Replaces the computer `original` in the file at `path` where it is,
+/// as [`add_computer_in`] writes: the other computers in their order,
+/// nothing else changed, not even a key of the entry `Computer` does not
+/// know. It may keep its name or take one no other computer has. The
+/// entry changed is the one `computers_in` lists; a later entry of the
+/// same name, which only a hand edit makes, is left alone. A change that
+/// changes nothing writes nothing, as [`set_config_value_in`].
+pub(super) fn update_computer_in(path: &Path, original: &str, name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    let computer = checked_computer(name, host, dir)?;
+    let mut obj = read_object(path)?;
+    let mut list = computer_list(&obj)?;
+    let at = listed_at(&list, original)?;
+    if computer.name != original.trim() {
+        unclaimed(&list, &computer.name)?;
+    }
+    let before = list[at].clone();
+    for (key, value) in [("name", &computer.name), ("host", &computer.host), ("dir", &computer.dir)] {
+        list[at][key] = json!(value);
+    }
+    if list[at] == before {
+        return Ok(computer);
+    }
+    obj.insert("computers".into(), Value::Array(list));
+    write_object(path, obj)?;
+    Ok(computer)
+}
+
+/// Removes the computer `name` from the file at `path`, as
+/// [`update_computer_in`] finds it. A later entry of the same name is left
+/// alone, and is the one `computers_in` lists from then on.
+pub(super) fn remove_computer_in(path: &Path, name: &str) -> Result<(), String> {
+    let mut obj = read_object(path)?;
+    let mut list = computer_list(&obj)?;
+    let at = listed_at(&list, name)?;
+    list.remove(at);
+    obj.insert("computers".into(), Value::Array(list));
+    write_object(path, obj)
+}
+
+/// A computer as it is saved: trimmed. The name goes on command lines and
+/// in palette entries, so it is a role's kind of name (`roles::is_name`).
+fn checked_computer(name: &str, host: &str, dir: &str) -> Result<Computer, String> {
     let computer = Computer { name: name.trim().into(), host: host.trim().into(), dir: dir.trim().into() };
     if !crate::roles::is_name(&computer.name) {
         return Err(format!(
@@ -333,23 +394,44 @@ pub(super) fn add_computer_in(path: &Path, name: &str, host: &str, dir: &str) ->
     if computer.dir.is_empty() {
         return Err("a computer needs the directory where the work is".into());
     }
-    let mut obj = read_object(path)?;
-    let mut list = match obj.get("computers") {
+    Ok(computer)
+}
+
+/// `computers` in `obj`, to be edited. One that is not a list of computers
+/// is refused, not repaired: as set_config_value_in, the app never writes
+/// what Config cannot read back.
+fn computer_list(obj: &serde_json::Map<String, Value>) -> Result<Vec<Value>, String> {
+    let list = match obj.get("computers") {
         None => Vec::new(),
         Some(Value::Array(list)) => list.clone(),
         Some(_) => return Err("computers in mirador.json is not a list".into()),
     };
-    if list.iter().any(|c| c["name"].as_str().map(str::trim) == Some(computer.name.as_str())) {
-        return Err(format!("there is already a computer `{}`", computer.name));
-    }
-    list.push(serde_json::to_value(&computer).map_err(|e| e.to_string())?);
-    // As set_config_value_in: never write what Config cannot read back.
     if serde_json::from_value::<Config>(json!({ "computers": list })).is_err() {
         return Err("computers in mirador.json has an entry that is not a computer".into());
     }
-    obj.insert("computers".into(), Value::Array(list));
-    write_object(path, obj)?;
-    Ok(computer)
+    Ok(list)
+}
+
+/// Refuses `name` when an entry in `list` has it: no two computers share
+/// a name.
+fn unclaimed(list: &[Value], name: &str) -> Result<(), String> {
+    if list.iter().any(|c| c["name"].as_str().map(str::trim) == Some(name)) {
+        return Err(format!("there is already a computer `{name}`"));
+    }
+    Ok(())
+}
+
+/// Where in `list`, a [`computer_list`], the computer `computers_in` lists
+/// as `name` is.
+fn listed_at(list: &[Value], name: &str) -> Result<usize, String> {
+    let name = name.trim();
+    let config: Config = serde_json::from_value(json!({ "computers": list })).map_err(|e| e.to_string())?;
+    let unknown = || format!("there is no computer `{name}`");
+    let listed = super::computers_in(&config).into_iter().find(|c| c.name == name).ok_or_else(unknown)?;
+    // The first entry that trims to it: an earlier one would have been
+    // usable too, and listed instead.
+    let trimmed = |c: &Computer| Computer { name: c.name.trim().into(), host: c.host.trim().into(), dir: c.dir.trim().into() };
+    config.computers.iter().position(|c| trimmed(c) == listed).ok_or_else(unknown)
 }
 
 #[cfg(test)]
@@ -409,6 +491,105 @@ mod tests {
         assert!(add_computer_in(&path, "b2", "devbox", "~/w").unwrap_err().contains("not a list"));
         // The Settings pane does not write it: it takes no single value.
         assert!(set_config_value_in(&path, "computers", Some(json!([]))).is_err());
+    }
+
+    /// Three computers and keys of other kinds, as a file to change.
+    fn three_computers(name: &str) -> std::path::PathBuf {
+        let path = temp_config(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"fontSize": 14, "someFutureKey": {"kept": true}}"#).unwrap();
+        for (name, host) in [("a", "ha"), ("box", "devbox"), ("c", "hc")] {
+            add_computer_in(&path, name, host, "/w").unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn a_computer_is_changed_in_its_place_and_nothing_else_changes() {
+        let path = three_computers("computers-update");
+        let changed = update_computer_in(&path, " box ", "box", " other ", " ~/x ").unwrap();
+        assert_eq!(changed, Computer { name: "box".into(), host: "other".into(), dir: "~/x".into() });
+        update_computer_in(&path, "c", "lab", "hc", "/w").unwrap();
+        let file = read(&path);
+        assert_eq!(file["computers"][1]["host"], "other");
+        assert_eq!(file["fontSize"], 14);
+        assert_eq!(file["someFutureKey"], json!({ "kept": true }));
+        assert_eq!(
+            file["computers"],
+            json!([
+                { "name": "a", "host": "ha", "dir": "/w" },
+                { "name": "box", "host": "other", "dir": "~/x" },
+                { "name": "lab", "host": "hc", "dir": "/w" },
+            ])
+        );
+    }
+
+    /// An entry keeps what the app does not know of it, and a change to
+    /// what it already is does not rewrite the file.
+    #[test]
+    fn a_change_keeps_the_rest_of_its_entry_and_none_writes_nothing() {
+        let path = temp_config("computers-update-keep");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let text = r#"{"computers":[{"name":"box","host":"devbox","dir":"/w","someFutureField":1}]}"#;
+        std::fs::write(&path, text).unwrap();
+        update_computer_in(&path, "box", "box", "devbox", " /w ").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "nothing changed, nothing written");
+        update_computer_in(&path, "box", "box", "other", "/w").unwrap();
+        assert_eq!(read(&path)["computers"], json!([{ "name": "box", "host": "other", "dir": "/w", "someFutureField": 1 }]));
+    }
+
+    #[test]
+    fn a_change_is_refused_with_the_file_unchanged() {
+        let path = three_computers("computers-update-bad");
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(update_computer_in(&path, "box", "c", "devbox", "/w").unwrap_err(), "there is already a computer `c`");
+        assert_eq!(update_computer_in(&path, "nope", "nope", "h", "/w").unwrap_err(), "there is no computer `nope`");
+        assert!(update_computer_in(&path, "box", "my box", "devbox", "/w").unwrap_err().contains("can't name a computer"));
+        assert!(update_computer_in(&path, "box", "box", " ", "/w").unwrap_err().contains("ssh host"));
+        assert!(update_computer_in(&path, "box", "box", "devbox", "").unwrap_err().contains("directory"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "a refused change writes nothing");
+
+        for (text, says) in [(r#"{"computers": ["nope"]}"#, "not a computer"), (r#"{"computers": "nope"}"#, "not a list")] {
+            std::fs::write(&path, text).unwrap();
+            assert!(update_computer_in(&path, "box", "box", "h", "/w").unwrap_err().contains(says), "{text}");
+            assert!(remove_computer_in(&path, "box").unwrap_err().contains(says), "{text}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "not repaired");
+        }
+    }
+
+    #[test]
+    fn a_computer_is_removed_and_nothing_else_changes() {
+        let path = three_computers("computers-remove");
+        remove_computer_in(&path, " box ").unwrap();
+        let file = read(&path);
+        assert_eq!((&file["fontSize"], &file["someFutureKey"]), (&json!(14), &json!({ "kept": true })));
+        assert_eq!(
+            file["computers"],
+            json!([{ "name": "a", "host": "ha", "dir": "/w" }, { "name": "c", "host": "hc", "dir": "/w" }])
+        );
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(remove_computer_in(&path, "box").unwrap_err(), "there is no computer `box`");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    /// A hand edit can repeat a name or leave an entry unusable. A change
+    /// or a removal goes to the entry the app lists, the first usable one
+    /// of that name; the others stay as they are.
+    #[test]
+    fn a_change_goes_to_the_listed_entry_of_a_repeated_name() {
+        let path = temp_config("computers-repeated");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let unusable = json!({ "name": "box", "host": "nodir" });
+        let later = json!({ "name": "box", "host": "h2", "dir": "/two" });
+        let file = json!({ "computers": [unusable, { "name": " box ", "host": "h1", "dir": "/one" }, later] });
+        std::fs::write(&path, file.to_string()).unwrap();
+
+        update_computer_in(&path, "box", "box", "h1", "/changed").unwrap();
+        assert_eq!(read(&path)["computers"], json!([unusable, { "name": "box", "host": "h1", "dir": "/changed" }, later]));
+        remove_computer_in(&path, "box").unwrap();
+        assert_eq!(read(&path)["computers"], json!([unusable, later]));
+        let config: Config = serde_json::from_value(read(&path)).unwrap();
+        assert_eq!(super::super::computers_in(&config)[0].host, "h2", "the later one is listed now");
     }
 
     #[test]
