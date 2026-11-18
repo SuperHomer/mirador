@@ -630,6 +630,48 @@ fn a_team_runs_on_the_remote() {
     assert!(err.contains("in a team's tab is not done yet"), "{err}");
 }
 
+/// `mira computer`, as the computers pane's buttons: `box` saved, changed
+/// and listed; tested by its name, where agents can run, and by a host
+/// and a directory before saving one, where a missing directory says so
+/// and exits non-zero; a host ssh cannot reach is an error; and removed.
+#[test]
+fn a_computer_is_saved_tested_and_removed_from_the_cli() {
+    e2e!();
+    let mut sb = Sandbox::new("rcomp");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let mira = |args: &[&str]| sb.mira(None, args);
+    let ok = |args: &[&str]| {
+        let (code, out, err) = mira(args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        out
+    };
+
+    assert_eq!(ok(&["computer", "add", "devbox", "--host", "box", "--dir", "/nope"]), "devbox\tbox\t/nope\n");
+    assert_eq!(ok(&["computer", "update", "devbox", "--dir", &dir]), format!("devbox\tbox\t{dir}\n"));
+    assert_eq!(ok(&["computer", "list"]), format!("devbox\tbox\t{dir}\n"));
+
+    let uname = |flag: &str| String::from_utf8_lossy(&std::process::Command::new("uname").arg(flag).output().unwrap().stdout).trim().to_string();
+    let reached = format!("reached: {} {}", uname("-s"), uname("-m"));
+    assert_eq!(ok(&["computer", "test", "devbox"]), format!("{reached}\ndirectory: found\nagents: can run there\n"));
+    let (code, out, err) = mira(&["computer", "test", "--host", "box", "--dir", "~/nope"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (1, format!("{reached}\ndirectory: not found\nagents: cannot run there: the directory is not there\n").as_str()),
+        "{err}"
+    );
+    let (code, out, err) = mira(&["computer", "test", "--host", "nohost.invalid", "--dir", "/w"]);
+    assert!(code != 0 && out.is_empty() && err.contains("nohost.invalid"), "{code} {out} {err}");
+
+    assert_eq!(ok(&["computer", "remove", "devbox"]), "");
+    assert!(ok(&["computer", "list"]).starts_with("(no computers saved"));
+    let (code, _, err) = mira(&["computer", "test", "devbox"]);
+    assert!(code != 0 && err.contains("no computer `devbox`"), "{err}");
+}
+
 fn pane_of(sb: &Sandbox, name: &str) -> String {
     sb.member(name).and_then(|m| m["pane"].as_str().map(String::from)).expect(name)
 }

@@ -843,6 +843,37 @@ pub enum Request {
     },
     /// Host aliases from ~/.ssh/config.
     SshHosts,
+    /// The saved computers (`computers` in mirador.json), as the app
+    /// lists them: `computers`.
+    ComputerList,
+    /// Saves a computer: a name for an ssh host and the directory there
+    /// where the work is. Answers the computer saved (`computer`).
+    ComputerAdd { name: String, host: String, dir: String },
+    /// Changes the saved computer `name`: each of `new_name`, `host` and
+    /// `dir` given replaces its own. Answers the computer (`computer`).
+    ComputerUpdate {
+        name: String,
+        #[serde(default)]
+        new_name: Option<String>,
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+    },
+    /// Removes the saved computer `name`.
+    ComputerRemove { name: String },
+    /// Tests a computer for agents, as an agent's start there would meet
+    /// it: a saved one by `name`, or `host` and `dir` before saving one,
+    /// never both. Answers a [`ComputerCheck`] (`check`), or ssh's error
+    /// when the computer was not reached.
+    ComputerTest {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+    },
     /// Forward (or cancel) `localhost:<port>` → remote's `localhost:<port>`
     /// over a remote pane's ControlMaster.
     SshForward {

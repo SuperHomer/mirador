@@ -108,6 +108,15 @@ fn sender(state: &AppState, pane_id: Option<&str>) -> String {
     pane_id.and_then(|p| crate::handoff::sender(state, p)).unwrap_or_else(|| "you".into())
 }
 
+/// mirador.json as it is now. One that does not parse is the answer, not
+/// the defaults it would load as, where no computer is saved.
+fn saved_config() -> Result<cmux_core::config::Config, String> {
+    match cmux_core::config::load() {
+        (_, Some(problem)) => Err(problem),
+        (config, None) => Ok(config),
+    }
+}
+
 fn focused_pane(state: &AppState) -> String {
     state.workspace.lock().unwrap().focused_pane()
 }
@@ -666,6 +675,43 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "paneId": pane_id }))
         }
         Request::SshHosts => Ok(json!({ "hosts": cmux_core::ssh::config_hosts() })),
+        Request::ComputerList => Ok(json!({ "computers": cmux_core::config::computers_in(&saved_config()?) })),
+        Request::ComputerAdd { name, host, dir } => {
+            Ok(json!({ "computer": cmux_core::config::settings::add_computer(&name, &host, &dir)? }))
+        }
+        Request::ComputerUpdate { name, new_name, host, dir } => {
+            let saved = cmux_core::config::computer_named(&saved_config()?, &name)?;
+            let computer = cmux_core::config::settings::update_computer(
+                &name,
+                new_name.as_deref().unwrap_or(&saved.name),
+                host.as_deref().unwrap_or(&saved.host),
+                dir.as_deref().unwrap_or(&saved.dir),
+            )?;
+            Ok(json!({ "computer": computer }))
+        }
+        Request::ComputerRemove { name } => {
+            cmux_core::config::settings::remove_computer(&name)?;
+            Ok(Value::Null)
+        }
+        // Up to ssh::CHECK_TIMEOUT: on this connection's own thread, and
+        // holding nothing of the app's, so no other request waits on it.
+        Request::ComputerTest { name, host, dir } => {
+            let (host, dir) = match (name, host, dir) {
+                (Some(name), None, None) => {
+                    let computer = cmux_core::config::computer_named(&saved_config()?, &name)?;
+                    (computer.host, computer.dir)
+                }
+                (None, Some(host), Some(dir)) => (host, dir),
+                _ => return Err("a computer to test is a saved one's name, or a host and a directory there: one, not both".into()),
+            };
+            #[cfg(windows)]
+            return {
+                let _ = (host, dir);
+                Err("testing a computer is not done on Windows yet".into())
+            };
+            #[cfg(not(windows))]
+            Ok(json!({ "check": cmux_core::ssh::check_computer(&host, &dir, env!("CARGO_PKG_VERSION"))? }))
+        }
         Request::SshForward {
             pane_id,
             port,
