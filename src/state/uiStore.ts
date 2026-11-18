@@ -1,5 +1,13 @@
 import { create } from "zustand";
-import { AgentStatus } from "../bindings";
+import { AgentStatus, StartWhere } from "../bindings";
+
+/** A start waiting for "here, or on the pane's remote?". */
+export interface PendingWhere {
+  /** What is started, as the step's crumb and in a failure: "Start reviewer". */
+  label: string;
+  remote: StartWhere;
+  go: (onRemote: boolean) => void;
+}
 
 /** All of a wall's tiles, the agents in one status, or its tools. */
 export type WallFilter = "all" | AgentStatus | "tools";
@@ -35,6 +43,11 @@ interface UiStore {
   /** The tab bar's "+ New" menu is open, over the tab's panes. */
   newMenuOpen: boolean;
   setNewMenuOpen: (open: boolean) => void;
+  /** A start from a remote pane waiting for the palette's Where step:
+   *  `go(false)` starts it here, `go(true)` on the pane's remote
+   *  (`startHere`). Dropped when the palette closes without a choice. */
+  where: PendingWhere | null;
+  askWhere: (where: PendingWhere) => void;
   /** What the person last asked for that failed, said in the error bar
    *  until dismissed; a new failure replaces it (`reportFailure`). */
   error: string | null;
@@ -86,23 +99,28 @@ export const useUiStore = create<UiStore>((set) => ({
   setNewMenuOpen: (newMenuOpen) => set({ newMenuOpen }),
   error: null,
   setError: (error) => set({ error }),
+  where: null,
+  askWhere: (where) =>
+    set({ where, paletteOpen: true, paletteStep: "where", notificationsOpen: false, activityPane: null }),
   computerDraft: false,
   setComputerDraft: (computerDraft) => set({ computerDraft }),
   togglePalette: () =>
-    set((s) => ({ paletteOpen: !s.paletteOpen, paletteStep: null, notificationsOpen: false })),
+    set((s) => ({ paletteOpen: !s.paletteOpen, paletteStep: null, notificationsOpen: false, where: null })),
   openPalette: (step) =>
     set({ paletteOpen: true, paletteStep: step, notificationsOpen: false, activityPane: null }),
-  closePalette: () => set({ paletteOpen: false }),
+  // A start waiting for its Where step is dropped with it: nothing opens.
+  closePalette: () => set({ paletteOpen: false, where: null }),
   toggleNotifications: () =>
     set((s) => ({
       notificationsOpen: !s.notificationsOpen,
       paletteOpen: false,
       activityPane: null,
+      where: null,
     })),
   closeNotifications: () => set({ notificationsOpen: false }),
   // The two drawers share the window's right edge: one at a time.
   openActivity: (paneId) =>
-    set({ activityPane: paneId, notificationsOpen: false, paletteOpen: false }),
+    set({ activityPane: paneId, notificationsOpen: false, paletteOpen: false, where: null }),
   closeActivity: () => set({ activityPane: null }),
 }));
 

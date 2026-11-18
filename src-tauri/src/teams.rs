@@ -38,7 +38,10 @@ pub(crate) fn mira_for_prompt() -> String {
 /// Starts `team` — the one `pane_id`'s directory sees — in a tab of its
 /// own, each member told its teammates; `task` goes to the lead. Every
 /// member's launch is worked out before any pane opens, so a team that
-/// cannot start opens nothing. Returns the tab's id.
+/// cannot start opens nothing. Returns the tab's id. With `on_remote`,
+/// every member runs on the remote `pane_id` is on, in its directory
+/// there, as the person chose in the palette's Where step; the remote is
+/// read from the pane, never taken from the page.
 #[tauri::command(async)]
 pub fn start_team(
     app: AppHandle,
@@ -46,8 +49,14 @@ pub fn start_team(
     team: String,
     task: Option<String>,
     pane_id: Option<String>,
+    on_remote: bool,
 ) -> Result<String, String> {
-    start_team_from(app, state, team, task, pane_id, None, "you".into(), None)
+    let remote = if on_remote {
+        Some(crate::commands::remote_of_source(&state, pane_id.as_deref())?)
+    } else {
+        None
+    };
+    start_team_from(app, state, team, task, pane_id, None, "you".into(), remote)
 }
 
 /// [`start_team`], its task logged as given by `from`: a person, from the

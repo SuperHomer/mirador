@@ -97,9 +97,11 @@ fn an_ssh_pane_reaches_the_sandboxs_own_remote() {
 
 /// A saved computer's tab: `ssh open --tab --dir` opens an ssh pane on
 /// box whose shell starts in that directory there. A split of it, from
-/// `mira split`, is a shell on box too, in the same directory, as a local
-/// split opens in its pane's directory. A split of a local pane stays
-/// local, and so does a command split from the remote one.
+/// `mira split`, is a shell on box too, in the directory the tab was
+/// opened in. A split of a local pane stays
+/// local, and so does a command split from the remote one. And `mira agent
+/// new` from inside the remote tab, with no --host, starts here: only the
+/// app asks where.
 #[test]
 fn a_remote_tab_splits_on_its_remote() {
     e2e!();
@@ -130,6 +132,14 @@ fn a_remote_tab_splits_on_its_remote() {
     assert!(!on_box(&command), "a command split runs here");
     let local = ok(&["split", "--pane", &first]);
     assert!(!on_box(&local), "a split of a local pane stays local");
+
+    // The app asks where an agent from a remote pane runs; `mira` asks
+    // nothing: with no --host it starts here, even from inside box's tab.
+    let (code, out, err) = sb.mira(Some(&tab), &["agent", "new", "look around"]);
+    assert_eq!(code, 0, "{err}");
+    let agent = out.trim().to_string();
+    sb.wait_for("the agent's start", LONG, || sb.events("start", &agent).into_iter().next());
+    assert!(!on_box(&agent), "mira agent new from a remote tab, no --host: here");
 }
 
 /// A `mira` on the remote has no discovery file there, so it finds no app

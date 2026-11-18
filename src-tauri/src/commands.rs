@@ -1776,7 +1776,11 @@ pub fn graph_show_commit(
     Ok(diff_pane)
 }
 
-/// Starts a Claude Code agent: a shell pane (a split of `pane_id` — the
+/// Starts a Claude Code agent, as the person starts one: here, or with
+/// `on_remote` on the remote `pane_id` is on, in its directory there, as
+/// they chose in the palette's Where step (`start_where` offers it). The
+/// remote is read from the pane again here, never taken from the page. A
+/// shell pane (a split of `pane_id` — the
 /// usual way, so the agent works in the tab beside you — or a new tab)
 /// with `claude` typed into it, carrying the role's model and prompt and
 /// `task` as its first message. A shell rather than a command pane, as a
@@ -1785,6 +1789,7 @@ pub fn graph_show_commit(
 // Off the main thread: a role that keeps a list of skills or plugins
 // asks Claude Code for its inventory first, which takes a second.
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 pub fn open_agent(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1793,8 +1798,89 @@ pub fn open_agent(
     pane_id: Option<String>,
     tab: bool,
     harness: Option<cmux_protocol::Harness>,
+    on_remote: bool,
 ) -> Result<String, String> {
-    open_agent_from(app, state, role, task, pane_id, tab, harness, None, "you".into(), None)
+    let remote = if on_remote { Some(remote_of_source(&state, pane_id.as_deref())?) } else { None };
+    open_agent_from(app, state, role, task, pane_id, tab, harness, None, "you".into(), remote)
+}
+
+/// The pane something is started from: `pane_id` when it is one, else the
+/// focused pane.
+fn agent_source(state: &AppState, pane_id: Option<String>) -> String {
+    pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane())
+}
+
+/// Whether `role`, asked for from `source`, joins the team running in
+/// `source`'s tab, as `team add` would make it: a role, split into a
+/// team's tab rather than opened in a tab of its own. It then runs where
+/// the team does, so the person is not asked where.
+fn joins_team(state: &AppState, role: Option<&str>, source: &str, tab: bool) -> bool {
+    role.map(str::trim).is_some_and(|r| !r.is_empty()) && !tab && crate::teams::team_here(state, Some(source)).is_ok()
+}
+
+/// The remote the pane `pane_id` is on, as an agent or a team the person
+/// chose to start there from it runs: its host, in its directory there or
+/// the home. That pane only, never the focused one in its place: if it
+/// closed while the person chose, another pane may be on another host,
+/// and nothing starts.
+pub(crate) fn remote_of_source(state: &AppState, pane_id: Option<&str>) -> Result<(String, String), String> {
+    let pane = pane_id.ok_or("started on a remote from no pane: nothing was started")?;
+    let meta = state.meta.lock().unwrap();
+    let m = meta.get(pane).ok_or("the pane it was started from is gone: nothing was started")?;
+    m.start_remote().ok_or_else(|| "the pane it was started from is on no remote: nothing was started".into())
+}
+
+/// Whether what the person is starting from `pane_id` — a role, a plain
+/// harness, or a team — could run on the remote that pane is on, and if so
+/// where: the palette then asks "This computer, or on <label>?". None
+/// asks nothing, and it starts here: a local pane; a role that joins its
+/// tab's team, which runs where the team does; Codex, or a role or team
+/// member the remote would refuse (`refuse_on_remote`), offered only
+/// where it can work. The label is the saved computer there, else the
+/// host; a mirador.json that does not parse gives the host too, rather
+/// than blocking a start that does not need the file.
+#[tauri::command]
+pub fn start_where(
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    role: Option<String>,
+    harness: Option<cmux_protocol::Harness>,
+    team: Option<String>,
+) -> Result<Option<cmux_protocol::StartWhere>, String> {
+    // Agents on a remote are not done on Windows: offering one would only
+    // fail after the choice (`reach_remote`).
+    if cfg!(windows) {
+        return Ok(None);
+    }
+    // The pane given, as the start will read it (`remote_of_source`):
+    // never the focused one in its place.
+    let Some(source) = pane_id else { return Ok(None) };
+    let Some((host, dir)) = state.meta.lock().unwrap().get(&source).and_then(cmux_core::state::PaneMeta::start_remote) else {
+        return Ok(None);
+    };
+    let role = role.filter(|r| !r.trim().is_empty());
+    let can_run_there = if let Some(team) = team {
+        let catalog = cmux_core::roles::catalog(crate::teams::cwd_of(&state, Some(&source)).as_deref().map(std::path::Path::new));
+        catalog.teams.iter().find(|t| t.name == team).is_some_and(|def| {
+            cmux_core::teams::seats(def).iter().all(|seat| refuse_on_remote(&catalog, &seat.role).is_ok())
+        })
+    } else if let Some(role) = role.as_deref() {
+        let cwd = state.meta.lock().unwrap().get(&source).and_then(|m| m.cwd.clone()).or_else(cmux_core::config::default_cwd);
+        let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
+        !joins_team(&state, Some(role), &source, false) && refuse_on_remote(&catalog, role).is_ok()
+    } else {
+        cmux_core::agents::plain_harness(harness)? == cmux_protocol::Harness::Claude
+    };
+    if !can_run_there {
+        return Ok(None);
+    }
+    let label = crate::settings::saved_config()
+        .ok()
+        .and_then(|cfg| cmux_core::config::computer_label(&cfg, &host, &dir))
+        .unwrap_or_else(|| cmux_core::ssh::display_host(&host));
+    Ok(Some(cmux_protocol::StartWhere { label, host: cmux_core::ssh::display_host(&host), dir }))
 }
 
 /// [`open_agent`], its task logged as given by `from`: a person, from the
@@ -1827,11 +1913,9 @@ pub fn open_agent_from(
         return Err("a role names its own harness: give a role or a harness, not both".into());
     }
     let plain = cmux_core::agents::plain_harness(harness)?;
-    let source = pane_id
-        .filter(|id| state.meta.lock().unwrap().contains_key(id))
-        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let source = agent_source(&state, pane_id);
     if let Some(role) = role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
-        if !tab && crate::teams::team_here(&state, Some(&source)).is_ok() {
+        if joins_team(&state, Some(role), &source, tab) {
             if remote.is_some() {
                 return Err("a role on a remote in a team's tab is not done yet: start it in a tab of its own (--tab), or from another tab".into());
             }

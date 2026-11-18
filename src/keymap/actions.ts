@@ -28,6 +28,7 @@ import {
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
 import { reportFailure, useUiStore } from "../state/uiStore";
+import { startHere } from "../agents/startHere";
 import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal, isLent, paneWithFocus, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
@@ -320,8 +321,12 @@ export const actions: ActionDef[] = [
     group: "agents",
     hint: "Claude Code",
     // Beside the focused pane, in the tab you are working in.
-    run: () =>
-      void openAgent(null, null, focusedPane() ?? null, false).catch((e) => reportFailure("Start Claude Code", e)),
+    run: () => {
+      const pane = focusedPane() ?? null;
+      startHere(pane, { harness: "claude" }, "Start Claude Code", (remote) =>
+        openAgent(null, null, pane, false, null, remote !== null),
+      );
+    },
   },
   {
     id: "setup_claude_integration",

@@ -299,6 +299,17 @@ pub struct DiffPane {
     pub spec: String,
 }
 
+/// Where an agent or a team started from a remote pane could run instead
+/// of here, for the person to choose: the pane's remote, named by the
+/// saved computer there (else its host), and the directory there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartWhere {
+    pub label: String,
+    pub host: String,
+    pub dir: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemotePane {

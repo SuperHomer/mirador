@@ -672,6 +672,15 @@ pub fn computers_in(cfg: &Config) -> Vec<Computer> {
     computers
 }
 
+/// The name of the saved computer a remote pane on `host`, in `dir`, is
+/// on, to say where something would start: the one saved with that host
+/// and that directory. None otherwise, and the host says it then: with
+/// two computers on one host, a host alone could name the wrong one.
+pub fn computer_label(cfg: &Config, host: &str, dir: &str) -> Option<String> {
+    let host = host.trim();
+    computers_in(cfg).into_iter().find(|c| c.host == host && c.dir == dir).map(|c| c.name)
+}
+
 /// The usable computer called `name`, as `--on <name>` picks one. It goes
 /// through [`computers_in`], so an entry the palette would not list is not
 /// found here either.
@@ -805,6 +814,23 @@ mod tests {
         assert_eq!(computer_named(&cfg, " gpu "), Ok(gpu));
         assert_eq!(computer_named(&cfg, "nodir"), Err("no computer `nodir` (there are: box, gpu)".into()));
         assert_eq!(computer_named(&cfg, "lab"), Err("no computer `lab` (there are: box, gpu)".into()));
+    }
+
+    #[test]
+    fn a_remote_is_named_by_the_computer_saved_there() {
+        let cfg: Config = serde_json::from_str(
+            r#"{ "computers": [
+                { "name": "box", "host": "devbox", "dir": "~" },
+                { "name": "box-work", "host": "devbox", "dir": "~/work" },
+                { "name": "gpu", "host": "gpu.lan", "dir": "/srv" }
+            ] }"#,
+        )
+        .unwrap();
+        assert_eq!(computer_label(&cfg, "devbox", "~/work").as_deref(), Some("box-work"), "host and directory");
+        assert_eq!(computer_label(&cfg, "devbox", "~").as_deref(), Some("box"));
+        assert_eq!(computer_label(&cfg, "gpu.lan", "/srv").as_deref(), Some("gpu"));
+        assert_eq!(computer_label(&cfg, "devbox", "/elsewhere"), None, "the host alone could name the wrong one");
+        assert_eq!(computer_label(&cfg, "lab", "~"), None, "no computer saved there: the host says it");
     }
 
     #[test]

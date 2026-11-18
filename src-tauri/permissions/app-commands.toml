@@ -90,6 +90,7 @@ permissions = [
   "allow-release-image",
   "allow-open-whats-new",
   "allow-open-ssh",
+  "allow-start-where",
   "allow-ssh-hosts",
   "allow-set-browser-bounds",
   "allow-browser-screenshot",

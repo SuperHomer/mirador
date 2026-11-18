@@ -1,5 +1,5 @@
 import { HARNESS_LABEL, openAgent, openAgentEditor, startTeam, TabSnapshot, toggleAgentWall } from "../bindings";
-import { reportFailure } from "../state/uiStore";
+import { startHere } from "./startHere";
 import { roleLine, useRoleCatalog } from "./NewMenu";
 import { opensInTab } from "../state/configStore";
 
@@ -14,8 +14,8 @@ export function EmptyWall({ tab }: { tab: TabSnapshot }) {
   const roles = catalog?.roles ?? [];
   const teams = catalog?.teams ?? [];
   const start = (role: string | null, harness: "claude" | "codex" | null) =>
-    openAgent(role, null, pane, false, harness).catch((e) =>
-      reportFailure(`Start ${role ?? HARNESS_LABEL[harness ?? "claude"]}`, e),
+    startHere(pane, { role, harness }, `Start ${role ?? HARNESS_LABEL[harness ?? "claude"]}`, (remote) =>
+      openAgent(role, null, pane, false, harness, remote !== null),
     );
   return (
     <div className="empty-wall">
@@ -59,7 +59,9 @@ export function EmptyWall({ tab }: { tab: TabSnapshot }) {
                 <button
                   className="empty-wall-link"
                   onClick={() =>
-                    startTeam(t.name, null, pane).catch((e) => reportFailure(`Start team ${t.name}`, e))
+                    startHere(pane, { team: t.name }, `Start team ${t.name}`, (remote) =>
+                      startTeam(t.name, null, pane, remote !== null),
+                    )
                   }
                 >
                   Start team…

@@ -158,6 +158,13 @@ impl PaneMeta {
         Some((self.remote_host.clone()?, self.remote_dir.clone()))
     }
 
+    /// Where an agent or a team started from this pane runs when the person
+    /// picks its remote: the pane's host, in its directory there, or the
+    /// home (`~`) with none known. None for a local pane.
+    pub fn start_remote(&self) -> Option<(String, String)> {
+        self.split_remote().map(|(host, dir)| (host, dir.unwrap_or_else(|| "~".into())))
+    }
+
     /// What it runs. A `codex:` session is a Codex's; otherwise the
     /// session, role and launch mark are Claude Code's, so an agent known
     /// only by them is a Claude Code one.
@@ -1506,6 +1513,15 @@ mod tests {
         assert_eq!(agent.split_remote(), Some(("box".into(), Some("~/work".into()))), "a shell in the agent's directory");
         let home = PaneMeta { remote_host: Some("-p 2222 me@box".into()), ..Default::default() };
         assert_eq!(home.split_remote(), Some(("-p 2222 me@box".into(), None)), "the home there");
+    }
+
+    #[test]
+    fn an_agent_from_a_remote_pane_starts_in_its_directory_or_the_home() {
+        assert_eq!(PaneMeta::default().start_remote(), None, "a local pane: no remote to offer");
+        let shell = PaneMeta { remote_host: Some("box".into()), remote_dir: Some("~/work".into()), ..Default::default() };
+        assert_eq!(shell.start_remote(), Some(("box".into(), "~/work".into())));
+        let home = PaneMeta { remote_host: Some("box".into()), ..Default::default() };
+        assert_eq!(home.start_remote(), Some(("box".into(), "~".into())), "the home with no directory");
     }
 
     /// A camera set from outside is the last word over a save the board

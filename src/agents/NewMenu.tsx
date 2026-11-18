@@ -9,11 +9,12 @@ import {
   openAgentEditor,
   RoleCatalog,
 } from "../bindings";
-import { reportFailure, useUiStore } from "../state/uiStore";
+import { useUiStore } from "../state/uiStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { opensInTab, useConfigStore } from "../state/configStore";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { runAction } from "../keymap/actions";
+import { startHere } from "./startHere";
 
 /** "Claude Code · opus · high": what a role starts. */
 export function roleLine(r: AgentRole): string {
@@ -108,8 +109,9 @@ export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }
   const start = (role: string | null, harness: Harness | null) => {
     acted.current = true;
     onClose();
-    openAgent(role, message.trim() || null, pane, false, harness).catch((e) =>
-      reportFailure(`Start ${role ?? HARNESS_LABEL[harness ?? "claude"]}`, e),
+    const task = message.trim() || null;
+    startHere(pane, { role, harness }, `Start ${role ?? HARNESS_LABEL[harness ?? "claude"]}`, (remote) =>
+      openAgent(role, task, pane, false, harness, remote !== null),
     );
   };
   const edit = () => {

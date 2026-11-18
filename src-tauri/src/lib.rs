@@ -446,6 +446,7 @@ pub fn run() {
             whatsnew::release_image,
             whatsnew::open_whats_new,
             commands::open_ssh,
+            commands::start_where,
             commands::ssh_hosts,
             commands::set_browser_bounds,
             commands::browser_screenshot,
