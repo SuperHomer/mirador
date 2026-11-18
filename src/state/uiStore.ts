@@ -35,6 +35,10 @@ interface UiStore {
   /** The tab bar's "+ New" menu is open, over the tab's panes. */
   newMenuOpen: boolean;
   setNewMenuOpen: (open: boolean) => void;
+  /** A new computer was asked for: the computers pane starts a draft and
+   *  clears this, whether it was open already or opens for it. */
+  computerDraft: boolean;
+  setComputerDraft: (draft: boolean) => void;
   togglePalette: () => void;
   /** Opens the palette on one of its steps. */
   openPalette: (step: string) => void;
@@ -76,6 +80,8 @@ export const useUiStore = create<UiStore>((set) => ({
     }),
   newMenuOpen: false,
   setNewMenuOpen: (newMenuOpen) => set({ newMenuOpen }),
+  computerDraft: false,
+  setComputerDraft: (computerDraft) => set({ computerDraft }),
   togglePalette: () =>
     set((s) => ({ paletteOpen: !s.paletteOpen, paletteStep: null, notificationsOpen: false })),
   openPalette: (step) =>

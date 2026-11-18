@@ -167,6 +167,11 @@ enum Command {
         #[command(subcommand)]
         action: SshAction,
     },
+    /// Computers agents can work on over SSH, saved in mirador.json.
+    Computer {
+        #[command(subcommand)]
+        action: ComputerAction,
+    },
     /// Send a notification (prints OSC 777; works from inside any pane,
     /// even over SSH). Use --socket to target the app directly instead.
     Notify {
@@ -580,6 +585,65 @@ enum SshAction {
         port: u16,
         #[arg(long)]
         pane: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ComputerAction {
+    /// The saved computers: name, host and directory, one per line.
+    List,
+    /// Save a computer: NAME for an ssh host and the directory there where
+    /// the work is.
+    Add {
+        name: String,
+        /// An alias from ~/.ssh/config, or a destination: "-p 2222 me@box".
+        #[arg(long, allow_hyphen_values = true)]
+        host: String,
+        /// The directory there where the work is. Quote a ~ ('~/work') so
+        /// this shell does not expand it to this computer's home.
+        #[arg(long, allow_hyphen_values = true)]
+        dir: String,
+    },
+    /// Change a saved computer: each of --name, --host and --dir given
+    /// replaces its own.
+    Update {
+        name: String,
+        /// Its new name.
+        #[arg(long = "name", required_unless_present_any = ["host", "dir"])]
+        new_name: Option<String>,
+        /// Its ssh host: an alias from ~/.ssh/config, or a destination.
+        #[arg(long, allow_hyphen_values = true)]
+        host: Option<String>,
+        /// The directory there where the work is. Quote a ~ ('~/work') so
+        /// this shell does not expand it to this computer's home.
+        #[arg(long, allow_hyphen_values = true)]
+        dir: Option<String>,
+    },
+    /// Remove a saved computer.
+    Remove { name: String },
+    /// Show the computers pane, or open it: where `editorOpensIn` says, or
+    /// as --tab or --split say.
+    Open {
+        /// Open in a new tab.
+        #[arg(long, conflicts_with = "split")]
+        tab: bool,
+        /// Open as a split of this pane.
+        #[arg(long)]
+        split: bool,
+    },
+    /// Test a computer for agents, as starting one there would meet it: a
+    /// saved one by NAME, or --host and --dir before saving it. Exits 0
+    /// when agents can run there.
+    Test {
+        #[arg(required_unless_present = "host", conflicts_with = "host")]
+        name: Option<String>,
+        /// An ssh host to test: an alias from ~/.ssh/config, or a destination.
+        #[arg(long, requires = "dir", allow_hyphen_values = true)]
+        host: Option<String>,
+        /// The directory there where the work is. Quote a ~ ('~/work') so
+        /// this shell does not expand it to this computer's home.
+        #[arg(long, requires = "host", allow_hyphen_values = true)]
+        dir: Option<String>,
     },
 }
 
@@ -1016,6 +1080,21 @@ fn run(cli: Cli) -> Result<(), String> {
                 cancel: true,
             },
         },
+        Command::Computer { action } => match action {
+            ComputerAction::List => Request::ComputerList,
+            ComputerAction::Add { name, host, dir } => Request::ComputerAdd { name, host, dir },
+            ComputerAction::Update { name, new_name, host, dir } => Request::ComputerUpdate { name, new_name, host, dir },
+            ComputerAction::Remove { name } => Request::ComputerRemove { name },
+            ComputerAction::Open { tab, split } => Request::ComputerOpen {
+                pane_id: own_pane(),
+                target: if tab {
+                    Some("tab".to_string())
+                } else {
+                    split.then(|| "split".to_string())
+                },
+            },
+            ComputerAction::Test { name, host, dir } => Request::ComputerTest { name, host, dir },
+        },
         Command::Browser { action } => match action {
             BrowserAction::Open { url, tab } => Request::BrowserOpen {
                 url,
@@ -1297,6 +1376,28 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 }
                 for h in hosts {
                     println!("{}", h.as_str().unwrap_or(""));
+                }
+            } else if let Some(computers) = map.get("computers").or_else(|| map.get("computer")) {
+                // A list, or the one computer saved: a line each.
+                let computers: Vec<cmux_core::config::Computer> = match computers {
+                    serde_json::Value::Array(_) => serde_json::from_value(computers.clone()),
+                    one => serde_json::from_value(one.clone()).map(|c| vec![c]),
+                }
+                .map_err(|e| format!("bad response: {e}"))?;
+                if computers.is_empty() {
+                    println!("(no computers saved: mira computer add <name> --host <host> --dir <dir>)");
+                }
+                for c in computers {
+                    println!("{}\t{}\t{}", c.name, c.host, c.dir);
+                }
+            } else if let Some(check) = map.get("check") {
+                let check: cmux_protocol::ComputerCheck =
+                    serde_json::from_value(check.clone()).map_err(|e| format!("bad response: {e}"))?;
+                for line in check_lines(&check) {
+                    println!("{line}");
+                }
+                if check.agents.is_some() {
+                    std::process::exit(1);
                 }
             } else if map.contains_key("runs") {
                 render_runs(&data);
@@ -1969,6 +2070,20 @@ fn render_runs(data: &serde_json::Value) {
             run["paneId"].as_str().unwrap_or(""),
         );
     }
+}
+
+/// A computer's test as `mira computer test` shows it, a line each, as
+/// the computers pane does: reached and its system, its directory, and
+/// whether agents can run there or why not.
+fn check_lines(check: &cmux_protocol::ComputerCheck) -> Vec<String> {
+    vec![
+        format!("reached: {}", check.system),
+        format!("directory: {}", if check.dir_found { "found" } else { "not found" }),
+        match &check.agents {
+            None => "agents: can run there".to_string(),
+            Some(why) => format!("agents: cannot run there: {why}"),
+        },
+    ]
 }
 
 /// An account as `mira usage` shows it: who it is, then its limits, then
@@ -2688,6 +2803,81 @@ mod tests {
 
         std::env::remove_var(cmux_core::pty::PANE_ENV);
         assert_eq!(own_pane(), None);
+    }
+
+    /// `computer` add, update, remove, open and test, each as the pane
+    /// does: update changes at least one thing, and a test is a saved
+    /// computer's name or a host and a directory, never both.
+    #[test]
+    fn computers_are_saved_changed_removed_and_tested() {
+        let Command::Computer { action: ComputerAction::Add { name, host, dir } } =
+            parse(&["computer", "add", "gpu", "--host", "-p 2222 me@gpu", "--dir", "~/work"])
+        else {
+            panic!()
+        };
+        assert_eq!((name.as_str(), host.as_str(), dir.as_str()), ("gpu", "-p 2222 me@gpu", "~/work"));
+        assert!(Cli::try_parse_from(["mira", "computer", "add", "gpu", "--host", "box"]).is_err());
+
+        let Command::Computer { action: ComputerAction::Update { name, new_name, host, dir } } =
+            parse(&["computer", "update", "gpu", "--name", "lab"])
+        else {
+            panic!()
+        };
+        assert_eq!((name.as_str(), new_name.as_deref(), host, dir), ("gpu", Some("lab"), None, None));
+        let Command::Computer { action: ComputerAction::Update { new_name, dir, .. } } = parse(&["computer", "update", "gpu", "--dir", "/srv"])
+        else {
+            panic!()
+        };
+        assert_eq!((new_name, dir.as_deref()), (None, Some("/srv")));
+        assert!(Cli::try_parse_from(["mira", "computer", "update", "gpu"]).is_err(), "nothing to change");
+
+        let Command::Computer { action: ComputerAction::Remove { name } } = parse(&["computer", "remove", "gpu"]) else {
+            panic!()
+        };
+        assert_eq!(name, "gpu");
+        let Command::Computer { action: ComputerAction::Open { tab, split } } = parse(&["computer", "open", "--tab"]) else {
+            panic!()
+        };
+        assert_eq!((tab, split), (true, false));
+        assert!(Cli::try_parse_from(["mira", "computer", "open", "--tab", "--split"]).is_err());
+
+        let Command::Computer { action: ComputerAction::Test { name, host, dir } } = parse(&["computer", "test", "gpu"]) else {
+            panic!()
+        };
+        assert_eq!((name.as_deref(), host, dir), (Some("gpu"), None, None));
+        let Command::Computer { action: ComputerAction::Test { name, host, dir } } =
+            parse(&["computer", "test", "--host", "box", "--dir", "/srv"])
+        else {
+            panic!()
+        };
+        assert_eq!((name, host.as_deref(), dir.as_deref()), (None, Some("box"), Some("/srv")));
+        for refused in [
+            &["computer", "test"][..],
+            &["computer", "test", "--host", "box"],
+            &["computer", "test", "--dir", "/srv"],
+            &["computer", "test", "gpu", "--host", "box", "--dir", "/srv"],
+        ] {
+            assert!(Cli::try_parse_from(["mira"].iter().chain(refused)).is_err(), "{refused:?}");
+        }
+    }
+
+    /// A computer's test as `computer test` prints it: reached and its
+    /// system, its directory, then that agents can run there or why not.
+    #[test]
+    fn a_computers_test_is_three_lines() {
+        let mut check = cmux_protocol::ComputerCheck {
+            system: "Linux x86_64".into(),
+            dir_found: true,
+            claude_found: true,
+            agents: None,
+        };
+        assert_eq!(check_lines(&check), ["reached: Linux x86_64", "directory: found", "agents: can run there"]);
+        check.dir_found = false;
+        check.agents = Some("the directory is not there".into());
+        assert_eq!(
+            check_lines(&check),
+            ["reached: Linux x86_64", "directory: not found", "agents: cannot run there: the directory is not there"]
+        );
     }
 
     /// `agent new --host` goes with `--dir`: both, or neither.

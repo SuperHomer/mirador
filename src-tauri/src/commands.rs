@@ -129,6 +129,13 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .map(|(pane, _)| cmux_protocol::UsagePane { pane_id: pane.clone() })
             .collect()
     };
+    snapshot.computers_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter(|(_, m)| m.computers)
+            .map(|(pane, _)| cmux_protocol::ComputersPane { pane_id: pane.clone() })
+            .collect()
+    };
     snapshot.agents = agent_infos(state);
     let per_tab = state.config.lock().unwrap().agents_per_tab;
     cmux_core::wall::fill(&mut snapshot, per_tab);

@@ -60,7 +60,7 @@ pub fn tool_kind(meta: Option<&PaneMeta>) -> Option<ToolKind> {
     let Some(m) = meta else {
         return Some(ToolKind::Terminal);
     };
-    if m.agent_editor || m.settings || m.usage || m.whats_new.is_some() {
+    if m.agent_editor || m.settings || m.usage || m.computers || m.whats_new.is_some() {
         None
     } else if m.browser_url.is_some() {
         Some(ToolKind::Browser)
@@ -240,8 +240,9 @@ mod tests {
             ("settings".to_string(), PaneMeta { settings: true, ..Default::default() }),
             ("news".to_string(), PaneMeta { whats_new: Some("0.1.35".into()), ..Default::default() }),
             ("usage".to_string(), PaneMeta { usage: true, ..Default::default() }),
+            ("computers".to_string(), PaneMeta { computers: true, ..Default::default() }),
         ]);
-        let panes = ids(&["editor", "shell", "settings", "news", "usage"]);
+        let panes = ids(&["editor", "shell", "settings", "news", "usage", "computers"]);
         assert_eq!(kinds(&tools(&panes, &meta)), [("shell", ToolKind::Terminal)]);
     }
 

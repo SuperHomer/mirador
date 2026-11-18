@@ -835,10 +835,9 @@ Status comes from the Claude Code hooks, so it needs the integration set up
 
 A computer is somewhere agents can work over SSH: a host — an alias from
 `~/.ssh/config`, or a destination such as `-p 2222 me@gpu.example` — and
-the directory on it where the work is. The palette's *Pane: Computers…*
-lists them, each opening an SSH pane to its host, and *Add a computer…*
-asks for the host, the directory and a name (by default the host's
-alias), then keeps it in mirador.json:
+the directory on it where the work is. The Computers pane (*Pane:
+Computers* in the palette, or `mira computer open`) adds, edits, removes
+and tests them, and keeps them in mirador.json:
 
 ```jsonc
 { "computers": [{ "name": "devbox", "host": "devbox", "dir": "/home/me/app" }] }
@@ -849,6 +848,44 @@ one. `mira agent new --on <name>` and `mira team start --on <name>` run an
 agent or a team on a saved computer, its host and directory standing in
 for `--host` and `--dir` (*Teams on a remote computer*, below). Picking
 one for them from the app is not done yet.
+
+In the pane, *+ Add a computer* — or the palette's *Pane: Add a Remote
+Computer* — starts a new one: a name, the SSH host (your `~/.ssh/config`
+aliases are offered; anything `ssh` takes can be typed) and the
+directory. A `~` in the directory is the home there: `~/work/app` is
+that home's `work/app`. `~user` is not expanded. *Pane: SSH to a
+Computer…* opens an SSH pane on a saved one.
+
+**Test connection** connects as an agent's start would — one
+connection, never a password prompt, nothing written there — and
+answers within 30 seconds:
+
+- **Reached**, and the system there (`Linux x86_64`). A computer ssh
+  cannot reach shows ssh's own message instead.
+- **The directory found**, or not found.
+- **Agents can run there**, or why not yet: no `mira` is published for
+  that system (put one at `~/.mirador/bin/mira-<version>` there), Claude
+  Code is not on the PATH of a login shell there, or the directory is
+  not there.
+
+A test is offered, never required: a computer can be saved while it is
+off. Remove asks first, in the pane. mirador.json must be plain JSON: for
+a file that does not parse, the pane and `mira computer` say why, rather
+than read it as having no computers.
+
+The same from any terminal:
+
+```bash
+mira computer list                                         # name, host and directory, one per line
+mira computer add devbox --host devbox --dir '~/work/app'   # quote the ~, or this shell makes it its own home
+mira computer update devbox --dir /srv/app                 # --name, --host, --dir: what is given changes
+mira computer test devbox                                  # or --host devbox --dir '~/work/app', before saving
+mira computer remove devbox
+mira computer open                                         # the pane; --tab or --split
+```
+
+`mira computer test` prints the same three answers, a line each, and
+exits 0 only when agents can run there.
 
 ### Teams on a remote computer
 

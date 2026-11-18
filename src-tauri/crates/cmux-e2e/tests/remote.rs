@@ -189,8 +189,8 @@ fn a_file_sent_to_the_remote_arrives_exact() {
 /// `agent new --host box --dir <dir>`: plain Claude Code on the remote, in
 /// that directory, told its pane and this app's socket, given Mirador's
 /// hooks, listed as an agent on `box` — and a message sent from a local
-/// pane reaches it. Codex there is not done yet, and a host goes with a
-/// directory.
+/// pane reaches it. A `~/` directory is the remote's home's. Codex there
+/// is not done yet, and a host goes with a directory.
 #[test]
 fn a_plain_agent_runs_on_the_remote() {
     e2e!();
@@ -244,6 +244,27 @@ fn a_plain_agent_runs_on_the_remote() {
     sb.wait_for("the message on the remote", LONG, || {
         sb.events("message", &pane).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
     });
+
+    // A directory typed from the home, as a terminal there takes it: `~`
+    // is the remote's home, not a directory named `~`.
+    std::fs::create_dir_all(sb.home.join("work")).unwrap();
+    let from_home = sb
+        .call(Request::AgentNew {
+            role: None,
+            harness: None,
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(first.clone()),
+            host: Some("box".into()),
+            dir: Some("~/work".into()),
+            on: None,
+        })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the agent started in ~/work", LONG, || sb.events("start", &from_home).into_iter().next());
+    assert_eq!(start["cwd"], sb.home.join("work").canonicalize().unwrap().to_str().unwrap());
 }
 
 /// A computer saved in the app's mirador.json stands for its host and
@@ -672,6 +693,48 @@ fn a_team_runs_on_the_remote() {
         })
         .expect_err("not in a team's tab yet");
     assert!(err.contains("in a team's tab is not done yet"), "{err}");
+}
+
+/// `mira computer`, as the computers pane's buttons: `box` saved, changed
+/// and listed; tested by its name, where agents can run, and by a host
+/// and a directory before saving one, where a missing directory says so
+/// and exits non-zero; a host ssh cannot reach is an error; and removed.
+#[test]
+fn a_computer_is_saved_tested_and_removed_from_the_cli() {
+    e2e!();
+    let mut sb = Sandbox::new("rcomp");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let mira = |args: &[&str]| sb.mira(None, args);
+    let ok = |args: &[&str]| {
+        let (code, out, err) = mira(args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        out
+    };
+
+    assert_eq!(ok(&["computer", "add", "devbox", "--host", "box", "--dir", "/nope"]), "devbox\tbox\t/nope\n");
+    assert_eq!(ok(&["computer", "update", "devbox", "--dir", &dir]), format!("devbox\tbox\t{dir}\n"));
+    assert_eq!(ok(&["computer", "list"]), format!("devbox\tbox\t{dir}\n"));
+
+    let uname = |flag: &str| String::from_utf8_lossy(&std::process::Command::new("uname").arg(flag).output().unwrap().stdout).trim().to_string();
+    let reached = format!("reached: {} {}", uname("-s"), uname("-m"));
+    assert_eq!(ok(&["computer", "test", "devbox"]), format!("{reached}\ndirectory: found\nagents: can run there\n"));
+    let (code, out, err) = mira(&["computer", "test", "--host", "box", "--dir", "~/nope"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (1, format!("{reached}\ndirectory: not found\nagents: cannot run there: the directory is not there\n").as_str()),
+        "{err}"
+    );
+    let (code, out, err) = mira(&["computer", "test", "--host", "nohost.invalid", "--dir", "/w"]);
+    assert!(code != 0 && out.is_empty() && err.contains("nohost.invalid"), "{code} {out} {err}");
+
+    assert_eq!(ok(&["computer", "remove", "devbox"]), "");
+    assert!(ok(&["computer", "list"]).starts_with("(no computers saved"));
+    let (code, _, err) = mira(&["computer", "test", "devbox"]);
+    assert!(code != 0 && err.contains("no computer `devbox`"), "{err}");
 }
 
 fn pane_of(sb: &Sandbox, name: &str) -> String {

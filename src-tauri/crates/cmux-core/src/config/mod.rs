@@ -100,8 +100,8 @@ pub struct Config {
     /// and system prompt: the palette's *New Agent* entries, `mira agent
     /// new <role>`.
     pub agent_roles: Vec<AgentRole>,
-    /// Computers agents can work on over SSH, added from the palette's
-    /// *Add a computer…* (`settings::add_computer`).
+    /// Computers agents can work on over SSH, added, changed and removed
+    /// from the Computers pane or `mira computer` (`settings`).
     pub computers: Vec<Computer>,
 }
 
