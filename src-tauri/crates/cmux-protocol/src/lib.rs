@@ -266,6 +266,9 @@ pub struct WorkspaceSnapshot {
     /// Usage panes: at most one, showing each harness's account.
     #[serde(default)]
     pub usage_panes: Vec<UsagePane>,
+    /// Computers panes: at most one, showing the saved computers.
+    #[serde(default)]
+    pub computers_panes: Vec<ComputersPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -843,6 +846,46 @@ pub enum Request {
     },
     /// Host aliases from ~/.ssh/config.
     SshHosts,
+    /// The saved computers (`computers` in mirador.json), as the app
+    /// lists them: `computers`.
+    ComputerList,
+    /// Saves a computer: a name for an ssh host and the directory there
+    /// where the work is. Answers the computer saved (`computer`).
+    ComputerAdd { name: String, host: String, dir: String },
+    /// Changes the saved computer `name`: each of `new_name`, `host` and
+    /// `dir` given replaces its own. Answers the computer (`computer`).
+    ComputerUpdate {
+        name: String,
+        #[serde(default)]
+        new_name: Option<String>,
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+    },
+    /// Removes the saved computer `name`.
+    ComputerRemove { name: String },
+    /// Shows the computers pane, or opens one: a split of `pane_id`, or a
+    /// tab with `target` "tab"; without a target, where `editorOpensIn`
+    /// says.
+    ComputerOpen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// Tests a computer for agents, as an agent's start there would meet
+    /// it: a saved one by `name`, or `host` and `dir` before saving one,
+    /// never both. Answers a [`ComputerCheck`] (`check`), or ssh's error
+    /// when the computer was not reached.
+    ComputerTest {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+    },
     /// Forward (or cancel) `localhost:<port>` → remote's `localhost:<port>`
     /// over a remote pane's ControlMaster.
     SshForward {
@@ -1375,6 +1418,20 @@ pub struct TeamRun {
 pub struct TeamRemote {
     pub host: String,
     pub dir: String,
+}
+
+/// What testing a computer found there, changing nothing on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerCheck {
+    /// Its system and machine, as `uname -s` and `-m` say: `Linux x86_64`.
+    pub system: String,
+    /// Whether an agent started there would find its directory.
+    pub dir_found: bool,
+    /// Whether `claude` is on the PATH an agent there gets.
+    pub claude_found: bool,
+    /// Why agents cannot run there, in one line; none when they can.
+    pub agents: Option<String>,
 }
 
 /// A member of a running team: its name, its role, and its pane — which
@@ -2160,6 +2217,13 @@ pub struct SettingsPane {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsagePane {
+    pub pane_id: String,
+}
+
+/// A pane showing the computers saved in mirador.json.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputersPane {
     pub pane_id: String,
 }
 

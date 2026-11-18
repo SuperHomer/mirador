@@ -79,6 +79,9 @@ pub struct SessionPane {
     /// Usage pane: it comes back empty and reads the files again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub usage: bool,
+    /// Computers pane: it comes back and reads mirador.json again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub computers: bool,
     /// Graph pane: the repository it draws, and the diff pane it
     /// retargets when a commit is clicked (ignored if that pane is gone).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -209,6 +212,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_editor: m.is_some_and(|m| m.agent_editor),
                         settings: m.is_some_and(|m| m.settings),
                         usage: m.is_some_and(|m| m.usage),
+                        computers: m.is_some_and(|m| m.computers),
                         graph_repo: m.and_then(|m| m.graph_repo.clone()),
                         graph_diff_pane: m.and_then(|m| m.graph_diff_pane.clone()),
                         whats_new: m.and_then(|m| m.whats_new.clone()),
@@ -335,6 +339,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_editor: p.agent_editor,
                     settings: p.settings,
                     usage: p.usage,
+                    computers: p.computers,
                     graph_repo: p.graph_repo,
                     graph_diff_pane: p.graph_diff_pane,
                     whats_new: p.whats_new,
@@ -682,6 +687,20 @@ mod tests {
         assert!(!rmeta.get(&shell).is_some_and(|m| m.usage));
         // A shell's entry does not say it is not one.
         assert_eq!(json.matches("\"usage\"").count(), 1);
+    }
+
+    #[test]
+    fn a_computers_pane_comes_back_as_one() {
+        let mut ws = Workspace::default();
+        let shell = ws.focused_pane();
+        let computers = ws.split_pane(&shell, SplitDir::Row).unwrap();
+        let meta = HashMap::from([(computers.clone(), PaneMeta { computers: true, ..Default::default() })]);
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        let (_, rmeta) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert!(rmeta[&computers].computers);
+        assert!(!rmeta.get(&shell).is_some_and(|m| m.computers));
+        // A shell's entry does not say it is not one.
+        assert_eq!(json.matches("\"computers\"").count(), 1);
     }
 
     #[test]

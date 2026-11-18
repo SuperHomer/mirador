@@ -964,6 +964,40 @@ reconnect]`; restarting Mirador restores remote panes idle too — it never
 re-opens an SSH session behind your back. (An agent's pane on a remote
 reconnects by itself: below.)
 
+### Saved computers
+
+```bash
+mira computer list                                          # name, host, dir; --json for the data
+mira computer add devbox --host devbox --dir '~/work/app'
+mira computer update devbox --host "-p 2222 me@devbox"      # --name, --host, --dir: at least one
+mira computer remove devbox
+mira computer test devbox                                   # a saved one, or --host H --dir D before saving
+mira computer open                                          # the Computers pane; --tab or --split
+```
+
+A computer is an entry of `computers` in mirador.json: a name, an ssh
+host and the directory there. A `~` in the directory is the remote's
+home; quote it, or the shell you type in expands it to its own. `~user`
+is not expanded. The app reads the file at each request, and a file that
+does not parse is the answer, not an empty list.
+
+`computer test` connects as an agent's start would (BatchMode, over the
+shared ControlMaster), changes nothing there, and gives up after 30
+seconds. It prints three lines:
+
+```
+reached: Linux x86_64
+directory: found
+agents: can run there
+```
+
+or `directory: not found`, and `agents: cannot run there: <why>`. It
+exits 0 when agents can run there and 1 when they cannot. A computer
+not reached is ssh's error on stderr, exit 1. With `--json`, a computer
+that was reached exits 0 whatever the answer, which is in `check`
+(`check.agents` null when agents can run), as `run --wait --json` leaves
+the exit code in its answer; one not reached still exits 1.
+
 ### Agents and teams on a remote computer
 
 An agent, or a whole team, can run on a computer you reach by ssh. The
@@ -1140,7 +1174,8 @@ agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
-agent_trail agent_trail_detail usage usage_open`. Requests are
+agent_trail agent_trail_detail usage usage_open computer_list computer_add
+computer_update computer_remove computer_test computer_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

@@ -299,6 +299,12 @@ inconsistency reviewers will notice.
   the process working directory the poller reads, so on Windows the two
   disagree forever. Mirador injects a shell-integration script to get OSC 7
   out of PowerShell at all.
+- **A remote directory reaches a shell only through `ssh::remote_dir`.**
+  It makes a leading `~` the home there and keeps the rest literal, a
+  leading `-` included (`cd -` is `$OLDPWD`, even after `--`). An agent's
+  start and the computer test both go through it, so the test never says
+  found where the start's `cd` fails. A new place that hands a remote
+  directory to a shell goes through it too, never through plain quoting.
 
 ## Security boundaries
 

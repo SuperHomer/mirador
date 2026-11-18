@@ -370,6 +370,55 @@ fn there_is_one_settings_pane() {
     assert_eq!(listed(&sb), [settings], "it comes back as the settings pane, not a shell");
 }
 
+/// The computers are in mirador.json, one file, so there is one computers
+/// pane: `computer open` opens it beside the pane it is asked from, asked
+/// again from another tab it is focused rather than opened twice, and it
+/// comes back after a relaunch. What it draws is the webview's, out of
+/// reach here; that it draws without taking the page down is not.
+#[test]
+fn there_is_one_computers_pane() {
+    e2e!();
+    let mut sb = Sandbox::new("computers");
+    let path = sb.config.join("mirador/mirador.json");
+    let mut cfg: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    cfg["computers"] = serde_json::json!([{ "name": "devbox", "host": "box", "dir": "/srv/app" }]);
+    std::fs::write(&path, cfg.to_string()).unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+    let (code, out, err) = sb.mira(Some(&first), &["computer", "open", "--split"]);
+    assert_eq!(code, 0, "{err}");
+    let computers = out.trim().to_string();
+    let listed = |sb: &Sandbox| -> Vec<String> {
+        sb.snapshot()["computersPanes"]
+            .as_array()
+            .map(|l| l.iter().filter_map(|c| c["paneId"].as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(listed(&sb), std::slice::from_ref(&computers));
+    assert_eq!(sb.panes(), [first.clone(), computers.clone()]);
+    // A render throw in the pane takes the whole tree down with it: the
+    // terminal beside it still answering says the page survived it.
+    sb.type_into(&first, "echo still-$((40+2))\r");
+    sb.wait_for("the terminal beside the computers pane", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
+    });
+
+    let (code, out, err) = sb.mira(None, &["new-tab"]);
+    assert_eq!(code, 0, "{err}");
+    let elsewhere = out.trim().to_string();
+    let (code, out, err) = sb.mira(Some(&elsewhere), &["computer", "open", "--tab"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), computers, "the open computers pane again");
+    assert_eq!(listed(&sb), std::slice::from_ref(&computers));
+    let snap = sb.snapshot();
+    let active = snap["tabs"].as_array().unwrap().iter().find(|t| t["id"] == snap["activeTab"]).unwrap().clone();
+    assert_eq!(active["focusedPane"], computers.as_str(), "shown, in its own tab");
+
+    sb.quit();
+    sb.launch();
+    assert_eq!(listed(&sb), [computers], "it comes back as the computers pane, not a shell");
+}
+
 /// `mira usage` reads the accounts from the sandbox's own home, the
 /// sidebar's Usage section draws them, and `--tab` opens the one usage
 /// pane, which draws without taking the page
