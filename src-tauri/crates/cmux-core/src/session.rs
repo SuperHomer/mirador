@@ -52,6 +52,9 @@ pub struct SessionPane {
     /// back to the same agent if it is still running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_command: Option<String>,
+    /// The directory a remote shell pane starts in on `remote_host`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_dir: Option<String>,
     #[serde(default)]
     pub diff_repo: Option<String>,
     #[serde(default)]
@@ -203,6 +206,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_session: m.and_then(|m| m.agent_session.clone()),
                         remote_host: m.and_then(|m| m.remote_host.clone()),
                         remote_command: m.and_then(|m| m.remote_command.clone()),
+                        remote_dir: m.and_then(|m| m.remote_dir.clone()),
                         diff_repo: m.and_then(|m| m.diff_repo.clone()),
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
@@ -331,6 +335,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_session: p.agent_session,
                     remote_host: p.remote_host,
                     remote_command: p.remote_command,
+                    remote_dir: p.remote_dir,
                     diff_repo: p.diff_repo,
                     diff_spec: p.diff_spec,
                     agent_role: p.agent_role,
@@ -562,6 +567,21 @@ mod tests {
         assert_eq!(rmeta[&d].agent_role.as_deref(), Some("coder"));
         assert_eq!(rmeta[&d].agent_prompt.as_deref(), Some("/data/prompts/coder-1.toml"));
         assert_eq!(rmeta[&d].harness(), Some(cmux_protocol::Harness::Codex));
+    }
+
+    #[test]
+    fn a_remote_shell_comes_back_in_its_directory() {
+        let ws = Workspace::default();
+        let pane = ws.focused_pane();
+        let mut meta = HashMap::new();
+        meta.insert(
+            pane.clone(),
+            PaneMeta { remote_host: Some("devbox".into()), remote_dir: Some("~/work".into()), ..Default::default() },
+        );
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        let (_, back) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!((back[&pane].remote_host.as_deref(), back[&pane].remote_dir.as_deref()), (Some("devbox"), Some("~/work")));
+        assert_eq!(back[&pane].remote_command, None, "a shell, not an agent");
     }
 
     #[test]

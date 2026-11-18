@@ -88,6 +88,15 @@ pub fn interactive_command(host: &str, command: Option<&str>) -> CommandBuilder 
     cmd
 }
 
+/// The command line an SSH pane's `ssh -tt` runs to start in `dir` there:
+/// into it, then the person's login shell in its place. `;` rather than
+/// `&&`: a directory gone since leaves a shell in the home, under cd's
+/// own message, rather than a session that ends before it starts. Read
+/// alike by sh, bash, zsh and fish, whichever is the login shell there.
+pub fn shell_in(dir: &str) -> String {
+    format!("cd {}; exec \"$SHELL\" -l", remote_dir(dir))
+}
+
 /// Establishes (or cancels) a local port forward over the pane's existing
 /// ControlMaster: `localhost:<port>` → the remote's `localhost:<port>`.
 /// Requires the interactive session (the master) to be connected.
@@ -954,6 +963,47 @@ mod tests {
         let missing = run("~/nope");
         assert_eq!(missing.status.code(), Some(1));
         assert!(String::from_utf8_lossy(&missing.stderr).contains("mirador: no directory ~/nope on "), "{missing:?}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// An SSH pane's start in its directory, run by a real sh as the
+    /// remote's login shell runs what ssh hands it, from the home: in
+    /// `~/work` the shell it ends in is there. With the directory gone it
+    /// is still a shell, in the home, under cd's own message, rather than
+    /// a session that ends.
+    #[cfg(unix)]
+    #[test]
+    fn an_ssh_pane_starts_in_its_directory_or_else_the_home() {
+        use std::io::Write;
+        let home = std::env::temp_dir().join(format!("mira-shell-in-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("work")).unwrap();
+        let home = home.canonicalize().unwrap();
+        let run = |dir: &str| {
+            let mut sh = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(shell_in(dir))
+                .env_clear()
+                .env("HOME", &home)
+                .env("SHELL", "/bin/sh")
+                .env("PATH", "/usr/bin:/bin")
+                .current_dir(&home)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            // What the person types into the shell it gives.
+            sh.stdin.take().unwrap().write_all(b"pwd\n").unwrap();
+            sh.wait_with_output().unwrap()
+        };
+        let there = run("~/work");
+        assert!(there.status.success(), "{there:?}");
+        assert_eq!(String::from_utf8_lossy(&there.stdout).trim(), home.join("work").to_str().unwrap());
+        let gone = run("~/gone");
+        assert!(gone.status.success(), "a shell all the same: {gone:?}");
+        assert_eq!(String::from_utf8_lossy(&gone.stdout).trim(), home.to_str().unwrap());
+        assert!(String::from_utf8_lossy(&gone.stderr).contains("gone"), "cd says why: {gone:?}");
         let _ = std::fs::remove_dir_all(&home);
     }
 

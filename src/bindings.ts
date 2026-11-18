@@ -1244,8 +1244,10 @@ export const listWorktrees = (paneId: string) =>
   invoke<Worktree[]>("list_worktrees", { paneId });
 export const setDiffWorktree = (paneId: string, worktree: string) =>
   invoke<void>("set_diff_worktree", { paneId, worktree });
-export const openSsh = (paneId: string | null, tab: boolean, host: string) =>
-  invoke<string>("open_ssh", { paneId, tab, host });
+/** An SSH pane on `host`: a split of `paneId`, or a tab; its shell starts in
+ *  `dir` there when given (a saved computer's), else in the home. */
+export const openSsh = (paneId: string | null, tab: boolean, host: string, dir: string | null = null) =>
+  invoke<string>("open_ssh", { paneId, tab, host, dir });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
 
 /** A computer agents can work on: an ssh host and the directory there. */

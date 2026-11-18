@@ -262,8 +262,8 @@ export function CommandPalette() {
         run: () => void openSsh(null, false, host),
       })),
     };
-    // The saved computers (mirador.json), to open an SSH pane on one. Adding
-    // and changing them is the computers pane's.
+    // The saved computers (mirador.json), each opening a tab on it, in its
+    // directory. Adding and changing them is the computers pane's.
     const computerStep: Step = {
       id: "computers",
       title: "Pane: SSH to a Computer…",
@@ -276,8 +276,10 @@ export function CommandPalette() {
         ...computers.map((c) => ({
           id: `computer:${c.name}`,
           title: `${c.name} · ${c.host} · ${c.dir}`,
-          hint: "open SSH pane",
-          run: () => void openSsh(null, false, c.host),
+          hint: "open in a new tab",
+          // A tab of its own, its shell in the computer's directory: a
+          // remote terminal like any other, its splits on it too.
+          run: () => void openSsh(null, true, c.host, c.dir).catch((e) => reportFailure(`Open ${c.name}`, e)),
         })),
         {
           id: "computer:add",

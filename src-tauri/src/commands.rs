@@ -621,7 +621,13 @@ pub fn move_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, to: 
 }
 
 /// Splits `pane_id`, adding a fresh (not yet attached) pane to the tree.
-/// The frontend mounts a TerminalPane for it and calls `attach_pane`.
+/// The frontend mounts a TerminalPane for it and calls `attach_pane`. A
+/// shell split from a remote pane is on the same remote, in the directory
+/// that pane was opened in there (`PaneMeta::split_remote`), from the app
+/// and from `mira split` alike. Not where its shell has gone since: a
+/// local split follows its pane's current directory, a remote one cannot,
+/// the app does not know it. A `command` pane runs here, whatever it was
+/// split from.
 #[tauri::command]
 pub fn split_pane(
     app: AppHandle,
@@ -636,13 +642,23 @@ pub fn split_pane(
         .unwrap()
         .split_pane(&pane_id, dir)
         .ok_or_else(|| format!("no pane {pane_id}"))?;
-    // Inherit the source pane's cwd so the new pane opens there.
     {
         let mut meta = state.meta.lock().unwrap();
-        let inherited_cwd = meta.get(&pane_id).and_then(|m| m.cwd.clone());
+        let source = meta.get(&pane_id);
+        let remote = source.and_then(cmux_core::state::PaneMeta::split_remote).filter(|_| command.is_none());
+        let inherited_cwd = source.and_then(|m| m.cwd.clone());
         let entry = meta.entry(new_pane.clone()).or_default();
-        entry.cwd = inherited_cwd;
-        entry.command = command;
+        match remote {
+            Some((host, dir)) => {
+                entry.remote_host = Some(host);
+                entry.remote_dir = dir;
+            }
+            // Inherit the source pane's cwd so the new pane opens there.
+            None => {
+                entry.cwd = inherited_cwd;
+                entry.command = command;
+            }
+        }
     }
     emit_workspace(&app);
     Ok(new_pane)
@@ -901,7 +917,7 @@ fn attach_pane_blocking(
     // Remote panes run `ssh -tt <host>`; command panes run their command
     // directly in the PTY (exit detection, output capture); shell panes get
     // an interactive login shell.
-    let (cwd, pane_command, remote_host, remote_command) = {
+    let (cwd, pane_command, remote_host, remote_command, remote_dir) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(&pane_id);
         (
@@ -909,8 +925,14 @@ fn attach_pane_blocking(
             m.and_then(|m| m.command.clone()),
             m.and_then(|m| m.remote_host.clone()),
             m.and_then(|m| m.remote_command.clone()),
+            m.and_then(|m| m.remote_dir.clone()),
         )
     };
+    // What `ssh -tt` runs there: an agent's attach, a shell in a directory,
+    // or (none) a login shell in the home. Only an agent's is
+    // `remote_command`, which makes its pane reconnect by itself and the
+    // app's socket forwarded: a shell in a directory waits for a keypress.
+    let ssh_command = remote_command.clone().or_else(|| remote_dir.as_deref().map(cmux_core::ssh::shell_in));
 
     // A factory: a held pane that fails to attach falls back to a local
     // one, and each attempt consumes its own sink.
@@ -979,7 +1001,7 @@ fn attach_pane_blocking(
 
     let command_builder = match remote_host.as_deref() {
         // Remote pane: the system ssh handles auth/agent/2FA/ProxyJump.
-        Some(host) => Some(cmux_core::ssh::interactive_command(host, remote_command.as_deref())),
+        Some(host) => Some(cmux_core::ssh::interactive_command(host, ssh_command.as_deref())),
         None => pane_command
             .as_deref()
             .map(|cmd| cmux_core::pty::shell::run_command(cmd, cwd.as_deref())),
@@ -1005,7 +1027,7 @@ fn attach_pane_blocking(
     }
 
     let program = match (remote_host.as_deref(), pane_command.as_deref()) {
-        (Some(host), _) => Program::Ssh(host.to_string(), remote_command.clone()),
+        (Some(host), _) => Program::Ssh(host.to_string(), ssh_command.clone()),
         (None, Some(cmd)) => Program::Command(cmd.to_string()),
         (None, None) => Program::Shell,
     };
@@ -1970,6 +1992,9 @@ pub(crate) fn reach_remote(host: &str) -> Result<Remote, String> {
 #[cfg_attr(windows, allow(dead_code))]
 pub(crate) struct RemoteLaunch {
     pub run: String,
+    /// The directory it works in there: where a shell split from its pane
+    /// starts.
+    pub dir: String,
     pub command: String,
     pub role: Option<cmux_protocol::AgentRole>,
     pub settings: String,
@@ -2033,7 +2058,7 @@ pub(crate) fn send_remote_launch(remote: &Remote, pane: &str, dir: &str, launch:
         cmux_core::ssh::put_file(host, &settings_file, text.as_bytes())?;
         cmux_core::ssh::put_file(host, &run, cmux_core::ssh::run_script(&run, pane, &remote.socket, dir, &line).as_bytes())?;
         let command = cmux_core::ssh::attach_line(&remote.mira, pane);
-        Ok(RemoteLaunch { run, command, role: launch.role.clone(), settings: settings_file, prompt: prompt.map(|_| prompt_file) })
+        Ok(RemoteLaunch { run, dir: dir.to_string(), command, role: launch.role.clone(), settings: settings_file, prompt: prompt.map(|_| prompt_file) })
     }
 }
 
@@ -2076,6 +2101,7 @@ pub(crate) fn start_remote_launched(app: &AppHandle, state: &State<'_, AppState>
 pub(crate) fn mark_remote_launched(entry: &mut cmux_core::state::PaneMeta, remote: &Remote, sent: RemoteLaunch) {
     entry.remote_host = Some(remote.host.clone());
     entry.remote_command = Some(sent.command);
+    entry.remote_dir = Some(sent.dir);
     entry.agent_launched = true;
     entry.agent_started_at = Some(std::time::Instant::now());
     entry.agent_harness = Some(cmux_protocol::Harness::Claude);
@@ -2402,6 +2428,8 @@ pub fn set_agents_per_tab(n: u8) -> Result<(), String> {
 /// Opens a remote (SSH) pane: split of `pane_id` (or a new tab). Its PTY
 /// runs `ssh -tt <host>`, so auth/agent/2FA behave exactly as in any
 /// terminal; disconnect leaves the pane idle and a keypress reconnects.
+/// With `dir`, its shell starts in that directory there (a saved
+/// computer's), else in the home.
 #[tauri::command]
 pub fn open_ssh(
     app: AppHandle,
@@ -2409,6 +2437,7 @@ pub fn open_ssh(
     pane_id: Option<String>,
     tab: bool,
     host: String,
+    dir: Option<String>,
 ) -> Result<String, String> {
     if host.trim().is_empty() {
         return Err("ssh host required".into());
@@ -2425,13 +2454,12 @@ pub fn open_ssh(
             .split_pane(&target, SplitDir::Row)
             .ok_or_else(|| format!("no pane {target}"))?
     };
-    state
-        .meta
-        .lock()
-        .unwrap()
-        .entry(new_pane.clone())
-        .or_default()
-        .remote_host = Some(host.trim().to_string());
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(new_pane.clone()).or_default();
+        entry.remote_host = Some(host.trim().to_string());
+        entry.remote_dir = dir.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
+    }
     emit_workspace(&app);
     Ok(new_pane)
 }

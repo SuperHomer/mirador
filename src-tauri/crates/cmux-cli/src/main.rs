@@ -551,6 +551,11 @@ enum SshAction {
         /// Open in a new tab instead of a split.
         #[arg(long)]
         tab: bool,
+        /// The directory there its shell starts in, as a saved computer's
+        /// does; the home without it. Quote a ~ ('~/work') so this shell
+        /// does not expand it to this computer's home.
+        #[arg(long, allow_hyphen_values = true)]
+        dir: Option<String>,
     },
     /// List host aliases from ~/.ssh/config.
     Hosts,
@@ -1044,9 +1049,10 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Ssh { action } => match action {
-            SshAction::Open { host, tab } => Request::SshOpen {
+            SshAction::Open { host, tab, dir } => Request::SshOpen {
                 host,
                 target: tab.then(|| "tab".to_string()),
+                dir,
             },
             SshAction::Hosts => Request::SshHosts,
             SshAction::Forward { app: true, pane, .. } => {

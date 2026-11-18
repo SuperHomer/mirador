@@ -40,17 +40,32 @@ fn assert_hooks(path: &str, mira: &std::path::Path) {
 /// enough to wrap a path), once its shell is up: the pane's master
 /// connection is what the app's ssh requests ride on.
 fn remote_pane(sb: &Sandbox) -> String {
-    let pane = sb.call(Request::SshOpen { host: "box".into(), target: Some("tab".into()) })["paneId"]
+    let pane = sb.call(Request::SshOpen { host: "box".into(), target: Some("tab".into()), dir: None })["paneId"]
         .as_str()
         .unwrap()
         .to_string();
-    // The login shell is the passwd entry's: zsh on this Mac (`host% `),
-    // bash on CI's runner (`host:dir user$ `), after macOS's banner urging
-    // zsh. The prompt is the last line written.
-    sb.wait_for_screen(&pane, "the remote shell's prompt", LONG, |s| {
+    wait_for_prompt(sb, &pane);
+    pane
+}
+
+/// Waits for `pane`'s remote shell to prompt. The login shell is the
+/// passwd entry's: zsh on this Mac (`host% `), bash on CI's runner
+/// (`host:dir user$ `), after macOS's banner urging zsh. The prompt is
+/// the last line written.
+fn wait_for_prompt(sb: &Sandbox, pane: &str) {
+    sb.wait_for_screen(pane, "the remote shell's prompt", LONG, |s| {
         s.lines().map(str::trim_end).rfind(|l| !l.is_empty()).is_some_and(|l| l.ends_with('%') || l.ends_with('$'))
     });
-    pane
+}
+
+/// Where `pane`'s shell is, as `pwd -P` prints it: the directory with its
+/// links resolved, as the test's own paths are. A split is narrow enough
+/// to wrap the path, so the screen's lines are read as one.
+fn wait_for_pwd(sb: &Sandbox, pane: &str, want: &std::path::Path, what: &str) {
+    wait_for_prompt(sb, pane);
+    sb.type_into(pane, "pwd -P\r");
+    let want = format!("pwd -P{}", want.to_str().unwrap());
+    sb.wait_for_screen(pane, what, LONG, |s| s.lines().map(str::trim_end).collect::<String>().contains(&want));
 }
 
 /// `box` is in `ssh hosts`, an ssh pane reaches it, and the login there
@@ -78,6 +93,43 @@ fn an_ssh_pane_reaches_the_sandboxs_own_remote() {
     assert!(lines.contains(&home.as_str()), "{screen}");
     assert!(lines.contains(&"pane=[]"), "{screen}");
     assert!(lines.iter().any(|l| l.starts_with("ssh=127.0.0.1 ")), "over ssh, not a local shell: {screen}");
+}
+
+/// A saved computer's tab: `ssh open --tab --dir` opens an ssh pane on
+/// box whose shell starts in that directory there. A split of it, from
+/// `mira split`, is a shell on box too, in the same directory, as a local
+/// split opens in its pane's directory. A split of a local pane stays
+/// local, and so does a command split from the remote one.
+#[test]
+fn a_remote_tab_splits_on_its_remote() {
+    e2e!();
+    let mut sb = Sandbox::new("rsplit");
+    sb.sshd();
+    sb.launch();
+    let first = sb.first_pane();
+    std::fs::create_dir_all(sb.home.join("work")).unwrap();
+    let work = sb.home.join("work").canonicalize().unwrap();
+    let ok = |args: &[&str]| {
+        let (code, out, err) = sb.mira(None, args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        out.trim().to_string()
+    };
+    let on_box = |pane: &str| {
+        sb.snapshot()["remotePanes"].as_array().unwrap().iter().any(|r| r["paneId"] == pane && r["host"] == "box")
+    };
+
+    let tab = ok(&["ssh", "open", "box", "--tab", "--dir", "~/work"]);
+    assert!(on_box(&tab), "the tab is an ssh pane on box");
+    wait_for_pwd(&sb, &tab, &work, "the tab's shell in box's ~/work");
+
+    let split = ok(&["split", "--pane", &tab]);
+    assert!(on_box(&split), "a split of a remote shell is on the remote");
+    wait_for_pwd(&sb, &split, &work, "the split's shell in the same directory");
+
+    let command = ok(&["split", "--pane", &tab, "--command", "true"]);
+    assert!(!on_box(&command), "a command split runs here");
+    let local = ok(&["split", "--pane", &first]);
+    assert!(!on_box(&local), "a split of a local pane stays local");
 }
 
 /// A `mira` on the remote has no discovery file there, so it finds no app
@@ -227,6 +279,15 @@ fn a_plain_agent_runs_on_the_remote() {
     assert_hooks(&settings, &mira);
     let socket = start["socket"].as_str().unwrap_or_default();
     assert!(socket.ends_with(".sock") && std::path::Path::new(socket).exists(), "{start}");
+
+    // A shell split from the agent's pane is on box too, in the directory
+    // the agent was started in there.
+    let (code, out, err) = sb.mira(None, &["split", "--pane", &pane]);
+    assert_eq!(code, 0, "{err}");
+    let split = out.trim().to_string();
+    let remote = sb.snapshot()["remotePanes"].as_array().cloned().unwrap_or_default();
+    assert!(remote.iter().any(|r| r["paneId"] == split.as_str() && r["host"] == "box"), "the split is on box: {remote:?}");
+    wait_for_pwd(&sb, &split, std::path::Path::new(&dir), "the split's shell in the agent's directory");
 
     let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
     let listed = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));

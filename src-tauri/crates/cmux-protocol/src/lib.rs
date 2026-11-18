@@ -843,6 +843,9 @@ pub enum Request {
         host: String,
         #[serde(default)]
         target: Option<String>,
+        /// The directory there its shell starts in; the home without one.
+        #[serde(default)]
+        dir: Option<String>,
     },
     /// Host aliases from ~/.ssh/config.
     SshHosts,
