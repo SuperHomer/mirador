@@ -27,11 +27,20 @@ enum Command {
         command: Option<String>,
     },
     /// Split a pane (the focused one unless --pane is given).
+    ///
+    /// The new shell opens where the pane it splits is: a split of a local
+    /// pane in its current directory, a split of an SSH pane on the same
+    /// remote, in the directory the pane was opened in (the home there
+    /// with none).
     Split {
+        /// row or column: which way the pane is split, the new one beside
+        /// it or below it.
         #[arg(long, default_value = "row")]
         dir: String,
         #[arg(long)]
         pane: Option<String>,
+        /// Run this instead of a shell. It runs here, on this computer,
+        /// even when split from an SSH pane.
         #[arg(short, long)]
         command: Option<String>,
     },
