@@ -139,8 +139,10 @@ pub fn remove_computer(name: String) -> Result<(), String> {
 }
 
 /// Tests `host` and `dir` as a computer for agents, saved or not: the
-/// pane tests what its form says before it is saved. Up to
-/// `ssh::CHECK_TIMEOUT`, so off the main thread, as `settings_view`.
+/// pane tests what its form says before it is saved. Both are trimmed, as
+/// a save trims them, so a stray pasted space cannot fail a test of what
+/// Save would keep. Up to `ssh::CHECK_TIMEOUT`, so off the main thread, as
+/// `settings_view`.
 #[tauri::command]
 pub async fn test_computer(host: String, dir: String) -> Result<cmux_protocol::ComputerCheck, String> {
     #[cfg(windows)]
@@ -149,7 +151,7 @@ pub async fn test_computer(host: String, dir: String) -> Result<cmux_protocol::C
         Err("testing a computer is not done on Windows yet".into())
     };
     #[cfg(not(windows))]
-    tauri::async_runtime::spawn_blocking(move || cmux_core::ssh::check_computer(&host, &dir, env!("CARGO_PKG_VERSION")))
+    tauri::async_runtime::spawn_blocking(move || cmux_core::ssh::check_computer(host.trim(), dir.trim(), env!("CARGO_PKG_VERSION")))
         .await
         .map_err(|e| e.to_string())?
 }
