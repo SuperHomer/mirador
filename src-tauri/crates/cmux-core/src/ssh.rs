@@ -210,26 +210,36 @@ fn master_pid_in(answer: &str) -> Option<u32> {
 #[cfg(not(windows))]
 fn remote_shell(host: &str, script: &str) -> Result<String, String> {
     use std::io::Write;
-    let mut cmd = Command::new("ssh");
-    // Never a password prompt: nobody is there to answer it.
-    cmd.arg("-o").arg("BatchMode=yes");
-    for opt in control_opts() {
-        cmd.arg("-o").arg(opt);
-    }
-    let mut child = cmd
-        .args(host_args(host))
-        .args(["sh", "-s"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    let mut child = remote_sh(host).map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().expect("piped");
     let script = script.to_string();
     // From a thread: a large upload must not wait on ssh's output being read.
     let writer = std::thread::spawn(move || stdin.write_all(script.as_bytes()));
     let output = child.wait_with_output().map_err(|e| e.to_string())?;
     let _ = writer.join();
+    remote_answer(host, &output)
+}
+
+/// The `ssh <host> sh -s` [`remote_shell`] runs, every stdio piped.
+#[cfg(not(windows))]
+fn remote_sh(host: &str) -> std::io::Result<std::process::Child> {
+    let mut cmd = Command::new("ssh");
+    // Never a password prompt: nobody is there to answer it.
+    cmd.arg("-o").arg("BatchMode=yes");
+    for opt in control_opts() {
+        cmd.arg("-o").arg(opt);
+    }
+    cmd.args(host_args(host))
+        .args(["sh", "-s"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+}
+
+/// What a [`remote_sh`] that ended printed, or why it failed.
+#[cfg(not(windows))]
+fn remote_answer(host: &str, output: &std::process::Output) -> Result<String, String> {
     let err = String::from_utf8_lossy(&output.stderr);
     match output.status.code() {
         Some(0) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
@@ -287,11 +297,76 @@ pub fn ensure_mira(host: &str, version: &str) -> Result<String, String> {
 /// Tests `host` as a computer for agents of this app's `version`, working
 /// in `dir` there: one connection, which never prompts, and nothing made
 /// or fetched there. An error is ssh's own — a host it cannot reach or
-/// log in to — or an answer that is not the check's.
+/// log in to — or an answer that is not the check's, or none within
+/// [`CHECK_TIMEOUT`].
+///
+/// Run as [`remote_shell`] runs a script, over the host's shared master,
+/// as an agent's start would, but ended when it takes too long. Ending it
+/// ends the check's session alone. With `ControlPersist`, the ssh this
+/// spawns is never the master a pane or an agent is on: one already
+/// running, it joins as a client; none, it becomes one only until it has
+/// logged in, then forks the master into the background, detached, and
+/// carries on as that master's client.
 #[cfg(not(windows))]
 pub fn check_computer(host: &str, dir: &str, version: &str) -> Result<cmux_protocol::ComputerCheck, String> {
-    let answer = remote_shell(host, &check_computer_script(dir, version))?;
+    let child = remote_sh(host).map_err(|e| e.to_string())?;
+    let output = output_within(child, check_computer_script(dir, version), CHECK_TIMEOUT).map_err(|e| e.to_string())?;
+    let Some(output) = output else {
+        return Err(format!(
+            "{host} did not answer the test within {}s: ssh may still be logging in, or a login file there (.profile, .bashrc, .zshrc…) runs something that does not end",
+            CHECK_TIMEOUT.as_secs()
+        ));
+    };
+    let answer = remote_answer(host, &output)?;
     computer_check_in(&answer, version).ok_or_else(|| format!("{host} did not answer the test: {}", answer.trim()))
+}
+
+/// How long a computer's test may take: twice the [`CONNECT_TIMEOUT`], so
+/// a link that only just connects still has as long again to log in and
+/// run it, and short enough for a person watching its button. Only the
+/// test has it: a `mira` download may rightly take longer.
+#[cfg_attr(windows, allow(dead_code))]
+const CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What `child` printed, given `input` on its stdin, if it ends within
+/// `limit`; otherwise none, the child killed and reaped. Its stdio must
+/// be piped.
+#[cfg(not(windows))]
+fn output_within(mut child: std::process::Child, input: String, limit: std::time::Duration) -> std::io::Result<Option<std::process::Output>> {
+    use std::io::{Read, Write};
+    use std::time::{Duration, Instant};
+    // Each pipe read to its end on a thread of its own, as
+    // `wait_with_output` reads them, so a child with much to say is never
+    // stuck on a full one.
+    fn read_all(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            bytes
+        })
+    }
+    let mut stdin = child.stdin.take().expect("piped");
+    // Not joined: a child that never reads its input is killed at the
+    // limit, and the write fails then.
+    std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+    let stdout = read_all(child.stdout.take().expect("piped"));
+    let stderr = read_all(child.stderr.take().expect("piped"));
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            // The readers are not joined: their pipes end with the child.
+            let _ = child.kill();
+            child.wait()?;
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    Ok(Some(std::process::Output { status, stdout, stderr }))
 }
 
 /// The script [`check_computer`] runs, printing `key=value` lines. Each
@@ -739,6 +814,39 @@ mod tests {
 
         assert_eq!(listing(), before, "nothing made in the home");
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A child that answers in time gives what it printed on both pipes,
+    /// its input read and its exit code kept, as `remote_answer` reads them.
+    #[cfg(not(windows))]
+    #[test]
+    fn a_bounded_run_that_answers_in_time_gives_its_output() {
+        let child = piped(Command::new("/bin/sh").arg("-s"));
+        let output = output_within(child, "echo out; echo err >&2; exit 3\n".into(), std::time::Duration::from_secs(10))
+            .unwrap()
+            .expect("in time");
+        assert_eq!((output.stdout.as_slice(), output.stderr.as_slice(), output.status.code()), (&b"out\n"[..], &b"err\n"[..], Some(3)));
+    }
+
+    /// A child that outlives the bound is given up on at the bound, and
+    /// ended: nothing of it is left running.
+    #[cfg(not(windows))]
+    #[test]
+    fn a_bounded_run_that_takes_too_long_is_ended() {
+        let child = piped(Command::new("sleep").arg("30"));
+        let pid = child.id().to_string();
+        let start = std::time::Instant::now();
+        let output = output_within(child, String::new(), std::time::Duration::from_millis(300)).unwrap();
+        assert!(output.is_none());
+        assert!(start.elapsed() < std::time::Duration::from_secs(5), "{:?}", start.elapsed());
+        let alive = Command::new("kill").args(["-0", &pid]).stderr(std::process::Stdio::null()).status().unwrap().success();
+        assert!(!alive, "sleep {pid} still runs");
+    }
+
+    #[cfg(not(windows))]
+    fn piped(cmd: &mut Command) -> std::process::Child {
+        use std::process::Stdio;
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap()
     }
 
     /// An agent's run script: through the login shell with nothing but
