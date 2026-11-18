@@ -102,14 +102,20 @@ pub fn open_computers(
     Ok(pane)
 }
 
+/// mirador.json as it is now. One that does not parse is the answer, not
+/// the defaults it would load as, where no computer is saved.
+pub(crate) fn saved_config() -> Result<cmux_core::config::Config, String> {
+    match cmux_core::config::load() {
+        (_, Some(problem)) => Err(problem),
+        (config, None) => Ok(config),
+    }
+}
+
 /// The usable computers mirador.json lists, for the palette and the
 /// computers pane; or why the file cannot be read, rather than none.
 #[tauri::command]
 pub fn list_computers() -> Result<Vec<cmux_core::config::Computer>, String> {
-    match cmux_core::config::load() {
-        (_, Some(problem)) => Err(problem),
-        (config, None) => Ok(cmux_core::config::computers_in(&config)),
-    }
+    Ok(cmux_core::config::computers_in(&saved_config()?))
 }
 
 /// Adds a computer to mirador.json; refused for a name that is taken or
@@ -117,4 +123,33 @@ pub fn list_computers() -> Result<Vec<cmux_core::config::Computer>, String> {
 #[tauri::command]
 pub fn add_computer(name: String, host: String, dir: String) -> Result<cmux_core::config::Computer, String> {
     cmux_core::config::settings::add_computer(&name, &host, &dir)
+}
+
+/// Changes the computer `original` in mirador.json; refused as an added
+/// one is, or for a name another computer has.
+#[tauri::command]
+pub fn update_computer(original: String, name: String, host: String, dir: String) -> Result<cmux_core::config::Computer, String> {
+    cmux_core::config::settings::update_computer(&original, &name, &host, &dir)
+}
+
+/// Removes the computer `name` from mirador.json.
+#[tauri::command]
+pub fn remove_computer(name: String) -> Result<(), String> {
+    cmux_core::config::settings::remove_computer(&name)
+}
+
+/// Tests `host` and `dir` as a computer for agents, saved or not: the
+/// pane tests what its form says before it is saved. Up to
+/// `ssh::CHECK_TIMEOUT`, so off the main thread, as `settings_view`.
+#[tauri::command]
+pub async fn test_computer(host: String, dir: String) -> Result<cmux_protocol::ComputerCheck, String> {
+    #[cfg(windows)]
+    return {
+        let _ = (host, dir);
+        Err("testing a computer is not done on Windows yet".into())
+    };
+    #[cfg(not(windows))]
+    tauri::async_runtime::spawn_blocking(move || cmux_core::ssh::check_computer(&host, &dir, env!("CARGO_PKG_VERSION")))
+        .await
+        .map_err(|e| e.to_string())?
 }

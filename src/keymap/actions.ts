@@ -410,13 +410,19 @@ export const actions: ActionDef[] = [
     },
   },
   {
-    id: "computers_pane",
+    id: "computers",
     title: "Pane: Computers",
     group: "pane",
-    hint: "the saved computers",
-    // mirador.json's computers: the one pane, wherever it is, or a new one
-    // where the editor would open, as Settings and Usage do.
-    run: () => void openComputers(focusedPane() ?? null, opensInTab("editor")),
+    hint: "add, edit and test them",
+    run: () => openComputersPane(false),
+  },
+  {
+    id: "add_computer",
+    // "Remote" so typing it finds this: the palette matches titles only.
+    title: "Pane: Add a Remote Computer",
+    group: "pane",
+    hint: "an SSH host and a directory there",
+    run: () => openComputersPane(true),
   },
   {
     id: "new_browser_pane",
@@ -428,6 +434,17 @@ export const actions: ActionDef[] = [
     },
   },
 ];
+
+/** mirador.json's computers: the one pane, wherever it is, or a new one
+ *  where the editor would open, as Settings and Usage do; on a new draft
+ *  when `draft`. */
+export function openComputersPane(draft: boolean) {
+  if (draft) useUiStore.getState().setComputerDraft(true);
+  // No pane to take the draft: it must not wait for the next one to open.
+  openComputers(focusedPane() ?? null, opensInTab("editor")).catch(() =>
+    useUiStore.getState().setComputerDraft(false),
+  );
+}
 
 /** A zoom that could not be written: mirador.json does not parse. */
 function zoomFailed(err: unknown) {

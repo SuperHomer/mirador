@@ -1259,6 +1259,23 @@ export const listComputers = () => invoke<Computer[]>("list_computers");
 /** Shows the computers pane, or opens one beside `paneId` or in a tab. */
 export const openComputers = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_computers", { paneId, tab });
+/** Changes the computer `original`; refused as `addComputer` is, or for a taken name. */
+export const updateComputer = (original: string, name: string, host: string, dir: string) =>
+  invoke<Computer>("update_computer", { original, name, host, dir });
+export const removeComputer = (name: string) => invoke<void>("remove_computer", { name });
+/** What an agent's start on `host`, in `dir` there, would meet. */
+export interface ComputerCheck {
+  /** `uname -s` and `-m` there: "Linux x86_64". */
+  system: string;
+  dirFound: boolean;
+  claudeFound: boolean;
+  /** Why agents cannot run there, in one line; null when they can. */
+  agents: string | null;
+}
+/** Tests a host and a directory, saved or not; rejects with ssh's message
+ *  when it is not reached, or after 30s. */
+export const testComputer = (host: string, dir: string) =>
+  invoke<ComputerCheck>("test_computer", { host, dir });
 /** Adds one; refused for a taken or unsafe name, or an empty host or dir. */
 export const addComputer = (name: string, host: string, dir: string) =>
   invoke<Computer>("add_computer", { name, host, dir });
