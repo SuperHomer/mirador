@@ -623,12 +623,13 @@ pub fn move_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, to: 
 /// Splits `pane_id`, adding a fresh (not yet attached) pane to the tree.
 /// The frontend mounts a TerminalPane for it and calls `attach_pane`. A
 /// shell split from a remote pane is on the same remote, in the directory
-/// that pane was opened in there (`PaneMeta::split_remote`), from the app
-/// and from `mira split` alike. Not where its shell has gone since: a
-/// local split follows its pane's current directory, a remote one cannot,
-/// the app does not know it. A `command` pane runs here, whatever it was
-/// split from.
-#[tauri::command]
+/// its shell is in now when the app can know it, else the one it was
+/// opened in (`PaneMeta::split_remote`), from the app and from `mira
+/// split` alike. A `command` pane runs here, whatever it was split from.
+///
+/// Off the main thread (`async`): finding a remote shell's directory may
+/// wait on the remote, up to a few seconds, and the window must not.
+#[tauri::command(async)]
 pub fn split_pane(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -636,6 +637,10 @@ pub fn split_pane(
     dir: SplitDir,
     command: Option<String>,
 ) -> Result<String, String> {
+    // Asked before the split and with no lock held: the pane appears once
+    // its directory is known.
+    let ask = command.is_none().then(|| state.meta.lock().unwrap().get(&pane_id).and_then(cmux_core::state::PaneMeta::remote_shell_to_ask));
+    let live_dir = ask.flatten().and_then(|(host, pid)| cmux_core::ssh::shell_cwd(&host, pid));
     let new_pane = state
         .workspace
         .lock()
@@ -645,7 +650,10 @@ pub fn split_pane(
     {
         let mut meta = state.meta.lock().unwrap();
         let source = meta.get(&pane_id);
-        let remote = source.and_then(cmux_core::state::PaneMeta::split_remote).filter(|_| command.is_none());
+        let remote = source
+            .and_then(cmux_core::state::PaneMeta::split_remote)
+            .filter(|_| command.is_none())
+            .map(|(host, dir)| (host, live_dir.or(dir)));
         let inherited_cwd = source.and_then(|m| m.cwd.clone());
         let entry = meta.entry(new_pane.clone()).or_default();
         match remote {
@@ -932,6 +940,10 @@ fn attach_pane_blocking(
     // or (none) a login shell in the home. Only an agent's is
     // `remote_command`, which makes its pane reconnect by itself and the
     // app's socket forwarded: a shell in a directory waits for a keypress.
+    // With none, ssh gives a plain login, with its motd and last-login
+    // line; printing the shell's pid there (`shell_in`) would make it a
+    // command session instead, so its splits are not followed: they start
+    // in the home, unless its shell reports OSC 7.
     let ssh_command = remote_command.clone().or_else(|| remote_dir.as_deref().map(cmux_core::ssh::shell_in));
 
     // A factory: a held pane that fails to attach falls back to a local
@@ -1060,19 +1072,7 @@ let pane_id = pane_id.to_string();
         }
         OscEvent::Cwd(path) => {
             let state = app.state::<AppState>();
-            let changed = {
-                let mut meta = state.meta.lock().unwrap();
-                let entry = meta.entry(pane_id.clone()).or_default();
-                // Latch: from here on the poller leaves this pane's
-                // cwd alone, even between prompts.
-                entry.cwd_from_shell = true;
-                if entry.cwd.as_deref() != Some(path.as_str()) {
-                    entry.cwd = Some(path);
-                    true
-                } else {
-                    false
-                }
-            };
+            let changed = state.meta.lock().unwrap().entry(pane_id.clone()).or_default().observe_shell_cwd(path);
             if changed {
                 // cwd is restored with the session; titles are not.
                 state
@@ -1080,6 +1080,10 @@ let pane_id = pane_id.to_string();
                     .store(true, std::sync::atomic::Ordering::Relaxed);
                 request_workspace_emit(&app);
             }
+        }
+        OscEvent::ShellPid(pid) => {
+            let state = app.state::<AppState>();
+            state.meta.lock().unwrap().entry(pane_id.clone()).or_default().remote_shell_pid = Some(pid);
         }
         OscEvent::Title(title) => {
             let state = app.state::<AppState>();
@@ -1114,9 +1118,11 @@ fn pane_exit_hook(app: &AppHandle) -> impl FnOnce(&str, Option<i32>) + Send + 's
         let is_command = crate::runs::finish_run(&exit_app, exited_id, exit_code);
         let (is_remote, reconnects) = {
             let state = exit_app.state::<AppState>();
-            let meta = state.meta.lock().unwrap();
-            let m = meta.get(exited_id);
-            (m.is_some_and(|m| m.remote_host.is_some()), m.is_some_and(|m| m.remote_command.is_some()))
+            let mut meta = state.meta.lock().unwrap();
+            meta.get_mut(exited_id).map_or((false, false), |m| {
+                m.forget_remote_shell();
+                (m.remote_host.is_some(), m.remote_command.is_some())
+            })
         };
         let _ = exit_app.emit(
             "pane-exit",

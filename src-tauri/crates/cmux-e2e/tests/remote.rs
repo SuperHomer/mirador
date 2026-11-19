@@ -142,6 +142,34 @@ fn a_remote_tab_splits_on_its_remote() {
     assert!(!on_box(&agent), "mira agent new from a remote tab, no --host: here");
 }
 
+/// A split of a remote shell starts where that shell has gone, not where
+/// its tab was opened: the app asks the remote about the shell whose pid
+/// its start printed. The sandbox's zsh reports no directory (no OSC 7),
+/// so the asking is what this exercises.
+#[test]
+fn a_remote_split_starts_where_its_shell_has_gone() {
+    e2e!();
+    let mut sb = Sandbox::new("rlive");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    std::fs::create_dir_all(sb.home.join("work/deeper")).unwrap();
+    let deeper = sb.home.join("work/deeper").canonicalize().unwrap();
+    let ok = |args: &[&str]| {
+        let (code, out, err) = sb.mira(None, args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        out.trim().to_string()
+    };
+
+    let tab = ok(&["ssh", "open", "box", "--tab", "--dir", "~/work"]);
+    wait_for_prompt(&sb, &tab);
+    sb.type_into(&tab, "cd deeper\r");
+    wait_for_pwd(&sb, &tab, &deeper, "the tab's shell moved on");
+
+    let split = ok(&["split", "--pane", &tab]);
+    wait_for_pwd(&sb, &split, &deeper, "the split's shell where the tab's has gone");
+}
+
 /// `ssh open --on` a saved computer opens it as the palette's "SSH to a
 /// Computer" row does: a tab of its own, an ssh pane on its host, its
 /// shell in its directory. An unknown name is refused with the names there
