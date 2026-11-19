@@ -183,7 +183,7 @@ pub fn used_by(catalog: &RoleCatalog, kind: CatalogKind, name: &str, running_tea
 /// The harnesses a role knows how to start: the ones whose command line
 /// takes a model and a prompt Mirador knows how to give.
 pub fn can_start(harness: Harness) -> bool {
-    matches!(harness, Harness::Claude | Harness::Codex)
+    matches!(harness, Harness::Claude | Harness::Codex | Harness::Pi | Harness::OpenCode)
 }
 
 /// A role ready to start: the role, and its whole prompt — its own, then
@@ -495,9 +495,11 @@ pub fn role_choices() -> Vec<HarnessChoices> {
         Harness::Claude => &["opus", "sonnet", "haiku", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
         // What the built-in reviewer and the live tests run.
         Harness::Codex => &["gpt-6-luna"],
+        // Pi's and OpenCode's are the providers the person signed in to
+        // (`pi --list-models`, `opencode models`): no list fits everyone.
         _ => &[],
     };
-    [Harness::Claude, Harness::Codex]
+    [Harness::Claude, Harness::Codex, Harness::Pi, Harness::OpenCode]
         .into_iter()
         .filter(|h| can_start(*h))
         .map(|harness| HarnessChoices {
@@ -516,10 +518,16 @@ fn names(list: Vec<String>) -> Vec<String> {
 /// Why `role` cannot start, if it cannot.
 fn problem_of(role: &AgentRole, ways: &[AgentWay]) -> Option<String> {
     if !can_start(role.harness) {
-        return Some(format!("a role cannot start {} yet, only Claude Code and Codex", role.harness.label()));
+        return Some(format!(
+            "a role cannot start {} yet, only Claude Code, Codex, Pi and OpenCode",
+            role.harness.label()
+        ));
     }
     if let Some(effort) = &role.effort {
         let efforts = efforts(role.harness);
+        if efforts.is_empty() {
+            return Some(format!("{} takes no effort: leave `effort` out", role.harness.label()));
+        }
         if !efforts.contains(&effort.as_str()) {
             return Some(format!(
                 "effort `{effort}` is not one {} takes: {}",
@@ -527,6 +535,16 @@ fn problem_of(role: &AgentRole, ways: &[AgentWay]) -> Option<String> {
                 efforts.join(", ")
             ));
         }
+    }
+    // Its model goes in its config (`agents::opencode_config`), which names
+    // one only with its provider.
+    if let Some(model) = role.model.as_ref().filter(|m| role.harness == Harness::OpenCode && !m.contains('/')) {
+        return Some(format!("OpenCode's model is `provider/model` (`opencode models` lists them), not `{model}`"));
+    }
+    // Given through the environment, `NAME=value opencode`, which neither
+    // PowerShell nor cmd reads.
+    if role.harness == Harness::OpenCode && cfg!(windows) {
+        return Some("an OpenCode role is not done on Windows yet".into());
     }
     if role.profile.is_some() && role.harness != Harness::Codex {
         return Some(format!("`profile` is Codex's: a {} role has none", role.harness.label()));
@@ -558,12 +576,15 @@ fn problem_of(role: &AgentRole, ways: &[AgentWay]) -> Option<String> {
 }
 
 /// The efforts a harness takes, as its CLI spells them: Claude Code's
-/// `--effort` (its `--help`), and the ones Codex's models list as supported
-/// (0.163's model catalog). Lower case only: Codex reads any other case as
-/// a name no model supports.
+/// `--effort` (its `--help`), the ones Codex's models list as supported
+/// (0.163's model catalog), and Pi's `--thinking` levels (1.3's `--help`).
+/// OpenCode's TUI takes none. Lower case only: Codex reads any other case
+/// as a name no model supports.
 fn efforts(harness: Harness) -> &'static [&'static str] {
     match harness {
         Harness::Codex => &["low", "medium", "high", "xhigh", "max", "ultra"],
+        Harness::Pi => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+        Harness::OpenCode => &[],
         _ => &["low", "medium", "high", "xhigh", "max"],
     }
 }
@@ -789,7 +810,10 @@ mod tests {
     #[test]
     fn offers_what_the_launch_accepts() {
         let choices = role_choices();
-        assert_eq!(choices.iter().map(|c| c.harness).collect::<Vec<_>>(), [Harness::Claude, Harness::Codex]);
+        assert_eq!(
+            choices.iter().map(|c| c.harness).collect::<Vec<_>>(),
+            [Harness::Claude, Harness::Codex, Harness::Pi, Harness::OpenCode]
+        );
         for c in &choices {
             assert_eq!(c.efforts, efforts(c.harness));
             // Every model the built-in roles run is offered.
@@ -1012,6 +1036,41 @@ mod tests {
         assert!(lost.problem.as_deref().is_some_and(|p| p.contains("nowhere")));
         assert!(resolve(&cat, "gem").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Pi and OpenCode roles start, each refused only what it cannot be
+    /// given: an effort Pi has no thinking level for, any effort for
+    /// OpenCode, and an OpenCode model without its provider; and neither
+    /// a Codex profile nor Claude Code's limits.
+    #[test]
+    fn pi_and_opencode_roles_are_refused_only_what_they_cannot_take() {
+        let role = |harness| AgentRole { name: "dev".into(), harness, ..Default::default() };
+        let problem = |r: AgentRole| problem_of(&r, &[]);
+        let pi = role(Harness::Pi);
+        let opencode = role(Harness::OpenCode);
+        assert_eq!(problem(AgentRole { model: Some("sonnet".into()), effort: Some("minimal".into()), ..pi.clone() }), None);
+        assert_eq!(
+            problem(AgentRole { effort: Some("ultra".into()), ..pi.clone() }).as_deref(),
+            Some("effort `ultra` is not one Pi takes: off, minimal, low, medium, high, xhigh, max")
+        );
+        if !cfg!(windows) {
+            assert_eq!(problem(AgentRole { model: Some("anthropic/claude-haiku-5-5".into()), ..opencode.clone() }), None);
+        }
+        assert_eq!(
+            problem(AgentRole { effort: Some("high".into()), ..opencode.clone() }).as_deref(),
+            Some("OpenCode takes no effort: leave `effort` out")
+        );
+        assert_eq!(
+            problem(AgentRole { model: Some("haiku".into()), ..opencode.clone() }).as_deref(),
+            Some("OpenCode's model is `provider/model` (`opencode models` lists them), not `haiku`")
+        );
+        assert_eq!(
+            problem(AgentRole { profile: Some("fast".into()), ..pi.clone() }).as_deref(),
+            Some("`profile` is Codex's: a Pi role has none")
+        );
+        let limited = AgentRole { mcp: Some(vec![]), ..pi };
+        assert!(problem(limited).is_some_and(|p| p.starts_with("a Pi role cannot limit")));
+        assert!(problem(role(Harness::Gemini)).is_some_and(|p| p.contains("only Claude Code, Codex, Pi and OpenCode")));
     }
 
     #[test]

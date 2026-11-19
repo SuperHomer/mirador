@@ -37,8 +37,8 @@ downloads, the feature tour and the keybinding reference.
   sidebar's **Splits · Wall · Tasks · Board** switch turns it over to the
   tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
-  start Claude Code or Codex with their own model, prompt and shared way of
-  working (`mira agent new --role reviewer "…"`). **Teams**
+  start Claude Code, Codex, Pi or OpenCode with their own model, prompt
+  and shared way of working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Task board**, the agent wall's Tasks side (**Tasks** in the sidebar's
@@ -436,9 +436,10 @@ only when there is none.
 
 ## Agent roles and the agent wall
 
-A role is a named way to start an agent — Claude Code or Codex, its own
-model and effort, and its own instructions — written as a Markdown file: the
-frontmatter says how it starts, the body is its prompt.
+A role is a named way to start an agent — Claude Code, Codex, Pi or
+OpenCode, its own model and effort, and its own instructions — written as
+a Markdown file: the frontmatter says how it starts, the body is its
+prompt.
 
 ```markdown
 <!-- .mirador/roles/reviewer.md -->
@@ -464,8 +465,14 @@ You implement what the plan says, one step at a time.
 `effort` is how hard the model thinks: Claude Code gets it as `--effort`
 (`low`, `medium`, `high`, `xhigh`, `max`), Codex as
 `model_reasoning_effort` (the same, plus `ultra`, which only some models
-take). Absent, the harness's default. Any other value, upper case
-included, greys the role out with the values it takes.
+take), Pi as `--thinking` (`off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, `max`); OpenCode takes none. Absent, the harness's default. Any
+other value, upper case included, greys the role out with the values it
+takes.
+
+Each OpenCode role's pane runs an OpenCode server of its own
+(`--standalone`, about 300 MB), so the role's model and prompt apply to
+that pane only; the server ends with the pane.
 
 A Codex role can also name one of your Codex **profiles** —
 `profile: yolo` starts it with `--profile yolo` — for what a role cannot

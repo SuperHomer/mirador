@@ -42,7 +42,9 @@
 //! in it.
 //!
 //! As `pi` or `opencode` it is a `codex` with no rollout and no notify
-//! of its own: it logs how it was started, and echoes each message.
+//! of its own: it logs how it was started (with `OPENCODE_CONFIG_CONTENT`,
+//! where an OpenCode role's model and prompt are), and echoes each
+//! message.
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
@@ -293,6 +295,8 @@ fn main() {
         "pane": pane,
         "cwd": std::env::current_dir().ok(),
         "socket": std::env::var("MIRA_SOCKET").ok(),
+        // What an OpenCode role is given its model and prompt in.
+        "opencodeConfig": std::env::var("OPENCODE_CONFIG_CONTENT").ok(),
     }));
 
     let claude = kind == "claude";

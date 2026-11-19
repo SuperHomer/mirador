@@ -537,9 +537,17 @@ pub fn launch_command(
     quote: impl Fn(&str) -> String,
 ) -> String {
     let harness = role.map_or(plain, |r| r.harness);
-    let mut line = String::from(match harness {
+    let mut line = String::new();
+    // An OpenCode role's model and prompt are its config, which only a
+    // server of its own reads: the shared one started with another.
+    if let (Harness::OpenCode, Some(role)) = (harness, role) {
+        let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
+        line.push_str(&format!("OPENCODE_CONFIG_CONTENT={} ", quote(&opencode_config(role, prompt, prompt_file))));
+    }
+    line.push_str(match harness {
         Harness::Codex => "codex",
         Harness::Pi => "pi",
+        Harness::OpenCode if role.is_some() => "opencode --standalone",
         Harness::OpenCode => "opencode",
         _ => "claude",
     });
@@ -556,15 +564,26 @@ pub fn launch_command(
         line.push_str(&quote(&value));
     };
     let prompt = prompt.map(str::trim).filter(|p| !p.is_empty());
-    if let Some(role) = role {
+    if let Some(role) = role.filter(|_| harness != Harness::OpenCode) {
         arg(&mut line, "--model", role.model.as_deref().unwrap_or(""));
         if let Some(effort) = &role.effort {
             match harness {
                 Harness::Codex => arg(&mut line, "-c", &format!("model_reasoning_effort={}", toml_string(effort))),
+                Harness::Pi => arg(&mut line, "--thinking", effort),
                 _ => arg(&mut line, "--effort", effort),
             }
         }
         match harness {
+            // Its `--append-system-prompt` takes text, or a file's path,
+            // whose contents it reads.
+            Harness::Pi => {
+                match (prompt_file, prompt) {
+                    (Some(file), _) => arg(&mut line, "--append-system-prompt", &file.to_string_lossy()),
+                    (None, Some(prompt)) => arg(&mut line, "--append-system-prompt", prompt),
+                    (None, None) => {}
+                }
+                arg(&mut line, "--name", &role.name);
+            }
             Harness::Codex => {
                 arg(&mut line, "--profile", role.profile.as_deref().unwrap_or(""));
                 // The file alone is enough: a resume passes the one the
@@ -620,6 +639,25 @@ pub fn launch_command(
     };
     arg(&mut line, message, task.unwrap_or(""));
     line
+}
+
+/// The config an OpenCode role runs with, given in `OPENCODE_CONFIG_CONTENT`
+/// on top of the person's own: its model, and an agent named after the
+/// role, the default, whose prompt is the role's — from `prompt_file`
+/// through OpenCode's `{file:…}`, so the line typed stays short, else
+/// inline. Both checked against OpenCode 2.0.31's own resolved config.
+pub fn opencode_config(role: &AgentRole, prompt: Option<&str>, prompt_file: Option<&std::path::Path>) -> String {
+    let mut config = serde_json::Map::new();
+    if let Some(model) = &role.model {
+        config.insert("model".into(), model.as_str().into());
+    }
+    let prompt = prompt_file.map(|f| format!("{{file:{}}}", f.display())).or(prompt.map(str::to_string));
+    if let Some(prompt) = prompt {
+        let agent = serde_json::json!({ "mode": "primary", "prompt": prompt });
+        config.insert("agent".into(), serde_json::json!({ role.name.as_str(): agent }));
+        config.insert("default_agent".into(), role.name.as_str().into());
+    }
+    serde_json::Value::Object(config).to_string()
 }
 
 /// The permissions profile a Codex started in `cwd` runs on, read from the
@@ -1371,6 +1409,63 @@ mod tests {
         assert_eq!(launch_command(None, Harness::OpenCode, None, None, None, Some("do x"), None, None, q), "opencode --prompt 'do x'");
         assert_eq!(launch_command(None, Harness::Pi, None, None, None, None, None, None, q), "pi");
         assert_eq!(launch_command(None, Harness::OpenCode, None, None, None, Some(" "), None, None, q), "opencode");
+    }
+
+    /// A Pi role: its model, its effort as `--thinking`, its prompt file
+    /// through `--append-system-prompt` (which reads a file's contents),
+    /// its name, then the task after `--`.
+    #[test]
+    fn starts_a_pi_role_with_its_model_thinking_and_prompt_file() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let role = AgentRole {
+            name: "dev".into(),
+            harness: Harness::Pi,
+            model: Some("sonnet".into()),
+            effort: Some("high".into()),
+            ..Default::default()
+        };
+        let file = std::path::Path::new("/p/dev.md");
+        assert_eq!(
+            launch_command(Some(&role), Harness::Claude, Some("You build."), Some(file), None, Some("go"), None, None, q),
+            "pi --model 'sonnet' --thinking 'high' --append-system-prompt '/p/dev.md' --name 'dev' -- 'go'"
+        );
+        let bare = AgentRole { model: None, effort: None, ..role };
+        assert_eq!(
+            launch_command(Some(&bare), Harness::Claude, Some("You build."), None, None, None, None, None, q),
+            "pi --append-system-prompt 'You build.' --name 'dev'"
+        );
+    }
+
+    /// An OpenCode role's model and prompt go in the config its own
+    /// server reads (`--standalone`): an agent named after the role, the
+    /// default, its prompt read from the file. Without a prompt, only the
+    /// model.
+    #[test]
+    fn starts_an_opencode_role_on_a_server_of_its_own_with_its_config() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        let role = AgentRole {
+            name: "dev".into(),
+            harness: Harness::OpenCode,
+            model: Some("anthropic/claude-haiku-5-5".into()),
+            ..Default::default()
+        };
+        let file = std::path::Path::new("/Library/Application Support/p/dev.md");
+        let config = opencode_config(&role, Some("You build."), Some(file));
+        let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            config,
+            serde_json::json!({
+                "model": "anthropic/claude-haiku-5-5",
+                "agent": { "dev": { "mode": "primary", "prompt": "{file:/Library/Application Support/p/dev.md}" } },
+                "default_agent": "dev"
+            })
+        );
+        let line = launch_command(Some(&role), Harness::Claude, Some("You build."), Some(file), None, Some("go"), None, None, q);
+        assert_eq!(line, format!("OPENCODE_CONFIG_CONTENT={} opencode --standalone --prompt 'go'", q(&config.to_string())));
+        let unprompted = opencode_config(&role, None, None);
+        assert_eq!(unprompted, r#"{"model":"anthropic/claude-haiku-5-5"}"#);
+        // A plain OpenCode shares the person's server, as they run it.
+        assert_eq!(launch_command(None, Harness::OpenCode, None, None, None, Some("go"), None, None, q), "opencode --prompt 'go'");
     }
 
     #[test]

@@ -2026,13 +2026,14 @@ fn open_remote_agent(
 }
 
 /// Refuses `role` (from `catalog`) for a remote, before anything opens or
-/// touches it: Codex is not done there yet, nor a role that keeps only
-/// some skills or plugins — listing them runs Claude Code here, which says
-/// nothing of the remote's.
+/// touches it: no harness but Claude Code is done there yet, nor a role
+/// that keeps only some skills or plugins — listing them runs Claude Code
+/// here, which says nothing of the remote's.
 pub(crate) fn refuse_on_remote(catalog: &cmux_protocol::RoleCatalog, role: &str) -> Result<(), String> {
     let (r, _) = cmux_core::roles::role_layers(catalog, role)?;
     if r.harness != cmux_protocol::Harness::Claude {
-        return Err(format!("role `{role}` runs Codex: Codex on a remote is not done yet"));
+        let harness = r.harness.label();
+        return Err(format!("role `{role}` runs {harness}: {harness} on a remote is not done yet"));
     }
     if cmux_core::role_limits::needs_inventory(&r) {
         return Err(format!("role `{role}`: a role that limits skills or plugins is not done on a remote yet"));
@@ -2272,12 +2273,16 @@ pub(crate) fn prepare_launch(
         }
         _ => None,
     };
-    // Claude Code reads a role's prompt from a file; Codex too, through the
-    // shell, where the shell can (`agents::codex_instructions`) — else
-    // inline: ConPTY has no line discipline to cut a long line. Written
-    // once the role is known to start, so a refused one leaves none.
+    // Claude Code, Pi and OpenCode read a role's prompt from a file; Codex
+    // too, through the shell, where the shell can
+    // (`agents::codex_instructions`) — else inline: ConPTY has no line
+    // discipline to cut a long line. Written once the role is known to
+    // start, so a refused one leaves none.
+    use cmux_protocol::Harness::{Claude, OpenCode, Pi};
     let prompt_file = match (&role, &prompt) {
-        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p)),
+        (Some(r), Some(p)) if matches!(r.harness, Claude | Pi | OpenCode) => {
+            Some(cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p))
+        }
         (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Codex && cmux_core::pty::shell::takes_command_substitution() => {
             Some(cmux_core::roles::write_codex_prompt(name.unwrap_or(&r.name), p))
         }

@@ -316,7 +316,7 @@ any role can share:
 ```markdown
 <!-- .mirador/roles/reviewer.md -->
 ---
-harness: claude        # or codex; Claude Code when absent
+harness: claude        # or codex, pi, opencode; Claude Code when absent
 model: haiku
 effort: high           # how hard the model thinks; its default when absent
 way: our-way           # .mirador/ways/our-way.md, appended after this prompt
@@ -367,6 +367,15 @@ way's) through `--append-system-prompt-file`; the session resumes like any
 other, on the role's model and effort, and keeps that prompt. Codex gets
 `--model`, `model_reasoning_effort`, `--profile` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
+Pi gets `--model`, its effort as `--thinking` (off, minimal, low, medium,
+high, xhigh, max), `--name`, and the prompt through
+`--append-system-prompt`, given the file's path, whose contents it reads.
+OpenCode's TUI has no flag for a model or a prompt: an OpenCode role runs
+`opencode --standalone`, on a server of its own, with
+`OPENCODE_CONFIG_CONTENT` holding its model (`provider/model`) and an agent
+named after it, the default, whose prompt is `{file:<the prompt file>}`.
+It takes no effort, and is not done on Windows yet. Neither keeps a session
+Mirador resumes yet.
 Without a role, `--harness codex`, `pi` or `opencode` starts that agent
 plain instead of plain Claude Code (no other harness can be started that
 way, and `--harness` with `--role` is refused: a role names its own).
