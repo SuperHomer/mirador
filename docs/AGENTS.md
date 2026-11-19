@@ -660,9 +660,15 @@ has not started within that time, and an agent whose status is `needsYou`
 unless `--force`. Unless `--force`, `send` also reads the agent's screen,
 since a dialog reports no status (Codex's update prompt, an approval,
 Claude Code's own questions). It refuses a numbered menu (`❯ 1. Yes`),
-naming the selected row. For Claude Code or Codex, it waits up to 10 s for
-the input box (`❯ `, `› `), then refuses: without one, the message could
-dismiss a welcome screen and its Enter pick from the menu that follows.
+naming the selected row, and Pi's and OpenCode's menus by how each draws
+them: Pi's project-trust question and pickers (`→ Trust`, `/resume`'s
+`› dev`), OpenCode's permission prompt (`Allow once   Always allow
+Reject`) and its dialogs (the command palette, `/models`, `/sessions`,
+whose title row ends in `esc`); Pi asks no approval for its tools. For Claude Code, Codex, Pi and OpenCode, it waits up to 10 s for
+the input box — `❯ `, `› `, Pi's box between its last two rules over its
+footer, OpenCode's ending in its `╹▀` edge — then refuses: without one,
+the message could dismiss a welcome screen and its Enter pick from the
+menu that follows.
 
 `wait` polls `agent list` once a second and ends on a status that changed
 after it started, or after it saw the agent working — so a wait begun
@@ -672,8 +678,8 @@ wait by exiting.
 
 `clear` finds the agent as `send` does and types its harness's
 new-conversation command as plain keystrokes — `/clear` for Claude Code,
-`/new` for Codex — then Enter as a separate write; any other harness is
-refused. The process keeps running, so the role's prompt (a launch flag)
+`/new` for Codex, Pi and OpenCode — then Enter as a separate write; any
+other harness is refused. The process keeps running, so the role's prompt (a launch flag)
 holds. Refused as `send` is, except that it may name the caller's own
 pane. A working agent is not refused: the line queues behind its turn.
 

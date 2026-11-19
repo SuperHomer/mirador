@@ -21,8 +21,8 @@
 //!   leaves it up with no hook: a dialog like Codex's update prompt.
 //!
 //! Ready for a message, either draws its input box as the real ones do,
-//! `❯ ` as `claude` and `› ` as `codex` — Mirador waits for one before it
-//! types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
+//! `❯ ` as `claude` and `› ` as `codex`, Pi's and OpenCode's boxes as
+//! `pi` and `opencode` — Mirador waits for one before it types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
 //! with no input box until its first input, which only dismisses it: as
 //! Codex's logo waits for a key before its login menu.
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
@@ -327,8 +327,16 @@ fn main() {
     );
 
     println!("fake {kind} ready");
+    // Each as the real one draws it, for Mirador's screen checks
+    // (`handoff::showing_in`): Pi's box between two rules over its footer,
+    // OpenCode's ending in its `╹▀` edge.
     let input_box = || {
-        print!("{} ", if claude { '❯' } else { '›' });
+        let rule = "─".repeat(40);
+        match kind.as_str() {
+            "pi" => print!("{rule}\n\n{rule}\n~/proj\n0.0%/128k (auto)    fake\n"),
+            "opencode" => print!("  ┃\n  ┃  Build · Fake\n  ╹{}\n", "▀".repeat(40)),
+            _ => print!("{} ", if claude { '❯' } else { '›' }),
+        }
         let _ = std::io::stdout().flush();
     };
     let mut welcome = std::env::var("E2E_WELCOME").is_ok_and(|v| v == "1");

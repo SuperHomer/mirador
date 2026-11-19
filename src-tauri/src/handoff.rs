@@ -45,7 +45,7 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
 const INPUT_BOX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Why what is typed must not go into `pane` now, by what its screen shows
-/// (`cmux_core::handoff::showing`): a menu, which the Enter after it would
+/// (`cmux_core::handoff::showing_in`): a menu, which the Enter after it would
 /// answer; or, for a harness whose input box Mirador knows, no input box
 /// within [`INPUT_BOX_WAIT`] — the paste might dismiss a welcome screen
 /// and the Enter land on the menu that replaces it. No read outlives that
@@ -56,7 +56,7 @@ fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_proto
     use cmux_core::handoff::Showing;
     use cmux_protocol::Harness;
     use std::time::{Duration, Instant};
-    let knows_input_box = matches!(harness, Some(Harness::Claude | Harness::Codex));
+    let knows_input_box = matches!(harness, Some(Harness::Claude | Harness::Codex | Harness::Pi | Harness::OpenCode));
     let no_input_box =
         || Some("shows no input box yet: it may still be starting, or waiting on a screen of its own — look at its pane".into());
     let deadline = Instant::now() + INPUT_BOX_WAIT;
@@ -73,7 +73,7 @@ fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_proto
             Err(_) if seen_neither => return no_input_box(),
             Err(_) => return None,
         };
-        match cmux_core::handoff::showing(&screen) {
+        match cmux_core::handoff::showing_in(&screen, harness) {
             Showing::Choice(row) => return Some(format!("is showing a choice, `{row}`: answer it in its pane")),
             Showing::Composer => return None,
             Showing::Neither if !knows_input_box => return None,

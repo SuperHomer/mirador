@@ -380,3 +380,47 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
     send(&sb, &first, &pane, "now for real").unwrap();
     sb.wait_for("the message", LONG, || sb.events("message", &pane).into_iter().find(|m| m["text"] == "now for real"));
 }
+
+/// A team of a Pi and an OpenCode member hand each other work by name,
+/// each message going into the other's input box (drawn as each draws
+/// it) and arriving whole, and each clears the other with `/new`.
+#[test]
+fn pi_and_opencode_members_send_to_each_other_and_clear() {
+    e2e!();
+    let mut sb = Sandbox::new("piocsend");
+    sb.write(".mirador/roles/builder.md", "---\nharness: pi\n---\nYou build.\n");
+    sb.write(".mirador/roles/helper.md", "---\nharness: opencode\n---\nYou help.\n");
+    sb.write(
+        ".mirador/teams/duo.md",
+        "---\nmembers:\n  - role: builder\n    lead: true\n  - role: helper\n---\nShip small.\n",
+    );
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    let builder = sb.wait_for("the builder", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
+    let helper = sb.wait_for("the helper", LONG, || sb.member("helper").and_then(|m| m["pane"].as_str().map(String::from)));
+    // Listed before their terminals start: a send then is refused.
+    sb.nth_start(&builder, 1);
+    sb.nth_start(&helper, 1);
+    let got = |pane: &str| -> Vec<String> {
+        sb.events("message", pane).iter().map(|m| m["text"].as_str().unwrap_or_default().to_string()).collect()
+    };
+    let ok = |from: &str, args: &[&str]| {
+        let (code, out, err) = sb.mira(Some(from), args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+    };
+
+    ok(&builder, &["agent", "send", "helper", "check the build"]);
+    sb.wait_for("the helper's echo", LONG, || sb.screen(&helper).filter(|s| s.contains("got: [message from builder")));
+    ok(&helper, &["agent", "send", "builder", "it is green"]);
+    sb.wait_for("the builder's echo", LONG, || sb.screen(&builder).filter(|s| s.contains("got: [message from helper")));
+    // One message each, its header and its text together.
+    sb.wait_for("both messages", LONG, || (got(&helper).len() == 1 && got(&builder).len() == 1).then_some(()));
+    assert_eq!(got(&helper), ["[message from builder, via mira agent send]\ncheck the build"]);
+    assert_eq!(got(&builder), ["[message from helper, via mira agent send]\nit is green"]);
+
+    ok(&builder, &["agent", "clear", "helper"]);
+    ok(&helper, &["agent", "clear", "builder"]);
+    sb.wait_for("each cleared", LONG, || (got(&helper).len() == 2 && got(&builder).len() == 2).then_some(()));
+    assert_eq!((got(&helper)[1].as_str(), got(&builder)[1].as_str()), ("/new", "/new"));
+}
