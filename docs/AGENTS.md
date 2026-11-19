@@ -946,6 +946,7 @@ mira ssh open prod                 # remote pane running `ssh -tt prod`
 mira ssh open "-p 2222 user@box"   # or a full destination with options
 mira ssh open prod --tab
 mira ssh open prod --tab --dir '~/work/app'   # its shell starts there; quote the ~
+mira ssh open --on devbox          # a saved computer: a tab on its host, in its directory
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
 ```

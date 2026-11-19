@@ -885,7 +885,8 @@ mira computer update devbox --dir /srv/app                 # --name, --host, --d
 mira computer test devbox                                  # or --host devbox --dir '~/work/app', before saving
 mira computer remove devbox
 mira computer open                                         # the pane; --tab or --split
-mira ssh open devbox --tab --dir '~/work/app'               # the same tab by hand: ssh open takes the host and directory, not a computer's name
+mira ssh open --on devbox                                  # a tab on it, in its directory, as the palette opens one
+mira ssh open devbox --tab --dir '~/work/app'               # the same tab by hand, from a host and a directory
 ```
 
 `mira computer test` prints the same three answers, a line each, and

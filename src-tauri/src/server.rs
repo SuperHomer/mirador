@@ -673,15 +673,19 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::browser::wait(app, &pane, &until, Duration::from_secs(timeout_secs.unwrap_or(10)))?;
             Ok(Value::Null)
         }
-        Request::SshOpen { host, target, dir } => {
-            let pane_id = crate::commands::open_ssh(
-                app.clone(),
-                app.state(),
-                None,
-                target.as_deref() == Some("tab"),
-                host,
-                dir,
-            )?;
+        Request::SshOpen { host, target, dir, on } => {
+            // A saved computer opens as the palette's "SSH to a Computer"
+            // does: a tab of its own, its shell in the computer's directory.
+            let (host, dir, tab) = match (host, dir, on) {
+                (Some(host), dir, None) => (host, dir, target.as_deref() == Some("tab")),
+                (None, None, Some(on)) => {
+                    let computer = cmux_core::config::computer_named(&crate::settings::saved_config()?, &on)?;
+                    (computer.host, Some(computer.dir), true)
+                }
+                (_, _, Some(_)) => return Err("a saved computer stands for a host and a directory: give it, or them, not both".into()),
+                (None, _, None) => return Err("ssh open needs a host, or a saved computer's name".into()),
+            };
+            let pane_id = crate::commands::open_ssh(app.clone(), app.state(), None, tab, host, dir)?;
             Ok(json!({ "paneId": pane_id }))
         }
         Request::SshHosts => Ok(json!({ "hosts": cmux_core::ssh::config_hosts() })),

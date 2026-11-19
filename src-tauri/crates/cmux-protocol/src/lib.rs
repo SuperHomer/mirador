@@ -856,15 +856,22 @@ pub enum Request {
         #[serde(default)]
         timeout_secs: Option<u64>,
     },
-    /// Opens a remote (SSH) pane running `ssh -tt <host>`.
+    /// Opens a remote (SSH) pane running `ssh -tt <host>`, or a tab on
+    /// the saved computer `on`.
     SshOpen {
         /// ssh host spec (alias, or full destination with options).
-        host: String,
+        #[serde(default)]
+        host: Option<String>,
         #[serde(default)]
         target: Option<String>,
         /// The directory there its shell starts in; the home without one.
         #[serde(default)]
         dir: Option<String>,
+        /// A saved computer's name, standing for its host and dir, which
+        /// the app looks up in its own config: a tab of its own there, as
+        /// the palette opens one. Not with `host` or `dir`.
+        #[serde(default)]
+        on: Option<String>,
     },
     /// Host aliases from ~/.ssh/config.
     SshHosts,

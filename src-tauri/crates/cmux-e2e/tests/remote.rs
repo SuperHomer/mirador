@@ -40,7 +40,7 @@ fn assert_hooks(path: &str, mira: &std::path::Path) {
 /// enough to wrap a path), once its shell is up: the pane's master
 /// connection is what the app's ssh requests ride on.
 fn remote_pane(sb: &Sandbox) -> String {
-    let pane = sb.call(Request::SshOpen { host: "box".into(), target: Some("tab".into()), dir: None })["paneId"]
+    let pane = sb.call(Request::SshOpen { host: Some("box".into()), target: Some("tab".into()), dir: None, on: None })["paneId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -140,6 +140,42 @@ fn a_remote_tab_splits_on_its_remote() {
     let agent = out.trim().to_string();
     sb.wait_for("the agent's start", LONG, || sb.events("start", &agent).into_iter().next());
     assert!(!on_box(&agent), "mira agent new from a remote tab, no --host: here");
+}
+
+/// `ssh open --on` a saved computer opens it as the palette's "SSH to a
+/// Computer" row does: a tab of its own, an ssh pane on its host, its
+/// shell in its directory. An unknown name is refused with the names there
+/// are, and so is a name given with a host; neither opens a pane.
+#[test]
+fn a_saved_computer_opens_in_a_tab_of_its_own() {
+    e2e!();
+    let mut sb = Sandbox::new("rssh");
+    sb.sshd();
+    std::fs::create_dir_all(sb.home.join("work")).unwrap();
+    let work = sb.home.join("work").canonicalize().unwrap();
+    let path = sb.config.join("mirador/mirador.json");
+    let mut cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    cfg["computers"] = serde_json::json!([{ "name": "devbox", "host": "box", "dir": work.to_str().unwrap() }]);
+    std::fs::write(&path, cfg.to_string()).unwrap();
+    sb.launch();
+    sb.first_pane();
+    let tabs = || sb.snapshot()["tabs"].as_array().unwrap().len();
+
+    let (code, _, err) = sb.mira(None, &["ssh", "open", "--on", "lab"]);
+    assert!(code != 0 && err.contains("no computer `lab` (there are: devbox)"), "{err}");
+    let err = sb
+        .request(Request::SshOpen { host: Some("box".into()), target: None, dir: None, on: Some("devbox".into()) })
+        .expect_err("a saved computer and a host");
+    assert!(err.contains("not both"), "{err}");
+    assert_eq!((sb.panes().len(), tabs()), (1, 1), "a refusal opens nothing");
+
+    let (code, out, err) = sb.mira(None, &["ssh", "open", "--on", "devbox"]);
+    assert_eq!(code, 0, "{err}");
+    let pane = out.trim().to_string();
+    assert_eq!(tabs(), 2, "a tab of its own, with no --tab");
+    let remote = sb.snapshot()["remotePanes"].as_array().unwrap().iter().any(|r| r["paneId"] == pane.as_str() && r["host"] == "box");
+    assert!(remote, "an ssh pane on the computer's host");
+    wait_for_pwd(&sb, &pane, &work, "the shell in the computer's directory");
 }
 
 /// A `mira` on the remote has no discovery file there, so it finds no app
