@@ -610,14 +610,21 @@ A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
 data directory (beside `session.json`): the team, its layout and cwd, and
 each member's role, harness, cwd and conversation — Claude Code's session
-id, the thread id of the rollout a Codex holds open. Saving again under a
-name replaces it. Nothing is saved unless every member can be: not one
-exited or closed, run by Claude Code's background daemon (`claude --bg`,
-whose jobs do not outlive a restart), or Codex on Windows, which cannot
-see a process's open files. `team resume` opens a team's save as `team
+id, the thread id of the rollout a Codex holds open, the id Mirador
+started a Pi or an OpenCode on (`--session-id`, `--session ses_…`). Saving
+again under a name replaces it. Nothing is saved unless every member can
+be: not one exited or closed, run by Claude Code's background daemon
+(`claude --bg`, whose jobs do not outlive a restart), Codex on Windows,
+which cannot see a process's open files, or a Pi or an OpenCode cleared
+since it started: `/new` moves it to a conversation of its own making,
+whose id Mirador does not learn. Only Mirador's own clear is known: a
+`/new` or a switch of session typed in the pane itself (Pi's `/resume`,
+OpenCode's session list) leaves the record on the old conversation, and
+the save keeps that one. `team resume` opens a team's save as `team
 start` lays a team out, a team like any other from then on; each member
 runs `claude --resume <id>` or `codex resume <id>` with its role's flags,
-its prompt passed again, since a conversation keeps its own only until it
+or its Pi's or OpenCode's launch line with the saved id, its prompt
+passed again, since a conversation keeps its own only until it
 is compacted. A resume is refused while any pane runs one of the saved
 conversations, naming it — two processes on one conversation write over
 each other — and `team resume` refuses an agent's save, `agent resume` a

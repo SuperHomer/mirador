@@ -20,6 +20,7 @@ fn member_of(state: &AppState, pane: &str, name: &str, role: Option<String>, lea
     let session = match harness {
         Some(Harness::Claude) => cmux_core::checkpoints::claude_session(record.as_deref())?,
         Some(Harness::Codex) => cmux_core::checkpoints::codex_session(pid.ok_or("its Codex is not running")?)?,
+        Some(h @ (Harness::Pi | Harness::OpenCode)) => cmux_core::checkpoints::chosen_session(h, record.as_deref())?,
         Some(other) => return Err(format!("{} cannot be resumed by Mirador", other.label())),
         None => return Err("its harness is not known".into()),
     };
@@ -115,6 +116,9 @@ fn not_running(state: &AppState, checkpoint: &Checkpoint) -> Result<(), String> 
                     (p.clone(), cmux_core::checkpoints::claude_session(m.agent_session.as_deref()).ok(), None)
                 }
                 Some(Harness::Codex) if wants_codex => (p.clone(), None, m.agent_pid),
+                Some(h @ (Harness::Pi | Harness::OpenCode)) => {
+                    (p.clone(), cmux_core::checkpoints::chosen_session(h, m.agent_session.as_deref()).ok(), None)
+                }
                 _ => (p.clone(), None, None),
             })
             .collect()
@@ -142,7 +146,8 @@ fn resume_launch(
     cwd: Option<&str>,
     extra: &[cmux_protocol::PromptLayer],
 ) -> Result<crate::commands::Launch, String> {
-    let mut launch = prepare_launch(member.role.as_deref(), member.harness, Some(catalog), cwd, extra, Some(&member.name), None)
+    let mut launch =
+        prepare_launch(member.role.as_deref(), member.harness, Some(catalog), cwd, extra, Some(&member.name), None, Some(&member.session))
         .map_err(|e| format!("member `{}`: {e}", member.name))?;
     launch.input = cmux_core::checkpoints::resume_command(member, &launch.input)?;
     Ok(launch)

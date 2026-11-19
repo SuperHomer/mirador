@@ -102,7 +102,7 @@ pub fn start_team_from(
         let roster = cmux_core::teams::seat_layers(&catalog, def, seat, &seats, &mira);
         let task = task.as_deref().filter(|_| seat.lead);
         let member = |e: String| format!("team `{team}`, member `{}`: {e}", seat.name);
-        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task)
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task, None)
             .map_err(member)?;
         let sent = match (&there, &remote) {
             (Some(there), Some((_, dir))) => Some(send_remote_launch(there, pane, dir, &launch, task).map_err(member)?),
@@ -313,7 +313,7 @@ pub fn team_add_from(
     };
     let mira = there.as_ref().map_or_else(mira_for_prompt, |(r, _)| r.mira.clone());
     let roster = roster_now(&run, &catalog, &seat, Some(&seat), &mira);
-    let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task.as_deref())?;
+    let launch = prepare_launch(Some(&role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), task.as_deref(), None)?;
 
     let pane = cmux_core::state::Workspace::fresh_pane_ids(1).remove(0);
     // On a remote, its files are sent before its pane opens
@@ -439,7 +439,7 @@ pub fn team_restart(
         }
         let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
         let roster = roster_now(&run, &catalog, &me, None, &mira_for_prompt());
-        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), None)
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(&catalog), cwd.as_deref(), &roster, Some(&seat.name), None, None)
             .map_err(|e| format!("member `{}`: {e}", seat.name))?;
 
         match seat_state {
@@ -528,7 +528,7 @@ fn restart_on_remote(
         let member = |e: String| format!("member `{}`: {e}", seat.name);
         let me = cmux_core::teams::Seat { name: seat.name.clone(), role: seat.role.clone(), lead: seat.lead };
         let roster = roster_now(run, catalog, &me, None, &there.mira);
-        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(catalog), cwd, &roster, Some(&seat.name), None)
+        let launch = prepare_launch(Some(&seat.role), cmux_protocol::Harness::Claude, Some(catalog), cwd, &roster, Some(&seat.name), None, None)
             .map_err(member)?;
         sent.push(send_remote_launch(&there, pane, &remote.dir, &launch, None).map_err(member)?);
     }

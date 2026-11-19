@@ -578,8 +578,15 @@ and nothing else — so `mira agent send` and `wait` work from inside its
 sandbox; not when your Codex config uses `sandbox_mode`, gives full access,
 or cannot be read. Exiting the agent
 leaves the shell; restarting Mirador resumes the conversation — Claude
-Code's, or Codex's with `codex resume` — on the role's model and effort,
-with its prompt. To know which Codex conversation that is, Mirador gives
+Code's, Codex's with `codex resume`, or a Pi's or an OpenCode's, started
+on an id Mirador picked and given it again — on the role's model and
+effort, with its prompt. A Pi or an OpenCode cleared with `mira agent
+clear` comes back without a conversation: its `/new` started one whose id
+Mirador does not learn, and the cleared one is not brought back. Only
+Mirador's own clear is known: a `/new` or a switch of session you make
+yourself in the pane (Pi's `/resume`, OpenCode's session list) leaves the
+record on the old conversation, and a restart or a save brings that one
+back. To know which Codex conversation that is, Mirador gives
 Codex a `notify` (`mira codex-notify`) that records it after each turn,
 then runs your own `notify`, if you have one, as before.
 

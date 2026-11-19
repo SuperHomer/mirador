@@ -292,6 +292,21 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
     // Enter on its own read, as `send` does.
     std::thread::sleep(cmux_core::handoff::enter_delay(harness));
     state.pty.write(pane, b"\r").map_err(|e| ("not running", e))?;
+    // A Pi's or an OpenCode's `/new` moves it to a conversation of its own
+    // making, whose id is not cheap to learn: Pi writes the new session's
+    // file only on its first message, in a directory every Pi in that
+    // project shares, and OpenCode keeps its ids in its server's store. The
+    // one Mirador started it on is the cleared one, and a restart must not
+    // bring that back: the record goes, and the pane comes back with
+    // nothing to resume. Only this clear is known: a `/new` or a session
+    // switch typed in the pane itself leaves the record on the old
+    // conversation, which a restart or a save then brings back.
+    if matches!(harness, Some(cmux_protocol::Harness::Pi | cmux_protocol::Harness::OpenCode)) {
+        if let Some(m) = state.meta.lock().unwrap().get_mut(pane) {
+            m.agent_session = None;
+        }
+        state.session_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     Ok(())
 }
 

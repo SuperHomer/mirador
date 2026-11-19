@@ -109,7 +109,8 @@ fn pi_and_opencode_roles_start_with_their_model_and_prompt() {
     let started = sb.wait_for("the helper's start", std::time::Duration::from_secs(45), || {
         sb.events("start", &helper).into_iter().next()
     });
-    assert_eq!(started["args"], serde_json::json!(["--standalone"]), "{started}");
+    let args: Vec<String> = serde_json::from_value(started["args"].clone()).unwrap();
+    assert_eq!((args.len(), args[0].as_str(), args[1].as_str()), (3, "--standalone", "--session"), "{args:?}");
     let config: Value = serde_json::from_str(started["opencodeConfig"].as_str().expect("a config")).unwrap();
     assert_eq!(config["model"], "anthropic/claude-haiku-5-5", "{config}");
     assert_eq!(config["default_agent"], "helper", "{config}");

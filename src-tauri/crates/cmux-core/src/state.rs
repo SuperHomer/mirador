@@ -165,16 +165,16 @@ impl PaneMeta {
         self.split_remote().map(|(host, dir)| (host, dir.unwrap_or_else(|| "~".into())))
     }
 
-    /// What it runs. A `codex:` session is a Codex's; otherwise the
+    /// What it runs. A `codex:` session is a Codex's, a `pi:` or an
+    /// `opencode:` one a Pi's or an OpenCode's; otherwise the
     /// session, role and launch mark are Claude Code's, so an agent known
     /// only by them is a Claude Code one.
     pub fn harness(&self) -> Option<cmux_protocol::Harness> {
-        self.agent_harness.or_else(|| {
-            if self.agent_session.as_deref().is_some_and(|s| s.starts_with("codex:")) {
-                Some(cmux_protocol::Harness::Codex)
-            } else {
-                self.claude_marked().then_some(cmux_protocol::Harness::Claude)
-            }
+        use cmux_protocol::Harness;
+        self.agent_harness.or_else(|| match self.agent_session.as_deref().map(crate::agents::session_harness) {
+            // Its record says: a Codex's thread, a Pi's or an OpenCode's id.
+            Some(h @ (Harness::Codex | Harness::Pi | Harness::OpenCode)) => Some(h),
+            _ => self.claude_marked().then_some(Harness::Claude),
         })
     }
 
@@ -1144,6 +1144,21 @@ mod tests {
         // Claude Code in its place is another agent: nothing to resume.
         assert!(m.observe_agent(Some(&running(Harness::Claude, "claude")), true));
         assert_eq!(m.agent_session, None);
+    }
+
+    /// A restored pane's harness comes from its record before anything is
+    /// seen running: a Pi's or an OpenCode's id says which it was.
+    #[test]
+    fn a_pi_or_opencode_record_names_its_harness() {
+        use cmux_protocol::Harness;
+        let of = |record: &str| PaneMeta { agent_session: Some(record.into()), ..Default::default() }.harness();
+        assert_eq!(of("pi:a1"), Some(Harness::Pi));
+        assert_eq!(of("opencode:ses_a1"), Some(Harness::OpenCode));
+        assert_eq!(of("codex:t1"), Some(Harness::Codex));
+        assert_eq!(of("claude-fg:s1"), Some(Harness::Claude));
+        // Seen running wins over the record.
+        let seen = PaneMeta { agent_harness: Some(Harness::Codex), agent_session: Some("pi:a1".into()), ..Default::default() };
+        assert_eq!(seen.harness(), Some(Harness::Codex));
     }
 
     #[test]
