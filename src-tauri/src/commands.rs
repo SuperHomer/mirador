@@ -1933,7 +1933,7 @@ pub fn open_agent_from(
         .or_else(cmux_core::config::default_cwd);
     if let Some((host, dir)) = remote {
         if plain != cmux_protocol::Harness::Claude {
-            return Err("Codex on a remote is not done yet: start Claude Code there".into());
+            return Err(format!("{} on a remote is not done yet: start Claude Code there", plain.label()));
         }
         return open_remote_agent(app, state, &host, &dir, role.as_deref(), cwd.as_deref(), task, &source, tab, title, from);
     }

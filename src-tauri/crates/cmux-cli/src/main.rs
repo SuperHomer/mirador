@@ -388,8 +388,9 @@ enum AgentAction {
         /// A role this directory sees (`mira agent roles` lists them).
         #[arg(short, long)]
         role: Option<String>,
-        /// Without a role: start Codex instead of Claude Code.
-        #[arg(long, value_parser = ["claude", "codex"], conflicts_with = "role")]
+        /// Without a role: start Codex, Pi or OpenCode instead of Claude
+        /// Code. Only Claude Code runs on a remote.
+        #[arg(long, value_parser = ["claude", "codex", "pi", "opencode"], conflicts_with = "role")]
         harness: Option<String>,
         /// Open a new tab instead of splitting this pane.
         #[arg(long)]
@@ -932,6 +933,8 @@ fn run(cli: Cli) -> Result<(), String> {
                 on,
                 harness: harness.map(|h| match h.as_str() {
                     "codex" => cmux_protocol::Harness::Codex,
+                    "pi" => cmux_protocol::Harness::Pi,
+                    "opencode" => cmux_protocol::Harness::OpenCode,
                     _ => cmux_protocol::Harness::Claude,
                 }),
                 task: (!task.is_empty()).then(|| task.join(" ")),

@@ -282,6 +282,7 @@ mira agent edit [--tab]                       # a pane to edit them, and teams; 
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent new --harness codex "fix the flaky test"   # plain codex, beside this one
+mira agent new --harness pi "fix the flaky test"      # plain pi; or --harness opencode
 mira agent list                               # pane, status, harness, name, model
 mira agent wall                               # this tab as its agents' wall, or its splits again
 mira agent wall --focus | --grid              # the wall, in that layout (never turns it off)
@@ -366,9 +367,11 @@ way's) through `--append-system-prompt-file`; the session resumes like any
 other, on the role's model and effort, and keeps that prompt. Codex gets
 `--model`, `model_reasoning_effort`, `--profile` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
-Without a role, `--harness codex` starts plain Codex instead of plain
-Claude Code (no other harness can be started that way, and `--harness`
-with `--role` is refused: a role names its own).
+Without a role, `--harness codex`, `pi` or `opencode` starts that agent
+plain instead of plain Claude Code (no other harness can be started that
+way, and `--harness` with `--role` is refused: a role names its own).
+Pi gets the task as an argument after `--`, OpenCode as `--prompt`. None
+of the three runs on a remote yet: there, only Claude Code starts.
 In a team's tab, `agent new --role` (without `--tab`) is `team add`: the
 agent joins the running team as a member, told its teammates (see
 *Teams*). A plain agent there, with no role, is no member.

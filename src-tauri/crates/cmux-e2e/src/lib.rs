@@ -374,8 +374,12 @@ impl Sandbox {
             serde_json::json!({ "persistSessions": false, "defaultCwd": project }).to_string(),
         )
         .unwrap();
+        // Live runs bring the real claude and codex only: nothing live runs
+        // Pi or OpenCode yet.
         #[cfg(unix)]
-        for name in ["claude", "codex"] {
+        let names: &[&str] = if live { &["claude", "codex"] } else { &["claude", "codex", "pi", "opencode"] };
+        #[cfg(unix)]
+        for &name in names {
             let agent = if live {
                 on_path(name).unwrap_or_else(|| panic!("no `{name}` on the PATH"))
             } else {

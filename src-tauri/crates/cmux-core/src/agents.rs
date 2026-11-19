@@ -480,11 +480,11 @@ pub fn hook_notify_kind(event: &str, notification_type: Option<&str>, message: O
 
 /// The harness an agent started without a role runs: Claude Code unless
 /// asked for another, which must be one Mirador knows how to start plain —
-/// Codex. A role names its own.
+/// Codex, Pi or OpenCode. A role names its own.
 pub fn plain_harness(harness: Option<Harness>) -> Result<Harness, String> {
     match harness.unwrap_or(Harness::Claude) {
-        h @ (Harness::Claude | Harness::Codex) => Ok(h),
-        h => Err(format!("an agent without a role is Claude Code or Codex, not {}", h.label())),
+        h @ (Harness::Claude | Harness::Codex | Harness::Pi | Harness::OpenCode) => Ok(h),
+        h => Err(format!("an agent without a role is Claude Code, Codex, Pi or OpenCode, not {}", h.label())),
     }
 }
 
@@ -515,6 +515,12 @@ pub fn plain_harness(harness: Option<Harness>) -> Result<Harness, String> {
 /// Mirador learns each turn's thread where it cannot read the process's
 /// open files (Windows), the person's own notify still run after it.
 ///
+/// The task is the first message: an argument of its own for Claude Code
+/// and Codex; for Pi too, after `--`, the end of its options, so a task
+/// starting with `-` is not read as one; and `--prompt` for OpenCode,
+/// whose TUI takes no message otherwise. Pi and OpenCode start
+/// only plain: a role cannot name them yet (`roles::problem_of`).
+///
 /// It is typed in, so every argument is put on one line and loses its
 /// control characters: a newline would submit the line half-quoted, and a
 /// stray `^C` would be read as a keystroke before the shell ever saw quotes.
@@ -533,6 +539,8 @@ pub fn launch_command(
     let harness = role.map_or(plain, |r| r.harness);
     let mut line = String::from(match harness {
         Harness::Codex => "codex",
+        Harness::Pi => "pi",
+        Harness::OpenCode => "opencode",
         _ => "claude",
     });
     let arg = |line: &mut String, flag: &str, value: &str| {
@@ -605,7 +613,12 @@ pub fn launch_command(
     if let (Harness::Codex, Some(notify)) = (harness, notify) {
         arg(&mut line, "-c", &codex_notify_override(notify));
     }
-    arg(&mut line, "", task.unwrap_or(""));
+    let message = match harness {
+        Harness::OpenCode => "--prompt",
+        Harness::Pi => "--",
+        _ => "",
+    };
+    arg(&mut line, message, task.unwrap_or(""));
     line
 }
 
@@ -1345,12 +1358,27 @@ mod tests {
         );
     }
 
+    /// Pi takes its first message as an argument, after `--` so a task
+    /// that starts with `-` is not an option; OpenCode's TUI as
+    /// `--prompt`. With no task, either starts bare.
+    #[test]
+    fn starts_plain_pi_and_opencode_with_the_task_as_their_first_message() {
+        let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+        assert_eq!(plain_harness(Some(Harness::Pi)), Ok(Harness::Pi));
+        assert_eq!(plain_harness(Some(Harness::OpenCode)), Ok(Harness::OpenCode));
+        assert_eq!(launch_command(None, Harness::Pi, None, None, None, Some("fix it's\nbug"), None, None, q), r"pi -- 'fix it'\''s bug'");
+        assert_eq!(launch_command(None, Harness::Pi, None, None, None, Some("-v fix it"), None, None, q), "pi -- '-v fix it'");
+        assert_eq!(launch_command(None, Harness::OpenCode, None, None, None, Some("do x"), None, None, q), "opencode --prompt 'do x'");
+        assert_eq!(launch_command(None, Harness::Pi, None, None, None, None, None, None, q), "pi");
+        assert_eq!(launch_command(None, Harness::OpenCode, None, None, None, Some(" "), None, None, q), "opencode");
+    }
+
     #[test]
     fn starts_plain_codex_when_asked_and_refuses_harnesses_it_cannot_start() {
         let q = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
         assert_eq!(plain_harness(None), Ok(Harness::Claude));
         assert_eq!(plain_harness(Some(Harness::Codex)), Ok(Harness::Codex));
-        assert!(plain_harness(Some(Harness::OpenCode)).is_err());
+        assert!(plain_harness(Some(Harness::Gemini)).unwrap_err().contains("Claude Code, Codex, Pi or OpenCode"));
         assert_eq!(launch_command(None, Harness::Codex, None, None, None, Some("go"), None, None, q), "codex 'go'");
         // It may reach the app as a Codex role may.
         let socket = Some((":read-only", std::path::Path::new("/tmp/mira.sock")));

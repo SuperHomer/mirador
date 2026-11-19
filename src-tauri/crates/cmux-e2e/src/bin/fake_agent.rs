@@ -40,6 +40,9 @@
 //! Mirador on Windows. Started with a `-c notify=[…]`, it runs that
 //! program after each turn with Codex's JSON appended, the turn's thread
 //! in it.
+//!
+//! As `pi` or `opencode` it is a `codex` with no rollout and no notify
+//! of its own: it logs how it was started, and echoes each message.
 
 use std::io::{BufRead, Write};
 use std::time::Duration;

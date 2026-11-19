@@ -292,6 +292,32 @@ fn a_codex_role_pane_comes_back_resuming_its_thread() {
     assert!(!args.iter().any(|a| a == "look at main"), "{args:?}");
 }
 
+/// Pi and OpenCode start plain from `mira agent new --harness`, each with
+/// the task as its first message the way its CLI takes one — Pi as an
+/// argument after `--`, OpenCode's TUI as `--prompt` — and are listed as
+/// what they are from the start.
+#[test]
+fn plain_pi_and_opencode_start_with_their_task() {
+    e2e!();
+    let mut sb = Sandbox::new("piopencode");
+    sb.launch();
+    let first = sb.first_pane();
+    for (harness, kind, args, listed) in [
+        ("pi", "pi", vec!["--", "do x"], "pi"),
+        ("opencode", "opencode", vec!["--prompt", "do x"], "openCode"),
+    ] {
+        let (code, out, err) = sb.mira(Some(&first), &["agent", "new", "--harness", harness, "do x"]);
+        assert_eq!(code, 0, "{harness}: {err}");
+        let pane = out.trim().to_string();
+        let started = sb.wait_for(&format!("{kind} to start"), LONG, || sb.events("start", &pane).into_iter().next());
+        assert_eq!(started["kind"], kind, "{started}");
+        assert_eq!(started["args"], serde_json::json!(args), "{started}");
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+        let agent = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));
+        assert_eq!(agent["harness"], listed, "{agent}");
+    }
+}
+
 /// The editor for role, way and team files opens beside the pane it is
 /// asked from, knowing that pane's directory, and is still an editor after
 /// a relaunch. What it does inside is the webview's, out of reach here;
