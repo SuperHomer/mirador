@@ -1804,20 +1804,12 @@ pub fn open_agent(
     open_agent_from(app, state, role, task, pane_id, tab, harness, None, "you".into(), remote)
 }
 
-/// The pane something is started from: `pane_id` when it is one, else the
-/// focused pane.
-fn agent_source(state: &AppState, pane_id: Option<String>) -> String {
-    pane_id
-        .filter(|id| state.meta.lock().unwrap().contains_key(id))
-        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane())
-}
-
 /// Whether `role`, asked for from `source`, joins the team running in
 /// `source`'s tab, as `team add` would make it: a role, split into a
 /// team's tab rather than opened in a tab of its own. It then runs where
 /// the team does, so the person is not asked where.
-fn joins_team(state: &AppState, role: Option<&str>, source: &str, tab: bool) -> bool {
-    role.map(str::trim).is_some_and(|r| !r.is_empty()) && !tab && crate::teams::team_here(state, Some(source)).is_ok()
+fn joins_team(state: &AppState, role: &str, source: &str, tab: bool) -> bool {
+    !role.trim().is_empty() && !tab && crate::teams::team_here(state, Some(source)).is_ok()
 }
 
 /// The remote the pane `pane_id` is on, as an agent or a team the person
@@ -1867,9 +1859,8 @@ pub fn start_where(
             cmux_core::teams::seats(def).iter().all(|seat| refuse_on_remote(&catalog, &seat.role).is_ok())
         })
     } else if let Some(role) = role.as_deref() {
-        let cwd = state.meta.lock().unwrap().get(&source).and_then(|m| m.cwd.clone()).or_else(cmux_core::config::default_cwd);
-        let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
-        !joins_team(&state, Some(role), &source, false) && refuse_on_remote(&catalog, role).is_ok()
+        let catalog = cmux_core::roles::catalog(crate::teams::cwd_of(&state, Some(&source)).as_deref().map(std::path::Path::new));
+        !joins_team(&state, role, &source, false) && refuse_on_remote(&catalog, role).is_ok()
     } else {
         cmux_core::agents::plain_harness(harness)? == cmux_protocol::Harness::Claude
     };
@@ -1913,9 +1904,12 @@ pub fn open_agent_from(
         return Err("a role names its own harness: give a role or a harness, not both".into());
     }
     let plain = cmux_core::agents::plain_harness(harness)?;
-    let source = agent_source(&state, pane_id);
+    // Started from `pane_id` when it is a pane, else from the focused one.
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
     if let Some(role) = role.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
-        if joins_team(&state, Some(role), &source, tab) {
+        if joins_team(&state, role, &source, tab) {
             if remote.is_some() {
                 return Err("a role on a remote in a team's tab is not done yet: start it in a tab of its own (--tab), or from another tab".into());
             }
@@ -1924,13 +1918,7 @@ pub fn open_agent_from(
     }
     // The agent works where it was asked from, whichever way it opens, and
     // gets the roles that directory sees: its repository's, then yours.
-    let cwd = state
-        .meta
-        .lock()
-        .unwrap()
-        .get(&source)
-        .and_then(|m| m.cwd.clone())
-        .or_else(cmux_core::config::default_cwd);
+    let cwd = crate::teams::cwd_of(&state, Some(&source));
     if let Some((host, dir)) = remote {
         if plain != cmux_protocol::Harness::Claude {
             return Err("Codex on a remote is not done yet: start Claude Code there".into());

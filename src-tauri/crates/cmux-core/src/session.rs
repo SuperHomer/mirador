@@ -52,7 +52,9 @@ pub struct SessionPane {
     /// back to the same agent if it is still running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_command: Option<String>,
-    /// The directory a remote shell pane starts in on `remote_host`.
+    /// The directory a remote pane, a shell or an agent, was opened in on
+    /// `remote_host`: where a restored shell starts again, and where a
+    /// shell split from either starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_dir: Option<String>,
     #[serde(default)]
