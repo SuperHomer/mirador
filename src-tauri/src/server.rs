@@ -673,13 +673,14 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::browser::wait(app, &pane, &until, Duration::from_secs(timeout_secs.unwrap_or(10)))?;
             Ok(Value::Null)
         }
-        Request::SshOpen { host, target } => {
+        Request::SshOpen { host, target, dir } => {
             let pane_id = crate::commands::open_ssh(
                 app.clone(),
                 app.state(),
                 None,
                 target.as_deref() == Some("tab"),
                 host,
+                dir,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }

@@ -919,12 +919,15 @@ export const roleHint = (r: AgentRole): string =>
         .filter(Boolean)
         .join(" · ");
 
-/** Starts a team in a tab of its own; `task` goes to its lead. */
+/** Starts a team in a tab of its own; `task` goes to its lead. With
+ *  `onRemote`, every member runs on the remote `paneId` is on (the Where
+ *  step's choice; Rust reads the remote from that pane). */
 export const startTeam = (
   team: string,
   task: string | null,
   paneId: string | null,
-) => invoke<string>("start_team", { team, task, paneId });
+  onRemote = false,
+) => invoke<string>("start_team", { team, task, paneId, onRemote });
 
 /** What a team tells its members, in estimated tokens, and the least that
  *  costs per turn (`cmux_protocol::TeamWeight`). A lower bound: the
@@ -1207,7 +1210,26 @@ export const openAgent = (
   paneId: string | null,
   tab: boolean,
   harness: Harness | null = null,
-) => invoke<string>("open_agent", { role, task, paneId, tab, harness });
+  onRemote = false,
+) => invoke<string>("open_agent", { role, task, paneId, tab, harness, onRemote });
+
+/** Where something started from a remote pane could run instead of here:
+ *  the pane's remote, named by the saved computer there, else its host. */
+export interface StartWhere {
+  label: string;
+  host: string;
+  dir: string;
+}
+/** Whether a role, a plain harness or a team started from `paneId` could
+ *  run on that pane's remote, and where; null when it can only run here
+ *  (a local pane, Codex, a role the remote refuses, a role joining its
+ *  tab's team). `start_where`. */
+export const startWhere = (
+  paneId: string | null,
+  role: string | null,
+  harness: Harness | null,
+  team: string | null,
+) => invoke<StartWhere | null>("start_where", { paneId, role, harness, team });
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });
@@ -1244,8 +1266,10 @@ export const listWorktrees = (paneId: string) =>
   invoke<Worktree[]>("list_worktrees", { paneId });
 export const setDiffWorktree = (paneId: string, worktree: string) =>
   invoke<void>("set_diff_worktree", { paneId, worktree });
-export const openSsh = (paneId: string | null, tab: boolean, host: string) =>
-  invoke<string>("open_ssh", { paneId, tab, host });
+/** An SSH pane on `host`: a split of `paneId`, or a tab; its shell starts in
+ *  `dir` there when given (a saved computer's), else in the home. */
+export const openSsh = (paneId: string | null, tab: boolean, host: string, dir: string | null = null) =>
+  invoke<string>("open_ssh", { paneId, tab, host, dir });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
 
 /** A computer agents can work on: an ssh host and the directory there. */

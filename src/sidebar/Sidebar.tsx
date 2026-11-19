@@ -24,7 +24,7 @@ import {
   TokenTotals,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
 import { useClaudeStore } from "../state/claudeStore";
 import { opensInTab, useConfigStore } from "../state/configStore";
 import { STATUS_LABEL, StatusMark, StatusPips } from "../agents/StatusMark";
@@ -116,7 +116,7 @@ export function Sidebar() {
         // The new tab's terminal takes the keyboard when it mounts; until
         // then it stays where it was, as with the tab bar's + New.
         onMouseDown={(e) => e.preventDefault()}
-        onClick={() => void newTab()}
+        onClick={() => void newTab().catch((e) => reportFailure("New tab", e))}
       >
         <span className="tab-index">+</span>
         <span className="sidebar-new-tab-label">New tab</span>

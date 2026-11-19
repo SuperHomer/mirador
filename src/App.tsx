@@ -15,6 +15,7 @@ import { useZoomWheel } from "./keymap/useZoomWheel";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
 import { BoardHost, TabLayer } from "./layout/BoardHost";
+import { ErrorBar } from "./layout/ErrorBar";
 import { CommandPalette } from "./palette/CommandPalette";
 import { ActivityPanel } from "./agents/ActivityPanel";
 import { NotificationPanel } from "./notifications/NotificationPanel";
@@ -165,35 +166,41 @@ export default function App() {
       style={{ "--term-bg": config.colors.background } as React.CSSProperties}
     >
       <Sidebar />
-      <BoardHost board={board}>
-        {snapshot.tabs.map((tab) => (
-          <TabLayer
-            key={tab.id}
-            tab={tab}
-            board={board}
-            current={tab.id === snapshot.activeTab}
-          >
-            <SplitLayer
+      {/* The error bar takes a row of its own above the panes rather than
+          floating over them, where a browser page, a native view, would
+          cover it. */}
+      <div className="app-main">
+        <ErrorBar />
+        <BoardHost board={board}>
+          {snapshot.tabs.map((tab) => (
+            <TabLayer
+              key={tab.id}
               tab={tab}
               board={board}
-              active={board || tab.id === snapshot.activeTab}
               current={tab.id === snapshot.activeTab}
-              agents={snapshot.agents}
-              unreadPanes={snapshot.unreadPanes}
-              agentPanes={snapshot.agentPanes}
-              browserPanes={snapshot.browserPanes}
-              remotePanes={snapshot.remotePanes}
-              diffPanes={snapshot.diffPanes}
-              whatsNewPanes={snapshot.whatsNewPanes}
-              graphPanes={snapshot.graphPanes}
-              agentEditorPanes={snapshot.agentEditorPanes ?? []}
-              settingsPanes={snapshot.settingsPanes ?? []}
-              usagePanes={snapshot.usagePanes ?? []}
-              computersPanes={snapshot.computersPanes ?? []}
-            />
-          </TabLayer>
-        ))}
-      </BoardHost>
+            >
+              <SplitLayer
+                tab={tab}
+                board={board}
+                active={board || tab.id === snapshot.activeTab}
+                current={tab.id === snapshot.activeTab}
+                agents={snapshot.agents}
+                unreadPanes={snapshot.unreadPanes}
+                agentPanes={snapshot.agentPanes}
+                browserPanes={snapshot.browserPanes}
+                remotePanes={snapshot.remotePanes}
+                diffPanes={snapshot.diffPanes}
+                whatsNewPanes={snapshot.whatsNewPanes}
+                graphPanes={snapshot.graphPanes}
+                agentEditorPanes={snapshot.agentEditorPanes ?? []}
+                settingsPanes={snapshot.settingsPanes ?? []}
+                usagePanes={snapshot.usagePanes ?? []}
+                computersPanes={snapshot.computersPanes ?? []}
+              />
+            </TabLayer>
+          ))}
+        </BoardHost>
+      </div>
       <CommandPalette />
       <NotificationPanel />
       <ActivityPanel />

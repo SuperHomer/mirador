@@ -95,6 +95,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "release_image",
     "open_whats_new",
     "open_ssh",
+    "start_where",
     "ssh_hosts",
     "set_browser_bounds",
     "browser_screenshot",

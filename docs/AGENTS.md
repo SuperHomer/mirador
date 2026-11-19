@@ -945,6 +945,7 @@ mira ssh hosts                     # aliases from ~/.ssh/config
 mira ssh open prod                 # remote pane running `ssh -tt prod`
 mira ssh open "-p 2222 user@box"   # or a full destination with options
 mira ssh open prod --tab
+mira ssh open prod --tab --dir '~/work/app'   # its shell starts there; quote the ~
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
 ```
@@ -963,6 +964,19 @@ Disconnects leave a plain SSH pane idle with `[press any key to
 reconnect]`; restarting Mirador restores remote panes idle too — it never
 re-opens an SSH session behind your back. (An agent's pane on a remote
 reconnects by itself: below.)
+
+**`mira split` of a remote pane is remote.** Splitting is a property of
+the pane split: as a split of a local pane opens in its directory, a
+split of an SSH pane is another shell on the same host, in the directory
+the pane was opened in (`--dir`, or a saved computer's), never where its
+shell has gone since, which the app does not know; with none, the home
+there. A split of a remote agent's pane is a shell on its host, in the
+agent's directory. An agent driving `mira` should expect this: `mira
+split --pane <ssh pane>` is not a local shell. `split --command` and
+`run` still run here, whatever pane they come from, and `new-tab` is
+local. A remote pane from an older session has no directory, so its
+splits start in the home (an agent's, until restarted). On Windows, with
+no ControlMaster, each split logs in again.
 
 ### Saved computers
 
@@ -1021,11 +1035,14 @@ the directory there the agents work in; the two go together. `--on
 "/srv/app" }`), looked up by the app in its own config, since a `mira`
 on a remote has none. It is refused with `--host` or `--dir`, and an
 unknown name is refused with the names there are; neither opens a pane.
-The remote needs Linux on x86_64 or aarch64 (other systems: see its
-`mira`, below), ssh by key or agent (nothing answers a password
-prompt), and Claude Code, installed and signed in (`claude setup-token`
-for agents nobody sits in front of). Nothing of this machine's logins
-is copied there.
+`agent new` and `team start` ask nothing and follow no pane: without
+`--host` or `--on` they run here, even when run from a remote pane. (In
+the app, starting one from a remote pane asks *This computer* or *On
+<name>*; that is the person's question, not the socket's.) The remote
+needs Linux on x86_64 or aarch64 (other systems: see its `mira`, below),
+ssh by key or agent (nothing answers a password prompt), and Claude
+Code, installed and signed in (`claude setup-token` for agents nobody
+sits in front of). Nothing of this machine's logins is copied there.
 
 Roles and teams are this computer's: the ones the calling pane's
 directory sees, as for agents here; the remote's own `.mirador` is not
@@ -1127,9 +1144,8 @@ Not done yet: Codex there; a role that keeps only some skills or
 plugins (listing them runs Claude Code here, which says nothing of the
 remote's); resuming a save of a member there (`team save` and `agent
 save` write one, but `team resume` and `agent resume` start it on this
-computer, where its conversation is not); a Windows remote, or Mirador
-on Windows driving one; and picking a saved computer for an agent or a
-team from the app, rather than with `--on`.
+computer, where its conversation is not); and a Windows remote, or
+Mirador on Windows driving one.
 
 ### How a remote reaches this app
 

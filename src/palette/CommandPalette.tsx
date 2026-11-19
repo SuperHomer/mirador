@@ -17,8 +17,9 @@ import {
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { ActionGroup, actions, openComputersPane } from "../keymap/actions";
 import { useConfigStore } from "../state/configStore";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
+import { startHere } from "../agents/startHere";
 
 interface Entry {
   id: string;
@@ -178,10 +179,10 @@ export function CommandPalette() {
       command: true,
       run: () => {
         if (c.target === "tab") {
-          void newTab(c.command);
+          void newTab(c.command).catch((e) => reportFailure(c.name, e));
         } else {
           const pane = focusedPane();
-          if (pane) void splitPane(pane, "row", c.command);
+          if (pane) void splitPane(pane, "row", c.command).catch((e) => reportFailure(c.name, e));
         }
       },
     }));
@@ -210,8 +211,9 @@ export function CommandPalette() {
           title: r.name,
           hint: roleHint(r),
           run: () => {
-            openAgent(r.name, null, focusedPane(), false).catch((e) =>
-              console.error(`mirador: role ${r.name}: ${e}`),
+            const pane = focusedPane();
+            startHere(pane, { role: r.name }, `Start ${r.name}`, (remote) =>
+              openAgent(r.name, null, pane, false, null, remote !== null),
             );
           },
         })),
@@ -244,9 +246,8 @@ export function CommandPalette() {
               .filter(Boolean)
               .join(" · "),
         run: () => {
-          startTeam(t.name, null, focusedPane()).catch((e) =>
-            console.error(`mirador: team ${t.name}: ${e}`),
-          );
+          const pane = focusedPane();
+          startHere(pane, { team: t.name }, `Start team ${t.name}`, (remote) => startTeam(t.name, null, pane, remote !== null));
         },
       })),
     };
@@ -266,8 +267,8 @@ export function CommandPalette() {
         run: () => void openSsh(null, false, host),
       })),
     };
-    // The saved computers (mirador.json), to open an SSH pane on one. Adding
-    // and changing them is the computers pane's.
+    // The saved computers (mirador.json), each opening a tab on it, in its
+    // directory. Adding and changing them is the computers pane's.
     const computerStep: Step = {
       id: "computers",
       title: "Pane: SSH to a Computer…",
@@ -280,8 +281,10 @@ export function CommandPalette() {
         ...computers.map((c) => ({
           id: `computer:${c.name}`,
           title: `${c.name} · ${c.host} · ${c.dir}`,
-          hint: "open SSH pane",
-          run: () => void openSsh(null, false, c.host),
+          hint: "open in a new tab",
+          // A tab of its own, its shell in the computer's directory: a
+          // remote terminal like any other, its splits on it too.
+          run: () => void openSsh(null, true, c.host, c.dir).catch((e) => reportFailure(`Open ${c.name}`, e)),
         })),
         {
           id: "computer:add",
@@ -297,7 +300,29 @@ export function CommandPalette() {
     return { entries: [...base, ...custom, ...tabEntries], steps };
   }, [customCommands, roles, teams, hosts, computers, keybindings, tabs]);
 
-  const step = steps.find((st) => st.id === stepId) ?? null;
+  // A start from a remote pane asks where it runs (`startHere`): this
+  // computer first, then the pane's remote with its host and directory.
+  // Never listed at the top: only a start opens it.
+  const pending = useUiStore((s) => s.where);
+  const whereStep = useMemo<Step | null>(() => pending && {
+    id: "where",
+    title: "Where",
+    hint: "",
+    group: "agents",
+    crumb: pending.label,
+    placeholder: "Where it runs…",
+    empty: "No matching place",
+    entries: [
+      { id: "where:here", title: "This computer", run: () => pending.go(false) },
+      {
+        id: "where:remote",
+        title: `On ${pending.remote.label}`,
+        hint: `${pending.remote.host} · ${pending.remote.dir}`,
+        run: () => pending.go(true),
+      },
+    ],
+  }, [pending]);
+  const step = stepId === "where" ? whereStep : (steps.find((st) => st.id === stepId) ?? null);
 
   const sections = useMemo<Section[]>(() => {
     const rank = <T,>(items: T[], text: (t: T) => string) =>
@@ -413,6 +438,8 @@ export function CommandPalette() {
     inputRef.current?.focus();
   };
   const back = () => {
+    // Back from Where is no choice at all: the start is dropped.
+    if (step?.id === "where") return close();
     setStepId(null);
     setQuery("");
   };
@@ -424,7 +451,8 @@ export function CommandPalette() {
     }
     // By the id it has inside its step, so a deep entry and the same
     // entry picked in its step are one recent command.
-    rememberRecent(row.entry.id.replace(/^deep:/, ""));
+    // Where's rows are a choice for one start, not commands to run again.
+    if (step?.id !== "where") rememberRecent(row.entry.id.replace(/^deep:/, ""));
     close();
     row.entry.run();
   };

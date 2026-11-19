@@ -27,11 +27,20 @@ enum Command {
         command: Option<String>,
     },
     /// Split a pane (the focused one unless --pane is given).
+    ///
+    /// The new shell opens where the pane it splits is: a split of a local
+    /// pane in its current directory, a split of an SSH pane on the same
+    /// remote, in the directory the pane was opened in (the home there
+    /// with none).
     Split {
+        /// row or column: which way the pane is split, the new one beside
+        /// it or below it.
         #[arg(long, default_value = "row")]
         dir: String,
         #[arg(long)]
         pane: Option<String>,
+        /// Run this instead of a shell. It runs here, on this computer,
+        /// even when split from an SSH pane.
         #[arg(short, long)]
         command: Option<String>,
     },
@@ -561,6 +570,11 @@ enum SshAction {
         /// Open in a new tab instead of a split.
         #[arg(long)]
         tab: bool,
+        /// The directory there its shell starts in, as a saved computer's
+        /// does; the home without it. Quote a ~ ('~/work') so this shell
+        /// does not expand it to this computer's home.
+        #[arg(long, allow_hyphen_values = true)]
+        dir: Option<String>,
     },
     /// List host aliases from ~/.ssh/config.
     Hosts,
@@ -1056,9 +1070,10 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Ssh { action } => match action {
-            SshAction::Open { host, tab } => Request::SshOpen {
+            SshAction::Open { host, tab, dir } => Request::SshOpen {
                 host,
                 target: tab.then(|| "tab".to_string()),
+                dir,
             },
             SshAction::Hosts => Request::SshHosts,
             SshAction::Forward { app: true, pane, .. } => {

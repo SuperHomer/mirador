@@ -305,6 +305,18 @@ inconsistency reviewers will notice.
   start and the computer test both go through it, so the test never says
   found where the start's `cd` fails. A new place that hands a remote
   directory to a shell goes through it too, never through plain quoting.
+- **A start on a remote from the app is decided in Rust, from the pane.**
+  `start_where` says whether a start from a pane has a remote to offer;
+  the person's `open_agent` and `start_team` then take only `on_remote`
+  and read the host and directory again from the pane given
+  (`remote_of_source`). Never a host from the page, and never the
+  focused pane in its place: the pane may close while the palette asks,
+  leaving focus on another host. The socket's arms call the `_from`
+  functions with `--host`/`--dir`, or `--on`'s (`server::remote_of`),
+  and ask nothing; the page never passes a host. The page's half: every
+  start in the app goes through `startHere` (`src/agents/startHere.ts`).
+  A new menu that calls `openAgent` or `startTeam` directly starts here
+  from a remote pane without asking, and nothing fails to say so.
 
 ## Security boundaries
 

@@ -94,7 +94,8 @@ downloads, the feature tour and the keybinding reference.
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
   it, reads its console errors — while you watch (`mira browser …`)
 - **Remote workspaces**: `mira ssh open <host>` panes run the system ssh
-  (agent auth, 2FA, ProxyJump all work); ControlMaster-backed port
+  (agent auth, 2FA, ProxyJump all work); a saved computer opens in a tab,
+  and a split there is another shell on it; ControlMaster-backed port
   forwarding brings remote dev servers to your browser pane; agents and
   whole teams can run there too, their tabs and board here
 - **Automation socket**: every action drivable via the `mira` CLI / Unix socket
@@ -844,17 +845,19 @@ and tests them, and keeps them in mirador.json:
 ```
 
 A name is letters, digits, `-`, `_` and `.`, and no two computers share
-one. `mira agent new --on <name>` and `mira team start --on <name>` run an
-agent or a team on a saved computer, its host and directory standing in
-for `--host` and `--dir` (*Teams on a remote computer*, below). Picking
-one for them from the app is not done yet.
+one. From the app, an agent or a team runs on a computer when you start
+it from a pane there (*Remote terminals*, below). From `mira`, `mira
+agent new --on <name>` and `mira team start --on <name>` run it on a
+saved computer, its host and directory standing in for `--host` and
+`--dir` (*Teams on a remote computer*, below).
 
 In the pane, *+ Add a computer* — or the palette's *Pane: Add a Remote
 Computer* — starts a new one: a name, the SSH host (your `~/.ssh/config`
 aliases are offered; anything `ssh` takes can be typed) and the
 directory. A `~` in the directory is the home there: `~/work/app` is
 that home's `work/app`. `~user` is not expanded. *Pane: SSH to a
-Computer…* opens an SSH pane on a saved one.
+Computer…* opens a saved one in a new tab, its shell in the computer's
+directory.
 
 **Test connection** connects as an agent's start would — one
 connection, never a password prompt, nothing written there — and
@@ -882,10 +885,47 @@ mira computer update devbox --dir /srv/app                 # --name, --host, --d
 mira computer test devbox                                  # or --host devbox --dir '~/work/app', before saving
 mira computer remove devbox
 mira computer open                                         # the pane; --tab or --split
+mira ssh open devbox --tab --dir '~/work/app'               # the same tab by hand: ssh open takes the host and directory, not a computer's name
 ```
 
 `mira computer test` prints the same three answers, a line each, and
 exits 0 only when agents can run there.
+
+### Remote terminals
+
+A remote pane is a terminal like any other. A split of it — from the
+keys, *+ New*, the board or `mira split` — is another shell on the same
+remote, in the directory the pane was opened in: not where its shell has
+gone since, which the app cannot know, where a local split follows its
+pane's current directory. A split of a remote agent's pane is a shell on
+its host, in the directory the agent works in. A split with a command
+(`mira split --command`, `mira run`) runs here, and a new tab is local.
+
+Starting an agent or a team from a remote pane asks where it runs, in
+the palette: *This computer*, or *On devbox* — the saved computer with
+that host and directory, else the host — with the directory beside it.
+It is asked wherever the app starts one: the palette, *+ New*, the
+empty wall and the board's frame menu. Esc starts nothing. There is no
+question, and it starts here, when there is no choice:
+
+- from a local pane;
+- for Codex, a role the remote cannot take (one that keeps only some
+  skills or plugins), or a team with such a member;
+- for a role started in a team's tab: it joins that team, and runs
+  where the team runs;
+- from the role and team editor, whose own pane is never remote;
+- on Windows, where agents on a remote are not done yet.
+
+`mira` asks nothing: `mira agent new` and `mira team start` run where
+`--host` and `--dir`, or `--on`, say, or here, whatever pane they are
+run from. When a start fails — a remote that cannot take it, a pane
+closed meanwhile — a bar at the top of the window says why, until you
+dismiss it.
+
+A remote pane from a session before this has no directory: its splits
+start in the home there, and a remote agent's until it is restarted.
+On Windows, with no ControlMaster, each split on a host that asks for a
+password or a second factor logs in again.
 
 ### Teams on a remote computer
 
@@ -953,9 +993,8 @@ machine's logins is copied.
 Not done yet: Codex on a remote; a role that keeps only some skills or
 plugins; resuming a save of a member there (`team save` and `agent save`
 write one, but a resume starts it on this computer, where its
-conversation is not); Windows remotes, or Mirador on Windows driving one;
-and picking a saved computer for an agent or a team from the app, rather
-than with `--on`.
+conversation is not); and Windows remotes, or Mirador on Windows
+driving one.
 [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has how it works.
 
 ## Terminals that keep running when you quit

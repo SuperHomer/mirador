@@ -118,6 +118,11 @@ pub struct PaneMeta {
     /// `remote_host` instead of a login shell there, attaching to the
     /// agent's holder there (`mira attach <pane>`).
     pub remote_command: Option<String>,
+    /// Remote pane: the directory it works in on `remote_host`, the one it
+    /// was opened in there. A shell's `ssh -tt` starts there
+    /// (`ssh::shell_in`); an agent's pane runs `remote_command`, and this
+    /// is where a shell split from it starts.
+    pub remote_dir: Option<String>,
     /// Diff pane: the repository root its diff is taken in. Paired with
     /// `diff_spec` — both set, or neither.
     pub diff_repo: Option<String>,
@@ -141,6 +146,23 @@ impl PaneMeta {
     /// and has not exited.
     pub fn is_agent(&self) -> bool {
         self.agent_harness.is_some() || self.claude_marked()
+    }
+
+    /// Where a shell split from this pane runs: on its remote host, in the
+    /// directory it was opened in there, when it is a remote pane, a shell
+    /// or an agent. Not where its shell has gone since, which the app does
+    /// not know: a local split follows its pane's current directory, a
+    /// remote one cannot. A remote pane with no directory known gives the
+    /// home there. None for a local pane.
+    pub fn split_remote(&self) -> Option<(String, Option<String>)> {
+        Some((self.remote_host.clone()?, self.remote_dir.clone()))
+    }
+
+    /// Where an agent or a team started from this pane runs when the person
+    /// picks its remote: the pane's host, in its directory there, or the
+    /// home (`~`) with none known. None for a local pane.
+    pub fn start_remote(&self) -> Option<(String, String)> {
+        self.split_remote().map(|(host, dir)| (host, dir.unwrap_or_else(|| "~".into())))
     }
 
     /// What it runs. A `codex:` session is a Codex's; otherwise the
@@ -1479,6 +1501,27 @@ mod tests {
         ws.close_tab(&id);
         assert_eq!(ws.tabs[0].frame, BoardPoint { x: 700.0, y: -40.0 });
         assert_board_consistent(&ws);
+    }
+
+    #[test]
+    fn a_split_of_a_remote_pane_is_on_its_remote_in_its_directory() {
+        let local = PaneMeta { cwd: Some("/home/me".into()), ..Default::default() };
+        assert_eq!(local.split_remote(), None, "a local pane splits here");
+        let shell = PaneMeta { remote_host: Some("box".into()), remote_dir: Some("~/work".into()), ..Default::default() };
+        assert_eq!(shell.split_remote(), Some(("box".into(), Some("~/work".into()))));
+        let agent = PaneMeta { remote_command: Some("'/m' attach p1".into()), ..shell.clone() };
+        assert_eq!(agent.split_remote(), Some(("box".into(), Some("~/work".into()))), "a shell in the agent's directory");
+        let home = PaneMeta { remote_host: Some("-p 2222 me@box".into()), ..Default::default() };
+        assert_eq!(home.split_remote(), Some(("-p 2222 me@box".into(), None)), "the home there");
+    }
+
+    #[test]
+    fn an_agent_from_a_remote_pane_starts_in_its_directory_or_the_home() {
+        assert_eq!(PaneMeta::default().start_remote(), None, "a local pane: no remote to offer");
+        let shell = PaneMeta { remote_host: Some("box".into()), remote_dir: Some("~/work".into()), ..Default::default() };
+        assert_eq!(shell.start_remote(), Some(("box".into(), "~/work".into())));
+        let home = PaneMeta { remote_host: Some("box".into()), ..Default::default() };
+        assert_eq!(home.start_remote(), Some(("box".into(), "~".into())), "the home with no directory");
     }
 
     /// A camera set from outside is the last word over a save the board

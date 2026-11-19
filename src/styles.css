@@ -733,10 +733,32 @@ body,
 
 /* ---------- Split layout ---------- */
 
+/* Beside the sidebar: the error bar, when there is one, then the panes. */
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* What the person asked for that failed (ErrorBar): the editor's error
+   bar, as a row of the window's. */
+.app-error {
+  border-bottom: 1px solid var(--surface);
+  background: var(--bg-alt);
+}
+
+.app-error span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .tabs-host {
   flex: 1;
   position: relative;
   min-width: 0;
+  min-height: 0;
 }
 
 .tab-layer,
