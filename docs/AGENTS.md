@@ -1109,6 +1109,10 @@ after 15s), back to 2s once a connection has held a minute. A key
 retries at once. Reattached, the pane shows what the agent printed
 meanwhile. A send that meets the pane between tries is refused: `<name>
 on <host> is not attached right now: send again once its pane is back`.
+A pane opened moments ago (by `agent new`, `team add` or a restart) has
+its agent started before it attaches; a send or clear then waits for the
+attach, as long as it would wait for an agent to start, rather than being
+refused.
 The agent's own exit shows as a command's does, `[done ✓]` or
 `[exit N]`, and is not retried.
 
