@@ -16,6 +16,10 @@
 //! screen: Pi's session files, and OpenCode's sessions as `opencode
 //! session export` gives them.
 
+// The sandbox symlinks the person's node, fd and rg into its HOME, and the
+// suite runs on macOS only: none of this builds on Windows.
+#![cfg(unix)]
+
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
