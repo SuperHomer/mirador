@@ -778,6 +778,21 @@ fn a_team_runs_on_the_remote() {
         let members = sb.teams().first()?["members"].as_array()?.clone();
         members.iter().find(|m| m["pane"] == added.as_str()).and_then(|m| m["name"].as_str().map(String::from))
     });
+    // A message sent at once, as a lead does right after `team add`,
+    // waiting for nothing: the agent is started over ssh first, and its
+    // pane attaches to it only after. The send waits for the attach
+    // rather than being refused.
+    sb.call(Request::AgentSend {
+        to: name.clone(),
+        message: "hello, new one".into(),
+        pane_id: Some(planner.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message to the new member", LONG, || {
+        sb.events("message", &added).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello, new one")))
+    });
     let start = sb.wait_for("the new member's start", LONG, || sb.events("start", &added).into_iter().next());
     assert_eq!(start["cwd"], dir.as_str(), "{start}");
     let args = sb.nth_start(&added, 1);
@@ -791,17 +806,6 @@ fn a_team_runs_on_the_remote() {
     sb.wait_for("the new member's status, from its hooks", LONG, || {
         let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
         agents.iter().any(|a| a["paneId"] == added.as_str() && a["remoteHost"] == "box" && !a["status"].is_null()).then_some(())
-    });
-    sb.call(Request::AgentSend {
-        to: name.clone(),
-        message: "hello, new one".into(),
-        pane_id: Some(planner.clone()),
-        force: false,
-        card: None,
-        title: None,
-    });
-    sb.wait_for("the message to the new member", LONG, || {
-        sb.events("message", &added).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello, new one")))
     });
 
     // A Codex member is not done on a remote: refused, and no seat taken.

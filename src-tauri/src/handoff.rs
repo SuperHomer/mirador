@@ -36,6 +36,30 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
     }
 }
 
+/// Waits for the terminal of a remote agent's pane opened moments ago —
+/// by `agent new`, `team add` or a restart — to attach, for no longer than
+/// the app waits for any agent to start (`cmux_core::agents::START_GRACE`).
+/// The agent is started over ssh before the app shows its pane, so its
+/// hooks can report it running while the pane's own `mira attach` is still
+/// to come: a message sent then was refused for a pane about to be back.
+/// One between attaches for any other reason — reconnecting, restored and
+/// waiting for a key, done — is not waited for: nothing says it is coming.
+/// Never asleep holding the lock.
+fn wait_attached(state: &AppState, pane: &str) {
+    while !state.pty.is_running(pane) {
+        let restored = state.restored_panes.lock().unwrap().contains(pane);
+        let opening = state.meta.lock().unwrap().get(pane).is_some_and(|m| {
+            m.remote_command.is_some()
+                && m.remote_host.is_some()
+                && m.agent_started_at.is_some_and(|t| t.elapsed() < cmux_core::agents::START_GRACE)
+        });
+        if restored || !opening {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
 /// How long a Claude Code or Codex agent, once running, is given to show
 /// its input box. It draws one within a second or two of starting, and
 /// `wait_started` has waited for it to start already; a screen still
@@ -186,6 +210,7 @@ pub fn send(
         Ok::<_, String>((m.status(), m.harness()))
     };
     cmux_core::handoff::can_receive(status(state)?.0, force).map_err(|e| format!("{to}: {e}"))?;
+    wait_attached(state, &pane);
     if !state.pty.is_running(&pane) {
         // A remote agent's pane with no terminal is between attaches:
         // reconnecting, waiting for a key, or done. The app cannot tell.
@@ -267,6 +292,7 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
         Ok((m.status(), m.harness()))
     };
     agent(state)?;
+    wait_attached(state, pane);
     if !state.pty.is_running(pane) {
         // As for a send: a remote agent's pane between attaches.
         let remote = state.meta.lock().unwrap().get(pane).filter(|m| m.remote_command.is_some()).and_then(|m| m.remote_host.clone());
