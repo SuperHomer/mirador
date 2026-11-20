@@ -337,7 +337,9 @@ whole catalog, including `problem` on a role that cannot start.
 `effort` goes to Claude Code as `--effort` (`low`, `medium`, `high`,
 `xhigh`, `max`) and to Codex as `-c model_reasoning_effort="…"` (`low`,
 `medium`, `high`, `xhigh`, `max`, `ultra` — Codex itself refuses one the
-model does not support, and only some models take `ultra`). Lower case
+model does not support, and only some models take `ultra`); to Pi as
+`--thinking` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`);
+OpenCode takes none. Lower case
 only: any other value is the role's `problem`, which names the accepted
 ones, and the role is listed greyed out until it is fixed.
 
@@ -356,8 +358,8 @@ permission syntax. They become one settings file passed with `--settings`
 kept with the pane so a resume passes it again. `skills` and `plugins`
 first ask `claude` itself what exists, in the agent's directory; an
 unknown name stops the launch with the list. A repository's role may not
-`allow` tools, and a Codex role may not use any of these yet — both are
-reported as the role's `problem`.
+`allow` tools, and a Codex, Pi or OpenCode role may not use any of these
+yet — both are reported as the role's `problem`.
 
 `agent new` splits the pane it runs in (the focused pane, from outside
 Mirador), opens a shell there and types the agent into it, with the task as
@@ -1165,9 +1167,9 @@ terminal here and reads as exited too, although its agent may still run
 there. A restart then starts it afresh, not on the conversation it had,
 and ends the old agent there with its old pane.
 
-Not done yet: Codex there; a role that keeps only some skills or
-plugins (listing them runs Claude Code here, which says nothing of the
-remote's); resuming a save of a member there (`team save` and `agent
+Not done yet: Codex, Pi or OpenCode there; a role that keeps only some
+skills or plugins (listing them runs Claude Code here, which says nothing
+of the remote's); resuming a save of a member there (`team save` and `agent
 save` write one, but `team resume` and `agent resume` start it on this
 computer, where its conversation is not); and a Windows remote, or
 Mirador on Windows driving one.

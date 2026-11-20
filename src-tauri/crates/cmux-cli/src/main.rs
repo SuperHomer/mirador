@@ -153,8 +153,8 @@ enum Command {
         #[arg(long)]
         split: bool,
     },
-    /// Agents: start a Claude Code one with a role; list and watch every
-    /// agent, Codex, OpenCode and the rest included.
+    /// Agents: start Claude Code, Codex, Pi or OpenCode, with a role or
+    /// plain; list and watch every agent, Gemini CLI and the rest included.
     Agent {
         #[command(subcommand)]
         action: AgentAction,
@@ -400,7 +400,7 @@ enum AgentAction {
         title: Option<String>,
         /// Run it on a computer you reach by ssh (an alias from
         /// ~/.ssh/config, or a destination): Claude Code, plain or as a role
-        /// of this computer's; not Codex yet.
+        /// of this computer's; not Codex, Pi or OpenCode yet.
         #[arg(long, requires = "dir")]
         host: Option<String>,
         /// With --host: the directory there it works in.
@@ -453,9 +453,10 @@ enum AgentAction {
         timeout: u64,
     },
     /// Start an agent on a new conversation, as typing /clear into it does
-    /// (Codex's /new): NAME as `agent send` takes it, else this pane's
-    /// agent. Its role's prompt is kept. A working agent starts over once
-    /// its turn ends; one waiting on a person is refused unless --force.
+    /// (/new for Codex, Pi and OpenCode): NAME as `agent send` takes it,
+    /// else this pane's agent. Its role's prompt is kept. A working agent
+    /// starts over once its turn ends; one waiting on a person is refused
+    /// unless --force.
     Clear {
         name: Option<String>,
         /// The agent's pane, instead of a name.
