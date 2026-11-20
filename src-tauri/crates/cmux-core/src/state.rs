@@ -121,8 +121,17 @@ pub struct PaneMeta {
     /// Remote pane: the directory it works in on `remote_host`, the one it
     /// was opened in there. A shell's `ssh -tt` starts there
     /// (`ssh::shell_in`); an agent's pane runs `remote_command`, and this
-    /// is where a shell split from it starts.
+    /// is where a shell split from it starts when its shell's own is not
+    /// known.
     pub remote_dir: Option<String>,
+    /// Remote pane: the directory its shell last reported there with OSC
+    /// 7, which bash and zsh do not by default. Never saved: a restored
+    /// pane's shell is a new one.
+    pub remote_cwd: Option<String>,
+    /// Remote pane: the pid of its shell there, which its start prints
+    /// (`ssh::shell_in`), so a split can ask the remote where it is. Never
+    /// saved; a reconnect prints it again.
+    pub remote_shell_pid: Option<u32>,
     /// Diff pane: the repository root its diff is taken in. Paired with
     /// `diff_spec` — both set, or neither.
     pub diff_repo: Option<String>,
@@ -148,21 +157,61 @@ impl PaneMeta {
         self.agent_harness.is_some() || self.claude_marked()
     }
 
-    /// Where a shell split from this pane runs: on its remote host, in the
-    /// directory it was opened in there, when it is a remote pane, a shell
-    /// or an agent. Not where its shell has gone since, which the app does
-    /// not know: a local split follows its pane's current directory, a
-    /// remote one cannot. A remote pane with no directory known gives the
-    /// home there. None for a local pane.
+    /// Where a shell split from this pane runs, when it is a remote pane, a
+    /// shell or an agent: on its remote host, in the directory its shell
+    /// last reported there (OSC 7), else the one it was opened in, else
+    /// the home there. A split first asks the remote where the shell is
+    /// ([`Self::remote_shell_to_ask`]) and uses that instead when it
+    /// answers. None for a local pane.
     pub fn split_remote(&self) -> Option<(String, Option<String>)> {
-        Some((self.remote_host.clone()?, self.remote_dir.clone()))
+        Some((self.remote_host.clone()?, self.remote_cwd.clone().or_else(|| self.remote_dir.clone())))
+    }
+
+    /// The host and pid of the remote shell a split should ask the
+    /// directory of: a remote shell pane whose start printed its pid, and
+    /// whose shell has not reported its directory itself, which costs
+    /// nothing to use. Not an agent's pane, whose directory is its agent's.
+    pub fn remote_shell_to_ask(&self) -> Option<(String, u32)> {
+        if self.remote_cwd.is_some() || self.remote_command.is_some() {
+            return None;
+        }
+        Some((self.remote_host.clone()?, self.remote_shell_pid?))
+    }
+
+    /// Forgets the remote shell the pane ran, once its process has ended:
+    /// the pane stays, and so does the connection's master for a while, so
+    /// a split of it would otherwise ask about a pid that may be another
+    /// process's by then.
+    pub fn forget_remote_shell(&mut self) {
+        self.remote_cwd = None;
+        self.remote_shell_pid = None;
+    }
+
+    /// Takes a directory the pane's shell reported with OSC 7, and says
+    /// whether the pane's saved state changed. A local shell's is the
+    /// pane's `cwd`, and latches it (`cwd_from_shell`). A remote shell's is
+    /// a path on another computer: never the `cwd`, which is this
+    /// computer's, only where its splits start (`remote_cwd`).
+    pub fn observe_shell_cwd(&mut self, path: String) -> bool {
+        if self.remote_host.is_some() {
+            self.remote_cwd = Some(path);
+            return false;
+        }
+        // From here on the poller leaves this pane's cwd alone, even
+        // between prompts.
+        self.cwd_from_shell = true;
+        if self.cwd.as_deref() == Some(path.as_str()) {
+            return false;
+        }
+        self.cwd = Some(path);
+        true
     }
 
     /// Where an agent or a team started from this pane runs when the person
-    /// picks its remote: the pane's host, in its directory there, or the
-    /// home (`~`) with none known. None for a local pane.
+    /// picks its remote: the pane's host, in the directory it was opened in
+    /// there, or the home (`~`) with none known. None for a local pane.
     pub fn start_remote(&self) -> Option<(String, String)> {
-        self.split_remote().map(|(host, dir)| (host, dir.unwrap_or_else(|| "~".into())))
+        Some((self.remote_host.clone()?, self.remote_dir.clone().unwrap_or_else(|| "~".into())))
     }
 
     /// What it runs. A `codex:` session is a Codex's; otherwise the
@@ -1513,6 +1562,45 @@ mod tests {
         assert_eq!(agent.split_remote(), Some(("box".into(), Some("~/work".into()))), "a shell in the agent's directory");
         let home = PaneMeta { remote_host: Some("-p 2222 me@box".into()), ..Default::default() };
         assert_eq!(home.split_remote(), Some(("-p 2222 me@box".into(), None)), "the home there");
+    }
+
+    /// A remote shell's live directory: what it reported (OSC 7) wins, and
+    /// is not asked for; without it the remote is asked about its pid, and
+    /// with neither the split is where the pane was opened. An agent's pane
+    /// is never asked about.
+    #[test]
+    fn a_split_of_a_remote_shell_follows_where_it_has_gone() {
+        let opened = PaneMeta { remote_host: Some("box".into()), remote_dir: Some("~/work".into()), ..Default::default() };
+        assert_eq!(opened.remote_shell_to_ask(), None, "no pid printed: nothing to ask");
+        let with_pid = PaneMeta { remote_shell_pid: Some(42), ..opened.clone() };
+        assert_eq!(with_pid.remote_shell_to_ask(), Some(("box".into(), 42)));
+        assert_eq!(with_pid.split_remote(), Some(("box".into(), Some("~/work".into()))), "the asking is the split's");
+        let reported = PaneMeta { remote_cwd: Some("/srv/app".into()), ..with_pid.clone() };
+        assert_eq!(reported.remote_shell_to_ask(), None, "OSC 7 is free; asking is not");
+        assert_eq!(reported.split_remote(), Some(("box".into(), Some("/srv/app".into()))));
+        assert_eq!(reported.start_remote(), Some(("box".into(), "~/work".into())), "an agent starts where the pane was opened");
+        let agent = PaneMeta { remote_command: Some("'/m' attach p1".into()), ..with_pid };
+        assert_eq!(agent.remote_shell_to_ask(), None);
+        assert_eq!(PaneMeta { remote_shell_pid: Some(42), ..Default::default() }.remote_shell_to_ask(), None, "a local pane");
+        let mut ended = reported;
+        ended.forget_remote_shell();
+        assert_eq!((ended.remote_shell_to_ask(), ended.split_remote()), (None, Some(("box".into(), Some("~/work".into())))), "its shell gone: where it was opened");
+    }
+
+    /// OSC 7 from a local shell is the pane's cwd, and latches it; from a
+    /// remote shell it is a path over there, kept apart from the cwd.
+    #[test]
+    fn a_remote_shells_osc7_is_not_the_panes_cwd() {
+        let mut local = PaneMeta::default();
+        assert!(local.observe_shell_cwd("/repo".into()));
+        assert!(!local.observe_shell_cwd("/repo".into()), "unchanged");
+        assert_eq!((local.cwd.as_deref(), local.cwd_from_shell, local.remote_cwd), (Some("/repo"), true, None));
+
+        let mut remote = PaneMeta { cwd: Some("/Users/me".into()), remote_host: Some("box".into()), ..Default::default() };
+        assert!(!remote.observe_shell_cwd("/srv/app".into()), "nothing saved changed");
+        assert_eq!(remote.cwd.as_deref(), Some("/Users/me"));
+        assert!(!remote.cwd_from_shell, "the poller still reads this computer's");
+        assert_eq!(remote.remote_cwd.as_deref(), Some("/srv/app"));
     }
 
     #[test]

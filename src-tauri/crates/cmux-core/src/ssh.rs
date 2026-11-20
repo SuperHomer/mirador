@@ -93,8 +93,60 @@ pub fn interactive_command(host: &str, command: Option<&str>) -> CommandBuilder 
 /// `&&`: a directory gone since leaves a shell in the home, under cd's
 /// own message, rather than a session that ends before it starts. Read
 /// alike by sh, bash, zsh and fish, whichever is the login shell there.
+///
+/// First it prints the pid of the shell running the line, which `exec`
+/// keeps for the person's shell, so a split can ask the remote where that
+/// shell has gone since ([`shell_cwd`]). From an `sh` child's `$PPID`,
+/// since fish has no `$$`; in single quotes, which fish leaves alone too
+/// but for `\'` and `\\`.
 pub fn shell_in(dir: &str) -> String {
-    format!("cd {}; exec \"$SHELL\" -l", remote_dir(dir))
+    format!(
+        r#"sh -c 'printf "\033]1337;{}%s\007" "$PPID"'; cd {}; exec "$SHELL" -l"#,
+        crate::osc::SHELL_PID,
+        remote_dir(dir)
+    )
+}
+
+/// Where the shell `pid` on `host` is now, asked over the pane's
+/// connection; none when it does not answer within [`SHELL_CWD_TIMEOUT`],
+/// or with no directory. The person is waiting on their split meanwhile.
+#[cfg(not(windows))]
+pub fn shell_cwd(host: &str, pid: u32) -> Option<String> {
+    let child = remote_sh(host).ok()?;
+    let output = output_within(child, shell_cwd_script(pid), SHELL_CWD_TIMEOUT).ok()??;
+    shell_cwd_in(&remote_answer(host, &output).ok()?)
+}
+
+/// Windows' OpenSSH has no ControlMaster to ask over without logging in
+/// again: a split there starts where its pane was opened.
+#[cfg(windows)]
+pub fn shell_cwd(_host: &str, _pid: u32) -> Option<String> {
+    None
+}
+
+/// How long a split waits on [`shell_cwd`]: the connection is the pane's
+/// own, already up, so an answer takes a round trip.
+#[cfg_attr(windows, allow(dead_code))]
+const SHELL_CWD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The script [`shell_cwd`] runs: the process's directory from Linux's
+/// `/proc`, else from `lsof` (macOS, the BSDs), whose `-Fn` gives it on
+/// an `n` line. Printed as `cwd=…`.
+#[cfg_attr(windows, allow(dead_code))]
+fn shell_cwd_script(pid: u32) -> String {
+    format!(
+        "if d=$(readlink /proc/{pid}/cwd 2>/dev/null); then printf 'cwd=%s\\n' \"$d\"; \
+         else lsof -a -p {pid} -d cwd -Fn 2>/dev/null </dev/null | sed -n 's/^n/cwd=/p'; fi\n"
+    )
+}
+
+/// The directory in a [`shell_cwd_script`] answer: its last `cwd=` line,
+/// since what a remote's rc files print comes first, and only an absolute
+/// path.
+#[cfg_attr(windows, allow(dead_code))]
+fn shell_cwd_in(answer: &str) -> Option<String> {
+    let dir = answer.lines().rev().find_map(|l| l.trim_end_matches('\r').strip_prefix("cwd="))?;
+    dir.starts_with('/').then(|| dir.to_string())
 }
 
 /// Establishes (or cancels) a local port forward over the pane's existing
@@ -970,7 +1022,8 @@ mod tests {
     /// remote's login shell runs what ssh hands it, from the home: in
     /// `~/work` the shell it ends in is there. With the directory gone it
     /// is still a shell, in the home, under cd's own message, rather than
-    /// a session that ends.
+    /// a session that ends. Before anything it prints the pid of that
+    /// shell, the one the person types into.
     #[cfg(unix)]
     #[test]
     fn an_ssh_pane_starts_in_its_directory_or_else_the_home() {
@@ -994,17 +1047,54 @@ mod tests {
                 .spawn()
                 .unwrap();
             // What the person types into the shell it gives.
-            sh.stdin.take().unwrap().write_all(b"pwd\n").unwrap();
+            sh.stdin.take().unwrap().write_all(b"echo $$; pwd\n").unwrap();
             sh.wait_with_output().unwrap()
+        };
+        // The pid line, then what was typed: the shell's own pid, and where it is.
+        let typed = |out: &std::process::Output| {
+            let out = String::from_utf8_lossy(&out.stdout).into_owned();
+            let (pid, rest) = out.strip_prefix("\x1b]1337;MiraShellPid=").and_then(|o| o.split_once('\x07')).unwrap_or_else(|| panic!("{out:?}"));
+            let (echoed, pwd) = rest.trim().split_once('\n').unwrap_or_else(|| panic!("{out:?}"));
+            assert_eq!(pid, echoed, "the pid printed is the shell's: {out:?}");
+            pwd.to_string()
         };
         let there = run("~/work");
         assert!(there.status.success(), "{there:?}");
-        assert_eq!(String::from_utf8_lossy(&there.stdout).trim(), home.join("work").to_str().unwrap());
+        assert_eq!(typed(&there), home.join("work").to_str().unwrap());
         let gone = run("~/gone");
         assert!(gone.status.success(), "a shell all the same: {gone:?}");
-        assert_eq!(String::from_utf8_lossy(&gone.stdout).trim(), home.to_str().unwrap());
+        assert_eq!(typed(&gone), home.to_str().unwrap());
         assert!(String::from_utf8_lossy(&gone.stderr).contains("gone"), "cd says why: {gone:?}");
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The directory of a running process, as a split asks the remote for
+    /// its shell's: here, by a real sh, from `/proc` on Linux and `lsof`
+    /// on macOS, whichever this computer is.
+    #[cfg(unix)]
+    #[test]
+    fn a_shells_directory_is_read_by_its_pid() {
+        let dir = std::env::temp_dir().join(format!("mira-shell-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let mut shell = Command::new("/bin/sh").arg("-c").arg("sleep 30").current_dir(&dir).spawn().unwrap();
+        let answer = Command::new("/bin/sh").arg("-c").arg(shell_cwd_script(shell.id())).output().unwrap();
+        let _ = shell.kill();
+        let _ = shell.wait();
+        assert_eq!(shell_cwd_in(&String::from_utf8_lossy(&answer.stdout)).as_deref(), Some(dir.to_str().unwrap()), "{answer:?}");
+        let gone = Command::new("/bin/sh").arg("-c").arg(shell_cwd_script(shell.id())).output().unwrap();
+        assert_eq!(shell_cwd_in(&String::from_utf8_lossy(&gone.stdout)), None, "an ended process: {gone:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What a remote's rc files print comes first; the last `cwd=` line
+    /// is the answer, and only an absolute path is one.
+    #[test]
+    fn a_shells_directory_is_the_answers_last_path() {
+        assert_eq!(shell_cwd_in("welcome\ncwd=/old\ncwd=/srv/a b\r\n").as_deref(), Some("/srv/a b"));
+        assert_eq!(shell_cwd_in("cwd=\n"), None);
+        assert_eq!(shell_cwd_in("cwd=relative\n"), None);
+        assert_eq!(shell_cwd_in(""), None);
     }
 
     /// A path every shell reads as one word, and those it might not.

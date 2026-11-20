@@ -946,6 +946,7 @@ mira ssh open prod                 # remote pane running `ssh -tt prod`
 mira ssh open "-p 2222 user@box"   # or a full destination with options
 mira ssh open prod --tab
 mira ssh open prod --tab --dir '~/work/app'   # its shell starts there; quote the ~
+mira ssh open --on devbox          # a saved computer: a tab on its host, in its directory
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
 ```
@@ -968,9 +969,12 @@ reconnects by itself: below.)
 **`mira split` of a remote pane is remote.** Splitting is a property of
 the pane split: as a split of a local pane opens in its directory, a
 split of an SSH pane is another shell on the same host, in the directory
-the pane was opened in (`--dir`, or a saved computer's), never where its
-shell has gone since, which the app does not know; with none, the home
-there. A split of a remote agent's pane is a shell on its host, in the
+its shell is in now: the one the shell reports itself (OSC 7), else the
+remote's answer when asked where the pane's shell is (from `/proc`, or
+`lsof`), within a few seconds. Failing both — a pane opened with no
+directory, whose shell has no pid the app was told, a remote that does
+not answer, Windows — it is the directory the pane was opened in
+(`--dir`, or a saved computer's), or with none the home there. A split of a remote agent's pane is a shell on its host, in the
 agent's directory. An agent driving `mira` should expect this: `mira
 split --pane <ssh pane>` is not a local shell. `split --command` and
 `run` still run here, whatever pane they come from, and `new-tab` is

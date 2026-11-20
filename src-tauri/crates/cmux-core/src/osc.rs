@@ -5,6 +5,8 @@
 //! across read chunks arbitrarily) that:
 //! - strips and emits notification sequences: OSC 9 (iTerm2), OSC 99
 //!   (kitty, single-shot form), OSC 777 (`notify;title;body`)
+//! - strips and emits OSC 1337 `MiraShellPid=<pid>`, which an SSH pane's
+//!   start prints there (`ssh::shell_in`)
 //! - observes without stripping: OSC 7 (cwd), OSC 0/2 (window title)
 //! - passes every other byte through untouched.
 
@@ -35,6 +37,8 @@ pub enum OscEvent {
     Notification { title: Option<String>, body: String },
     Cwd(String),
     Title(String),
+    /// The pid of an SSH pane's shell on its remote.
+    ShellPid(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,6 +55,10 @@ enum State {
     /// Oversized OSC, saw ESC.
     OscOverflowEsc,
 }
+
+/// What an SSH pane's start prints its shell's pid after, in an OSC 1337
+/// (iTerm2's key=value form), where xterm.js ignores what it does not know.
+pub const SHELL_PID: &str = "MiraShellPid=";
 
 /// Upper bound on a buffered OSC sequence; beyond this we stop buffering
 /// and pass the rest through (protects against `cat /dev/urandom`).
@@ -152,6 +160,14 @@ impl<F: FnMut(OscEvent) + Send> OscScanner<F> {
                 }
                 false
             }
+            "1337" => match rest.strip_prefix(SHELL_PID).map(str::parse) {
+                Some(Ok(pid)) => {
+                    self.emit(OscEvent::ShellPid(pid));
+                    true
+                }
+                // iTerm2's own (an image, a user variable…): not ours.
+                _ => false,
+            },
             "0" | "2" => {
                 self.emit(OscEvent::Title(rest.to_string()));
                 false
@@ -514,6 +530,20 @@ mod tests {
         let evs = events.lock().unwrap();
         assert_eq!(evs[0], OscEvent::Title("my title".into()));
         assert_eq!(evs[1], OscEvent::Cwd("/Users/yo an".into()));
+    }
+
+    /// An SSH pane's shell pid is taken out of the stream, whole or in
+    /// bytes, and raised; iTerm2's other 1337s, and a pid that is not a
+    /// number, pass through for xterm to ignore.
+    #[test]
+    fn an_ssh_shells_pid_is_stripped_and_raised() {
+        let (mut s, events) = scanner_with_events();
+        assert_eq!(scan_all(&mut s, b"a\x1b]1337;MiraShellPid=4242\x07b"), b"ab");
+        assert_eq!(scan_byte_by_byte(&mut s, b"c\x1b]1337;MiraShellPid=17\x1b\\d"), b"cd");
+        for other in [&b"\x1b]1337;SetUserVar=a=Yg==\x07"[..], b"\x1b]1337;MiraShellPid=x\x07"] {
+            assert_eq!(scan_all(&mut s, other), other);
+        }
+        assert_eq!(events.lock().unwrap().as_slice(), &[OscEvent::ShellPid(4242), OscEvent::ShellPid(17)]);
     }
 
     #[test]

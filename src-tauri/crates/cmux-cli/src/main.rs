@@ -30,8 +30,8 @@ enum Command {
     ///
     /// The new shell opens where the pane it splits is: a split of a local
     /// pane in its current directory, a split of an SSH pane on the same
-    /// remote, in the directory the pane was opened in (the home there
-    /// with none).
+    /// remote, in the directory its shell is in now when the app can know
+    /// it, else the one the pane was opened in, else the home there.
     Split {
         /// row or column: which way the pane is split, the new one beside
         /// it or below it.
@@ -562,11 +562,12 @@ enum AgentAction {
 enum SshAction {
     /// Open a remote pane running `ssh -tt <host>`. HOST is an ssh alias
     /// (from ~/.ssh/config) or a full destination, optionally with ssh
-    /// options: "-p 2222 user@box".
+    /// options: "-p 2222 user@box". Or --on a saved computer, as the
+    /// palette's "SSH to a Computer" opens it.
     Open {
         /// Hyphens allowed so a full spec like "-p 2222 user@box" works.
-        #[arg(allow_hyphen_values = true)]
-        host: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "on")]
+        host: Option<String>,
         /// Open in a new tab instead of a split.
         #[arg(long)]
         tab: bool,
@@ -575,6 +576,11 @@ enum SshAction {
         /// does not expand it to this computer's home.
         #[arg(long, allow_hyphen_values = true)]
         dir: Option<String>,
+        /// A saved computer (`mira computer add`, or the Computers pane):
+        /// a tab of its own on its host, its shell in its directory,
+        /// instead of HOST and --dir.
+        #[arg(long, conflicts_with_all = ["host", "dir"])]
+        on: Option<String>,
     },
     /// List host aliases from ~/.ssh/config.
     Hosts,
@@ -1070,10 +1076,11 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Ssh { action } => match action {
-            SshAction::Open { host, tab, dir } => Request::SshOpen {
+            SshAction::Open { host, tab, dir, on } => Request::SshOpen {
                 host,
                 target: tab.then(|| "tab".to_string()),
                 dir,
+                on,
             },
             SshAction::Hosts => Request::SshHosts,
             SshAction::Forward { app: true, pane, .. } => {
@@ -2952,6 +2959,31 @@ mod tests {
         assert_eq!((port, app, pane.as_deref()), (None, true, Some("p1")));
         assert!(Cli::try_parse_from(["mira", "ssh", "forward"]).is_err());
         assert!(Cli::try_parse_from(["mira", "ssh", "forward", "3000", "--app"]).is_err());
+    }
+
+    /// `ssh open` takes a host, with --dir if it likes, or --on a saved
+    /// computer, which stands for both: one of them, never a computer and
+    /// a host or a directory. --tab beside --on changes nothing.
+    #[test]
+    fn ssh_open_takes_a_host_or_a_saved_computer() {
+        let Command::Ssh { action: SshAction::Open { host, tab, dir, on } } =
+            parse(&["ssh", "open", "-p 2222 me@box", "--tab", "--dir", "~/work"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), tab, dir.as_deref(), on), (Some("-p 2222 me@box"), true, Some("~/work"), None));
+        let Command::Ssh { action: SshAction::Open { host, dir, on, .. } } = parse(&["ssh", "open", "--on", "devbox"]) else {
+            panic!()
+        };
+        assert_eq!((host, dir, on.as_deref()), (None, None, Some("devbox")));
+        parse(&["ssh", "open", "--on", "devbox", "--tab"]);
+        for refused in [
+            &["ssh", "open"][..],
+            &["ssh", "open", "box", "--on", "devbox"],
+            &["ssh", "open", "--on", "devbox", "--dir", "/srv"],
+        ] {
+            assert!(Cli::try_parse_from([&["mira"][..], refused].concat()).is_err(), "{refused:?}");
+        }
     }
 
     /// Screenshots taken in the same millisecond each get a file of their

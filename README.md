@@ -885,7 +885,8 @@ mira computer update devbox --dir /srv/app                 # --name, --host, --d
 mira computer test devbox                                  # or --host devbox --dir '~/work/app', before saving
 mira computer remove devbox
 mira computer open                                         # the pane; --tab or --split
-mira ssh open devbox --tab --dir '~/work/app'               # the same tab by hand: ssh open takes the host and directory, not a computer's name
+mira ssh open --on devbox                                  # a tab on it, in its directory, as the palette opens one
+mira ssh open devbox --tab --dir '~/work/app'               # the same tab by hand, from a host and a directory
 ```
 
 `mira computer test` prints the same three answers, a line each, and
@@ -895,11 +896,15 @@ exits 0 only when agents can run there.
 
 A remote pane is a terminal like any other. A split of it — from the
 keys, *+ New*, the board or `mira split` — is another shell on the same
-remote, in the directory the pane was opened in: not where its shell has
-gone since, which the app cannot know, where a local split follows its
-pane's current directory. A split of a remote agent's pane is a shell on
-its host, in the directory the agent works in. A split with a command
-(`mira split --command`, `mira run`) runs here, and a new tab is local.
+remote, in the directory its shell is in now, as a local split follows
+its pane's: the app asks the remote where that shell is, or takes the
+directory the shell reports itself (OSC 7) when it does. Where it cannot
+know — a pane opened with no directory whose shell reports none, a
+remote that does not answer within seconds, Windows — the split starts
+in the directory the pane was opened in, or the home there. A split of a
+remote agent's pane is a shell on its host, in the directory the agent
+works in. A split with a command (`mira split --command`, `mira run`)
+runs here, and a new tab is local.
 
 Starting an agent or a team from a remote pane asks where it runs, in
 the palette: *This computer*, or *On devbox* — the saved computer with
