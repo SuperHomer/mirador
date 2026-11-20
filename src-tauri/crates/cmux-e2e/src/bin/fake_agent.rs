@@ -329,12 +329,14 @@ fn main() {
     println!("fake {kind} ready");
     // Each as the real one draws it, for Mirador's screen checks
     // (`handoff::showing_in`): Pi's box between two rules over its footer,
-    // OpenCode's ending in its `╹▀` edge.
+    // OpenCode's ending in its `╹▀` edge — and, as the real ones leave it,
+    // the cursor back up inside the box (`ESC [ n A`), with rows drawn
+    // below it that a screen read must still see.
     let input_box = || {
         let rule = "─".repeat(40);
         match kind.as_str() {
-            "pi" => print!("{rule}\n\n{rule}\n~/proj\n0.0%/128k (auto)    fake\n"),
-            "opencode" => print!("  ┃\n  ┃  Build · Fake\n  ╹{}\n", "▀".repeat(40)),
+            "pi" => print!("{rule}\n\n{rule}\n~/proj\n0.0%/128k (auto)    fake\n\x1b[4A\r"),
+            "opencode" => print!("  ┃\n  ┃  Build · Fake\n  ╹{}\n\x1b[3A\r  ┃  ", "▀".repeat(40)),
             _ => print!("{} ", if claude { '❯' } else { '›' }),
         }
         let _ = std::io::stdout().flush();
