@@ -1410,12 +1410,19 @@ fn type_startup_input(app: &AppHandle, pane_id: &str) {
     };
     let app = app.clone();
     let pane = pane_id.to_string();
+    // A restored pane's line once reached the shell without its first byte
+    // (`laude --resume …`), under load; 142 logged restores never showed
+    // why — nothing was written before it, and zsh's line editor was always
+    // already reading. A ^U first is kill-line on an empty prompt in zsh,
+    // bash and fish, so losing a first byte costs nothing. Not on Windows,
+    // where PowerShell and cmd may take it as a character.
+    let kill_line = if cfg!(windows) { "" } else { "\x15" };
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(300));
         let _ = app
             .state::<AppState>()
             .pty
-            .write(&pane, format!("{input}\r").as_bytes());
+            .write(&pane, format!("{kill_line}{input}\r").as_bytes());
     });
 }
 
