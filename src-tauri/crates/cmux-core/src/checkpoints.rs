@@ -3,7 +3,8 @@
 //! save` / `team resume`, `agent save` / `agent resume`.
 //!
 //! A checkpoint holds what each conversation is called by its harness —
-//! Claude Code's session id, Codex's thread id — and what the member was.
+//! Claude Code's session id, Codex's thread id, the id Mirador started a
+//! Pi or an OpenCode on — and what the member was.
 //! Resuming types a command line with that id into a shell, so a file
 //! that holds anything but a plain id is refused, as a restored pane's is
 //! (`agents::restore_command`): these files are not trusted to hold only
@@ -88,7 +89,7 @@ fn check(checkpoint: &Checkpoint) -> Result<(), String> {
 
 fn resumable(harness: Harness) -> Result<(), String> {
     match harness {
-        Harness::Claude | Harness::Codex => Ok(()),
+        Harness::Claude | Harness::Codex | Harness::Pi | Harness::OpenCode => Ok(()),
         other => Err(format!("{} cannot be resumed by Mirador", other.label())),
     }
 }
@@ -121,8 +122,29 @@ pub fn codex_session(pid: u32) -> Result<String, String> {
     crate::codex_trail::rollout_id(&rollout).ok_or_else(|| "its Codex conversation has no id Mirador can read".into())
 }
 
+/// The conversation a Pi or an OpenCode was started on, from its pane's
+/// `agent_session` (`agents::session_of`). None recorded is a conversation
+/// `mira agent clear` replaced with one of the harness's own making, whose
+/// id Mirador does not learn.
+pub fn chosen_session(harness: Harness, agent_session: Option<&str>) -> Result<String, String> {
+    let prefix = match harness {
+        Harness::Pi => "pi:",
+        Harness::OpenCode => "opencode:",
+        other => return Err(format!("{} names its own conversations", other.label())),
+    };
+    match agent_session.and_then(|s| s.strip_prefix(prefix)) {
+        Some(id) if is_safe_id(id) => Ok(id.to_string()),
+        _ => Err(format!(
+            "its {} conversation is not one Mirador knows: it was cleared, or not started from here",
+            harness.label()
+        )),
+    }
+}
+
 /// What to type to resume `member`, given `launch`: the line that starts
 /// it fresh, with its role's flags and no task (`agents::launch_command`).
+/// A Pi's or an OpenCode's is already the resume: started on the saved id
+/// (`prepare_launch`'s `session`), each continues it.
 pub fn resume_command(member: &CheckpointMember, launch: &str) -> Result<String, String> {
     if !is_safe_id(&member.session) {
         return Err(format!("member `{}` has a session id that is not a plain id", member.name));
@@ -130,6 +152,10 @@ pub fn resume_command(member: &CheckpointMember, launch: &str) -> Result<String,
     let (program, resume) = match member.harness {
         Harness::Claude => ("claude", "--resume"),
         Harness::Codex => ("codex", "resume"),
+        Harness::Pi | Harness::OpenCode if launch.ends_with(&format!(" {}", member.session)) => return Ok(launch.to_string()),
+        Harness::Pi | Harness::OpenCode => {
+            return Err(format!("member `{}` would not resume its {} conversation", member.name, member.harness.label()))
+        }
         other => return Err(format!("{} cannot be resumed by Mirador", other.label())),
     };
     resume_line(program, resume, &member.session, launch)
@@ -228,6 +254,17 @@ mod tests {
     }
 
     #[test]
+    fn a_pi_or_opencode_conversation_is_the_one_mirador_started_it_on() {
+        assert_eq!(chosen_session(Harness::Pi, Some("pi:a1")), Ok("a1".into()));
+        assert_eq!(chosen_session(Harness::OpenCode, Some("opencode:ses_a1")), Ok("ses_a1".into()));
+        // Cleared (the record dropped), another harness's, or not plain.
+        assert!(chosen_session(Harness::Pi, None).unwrap_err().contains("cleared"));
+        assert!(chosen_session(Harness::Pi, Some("opencode:ses_a1")).is_err());
+        assert!(chosen_session(Harness::Pi, Some("pi:a b")).is_err());
+        assert!(chosen_session(Harness::Claude, Some("pi:a1")).is_err());
+    }
+
+    #[test]
     fn resumes_with_the_launch_flags() {
         let claude = member("reviewer-1", Harness::Claude, "abc-1");
         assert_eq!(
@@ -247,6 +284,13 @@ mod tests {
         );
         assert!(resume_command(&codex, "claude --model 'opus'").is_err(), "not the harness it saved");
         assert!(resume_command(&claude, "claudette").is_err());
+        // A Pi's or an OpenCode's launch line, given the saved id, is its
+        // resume: it must carry that id.
+        let pi = member("dev", Harness::Pi, "a1");
+        assert_eq!(resume_command(&pi, "pi --model 'sonnet' --session-id a1"), Ok("pi --model 'sonnet' --session-id a1".into()));
+        assert!(resume_command(&pi, "pi --model 'sonnet' --session-id b2").is_err(), "another conversation");
+        let oc = member("helper", Harness::OpenCode, "ses_a1");
+        assert_eq!(resume_command(&oc, "opencode --standalone --session ses_a1"), Ok("opencode --standalone --session ses_a1".into()));
         assert!(resume_command(&member("x", Harness::Aider, "a1"), "aider").unwrap_err().contains("Aider"));
         assert!(resume_command(&member("x", Harness::Claude, "a b"), "claude").is_err());
     }

@@ -192,7 +192,7 @@ export function NewMenu({ pane, onClose }: { pane: string; onClose: () => void }
       ))}
 
       <div className="agent-menu-label">No role</div>
-      {(["claude", "codex"] as Harness[]).map((h) => (
+      {(["claude", "codex", "pi", "openCode"] as Harness[]).map((h) => (
         <div key={h} className="agent-menu-row">
           <span className="agent-menu-name">{HARNESS_LABEL[h]}</span>
           <span className="agent-menu-meta">{team ? "default model · not a member" : "default model"}</span>

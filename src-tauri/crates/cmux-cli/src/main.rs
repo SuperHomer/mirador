@@ -153,8 +153,8 @@ enum Command {
         #[arg(long)]
         split: bool,
     },
-    /// Agents: start a Claude Code one with a role; list and watch every
-    /// agent, Codex, OpenCode and the rest included.
+    /// Agents: start Claude Code, Codex, Pi or OpenCode, with a role or
+    /// plain; list and watch every agent, Gemini CLI and the rest included.
     Agent {
         #[command(subcommand)]
         action: AgentAction,
@@ -388,8 +388,9 @@ enum AgentAction {
         /// A role this directory sees (`mira agent roles` lists them).
         #[arg(short, long)]
         role: Option<String>,
-        /// Without a role: start Codex instead of Claude Code.
-        #[arg(long, value_parser = ["claude", "codex"], conflicts_with = "role")]
+        /// Without a role: start Codex, Pi or OpenCode instead of Claude
+        /// Code. Only Claude Code runs on a remote.
+        #[arg(long, value_parser = ["claude", "codex", "pi", "opencode"], conflicts_with = "role")]
         harness: Option<String>,
         /// Open a new tab instead of splitting this pane.
         #[arg(long)]
@@ -399,7 +400,7 @@ enum AgentAction {
         title: Option<String>,
         /// Run it on a computer you reach by ssh (an alias from
         /// ~/.ssh/config, or a destination): Claude Code, plain or as a role
-        /// of this computer's; not Codex yet.
+        /// of this computer's; not Codex, Pi or OpenCode yet.
         #[arg(long, requires = "dir")]
         host: Option<String>,
         /// With --host: the directory there it works in.
@@ -452,9 +453,10 @@ enum AgentAction {
         timeout: u64,
     },
     /// Start an agent on a new conversation, as typing /clear into it does
-    /// (Codex's /new): NAME as `agent send` takes it, else this pane's
-    /// agent. Its role's prompt is kept. A working agent starts over once
-    /// its turn ends; one waiting on a person is refused unless --force.
+    /// (/new for Codex, Pi and OpenCode): NAME as `agent send` takes it,
+    /// else this pane's agent. Its role's prompt is kept. A working agent
+    /// starts over once its turn ends; one waiting on a person is refused
+    /// unless --force.
     Clear {
         name: Option<String>,
         /// The agent's pane, instead of a name.
@@ -938,6 +940,8 @@ fn run(cli: Cli) -> Result<(), String> {
                 on,
                 harness: harness.map(|h| match h.as_str() {
                     "codex" => cmux_protocol::Harness::Codex,
+                    "pi" => cmux_protocol::Harness::Pi,
+                    "opencode" => cmux_protocol::Harness::OpenCode,
                     _ => cmux_protocol::Harness::Claude,
                 }),
                 task: (!task.is_empty()).then(|| task.join(" ")),

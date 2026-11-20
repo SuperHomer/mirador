@@ -374,8 +374,12 @@ impl Sandbox {
             serde_json::json!({ "persistSessions": false, "defaultCwd": project }).to_string(),
         )
         .unwrap();
+        // Live runs bring the real claude and codex only: nothing live runs
+        // Pi or OpenCode yet.
         #[cfg(unix)]
-        for name in ["claude", "codex"] {
+        let names: &[&str] = if live { &["claude", "codex"] } else { &["claude", "codex", "pi", "opencode"] };
+        #[cfg(unix)]
+        for &name in names {
             let agent = if live {
                 on_path(name).unwrap_or_else(|| panic!("no `{name}` on the PATH"))
             } else {
@@ -827,9 +831,9 @@ impl Drop for Sandbox {
     }
 }
 
-/// Which of `pids` are `claude` or `codex`, by `ps`'s name for them —
-/// not `lsof`'s, which names Claude Code by its versioned binary
-/// (`2.1.302`).
+/// Which of `pids` are agents — `claude`, `codex`, Pi or OpenCode — by
+/// `ps`'s name for them, not `lsof`'s, which names Claude Code by its
+/// versioned binary (`2.1.302`).
 fn agents_among(pids: &[String]) -> Vec<String> {
     if pids.is_empty() {
         return Vec::new();
@@ -843,7 +847,9 @@ fn agents_among(pids: &[String]) -> Vec<String> {
             let mut words = line.split_whitespace();
             let pid = words.next()?;
             let name = Path::new(words.next()?).file_name()?.to_str()?;
-            matches!(name, "claude" | "codex").then(|| pid.to_string())
+            // Pi runs as `node`; an OpenCode role's private server is an
+            // `opencode` too, some 300 MB a test must not leave behind.
+            matches!(name, "claude" | "codex" | "pi" | "opencode" | "node").then(|| pid.to_string())
         })
         .collect()
 }

@@ -1927,11 +1927,11 @@ pub fn open_agent_from(
     let cwd = crate::teams::cwd_of(&state, Some(&source));
     if let Some((host, dir)) = remote {
         if plain != cmux_protocol::Harness::Claude {
-            return Err("Codex on a remote is not done yet: start Claude Code there".into());
+            return Err(format!("{} on a remote is not done yet: start Claude Code there", plain.label()));
         }
         return open_remote_agent(app, state, &host, &dir, role.as_deref(), cwd.as_deref(), task, &source, tab, title, from);
     }
-    let launch = prepare_launch(role.as_deref(), plain, None, cwd.as_deref(), &[], None, task.as_deref())?;
+    let launch = prepare_launch(role.as_deref(), plain, None, cwd.as_deref(), &[], None, task.as_deref(), None)?;
 
     let new_pane = if tab {
         state.workspace.lock().unwrap().new_tab().1
@@ -1992,7 +1992,7 @@ fn open_remote_agent(
         refuse_on_remote(&catalog, name)?;
     }
     let remote = reach_remote(host)?;
-    let launch = prepare_launch(role, cmux_protocol::Harness::Claude, Some(&catalog), cwd, &[], None, task.as_deref())?;
+    let launch = prepare_launch(role, cmux_protocol::Harness::Claude, Some(&catalog), cwd, &[], None, task.as_deref(), None)?;
     // A split's source is looked for before the upload, so a gone one
     // leaves no files there that nothing starts; and again as the pane
     // opens, since it could close during the round trip.
@@ -2020,13 +2020,14 @@ fn open_remote_agent(
 }
 
 /// Refuses `role` (from `catalog`) for a remote, before anything opens or
-/// touches it: Codex is not done there yet, nor a role that keeps only
-/// some skills or plugins — listing them runs Claude Code here, which says
-/// nothing of the remote's.
+/// touches it: no harness but Claude Code is done there yet, nor a role
+/// that keeps only some skills or plugins — listing them runs Claude Code
+/// here, which says nothing of the remote's.
 pub(crate) fn refuse_on_remote(catalog: &cmux_protocol::RoleCatalog, role: &str) -> Result<(), String> {
     let (r, _) = cmux_core::roles::role_layers(catalog, role)?;
     if r.harness != cmux_protocol::Harness::Claude {
-        return Err(format!("role `{role}` runs Codex: Codex on a remote is not done yet"));
+        let harness = r.harness.label();
+        return Err(format!("role `{role}` runs {harness}: {harness} on a remote is not done yet"));
     }
     if cmux_core::role_limits::needs_inventory(&r) {
         return Err(format!("role `{role}`: a role that limits skills or plugins is not done on a remote yet"));
@@ -2119,6 +2120,7 @@ pub(crate) fn send_remote_launch(remote: &Remote, pane: &str, dir: &str, launch:
         task,
         None,
         None,
+        None,
         quote,
     );
     #[cfg(windows)]
@@ -2202,6 +2204,9 @@ pub(crate) struct Launch {
     pub settings: Option<String>,
     /// The role's prompt file: Claude Code's, or a Codex override.
     pub prompt: Option<String>,
+    /// The `agent_session` it is started on, where Mirador picks the
+    /// conversation's id: a Pi's or an OpenCode's (`agents::session_of`).
+    pub session: Option<String>,
 }
 
 /// Works out how to start an agent in `cwd`: plain Claude Code, or `role`
@@ -2209,8 +2214,11 @@ pub(crate) struct Launch {
 /// limits; without a role, `plain` (`agents::plain_harness`). `extra`
 /// follows the role's prompt — a team member's own layers
 /// (`teams::seat_layers`) — and `name` is the session's name instead of
-/// the role's. Every file it
+/// the role's. `session` is a Pi's or an OpenCode's conversation to
+/// continue, from a save; without one, either starts on a new id
+/// (`agents::new_session`). Every file it
 /// needs is written; nothing is opened, so a refusal changes nothing.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_launch(
     role: Option<&str>,
     plain: cmux_protocol::Harness,
@@ -2219,6 +2227,7 @@ pub(crate) fn prepare_launch(
     extra: &[cmux_protocol::PromptLayer],
     name: Option<&str>,
     task: Option<&str>,
+    session: Option<&str>,
 ) -> Result<Launch, String> {
     let (role, mut layers) = match role.map(str::trim).filter(|r| !r.is_empty()) {
         Some(role) => {
@@ -2266,12 +2275,16 @@ pub(crate) fn prepare_launch(
         }
         _ => None,
     };
-    // Claude Code reads a role's prompt from a file; Codex too, through the
-    // shell, where the shell can (`agents::codex_instructions`) — else
-    // inline: ConPTY has no line discipline to cut a long line. Written
-    // once the role is known to start, so a refused one leaves none.
+    // Claude Code, Pi and OpenCode read a role's prompt from a file; Codex
+    // too, through the shell, where the shell can
+    // (`agents::codex_instructions`) — else inline: ConPTY has no line
+    // discipline to cut a long line. Written once the role is known to
+    // start, so a refused one leaves none.
+    use cmux_protocol::Harness::{Claude, OpenCode, Pi};
     let prompt_file = match (&role, &prompt) {
-        (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Claude => Some(cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p)),
+        (Some(r), Some(p)) if matches!(r.harness, Claude | Pi | OpenCode) => {
+            Some(cmux_core::roles::write_prompt(name.unwrap_or(&r.name), p))
+        }
         (Some(r), Some(p)) if r.harness == cmux_protocol::Harness::Codex && cmux_core::pty::shell::takes_command_substitution() => {
             Some(cmux_core::roles::write_codex_prompt(name.unwrap_or(&r.name), p))
         }
@@ -2288,6 +2301,7 @@ pub(crate) fn prepare_launch(
     let socket = if harness == cmux_protocol::Harness::Codex { codex_socket(role.as_ref(), cwd) } else { None };
     // And told each turn's thread, which Windows has no other way to learn.
     let notify = if harness == cmux_protocol::Harness::Codex { codex_notify(role.as_ref()) } else { None };
+    let session = session.map(str::to_string).or_else(|| cmux_core::agents::new_session(harness));
     let input = cmux_core::agents::launch_command(
         named.as_ref(),
         plain,
@@ -2297,6 +2311,7 @@ pub(crate) fn prepare_launch(
         task,
         socket.as_ref().map(|(base, socket)| (base.as_str(), socket.as_path())),
         notify.as_deref(),
+        session.as_deref(),
         cmux_core::pty::shell::quote_arg,
     );
     Ok(Launch {
@@ -2305,6 +2320,7 @@ pub(crate) fn prepare_launch(
         role,
         settings: settings_file.map(|f| f.to_string_lossy().into_owned()),
         prompt: prompt_file.map(|f| f.to_string_lossy().into_owned()),
+        session: session.and_then(|id| cmux_core::agents::session_of(harness, &id)),
     })
 }
 
@@ -2366,6 +2382,11 @@ pub(crate) fn mark_launched(entry: &mut cmux_core::state::PaneMeta, launch: Laun
     // poller never would.
     if launch.harness != cmux_protocol::Harness::Claude {
         entry.agent_harness = Some(launch.harness);
+    }
+    // Known from the start for a Pi or an OpenCode, whose id Mirador
+    // picked: what a restart resumes.
+    if launch.session.is_some() {
+        entry.agent_session = launch.session;
     }
     if let Some(role) = launch.role {
         entry.agent_model = role.model;
@@ -2678,7 +2699,7 @@ mod tests {
     use super::*;
 
     fn launch(role: Option<cmux_protocol::AgentRole>) -> Launch {
-        Launch { input: "claude\n".into(), harness: cmux_protocol::Harness::Claude, role, settings: None, prompt: None }
+        Launch { input: "claude\n".into(), harness: cmux_protocol::Harness::Claude, role, settings: None, prompt: None, session: None }
     }
 
     #[test]

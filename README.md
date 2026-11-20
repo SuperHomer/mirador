@@ -37,8 +37,8 @@ downloads, the feature tour and the keybinding reference.
   sidebar's **Splits · Wall · Tasks · Board** switch turns it over to the
   tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
-  start Claude Code or Codex with their own model, prompt and shared way of
-  working (`mira agent new --role reviewer "…"`). **Teams**
+  start Claude Code, Codex, Pi or OpenCode with their own model, prompt
+  and shared way of working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Task board**, the agent wall's Tasks side (**Tasks** in the sidebar's
@@ -436,9 +436,10 @@ only when there is none.
 
 ## Agent roles and the agent wall
 
-A role is a named way to start an agent — Claude Code or Codex, its own
-model and effort, and its own instructions — written as a Markdown file: the
-frontmatter says how it starts, the body is its prompt.
+A role is a named way to start an agent — Claude Code, Codex, Pi or
+OpenCode, its own model and effort, and its own instructions — written as
+a Markdown file: the frontmatter says how it starts, the body is its
+prompt.
 
 ```markdown
 <!-- .mirador/roles/reviewer.md -->
@@ -464,8 +465,14 @@ You implement what the plan says, one step at a time.
 `effort` is how hard the model thinks: Claude Code gets it as `--effort`
 (`low`, `medium`, `high`, `xhigh`, `max`), Codex as
 `model_reasoning_effort` (the same, plus `ultra`, which only some models
-take). Absent, the harness's default. Any other value, upper case
-included, greys the role out with the values it takes.
+take), Pi as `--thinking` (`off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, `max`); OpenCode takes none. Absent, the harness's default. Any
+other value, upper case included, greys the role out with the values it
+takes.
+
+Each OpenCode role's pane runs an OpenCode server of its own
+(`--standalone`, about 300 MB), so the role's model and prompt apply to
+that pane only; the server ends with the pane.
 
 A Codex role can also name one of your Codex **profiles** —
 `profile: yolo` starts it with `--profile yolo` — for what a role cannot
@@ -522,8 +529,8 @@ hidden from the agent, not from you: `/name` still works when you type it.
 `tools.allow` is refused in `.mirador/roles` — rules given at launch are
 Claude Code's highest-priority settings, and would skip the trust prompt
 it shows before a project's own settings apply. Put `allow` in a role of
-your own. Codex roles cannot be limited yet: a Codex role with any of
-these fields does not start.
+your own. Codex, Pi and OpenCode roles cannot be limited yet: one with
+any of these fields does not start.
 
 **Edit them in the app:** *Agents: Edit Roles, Ways & Teams* in the palette (or
 `mira agent edit`) opens a pane — from the app in a tab of its own (see
@@ -563,16 +570,26 @@ listed the same way. The agent opens in a pane
 beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
 that pane's directory: `claude --model … --effort …
---append-system-prompt-file … --name <role>`, or `codex --model … -c
-model_reasoning_effort=… --profile … -c developer_instructions=…`. (`mira
+--append-system-prompt-file … --name <role>`, `codex --model … -c
+model_reasoning_effort=… --profile … -c developer_instructions=…`, `pi
+--model … --thinking … --append-system-prompt … --name <role>`, or
+`opencode --standalone` with its model and prompt in
+`OPENCODE_CONFIG_CONTENT`. (`mira
 agent new --tab` gives it a tab of its own instead.) Codex also gets a
 permissions profile — the one it would run on anyway, plus Mirador's socket
 and nothing else — so `mira agent send` and `wait` work from inside its
 sandbox; not when your Codex config uses `sandbox_mode`, gives full access,
 or cannot be read. Exiting the agent
 leaves the shell; restarting Mirador resumes the conversation — Claude
-Code's, or Codex's with `codex resume` — on the role's model and effort,
-with its prompt. To know which Codex conversation that is, Mirador gives
+Code's, Codex's with `codex resume`, or a Pi's or an OpenCode's, started
+on an id Mirador picked and given it again — on the role's model and
+effort, with its prompt. A Pi or an OpenCode cleared with `mira agent
+clear` comes back without a conversation: its `/new` started one whose id
+Mirador does not learn, and the cleared one is not brought back. Only
+Mirador's own clear is known: a `/new` or a switch of session you make
+yourself in the pane (Pi's `/resume`, OpenCode's session list) leaves the
+record on the old conversation, and a restart or a save brings that one
+back. To know which Codex conversation that is, Mirador gives
 Codex a `notify` (`mira codex-notify`) that records it after each turn,
 then runs your own `notify`, if you have one, as before.
 
@@ -707,7 +724,7 @@ closed. Run `team add` and `team restart` from a pane of the team's tab.
 A role started in a team's tab — from + New, a pane's menu, the palette
 or `mira agent new --role` — is a `team add`: it joins the running team
 for the session, told its teammates, and the team's file is never
-changed. A plain Claude Code or Codex started there is no member.
+changed. A plain agent, with no role, started there is no member.
 
 The **agent wall** is a way of showing a tab: in place of its splits, the
 tab's agents in a grid — roles, and any agent you started by hand:
@@ -722,8 +739,9 @@ board draws a walled tab's wall in its frame, in place of its cards. The tiles a
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
 the keyboard goes to the focused agent's tile when the wall comes up. A
-new agent from **+ New**, in the bar over the wall — a role of the repository, or
-plain Claude Code or Codex, with an optional first message that also
+new agent from **+ New**, in the bar over the wall — a role of the
+repository, or plain Claude Code, Codex, Pi or OpenCode, with an
+optional first message that also
 becomes its card — splits the tab under the wall and gets a tile. A tab
 with neither agents nor tools yet shows its roles and teams there
 instead, ready to start.
@@ -807,7 +825,8 @@ hides and shows the sidebar, as `mod+B` does. Then come the tab's name
 and the branch of its focused pane. At its right is **+ New**: a
 terminal, in a new tab (`mod+T`) or a split, right or down; an agent,
 with an optional first message, then a role of the repository, plain
-Claude Code or Codex, or a team; a diff; the commit graph; or a
+Claude Code, Codex, Pi or OpenCode, or a team; a diff; the commit
+graph; or a
 browser. Each row runs the same
 command as its key or the palette, and shows its shortcut when one is
 bound (the commit graph and a browser have none by default). On the
@@ -914,8 +933,8 @@ empty wall and the board's frame menu. Esc starts nothing. There is no
 question, and it starts here, when there is no choice:
 
 - from a local pane;
-- for Codex, a role the remote cannot take (one that keeps only some
-  skills or plugins), or a team with such a member;
+- for Codex, Pi or OpenCode, a role the remote cannot take (one that
+  keeps only some skills or plugins), or a team with such a member;
 - for a role started in a team's tab: it joins that team, and runs
   where the team runs;
 - from the role and team editor, whose own pane is never remote;
@@ -995,11 +1014,11 @@ reaches this Mirador whatever the remote's Claude Code settings hold. The
 status line is not installed there — that is yours. Nothing of this
 machine's logins is copied.
 
-Not done yet: Codex on a remote; a role that keeps only some skills or
-plugins; resuming a save of a member there (`team save` and `agent save`
-write one, but a resume starts it on this computer, where its
-conversation is not); and Windows remotes, or Mirador on Windows
-driving one.
+Not done yet: Codex, Pi or OpenCode on a remote; a role that keeps only
+some skills or plugins; resuming a save of a member there (`team save`
+and `agent save` write one, but a resume starts it on this computer,
+where its conversation is not); and Windows remotes, or Mirador on
+Windows driving one.
 [`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has how it works.
 
 ## Terminals that keep running when you quit

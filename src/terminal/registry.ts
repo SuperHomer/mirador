@@ -239,13 +239,24 @@ export function saveAllScrollbacks(maxLines = 10_000) {
 
 /**
  * The last `lines` lines of content (default: one screenful), as plain
- * text. Content ends at the cursor row — rows below it are unused padding.
+ * text. Content ends at the cursor row or the screen's last non-blank row,
+ * whichever is lower. A shell's cursor is on its last line, and the blank
+ * rows below are padding; but a full-screen TUI (Pi, OpenCode) parks its
+ * cursor in its input box, and draws the rest of the box and a footer
+ * below it — rows a read ending at the cursor dropped, so the screen check
+ * found no input box and refused every message to it.
  */
 export function readScreenText(paneId: string, lines?: number | null): string {
   const term = terminals.get(paneId)?.term;
   if (!term) return "";
   const buf = term.buffer.active;
-  const lastLine = buf.baseY + buf.cursorY;
+  let lastLine = buf.baseY + buf.cursorY;
+  for (let i = buf.baseY + term.rows - 1; i > lastLine; i--) {
+    if (buf.getLine(i)?.translateToString(true).trim()) {
+      lastLine = i;
+      break;
+    }
+  }
   const count = lines && lines > 0 ? lines : term.rows;
   const out: string[] = [];
   for (let i = Math.max(0, lastLine + 1 - count); i <= lastLine; i++) {

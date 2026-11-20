@@ -155,6 +155,10 @@ pub fn keystrokes(message: &str, from: Option<&str>) -> Result<(Vec<u8>, Vec<u8>
 /// How long to wait between what is typed and its Enter, so the Enter
 /// comes on its own read and submits rather than joining the text.
 ///
+/// Pi (1.3.0) and OpenCode (2.0.31) need none: in a PTY, each submitted a
+/// bracketed paste as one message with the Enter in the same write, 0 ms
+/// after it, or 120 ms after a 3000-character paste. They get the default.
+///
 /// Codex needs longer. Where it gets no bracketed paste (Windows' console
 /// input gives it none), plain characters handled 8 ms apart or less
 /// (`PASTE_BURST_CHAR_INTERVAL`) are a paste burst, and an Enter during
@@ -257,6 +261,11 @@ pub fn clear_line(harness: Option<cmux_protocol::Harness>) -> Result<&'static st
         // Codex's own `/clear` also wipes the terminal; `/new` is the one
         // that only starts over.
         Some(Harness::Codex) => Ok("/new"),
+        // Each starts a new session in the same process, keeping what it
+        // was started with: Pi's `--append-system-prompt`, an OpenCode
+        // role's agent (its prompt and model). Both seen on the requests
+        // they sent next.
+        Some(Harness::Pi | Harness::OpenCode) => Ok("/new"),
         Some(other) => Err(format!("{} has no new-conversation command Mirador knows", other.label())),
         None => Err("its harness is not known".into()),
     }
@@ -274,6 +283,67 @@ pub enum Showing<'a> {
     /// Neither: still starting, or a screen of its own (a logo, a
     /// welcome) that a keypress may turn into something else.
     Neither,
+}
+
+/// What `screen` shows, judged the way `harness` draws: Pi and OpenCode
+/// by their own input boxes and menus ([`pi_showing`],
+/// [`opencode_showing`]), any other by its selection glyph ([`showing`]).
+pub fn showing_in(screen: &str, harness: Option<cmux_protocol::Harness>) -> Showing<'_> {
+    match harness {
+        Some(cmux_protocol::Harness::Pi) => pi_showing(screen),
+        Some(cmux_protocol::Harness::OpenCode) => opencode_showing(screen),
+        _ => showing(screen),
+    }
+}
+
+/// Pi (1.3.0) has no selection glyph on its input box: the box is what is
+/// between its last two rules (lines of `─`, the upper one reading `── ⠹
+/// Working ──` while it works), with its footer — the directory, the
+/// tokens and the model — below. Its menus are drawn between two rules too
+/// (its project-trust question), their selected row marked `→ `, and with
+/// nothing below the last rule; or in the box's own place, its pickers —
+/// a model's, a setting's, a login's with `→ `, `/resume`'s sessions with
+/// `› `. The commands listed while `/` is typed show under the box, not
+/// in it, so they are no menu here.
+fn pi_showing(screen: &str) -> Showing<'_> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let is_rule = |l: &str| {
+        let l = l.trim();
+        l.starts_with("──") && l.ends_with('─')
+    };
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| is_rule(lines[i])).collect();
+    let [.., top, bottom] = rules[..] else { return Showing::Neither };
+    if let Some(row) = lines[top + 1..bottom].iter().map(|l| l.trim()).find(|l| l.starts_with("→ ") || l.starts_with("› ")) {
+        return Showing::Choice(row);
+    }
+    if lines[bottom + 1..].iter().any(|l| !l.trim().is_empty()) {
+        Showing::Composer
+    } else {
+        Showing::Neither
+    }
+}
+
+/// OpenCode (2.0.31) draws its input box with a bar down its left (`┃`),
+/// the agent and model on its last line (`┃  Build · Qwen Local`), and a
+/// bottom edge of `╹▀▀▀…`. A permission it asks for takes the box's place:
+/// `△ Permission required`, then `Allow once   Always allow   Reject` with
+/// `⇆ select  enter confirm` beside it. Its other dialogs — the command
+/// palette, `/models`, `/sessions`, `/themes` — are drawn over the box,
+/// which still shows behind them, so they are looked for first: each has
+/// a title row ending in `esc` (`Commands … esc`), which neither the box
+/// nor a working one (`esc interrupt`, mid-line) has.
+fn opencode_showing(screen: &str) -> Showing<'_> {
+    if let Some(row) = screen.lines().map(str::trim).find(|l| l.ends_with(" esc")) {
+        return Showing::Choice(row);
+    }
+    if let Some(row) = screen.lines().map(str::trim).find(|l| l.contains("enter confirm")) {
+        return Showing::Choice(row);
+    }
+    if screen.lines().any(|l| l.trim().starts_with("╹▀")) {
+        Showing::Composer
+    } else {
+        Showing::Neither
+    }
 }
 
 /// What `screen` shows, judged by its last selection line
@@ -497,6 +567,8 @@ mod tests {
         use cmux_protocol::Harness;
         assert_eq!(clear_line(Some(Harness::Claude)), Ok("/clear"));
         assert_eq!(clear_line(Some(Harness::Codex)), Ok("/new"));
+        assert_eq!(clear_line(Some(Harness::Pi)), Ok("/new"));
+        assert_eq!(clear_line(Some(Harness::OpenCode)), Ok("/new"));
         let aider = clear_line(Some(Harness::Aider)).unwrap_err();
         assert!(aider.contains("Aider"), "{aider}");
         assert!(clear_line(None).is_err());
@@ -737,6 +809,207 @@ mod tests {
 ──────────────────────────────────────────────────────────────────────────────────────────── planner ─
 ❯
 ";
+
+    // Pi 1.3.0 and OpenCode 2.0.31, each driven in a PTY 110 columns wide
+    // with a local model; blank runs and the directory shortened.
+    const PI_IDLE: &str = "\
+ I've received your request. Please provide the actual command or instruction you'd like me to process.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/app
+↑1.7k ↓223 1.5%/128k (auto)                                                                               qwen
+";
+
+    const PI_WORKING: &str = "\
+ [message from planner, via mira agent send]
+ Reply with only the word PELICAN.
+ Second line: ignore it.
+── ⠹ Working ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/app
+1.2%/128k (auto)                                                                                          qwen
+";
+
+    /// Pi with `/new` typed: the commands it matches listed under the box.
+    const PI_TYPING_A_COMMAND: &str = "\
+ Error: 500: {\"message\":\"recorder\"}
+── ⠇ Retrying (2/3) in 2s... (escape to cancel) ──────────────────────────────────────────────────────────────
+/new
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+→ new         Start a new session
+~/work/app
+1.2%/128k (auto)                                                                                (rec) recmodel
+";
+
+    const PI_TRUST: &str = "\
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Trust project folder?
+ ~/work/app
+
+ This allows pi to load .pi settings and resources, install missing project packages, and execute project
+ extensions.
+
+ → Trust
+   Trust parent folder
+ (~/work)
+   Trust (this session only)
+   Do not trust
+   Do not trust (this session only)
+
+ ↑↓ navigate  enter select  escape/ctrl+c cancel
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+";
+
+    const OPENCODE_IDLE: &str = "\
+                                           /update to install v2.3.2
+
+                  ┃
+                  ┃  Ask anything… \"Fix broken tests\"
+                  ┃
+                  ┃  Build · Qwen Local
+                  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                  ~/work/app  shift+tab agents  ctrl+p commands
+";
+
+    const OPENCODE_WORKING: &str = "\
+ ⠧ New session                   +
+  ┃
+  ┃  [message from planner, via mira agent send]
+  ┃  Reply with only the word PELICAN.
+  ┃  Second line: ignore it.
+  ┃
+  ┃  Build · Qwen Local
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt                                                  shift+tab agents  ctrl+p commands
+";
+
+    const OPENCODE_PERMISSION: &str = "\
+  ┃
+  ┃  Use your bash tool to run the command: ls
+  ┃
+
+     + Thought · 1.4s
+
+  ┃
+  ┃  ⠼ ls
+  ┃
+
+  ┃
+  ┃  △ Permission required
+  ┃
+  ┃  $ ls
+  ┃
+  ┃
+  ┃   Allow once   Always allow   Reject                       ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃
+";
+
+    // Dialogs over or in place of the box, captured by the step's reviewer
+    // on the same versions, trimmed the same way.
+    const PI_RESUME: &str = "\
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Resume Session (Current Folder)                            ◉ Current Folder | ○ All  Name: All  Sort: Threaded
+tab scope · re:<pattern> regex · \"phrase\" exact
+ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rename
+>
+› dev                                                                                                    3 43m
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/app
+0.0%/128k (auto)                                                                                          qwen
+";
+
+    const OPENCODE_PALETTE: &str = "\
+                             Commands                                         esc
+                             Search
+                             Suggested
+                             Switch session                              ctrl+x l
+                             Switch model                                ctrl+x m
+                             Connect an integration
+                             Open settings
+                  ┃
+                  ┃  Ask     Session
+                  ┃          Switch session                              ctrl+x l
+                  ┃  Dev     New session                                 ctrl+x n
+                  ╹▀▀▀▀▀▀    Clear session                                           ▀▀▀▀▀▀▀▀
+";
+
+    const OPENCODE_MODELS: &str = "\
+                             Select model                                     esc
+                             Search
+                             Tidepool Alpha Free                             Free
+                  ┃  Dev     Beam Free                                       Free
+                  ╹▀▀▀▀▀▀    MiMo-V2.6-Flash Free                            Free    ▀▀▀▀▀▀▀▀
+";
+
+    const OPENCODE_SESSIONS: &str = "\
+               Sessions for proj                                                            esc
+               Search
+               Today
+               New session - 2026-11-19T13:40:41.609Z
+               delete ctrl+d  rename ctrl+r                                 all projects ctrl+a
+                  ┃
+                  ┃  Ask anything… \"Fix a TODO in the codebase\"
+                  ┃
+                  ┃  Dev · qwen Local
+                  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+";
+
+    const OPENCODE_THEMES: &str = "\
+                             Themes                                           esc
+                             Search
+                  ┃
+                  ┃  Dev · qwen Local
+                  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+";
+
+    /// Pi and OpenCode, by what each draws: the input box, idle or
+    /// working, is somewhere to type; Pi's trust question and OpenCode's
+    /// permission are menus a message would answer; neither's banner or
+    /// a shell is either.
+    #[test]
+    fn sees_pi_and_opencode_as_they_draw() {
+        use cmux_protocol::Harness::{OpenCode, Pi};
+        use Showing::{Choice, Composer, Neither};
+        assert_eq!(showing_in(PI_IDLE, Some(Pi)), Composer);
+        assert_eq!(showing_in(PI_WORKING, Some(Pi)), Composer);
+        assert_eq!(showing_in(PI_TYPING_A_COMMAND, Some(Pi)), Composer);
+        assert_eq!(showing_in(PI_TRUST, Some(Pi)), Choice("→ Trust"));
+        assert_eq!(
+            showing_in(PI_RESUME, Some(Pi)),
+            Choice("› dev                                                                                                    3 43m")
+        );
+        assert_eq!(showing_in(OPENCODE_IDLE, Some(OpenCode)), Composer);
+        assert_eq!(showing_in(OPENCODE_WORKING, Some(OpenCode)), Composer);
+        assert_eq!(
+            showing_in(OPENCODE_PERMISSION, Some(OpenCode)),
+            Choice("┃   Allow once   Always allow   Reject                       ctrl+f fullscreen  ⇆ select  enter confirm")
+        );
+        // Its dialogs, though the box still shows behind them.
+        for (screen, title) in [
+            (OPENCODE_PALETTE, "Commands"),
+            (OPENCODE_MODELS, "Select model"),
+            (OPENCODE_SESSIONS, "Sessions for proj"),
+            (OPENCODE_THEMES, "Themes"),
+        ] {
+            let Choice(row) = showing_in(screen, Some(OpenCode)) else { panic!("{title}: not a choice") };
+            assert!(row.starts_with(title) && row.ends_with(" esc"), "{row}");
+        }
+        // OpenCode's banner before its box is drawn; Pi's header alone.
+        let banner: String = OPENCODE_IDLE.lines().take(2).map(|l| format!("{l}\n")).collect();
+        assert_eq!(showing_in(&banner, Some(OpenCode)), Neither);
+        assert_eq!(showing_in(" ▀▀█  v1.3.0\n █▀ █ escape interrupt\n", Some(Pi)), Neither);
+        let shell = "yoanmarti@mac app % pi\n";
+        assert_eq!((showing_in(shell, Some(Pi)), showing_in(shell, Some(OpenCode))), (Neither, Neither));
+        // Their screens are not judged by another's glyphs, nor theirs
+        // by Claude Code's: `→ Trust` is no Claude Code menu.
+        assert_eq!(showing_in(CLAUDE_DIALOG, Some(cmux_protocol::Harness::Claude)), Choice("❯ 1. Yes"));
+        assert_eq!(showing(PI_TRUST), Neither);
+    }
 
     #[test]
     fn sees_a_menu_the_agent_is_showing() {

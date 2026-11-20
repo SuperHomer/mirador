@@ -21,8 +21,8 @@
 //!   leaves it up with no hook: a dialog like Codex's update prompt.
 //!
 //! Ready for a message, either draws its input box as the real ones do,
-//! `❯ ` as `claude` and `› ` as `codex` — Mirador waits for one before it
-//! types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
+//! `❯ ` as `claude` and `› ` as `codex`, Pi's and OpenCode's boxes as
+//! `pi` and `opencode` — Mirador waits for one before it types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
 //! with no input box until its first input, which only dismisses it: as
 //! Codex's logo waits for a key before its login menu.
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
@@ -40,6 +40,11 @@
 //! Mirador on Windows. Started with a `-c notify=[…]`, it runs that
 //! program after each turn with Codex's JSON appended, the turn's thread
 //! in it.
+//!
+//! As `pi` or `opencode` it is a `codex` with no rollout and no notify
+//! of its own: it logs how it was started (with `OPENCODE_CONFIG_CONTENT`,
+//! where an OpenCode role's model and prompt are), and echoes each
+//! message.
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
@@ -290,6 +295,8 @@ fn main() {
         "pane": pane,
         "cwd": std::env::current_dir().ok(),
         "socket": std::env::var("MIRA_SOCKET").ok(),
+        // What an OpenCode role is given its model and prompt in.
+        "opencodeConfig": std::env::var("OPENCODE_CONFIG_CONTENT").ok(),
     }));
 
     let claude = kind == "claude";
@@ -320,8 +327,18 @@ fn main() {
     );
 
     println!("fake {kind} ready");
+    // Each as the real one draws it, for Mirador's screen checks
+    // (`handoff::showing_in`): Pi's box between two rules over its footer,
+    // OpenCode's ending in its `╹▀` edge — and, as the real ones leave it,
+    // the cursor back up inside the box (`ESC [ n A`), with rows drawn
+    // below it that a screen read must still see.
     let input_box = || {
-        print!("{} ", if claude { '❯' } else { '›' });
+        let rule = "─".repeat(40);
+        match kind.as_str() {
+            "pi" => print!("{rule}\n\n{rule}\n~/proj\n0.0%/128k (auto)    fake\n\x1b[4A\r"),
+            "opencode" => print!("  ┃\n  ┃  Build · Fake\n  ╹{}\n\x1b[3A\r  ┃  ", "▀".repeat(40)),
+            _ => print!("{} ", if claude { '❯' } else { '›' }),
+        }
         let _ = std::io::stdout().flush();
     };
     let mut welcome = std::env::var("E2E_WELCOME").is_ok_and(|v| v == "1");

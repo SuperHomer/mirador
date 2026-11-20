@@ -79,6 +79,55 @@ fn a_role_starts_with_its_prompt_and_way() {
     assert!(std::path::Path::new(&prompt_file).is_file(), "{prompt_file} was removed at startup");
 }
 
+/// A Pi role gets its model, its effort as `--thinking` and its prompt
+/// file through `--append-system-prompt`; an OpenCode role gets its model
+/// and prompt in `OPENCODE_CONFIG_CONTENT`, on a server of its own
+/// (`--standalone`), the prompt by `{file:…}`. Both prompt files hold the
+/// role's prompt then its way's. A team with a Pi member starts it the
+/// same way, with the team's prompt after the role's.
+#[test]
+fn pi_and_opencode_roles_start_with_their_model_and_prompt() {
+    e2e!();
+    let mut sb = Sandbox::new("pirole");
+    sb.write(".mirador/ways/our-way.md", WAY);
+    sb.write(".mirador/roles/builder.md", "---\nharness: pi\nmodel: sonnet\neffort: high\nway: our-way\n---\nYou build.\n");
+    sb.write(".mirador/roles/helper.md", "---\nharness: opencode\nmodel: anthropic/claude-haiku-5-5\n---\nYou help.\n");
+    sb.write(".mirador/teams/duo.md", "---\nmembers:\n  - role: builder\n    lead: true\n---\nShip small.\n");
+    sb.launch();
+    let first = sb.first_pane();
+
+    let builder = agent_new(&sb, "builder", &first).unwrap();
+    let args = sb.nth_start(&builder, 1);
+    assert_eq!(flag(&args, "--model").as_deref(), Some("sonnet"), "{args:?}");
+    assert_eq!(flag(&args, "--thinking").as_deref(), Some("high"), "{args:?}");
+    assert_eq!(flag(&args, "--name").as_deref(), Some("builder"), "{args:?}");
+    let prompt_file = flag(&args, "--append-system-prompt").expect("a prompt file");
+    let prompt = std::fs::read_to_string(&prompt_file).unwrap();
+    assert_eq!(prompt, "You build.\n\nWrite the failing test first.\nNever push.");
+
+    let helper = agent_new(&sb, "helper", &first).unwrap();
+    let started = sb.wait_for("the helper's start", std::time::Duration::from_secs(45), || {
+        sb.events("start", &helper).into_iter().next()
+    });
+    let args: Vec<String> = serde_json::from_value(started["args"].clone()).unwrap();
+    assert_eq!((args.len(), args[0].as_str(), args[1].as_str()), (3, "--standalone", "--session"), "{args:?}");
+    let config: Value = serde_json::from_str(started["opencodeConfig"].as_str().expect("a config")).unwrap();
+    assert_eq!(config["model"], "anthropic/claude-haiku-5-5", "{config}");
+    assert_eq!(config["default_agent"], "helper", "{config}");
+    let prompt = config["agent"]["helper"]["prompt"].as_str().unwrap();
+    let file = prompt.strip_prefix("{file:").and_then(|p| p.strip_suffix('}')).expect("a {file:…}");
+    assert_eq!(std::fs::read_to_string(file).unwrap(), "You help.");
+
+    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    let member = sb.wait_for("the duo's builder", std::time::Duration::from_secs(45), || sb.member("builder"))["pane"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let args = sb.nth_start(&member, 1);
+    let prompt = std::fs::read_to_string(flag(&args, "--append-system-prompt").expect("a prompt file")).unwrap();
+    assert!(prompt.starts_with("You build.") && prompt.ends_with("Ship small."), "{prompt}");
+}
+
 /// A role that keeps only some skills and no plugins: Mirador asks the
 /// agent's Claude Code what it has (the probe), and switches the rest off
 /// — skills hidden from the agent, plugins disabled, Claude Code's own

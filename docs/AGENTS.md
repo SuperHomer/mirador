@@ -282,6 +282,7 @@ mira agent edit [--tab]                       # a pane to edit them, and teams; 
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent new --harness codex "fix the flaky test"   # plain codex, beside this one
+mira agent new --harness pi "fix the flaky test"      # plain pi; or --harness opencode
 mira agent list                               # pane, status, harness, name, model
 mira agent wall                               # this tab as its agents' wall, or its splits again
 mira agent wall --focus | --grid              # the wall, in that layout (never turns it off)
@@ -315,7 +316,7 @@ any role can share:
 ```markdown
 <!-- .mirador/roles/reviewer.md -->
 ---
-harness: claude        # or codex; Claude Code when absent
+harness: claude        # or codex, pi, opencode; Claude Code when absent
 model: haiku
 effort: high           # how hard the model thinks; its default when absent
 way: our-way           # .mirador/ways/our-way.md, appended after this prompt
@@ -336,7 +337,9 @@ whole catalog, including `problem` on a role that cannot start.
 `effort` goes to Claude Code as `--effort` (`low`, `medium`, `high`,
 `xhigh`, `max`) and to Codex as `-c model_reasoning_effort="…"` (`low`,
 `medium`, `high`, `xhigh`, `max`, `ultra` — Codex itself refuses one the
-model does not support, and only some models take `ultra`). Lower case
+model does not support, and only some models take `ultra`); to Pi as
+`--thinking` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`);
+OpenCode takes none. Lower case
 only: any other value is the role's `problem`, which names the accepted
 ones, and the role is listed greyed out until it is fixed.
 
@@ -355,8 +358,8 @@ permission syntax. They become one settings file passed with `--settings`
 kept with the pane so a resume passes it again. `skills` and `plugins`
 first ask `claude` itself what exists, in the agent's directory; an
 unknown name stops the launch with the list. A repository's role may not
-`allow` tools, and a Codex role may not use any of these yet — both are
-reported as the role's `problem`.
+`allow` tools, and a Codex, Pi or OpenCode role may not use any of these
+yet — both are reported as the role's `problem`.
 
 `agent new` splits the pane it runs in (the focused pane, from outside
 Mirador), opens a shell there and types the agent into it, with the task as
@@ -366,9 +369,20 @@ way's) through `--append-system-prompt-file`; the session resumes like any
 other, on the role's model and effort, and keeps that prompt. Codex gets
 `--model`, `model_reasoning_effort`, `--profile` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
-Without a role, `--harness codex` starts plain Codex instead of plain
-Claude Code (no other harness can be started that way, and `--harness`
-with `--role` is refused: a role names its own).
+Pi gets `--model`, its effort as `--thinking` (off, minimal, low, medium,
+high, xhigh, max), `--name`, and the prompt through
+`--append-system-prompt`, given the file's path, whose contents it reads.
+OpenCode's TUI has no flag for a model or a prompt: an OpenCode role runs
+`opencode --standalone`, on a server of its own, with
+`OPENCODE_CONFIG_CONTENT` holding its model (`provider/model`) and an agent
+named after it, the default, whose prompt is `{file:<the prompt file>}`.
+It takes no effort, and is not done on Windows yet. Neither keeps a session
+Mirador resumes yet.
+Without a role, `--harness codex`, `pi` or `opencode` starts that agent
+plain instead of plain Claude Code (no other harness can be started that
+way, and `--harness` with `--role` is refused: a role names its own).
+Pi gets the task as an argument after `--`, OpenCode as `--prompt`. None
+of the three runs on a remote yet: there, only Claude Code starts.
 In a team's tab, `agent new --role` (without `--tab`) is `team add`: the
 agent joins the running team as a member, told its teammates (see
 *Teams*). A plain agent there, with no role, is no member.
@@ -598,14 +612,21 @@ A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
 data directory (beside `session.json`): the team, its layout and cwd, and
 each member's role, harness, cwd and conversation — Claude Code's session
-id, the thread id of the rollout a Codex holds open. Saving again under a
-name replaces it. Nothing is saved unless every member can be: not one
-exited or closed, run by Claude Code's background daemon (`claude --bg`,
-whose jobs do not outlive a restart), or Codex on Windows, which cannot
-see a process's open files. `team resume` opens a team's save as `team
+id, the thread id of the rollout a Codex holds open, the id Mirador
+started a Pi or an OpenCode on (`--session-id`, `--session ses_…`). Saving
+again under a name replaces it. Nothing is saved unless every member can
+be: not one exited or closed, run by Claude Code's background daemon
+(`claude --bg`, whose jobs do not outlive a restart), Codex on Windows,
+which cannot see a process's open files, or a Pi or an OpenCode cleared
+since it started: `/new` moves it to a conversation of its own making,
+whose id Mirador does not learn. Only Mirador's own clear is known: a
+`/new` or a switch of session typed in the pane itself (Pi's `/resume`,
+OpenCode's session list) leaves the record on the old conversation, and
+the save keeps that one. `team resume` opens a team's save as `team
 start` lays a team out, a team like any other from then on; each member
 runs `claude --resume <id>` or `codex resume <id>` with its role's flags,
-its prompt passed again, since a conversation keeps its own only until it
+or its Pi's or OpenCode's launch line with the saved id, its prompt
+passed again, since a conversation keeps its own only until it
 is compacted. A resume is refused while any pane runs one of the saved
 conversations, naming it — two processes on one conversation write over
 each other — and `team resume` refuses an agent's save, `agent resume` a
@@ -648,9 +669,15 @@ has not started within that time, and an agent whose status is `needsYou`
 unless `--force`. Unless `--force`, `send` also reads the agent's screen,
 since a dialog reports no status (Codex's update prompt, an approval,
 Claude Code's own questions). It refuses a numbered menu (`❯ 1. Yes`),
-naming the selected row. For Claude Code or Codex, it waits up to 10 s for
-the input box (`❯ `, `› `), then refuses: without one, the message could
-dismiss a welcome screen and its Enter pick from the menu that follows.
+naming the selected row, and Pi's and OpenCode's menus by how each draws
+them: Pi's project-trust question and pickers (`→ Trust`, `/resume`'s
+`› dev`), OpenCode's permission prompt (`Allow once   Always allow
+Reject`) and its dialogs (the command palette, `/models`, `/sessions`,
+whose title row ends in `esc`); Pi asks no approval for its tools. For Claude Code, Codex, Pi and OpenCode, it waits up to 10 s for
+the input box — `❯ `, `› `, Pi's box between its last two rules over its
+footer, OpenCode's ending in its `╹▀` edge — then refuses: without one,
+the message could dismiss a welcome screen and its Enter pick from the
+menu that follows.
 
 `wait` polls `agent list` once a second and ends on a status that changed
 after it started, or after it saw the agent working — so a wait begun
@@ -660,8 +687,8 @@ wait by exiting.
 
 `clear` finds the agent as `send` does and types its harness's
 new-conversation command as plain keystrokes — `/clear` for Claude Code,
-`/new` for Codex — then Enter as a separate write; any other harness is
-refused. The process keeps running, so the role's prompt (a launch flag)
+`/new` for Codex, Pi and OpenCode — then Enter as a separate write; any
+other harness is refused. The process keeps running, so the role's prompt (a launch flag)
 holds. Refused as `send` is, except that it may name the caller's own
 pane. A working agent is not refused: the line queues behind its turn.
 
@@ -1144,9 +1171,9 @@ terminal here and reads as exited too, although its agent may still run
 there. A restart then starts it afresh, not on the conversation it had,
 and ends the old agent there with its old pane.
 
-Not done yet: Codex there; a role that keeps only some skills or
-plugins (listing them runs Claude Code here, which says nothing of the
-remote's); resuming a save of a member there (`team save` and `agent
+Not done yet: Codex, Pi or OpenCode there; a role that keeps only some
+skills or plugins (listing them runs Claude Code here, which says nothing
+of the remote's); resuming a save of a member there (`team save` and `agent
 save` write one, but `team resume` and `agent resume` start it on this
 computer, where its conversation is not); and a Windows remote, or
 Mirador on Windows driving one.

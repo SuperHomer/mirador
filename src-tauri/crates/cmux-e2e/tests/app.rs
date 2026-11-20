@@ -292,6 +292,105 @@ fn a_codex_role_pane_comes_back_resuming_its_thread() {
     assert!(!args.iter().any(|a| a == "look at main"), "{args:?}");
 }
 
+/// Pi and OpenCode start plain from `mira agent new --harness`, each with
+/// the task as its first message the way its CLI takes one — Pi as an
+/// argument after `--`, OpenCode's TUI as `--prompt` — and are listed as
+/// what they are from the start.
+#[test]
+fn plain_pi_and_opencode_start_with_their_task() {
+    e2e!();
+    let mut sb = Sandbox::new("piopencode");
+    sb.launch();
+    let first = sb.first_pane();
+    // Each on a conversation Mirador picked, so it can resume it.
+    for (harness, kind, session, task, listed) in [
+        ("pi", "pi", "--session-id", ["--", "do x"], "pi"),
+        ("opencode", "opencode", "--session", ["--prompt", "do x"], "openCode"),
+    ] {
+        let (code, out, err) = sb.mira(Some(&first), &["agent", "new", "--harness", harness, "do x"]);
+        assert_eq!(code, 0, "{harness}: {err}");
+        let pane = out.trim().to_string();
+        let started = sb.wait_for(&format!("{kind} to start"), LONG, || sb.events("start", &pane).into_iter().next());
+        assert_eq!(started["kind"], kind, "{started}");
+        let args: Vec<String> = serde_json::from_value(started["args"].clone()).unwrap();
+        assert_eq!((args.len(), args[0].as_str(), &args[2..]), (4, session, &task.map(String::from)[..]), "{args:?}");
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+        let agent = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));
+        assert_eq!(agent["harness"], listed, "{agent}");
+    }
+}
+
+/// A Pi's and an OpenCode's pane come back on the conversation each was
+/// started on: Mirador picks the id up front (`--session-id`,
+/// `--session`) and types the same launch line, no task, with the same id
+/// after a relaunch. A cleared one is not brought back, since `/new` left
+/// that conversation. And a team with a Pi member is saved and resumed on
+/// its id.
+#[test]
+fn pi_and_opencode_panes_come_back_on_their_conversation() {
+    e2e!();
+    let mut sb = Sandbox::new("piocrestore");
+    sb.write(".mirador/roles/builder.md", "---\nharness: pi\nmodel: sonnet\n---\nYou build.\n");
+    sb.write(".mirador/roles/helper.md", "---\nharness: opencode\n---\nYou help.\n");
+    sb.write(".mirador/roles/spare.md", "---\nharness: pi\n---\nYou spare.\n");
+    sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: builder\n    lead: true\n---\nShip small.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    let start = |role: &str| {
+        sb.call(Request::AgentNew {
+            role: Some(role.into()),
+            harness: None,
+            title: None,
+            task: Some("look at main".into()),
+            target: None,
+            pane_id: Some(first.clone()),
+            host: None,
+            dir: None,
+            on: None,
+        })["paneId"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let (builder, helper, spare) = (start("builder"), start("helper"), start("spare"));
+    let pi = sb.nth_start(&builder, 1);
+    let pi_id = cmux_e2e::flag(&pi, "--session-id").expect("a session id");
+    assert_eq!(pi.last().map(String::as_str), Some("look at main"), "{pi:?}");
+    let oc = sb.nth_start(&helper, 1);
+    let oc_id = cmux_e2e::flag(&oc, "--session").expect("a session");
+    assert!(oc_id.starts_with("ses_"), "{oc:?}");
+    sb.nth_start(&spare, 1);
+    // `/new` moves the spare to a conversation Mirador does not know.
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "clear", &spare]);
+    assert_eq!(code, 0, "{err}");
+    sb.wait_for("the spare's /new", LONG, || sb.events("message", &spare).into_iter().find(|m| m["text"] == "/new"));
+
+    sb.quit();
+    sb.launch();
+    let pi = sb.nth_start(&builder, 2);
+    assert_eq!(cmux_e2e::flag(&pi, "--session-id").as_deref(), Some(pi_id.as_str()), "{pi:?}");
+    assert_eq!(cmux_e2e::flag(&pi, "--model").as_deref(), Some("sonnet"), "{pi:?}");
+    assert!(!pi.iter().any(|a| a == "look at main"), "the task was the launch's: {pi:?}");
+    let oc = sb.nth_start(&helper, 2);
+    assert_eq!(oc[0], "--standalone", "{oc:?}");
+    assert_eq!(cmux_e2e::flag(&oc, "--session").as_deref(), Some(oc_id.as_str()), "{oc:?}");
+    assert_eq!(sb.events("start", &spare).len(), 1, "the cleared conversation is not brought back");
+
+    // A team's Pi member, saved and resumed in a tab of its own.
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    let member = sb.wait_for("the pair's builder", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
+    let id = cmux_e2e::flag(&sb.nth_start(&member, 1), "--session-id").expect("a session id");
+    let (code, _, err) = sb.mira(Some(&member), &["team", "save"]);
+    assert_eq!(code, 0, "{err}");
+    let tab = sb.teams()[0]["tabId"].as_str().unwrap().to_string();
+    sb.call(Request::CloseTab { tab_id: tab });
+    sb.wait_for("the pair gone", LONG, || sb.teams().is_empty().then_some(()));
+    sb.call(Request::TeamResume { name: "pair".into() });
+    let member = sb.wait_for("the pair resumed", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
+    let args = sb.nth_start(&member, 1);
+    assert_eq!(cmux_e2e::flag(&args, "--session-id").as_deref(), Some(id.as_str()), "{args:?}");
+}
+
 /// The editor for role, way and team files opens beside the pane it is
 /// asked from, knowing that pane's directory, and is still an editor after
 /// a relaunch. What it does inside is the webview's, out of reach here;
