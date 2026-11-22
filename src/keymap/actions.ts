@@ -216,10 +216,10 @@ export const actions: ActionDef[] = [
       if (tab) void equalizePanes(tab);
     },
   },
-  layoutAction("layout_side_by_side", "Side by Side", "even-horizontal"),
-  layoutAction("layout_stacked", "Stacked", "even-vertical"),
-  layoutAction("layout_grid", "Grid", "tiled"),
-  layoutAction("layout_main_stack", "Main and Stack", "main-vertical"),
+  layoutAction("layout_side_by_side", "Side by Side", "side-by-side"),
+  layoutAction("layout_stacked", "Stacked", "stacked"),
+  layoutAction("layout_grid", "Grid", "grid"),
+  layoutAction("layout_main_stack", "Main and Stack", "main-stack"),
   { id: "next_tab", title: "Tab: Next", group: "tabs", run: () => cycleTab(1) },
   { id: "prev_tab", title: "Tab: Previous", group: "tabs", run: () => cycleTab(-1) },
   {

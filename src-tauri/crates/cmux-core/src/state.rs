@@ -1430,14 +1430,14 @@ mod tests {
         let (mut ws, tab, [a, b, c]) = three_panes();
         ws.focus_pane(&b);
         ws.zoom_pane(&b);
-        assert!(ws.apply_layout(&tab, Preset::EvenHorizontal));
+        assert!(ws.apply_layout(&tab, Preset::SideBySide));
         let root = &ws.tabs[0].root;
         assert_eq!(layout::pane_ids(root), vec![a, b.clone(), c]);
         assert!(matches!(root, Node::Split { dir: SplitDir::Row, children, .. } if children.len() == 3));
         assert_eq!(ws.focused_pane(), b);
         assert_eq!(ws.tabs[0].zoomed, None);
-        assert!(!ws.apply_layout(&tab, Preset::EvenHorizontal), "already laid out so");
-        assert!(!ws.apply_layout("no-such-tab", Preset::Tiled));
+        assert!(!ws.apply_layout(&tab, Preset::SideBySide), "already laid out so");
+        assert!(!ws.apply_layout("no-such-tab", Preset::Grid));
     }
 
     #[test]

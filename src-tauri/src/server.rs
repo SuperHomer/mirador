@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use cmux_core::transport::{self, Stream};
-use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope, WallView};
+use cmux_protocol::{Direction, Request, RequestEnvelope, ResponseEnvelope, WallView};
 
 use crate::{notify, AppState};
 
@@ -124,6 +124,17 @@ fn remote_of(host: Option<String>, dir: Option<String>, on: Option<String>) -> R
     }
 }
 
+/// The tab a tab-wide request is about: `tab_id`, else the tab holding
+/// `pane_id` (the pane `mira` ran in), else the active tab.
+fn layout_tab(state: &AppState, tab_id: Option<String>, pane_id: Option<String>) -> Result<String, String> {
+    let ws = state.workspace.lock().unwrap();
+    match (tab_id, pane_id) {
+        (Some(tab), _) => ws.tabs.iter().any(|t| t.id == tab).then_some(tab.clone()).ok_or(format!("no tab {tab}")),
+        (None, Some(pane)) => ws.tab_of_pane(&pane).map(|t| t.id.clone()).ok_or(format!("no pane {pane}")),
+        (None, None) => Ok(ws.tabs[ws.active].id.clone()),
+    }
+}
+
 fn focused_pane(state: &AppState) -> String {
     state.workspace.lock().unwrap().focused_pane()
 }
@@ -179,6 +190,44 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let zoomed =
                 crate::commands::zoom_pane(app.clone(), app.state(), pane.clone(), zoom)?;
             Ok(json!({ "paneId": pane, "zoomed": zoomed }))
+        }
+        Request::SwapPane { pane_id, direction } => {
+            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            if state.workspace.lock().unwrap().tab_of_pane(&pane).is_none() {
+                return Err(format!("no pane {pane}"));
+            }
+            if !crate::commands::swap_pane(app.clone(), app.state(), pane.clone(), direction) {
+                let side = match direction {
+                    Direction::Left => "on its left",
+                    Direction::Right => "on its right",
+                    Direction::Up => "above it",
+                    Direction::Down => "below it",
+                };
+                return Err(format!("{pane} has no pane {side} to swap with"));
+            }
+            Ok(Value::Null)
+        }
+        Request::RotatePanes { tab_id, pane_id, back } => {
+            let tab = layout_tab(&state, tab_id, pane_id)?;
+            if !crate::commands::rotate_panes(app.clone(), app.state(), tab.clone(), !back) {
+                return Err(format!("tab {tab} has one pane: there is nothing to rotate"));
+            }
+            Ok(Value::Null)
+        }
+        Request::EqualizePanes { tab_id, pane_id } => {
+            let tab = layout_tab(&state, tab_id, pane_id)?;
+            if !crate::commands::equalize_panes(app.clone(), app.state(), tab.clone()) {
+                return Err(format!("the panes of tab {tab} are already even"));
+            }
+            Ok(Value::Null)
+        }
+        Request::ApplyLayout { tab_id, pane_id, preset } => {
+            let tab = layout_tab(&state, tab_id, pane_id)?;
+            if !crate::commands::apply_layout(app.clone(), app.state(), tab.clone(), preset) {
+                let name = serde_json::to_value(preset).map_err(|e| e.to_string())?;
+                return Err(format!("tab {tab} is already laid out {}", name.as_str().unwrap_or_default()));
+            }
+            Ok(Value::Null)
         }
         Request::View { view } => {
             if let Some(view) = view {

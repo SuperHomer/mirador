@@ -315,7 +315,7 @@ pub fn equalize(node: &mut Node) {
     }
 }
 
-/// The main pane's share of the width in `Preset::MainVertical`. Big enough
+/// The main pane's share of the width in `Preset::MainStack`. Big enough
 /// to be the pane you work in, small enough that the stack beside it keeps
 /// terminals wide enough to read a prompt or a log line.
 const MAIN_RATIO: f32 = 0.6;
@@ -333,9 +333,9 @@ pub fn preset(panes: &[String], preset: Preset) -> Option<Node> {
         return None;
     }
     Some(match preset {
-        Preset::EvenHorizontal => even(SplitDir::Row, leaves),
-        Preset::EvenVertical => even(SplitDir::Column, leaves),
-        Preset::Tiled => {
+        Preset::SideBySide => even(SplitDir::Row, leaves),
+        Preset::Stacked => even(SplitDir::Column, leaves),
+        Preset::Grid => {
             let cols = (leaves.len() as f32).sqrt().ceil() as usize;
             let rows = leaves
                 .chunks(cols)
@@ -343,7 +343,7 @@ pub fn preset(panes: &[String], preset: Preset) -> Option<Node> {
                 .collect();
             even(SplitDir::Column, rows)
         }
-        Preset::MainVertical => {
+        Preset::MainStack => {
             let mut leaves = leaves;
             let rest = leaves.split_off(1);
             let main = leaves.pop().unwrap();
@@ -627,10 +627,10 @@ mod tests {
     #[test]
     fn every_preset_of_one_pane_is_a_leaf() {
         for p in [
-            Preset::EvenHorizontal,
-            Preset::EvenVertical,
-            Preset::Tiled,
-            Preset::MainVertical,
+            Preset::SideBySide,
+            Preset::Stacked,
+            Preset::Grid,
+            Preset::MainStack,
         ] {
             assert_eq!(preset(&ids(&["a"]), p), Some(leaf("a")));
         }
@@ -638,12 +638,12 @@ mod tests {
 
     #[test]
     fn no_panes_make_no_tree() {
-        assert_eq!(preset(&[], Preset::Tiled), None);
+        assert_eq!(preset(&[], Preset::Grid), None);
     }
 
     #[test]
-    fn even_horizontal_puts_panes_side_by_side() {
-        let root = preset(&ids(&["a", "b", "c"]), Preset::EvenHorizontal).unwrap();
+    fn side_by_side_puts_panes_side_by_side() {
+        let root = preset(&ids(&["a", "b", "c"]), Preset::SideBySide).unwrap();
         let w = 0.33;
         assert_eq!(
             rects(&root),
@@ -657,7 +657,7 @@ mod tests {
 
     #[test]
     fn even_vertical_stacks_panes() {
-        let root = preset(&ids(&["a", "b"]), Preset::EvenVertical).unwrap();
+        let root = preset(&ids(&["a", "b"]), Preset::Stacked).unwrap();
         assert_eq!(
             rects(&root),
             vec![rect("a", 0.0, 0.0, 1.0, 0.5), rect("b", 0.0, 0.5, 1.0, 0.5)]
@@ -665,15 +665,15 @@ mod tests {
     }
 
     #[test]
-    fn tiled_makes_a_grid() {
-        let tiled = |names: &[&str]| rects(&preset(&ids(names), Preset::Tiled).unwrap());
+    fn grid_makes_a_grid() {
+        let grid = |names: &[&str]| rects(&preset(&ids(names), Preset::Grid).unwrap());
         assert_eq!(
-            tiled(&["a", "b"]),
+            grid(&["a", "b"]),
             vec![rect("a", 0.0, 0.0, 0.5, 1.0), rect("b", 0.5, 0.0, 0.5, 1.0)]
         );
         // Two columns, the short last row spanning the width.
         assert_eq!(
-            tiled(&["a", "b", "c"]),
+            grid(&["a", "b", "c"]),
             vec![
                 rect("a", 0.0, 0.0, 0.5, 0.5),
                 rect("b", 0.5, 0.0, 0.5, 0.5),
@@ -681,7 +681,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            tiled(&["a", "b", "c", "d"]),
+            grid(&["a", "b", "c", "d"]),
             vec![
                 rect("a", 0.0, 0.0, 0.5, 0.5),
                 rect("b", 0.5, 0.0, 0.5, 0.5),
@@ -691,7 +691,7 @@ mod tests {
         );
         // Three columns: a row of three over a row of two.
         assert_eq!(
-            tiled(&["a", "b", "c", "d", "e"]),
+            grid(&["a", "b", "c", "d", "e"]),
             vec![
                 rect("a", 0.0, 0.0, 0.33, 0.5),
                 rect("b", 0.33, 0.0, 0.33, 0.5),
@@ -703,8 +703,8 @@ mod tests {
     }
 
     #[test]
-    fn main_vertical_puts_the_first_pane_large_on_the_left() {
-        let main = |names: &[&str]| rects(&preset(&ids(names), Preset::MainVertical).unwrap());
+    fn main_stack_puts_the_first_pane_large_on_the_left() {
+        let main = |names: &[&str]| rects(&preset(&ids(names), Preset::MainStack).unwrap());
         assert_eq!(
             main(&["a", "b"]),
             vec![rect("a", 0.0, 0.0, 0.6, 1.0), rect("b", 0.6, 0.0, 0.4, 1.0)]

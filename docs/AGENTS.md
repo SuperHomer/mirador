@@ -944,6 +944,10 @@ mira split --dir column --command "npm run dev"
 mira focus <pane>
 mira zoom <pane>               # that pane alone, filling its tab
 mira zoom <pane> --off         # the whole tab again
+mira swap <pane> --dir left    # trade places with its neighbor there (left|right|up|down)
+mira rotate [--back]           # every pane of the tab one place along
+mira equalize                  # every split of the tab in equal shares
+mira layout grid               # side-by-side | stacked | grid | main-stack
 mira close-pane <pane>
 mira close-tab <tab>           # the tab and every pane in it
 mira view                      # which view is shown: tabs or board
@@ -952,6 +956,13 @@ mira view tabs                 # back to tabs
 mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
 ```
+
+`rotate`, `equalize` and `layout` act on `--tab <tab>`, else the tab
+they run in, else the active one; `swap` without a pane swaps the focused
+one. The focus stays with its pane wherever it goes, and panes keep
+running as they move. Each refuses a change that changes nothing — no
+neighbor on that side, a tab of one pane, sizes already even — with an
+error, so a script can tell.
 
 The board shows every tab as a frame and every pane as a card — but a
 tab showing its agent wall shows the wall in its frame, its agents or its

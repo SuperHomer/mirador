@@ -27,13 +27,13 @@ pub enum Direction {
 #[serde(rename_all = "kebab-case")]
 pub enum Preset {
     /// Side by side in one row.
-    EvenHorizontal,
+    SideBySide,
     /// Stacked in one column.
-    EvenVertical,
+    Stacked,
     /// A grid of ceil(sqrt(n)) columns, the last row possibly short.
-    Tiled,
+    Grid,
     /// The first pane large on the left, the rest stacked on the right.
-    MainVertical,
+    MainStack,
 }
 
 /// The split tree of one tab. Ratios are normalized to sum to 1.
@@ -366,6 +366,42 @@ pub enum Request {
         pane_id: Option<String>,
         #[serde(default)]
         zoom: Option<bool>,
+    },
+    /// Swaps a pane (the focused one without `pane_id`) with its neighbor
+    /// in `direction`; refused when it has none there.
+    SwapPane {
+        #[serde(default)]
+        pane_id: Option<String>,
+        direction: Direction,
+    },
+    /// Moves every pane of a tab one place along its pane order, or back
+    /// one with `back`; refused for a tab of one pane. The tab is `tab_id`,
+    /// else the one holding `pane_id` (the asking pane), else the active
+    /// one — as for the two below.
+    RotatePanes {
+        #[serde(default)]
+        tab_id: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        back: bool,
+    },
+    /// Gives every pane of a tab an equal share of its split; refused when
+    /// they already have one.
+    EqualizePanes {
+        #[serde(default)]
+        tab_id: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Lays a tab's panes out afresh as `preset`, in their order; refused
+    /// when they already are.
+    ApplyLayout {
+        #[serde(default)]
+        tab_id: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        preset: Preset,
     },
     /// Shows the workspace as `view`; without it, only answers which view
     /// is shown.
