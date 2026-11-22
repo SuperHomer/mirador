@@ -2873,10 +2873,6 @@ mod tests {
         assert_eq!((message.join(" ").as_str(), card.as_deref()), ("use -v", Some("ab12")));
     }
 
-    /// How a hook knows which pane its agent runs in. The tty fallback is
-    /// unix-only, so on Windows this environment variable is the only
-    /// mechanism — if it stopped being read, every notification would land
-    /// on whichever tab happened to be focused.
     #[test]
     fn layouts_and_directions_go_by_their_names() {
         assert_eq!(parse_preset("side-by-side"), Ok(Preset::SideBySide));
@@ -2888,6 +2884,10 @@ mod tests {
         assert!(parse_direction("north").is_err());
     }
 
+    /// How a hook knows which pane its agent runs in. The tty fallback is
+    /// unix-only, so on Windows this environment variable is the only
+    /// mechanism — if it stopped being read, every notification would land
+    /// on whichever tab happened to be focused.
     #[test]
     fn own_pane_comes_from_the_pane_environment() {
         std::env::set_var(cmux_core::pty::PANE_ENV, "pane-abc-123");

@@ -1239,8 +1239,9 @@ Newline-delimited JSON on the socket named in the discovery file:
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen notify run list_runs agent_session codex_thread agent_new agent_list
-agent_wall zoom_pane browser_open browser_navigate browser_snapshot
-browser_click browser_fill browser_type browser_press browser_text browser_eval
+agent_wall zoom_pane swap_pane rotate_panes equalize_panes apply_layout
+browser_open browser_navigate browser_snapshot browser_click browser_fill
+browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add

@@ -656,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn even_vertical_stacks_panes() {
+    fn stacked_stacks_panes() {
         let root = preset(&ids(&["a", "b"]), Preset::Stacked).unwrap();
         assert_eq!(
             rects(&root),
