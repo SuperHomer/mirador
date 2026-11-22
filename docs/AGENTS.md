@@ -944,7 +944,7 @@ mira split --dir column --command "npm run dev"
 mira focus <pane>
 mira zoom <pane>               # that pane alone, filling its tab
 mira zoom <pane> --off         # the whole tab again
-mira send-file shot.png         # type its path in, as a drop does; in an SSH pane, sent there first
+mira send-file shot.png        # type its path in, as a drop does; in an SSH pane, sent there first
 mira close-pane <pane>
 mira close-tab <tab>           # the tab and every pane in it
 mira view                      # which view is shown: tabs or board

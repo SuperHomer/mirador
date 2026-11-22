@@ -18,13 +18,25 @@ pub const MAX_BYTES: usize = 20 * 1024 * 1024;
 /// a cache, which is what they are.
 pub const REMOTE_DIR: &str = ".cache/mirador/paste";
 
-/// Where pastes go on this computer: the temp directory, which on macOS is
-/// the person's own and private, and which the system clears too. Not the
-/// data directory: on macOS that is `Application Support`, and a path with
-/// a space in it is one more thing the program it is typed into has to
-/// unquote right.
+/// Where pastes go on this computer: a directory that is the person's own.
+/// On macOS and Windows that is the temp directory, which is per user
+/// there and which the system clears too; not the data directory, which on
+/// macOS is `Application Support`, and a path with a space in it is one
+/// more thing the program it is typed into has to unquote right. On Linux
+/// and the BSDs the temp directory is the shared `/tmp`: one
+/// `mirador-paste` for every user, which another user could make first
+/// and so choose where screenshots land and what path is typed. There the
+/// data directory (`~/.local/share/mirador`) is the person's and has no
+/// space in it.
 pub fn local_dir() -> PathBuf {
-    std::env::temp_dir().join("mirador-paste")
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::session::data_dir().join("paste")
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        std::env::temp_dir().join("mirador-paste")
+    }
 }
 
 /// Where a paste called `file_name` goes on a remote, relative to its home.
@@ -310,6 +322,9 @@ mod tests {
     #[test]
     fn remote_pastes_go_under_the_cache() {
         assert_eq!(remote_rel_path("paste-x.png"), ".cache/mirador/paste/paste-x.png");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert_eq!(local_dir(), crate::session::data_dir().join("paste"), "never the shared /tmp");
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
         assert_eq!(local_dir(), std::env::temp_dir().join("mirador-paste"));
     }
 

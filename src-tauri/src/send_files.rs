@@ -77,5 +77,5 @@ fn upload(host: &str, files: Vec<(String, Vec<u8>)>) -> Result<Vec<String>, Stri
 
 #[cfg(windows)]
 fn upload(_host: &str, _files: Vec<(String, Vec<u8>)>) -> Result<Vec<String>, String> {
-    Err("Sending files to an SSH pane is not supported on Windows yet".into())
+    Err("sending files to an SSH pane is not supported on Windows yet".into())
 }
