@@ -8,18 +8,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::image::sniff_image;
 
-/// The largest image a paste takes. A paste into an SSH pane sends the
-/// file to the remote as base64 through a shell, and a screenshot is a few
-/// MB at most; anything past this is not one.
+/// The largest file a paste or a drop takes into an SSH pane, and the
+/// largest image a paste takes anywhere. Such a file goes to the remote as
+/// base64 through a shell, and a screenshot is a few MB at most; anything
+/// past this is not one.
 pub const MAX_BYTES: usize = 20 * 1024 * 1024;
 
 /// Where pastes go on a remote, relative to its home: out of the way, and
 /// a cache, which is what they are.
 pub const REMOTE_DIR: &str = ".cache/mirador/paste";
 
-/// Where pastes go on this computer.
+/// Where pastes go on this computer: the temp directory, which on macOS is
+/// the person's own and private, and which the system clears too. Not the
+/// data directory: on macOS that is `Application Support`, and a path with
+/// a space in it is one more thing the program it is typed into has to
+/// unquote right.
 pub fn local_dir() -> PathBuf {
-    crate::session::data_dir().join("paste")
+    std::env::temp_dir().join("mirador-paste")
 }
 
 /// Where a paste called `file_name` goes on a remote, relative to its home.
@@ -27,25 +32,61 @@ pub fn remote_rel_path(file_name: &str) -> String {
     format!("{REMOTE_DIR}/{file_name}")
 }
 
+/// The extension a pasted image's file takes, from its bytes; refused when
+/// they are not a raster image, or more than [`MAX_BYTES`].
+pub fn image_ext(bytes: &[u8]) -> Result<&'static str, String> {
+    let ext = sniff_image(bytes).ok_or("only a PNG, JPEG, GIF, WebP or AVIF image can be pasted")?;
+    check_size("the image", bytes.len() as u64)?;
+    Ok(ext)
+}
+
+/// Refuses `len` bytes over [`MAX_BYTES`], saying what was refused.
+pub fn check_size(what: &str, len: u64) -> Result<(), String> {
+    if len > MAX_BYTES as u64 {
+        return Err(format!(
+            "{what} is {} MB: a file pasted or dropped into a pane can be up to {} MB",
+            len.div_ceil(1024 * 1024),
+            MAX_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(())
+}
+
+/// A new name for a pasted image of type `ext`: `paste-<when>-<id>.<ext>`.
+pub fn image_name(ext: &str, now: SystemTime) -> String {
+    unique_name(now, &format!(".{ext}"))
+}
+
+/// The name a file called `original` takes on a remote it is sent to:
+/// `paste-<when>-<id>-<original>`, so that two files of one name never
+/// meet there, the remote's pruning finds it as it finds a paste, and the
+/// name stays one a shell reads as one word — anything but `A-Za-z0-9._-`
+/// in `original` becomes `_`.
+pub fn sent_file_name(original: &str, now: SystemTime) -> String {
+    let plain: String = original
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' })
+        .collect();
+    unique_name(now, &format!("-{}", if plain.is_empty() { "file" } else { &plain }))
+}
+
+/// `paste-<when>-<id><suffix>`. Two names made in the same second differ
+/// in their id.
+fn unique_name(now: SystemTime, suffix: &str) -> String {
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    format!("paste-{}-{}{suffix}", stamp(now), &id[..8])
+}
+
 /// Writes a pasted image into `dir` and answers its path. Refuses bytes
 /// that are not a raster image, and an image over [`MAX_BYTES`]. The file
 /// is the owner's alone: a screenshot can show anything.
 pub fn save(dir: &Path, bytes: &[u8], now: SystemTime) -> Result<PathBuf, String> {
-    let ext = sniff_image(bytes).ok_or("only a PNG, JPEG, GIF, WebP or AVIF image can be pasted")?;
-    if bytes.len() > MAX_BYTES {
-        return Err(format!(
-            "the image is {} MB: an image pasted into a pane can be up to {} MB",
-            bytes.len().div_ceil(1024 * 1024),
-            MAX_BYTES / (1024 * 1024)
-        ));
-    }
+    let ext = image_ext(bytes)?;
     create_private_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let stamp = stamp(now);
-    // Two pastes in the same second get different names, and `create_new`
-    // makes sure no paste ever overwrites another, however unlikely.
+    // `create_new` makes sure no paste ever overwrites another, however
+    // unlikely two ids are to meet.
     loop {
-        let id = uuid::Uuid::new_v4().simple().to_string();
-        let path = dir.join(format!("paste-{stamp}-{}.{ext}", &id[..8]));
+        let path = dir.join(image_name(ext, now));
         match create_private_file(&path) {
             Ok(mut file) => {
                 if let Err(e) = file.write_all(bytes) {
@@ -60,6 +101,18 @@ pub fn save(dir: &Path, bytes: &[u8], now: SystemTime) -> Result<PathBuf, String
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(format!("{}: {e}", path.display())),
         }
+    }
+}
+
+/// `path` quoted to be typed into a pane as one word, as the frontend's
+/// `quotePath` quotes a dropped file's: POSIX single quotes, each `'`
+/// closed and escaped; on Windows, double quotes, which only keep a path
+/// with spaces together (a name cannot hold `"`).
+pub fn quote_path(path: &str) -> String {
+    if cfg!(windows) {
+        format!("\"{path}\"")
+    } else {
+        format!("'{}'", path.replace('\'', "'\\''"))
     }
 }
 
@@ -207,7 +260,7 @@ mod tests {
         let mut big = PNG.to_vec();
         big.resize(MAX_BYTES + 1, 0);
         let err = save(&dir, &big, evening()).unwrap_err();
-        assert!(err.contains("21 MB") && err.contains("up to 20 MB"), "{err}");
+        assert!(err.contains("the image is 21 MB") && err.contains("up to 20 MB"), "{err}");
         assert!(!dir.exists());
 
         big.truncate(MAX_BYTES);
@@ -257,6 +310,31 @@ mod tests {
     #[test]
     fn remote_pastes_go_under_the_cache() {
         assert_eq!(remote_rel_path("paste-x.png"), ".cache/mirador/paste/paste-x.png");
-        assert!(local_dir().ends_with("paste"));
+        assert_eq!(local_dir(), std::env::temp_dir().join("mirador-paste"));
+    }
+
+    #[test]
+    fn a_file_sent_keeps_its_name_made_plain() {
+        let name = sent_file_name("my shot (1).png", evening());
+        assert!(name.starts_with("paste-20261122-221530-"), "{name}");
+        assert!(name.ends_with("-my_shot__1_.png"), "{name}");
+        assert!(crate::ssh::is_plain_path(&name), "{name}");
+        assert_ne!(name, sent_file_name("my shot (1).png", evening()), "two of one name never meet");
+        assert!(sent_file_name("", evening()).ends_with("-file"));
+        assert!(sent_file_name("../../etc/passwd", evening()).ends_with("-.._.._etc_passwd"), "no way out of its directory");
+    }
+
+    #[test]
+    fn a_file_over_the_cap_is_refused_by_name() {
+        assert!(check_size("notes.txt", MAX_BYTES as u64).is_ok());
+        let err = check_size("big.bin", MAX_BYTES as u64 + 1).unwrap_err();
+        assert!(err.starts_with("big.bin is 21 MB"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_path_is_quoted_as_one_word() {
+        assert_eq!(quote_path("/tmp/a b.png"), "'/tmp/a b.png'");
+        assert_eq!(quote_path("/tmp/it's.png"), "'/tmp/it'\\''s.png'");
     }
 }

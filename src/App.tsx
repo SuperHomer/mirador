@@ -6,6 +6,7 @@ import {
   getConfig,
   WorkspaceSnapshot,
   ResolvedConfig,
+  sendFiles,
 } from "./bindings";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useConfigStore } from "./state/configStore";
@@ -25,7 +26,7 @@ import {
   listNotifications,
   setBrowserVisible,
 } from "./bindings";
-import { useUiStore } from "./state/uiStore";
+import { reportFailure, useUiStore } from "./state/uiStore";
 import {
   getTerminal,
   readScreenText,
@@ -122,15 +123,24 @@ export default function App() {
         .elementFromPoint(x, y)
         ?.closest<HTMLElement>("[data-pane]")?.dataset.pane;
       if (!pane) return;
-      getTerminal(pane)?.paste(
-        e.payload.paths.map(quotePath).join(" ") + " ",
-      );
+      // Rust answers what to type: the paths themselves in a local pane,
+      // the copies it sent there in an SSH pane.
+      const paths = e.payload.paths;
+      void sendFiles(pane, paths)
+        .then((typed) => getTerminal(pane)?.paste(typed.map(quotePath).join(" ") + " "))
+        .catch((err) => reportFailure("Drop files", err));
     });
+    // `mira send-file`: typed by the terminal, as a drop is, so xterm
+    // brackets it only for a program that asked for bracketed paste.
+    const unlistenPasteInto = listen<{ paneId: string; text: string }>("paste-into-pane", (e) =>
+      getTerminal(e.payload.paneId)?.paste(e.payload.text),
+    );
     const onBlur = () => saveAllScrollbacks();
     window.addEventListener("blur", onBlur);
     return () => {
       void unlistenScrollback.then((fn) => fn());
       void unlistenDrop.then((fn) => fn());
+      void unlistenPasteInto.then((fn) => fn());
       window.removeEventListener("blur", onBlur);
       void unlistenRead.then((fn) => fn());
       disposed = true;

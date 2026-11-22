@@ -25,6 +25,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "focus_pane",
     "focus_direction",
     "paste_image",
+    "send_files",
     "set_split_ratios",
     "set_view",
     "set_camera",

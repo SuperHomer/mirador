@@ -609,6 +609,24 @@ pub fn put_file(host: &str, path: &str, bytes: &[u8]) -> Result<(), String> {
     remote_shell(host, &put_file_script(path, bytes)).map(|_| ())
 }
 
+/// Deletes the files pasted or dropped into panes on `host`
+/// ([`crate::paste::REMOTE_DIR`] under its `home`) a day or more old, as
+/// the app prunes its own at launch. No such directory is nothing to do.
+#[cfg(not(windows))]
+pub fn prune_pastes(host: &str, home: &str) -> Result<(), String> {
+    remote_shell(host, &prune_pastes_script(home)).map(|_| ())
+}
+
+/// The script [`prune_pastes`] runs. `-mtime +0` is a whole day or more,
+/// and `-exec rm` rather than `-delete`, which is not in every `find`.
+#[cfg_attr(windows, allow(dead_code))]
+fn prune_pastes_script(home: &str) -> String {
+    format!(
+        "find {} -maxdepth 1 -type f -name 'paste-*' -mtime +0 -exec rm -f {{}} + 2>/dev/null; true\n",
+        quote(&format!("{home}/{}", crate::paste::REMOTE_DIR))
+    )
+}
+
 /// The script [`put_file`] runs. The bytes travel as base64 in a quoted
 /// heredoc rather than as themselves: a heredoc always ends its text with
 /// a newline, so a file without one could not arrive exact, and any text
@@ -1133,6 +1151,36 @@ mod tests {
             "{script}"
         );
         assert!(!put_file_script("probe.txt", b"x").contains("mkdir"), "no directory to make");
+    }
+
+    /// The remote's pruning, run here by `sh` on a home of its own: the
+    /// old pastes go, a new one and a file that is not a paste stay, and a
+    /// home with no paste directory is no error.
+    #[cfg(unix)]
+    #[test]
+    fn a_remote_prunes_only_its_old_pastes() {
+        let home = std::env::temp_dir().join(format!("mirador-prune-{}", uuid::Uuid::new_v4().simple()));
+        let run = || {
+            let script = prune_pastes_script(home.to_str().unwrap());
+            let out = std::process::Command::new("sh").arg("-c").arg(script).output().unwrap();
+            assert!(out.status.success(), "{out:?}");
+        };
+        std::fs::create_dir_all(&home).unwrap();
+        run();
+        let dir = home.join(crate::paste::REMOTE_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let two_days_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400);
+        for name in ["paste-old.png", "keep-old.txt", "paste-new.png"] {
+            let file = std::fs::File::create(dir.join(name)).unwrap();
+            if name.contains("old") {
+                file.set_modified(two_days_ago).unwrap();
+            }
+        }
+        run();
+        assert!(!dir.join("paste-old.png").exists());
+        assert!(dir.join("paste-new.png").exists());
+        assert!(dir.join("keep-old.txt").exists());
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     /// The holder starts the run script, quoted for sh, with a terminal

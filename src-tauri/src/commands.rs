@@ -742,13 +742,13 @@ pub fn focus_direction(app: AppHandle, state: State<'_, AppState>, direction: Di
     }
 }
 
-/// Saves an image pasted into `pane` and answers the path to type there.
-/// The bytes come as the raw body, not a JSON array of numbers three times
-/// their size; a raw body carries nothing else, so the pane comes in the
-/// `mirador-pane` header. The pane is asked for so that where the file
-/// goes is decided here, from the pane, not by the page.
+/// Saves an image pasted into `pane` and answers the path to type there:
+/// on the pane's remote for an SSH pane (`send_files`). The bytes come as
+/// the raw body, not a JSON array of numbers three times their size; a
+/// raw body carries nothing else, so the pane comes in the `mirador-pane`
+/// header.
 ///
-/// Off the main thread (`async`): it writes up to 20 MB.
+/// Off the main thread (`async`): it writes up to 20 MB, maybe over ssh.
 #[tauri::command(async)]
 pub fn paste_image(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
@@ -759,11 +759,15 @@ pub fn paste_image(state: State<'_, AppState>, request: tauri::ipc::Request<'_>)
         .get("mirador-pane")
         .and_then(|v| v.to_str().ok())
         .ok_or("no pane to paste the image into")?;
-    if state.workspace.lock().unwrap().tab_of_pane(pane).is_none() {
-        return Err(format!("no pane {pane}"));
-    }
-    let path = cmux_core::paste::save(&cmux_core::paste::local_dir(), bytes, std::time::SystemTime::now())?;
-    Ok(path.to_string_lossy().into_owned())
+    crate::send_files::image(&state, pane, bytes)
+}
+
+/// The paths to type into `pane_id` for files dropped on it: their own in
+/// a local pane, copies sent to the remote in an SSH pane. Off the main
+/// thread (`async`): that may be an upload.
+#[tauri::command(async)]
+pub fn send_files(state: State<'_, AppState>, pane_id: String, paths: Vec<String>) -> Result<Vec<String>, String> {
+    crate::send_files::files(&state, &pane_id, paths)
 }
 
 #[tauri::command]

@@ -10,6 +10,7 @@ mod handoff;
 mod intel;
 mod notify;
 mod runs;
+mod send_files;
 mod server;
 mod settings;
 mod tasks;
@@ -387,6 +388,7 @@ pub fn run() {
             commands::focus_pane,
             commands::focus_direction,
             commands::paste_image,
+            commands::send_files,
             commands::set_split_ratios,
             commands::set_view,
             commands::set_camera,

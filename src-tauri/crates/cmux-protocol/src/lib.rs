@@ -396,6 +396,14 @@ pub enum Request {
         pane_id: Option<String>,
         data: String,
     },
+    /// Types the paths of `paths` (absolute, on this computer) into a pane,
+    /// as dropping them on it does: in an SSH pane, the paths of copies
+    /// sent to its remote first. Answers the paths typed.
+    SendFile {
+        #[serde(default)]
+        pane_id: Option<String>,
+        paths: Vec<String>,
+    },
     ReadScreen {
         #[serde(default)]
         pane_id: Option<String>,

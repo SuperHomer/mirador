@@ -889,17 +889,20 @@ export const setDiffSpec = (paneId: string, spec: string) =>
 /** Newest first: one release, or every release after `since`. */
 export const whatsNew = (version: string, since: string | null) =>
   invoke<ReleaseNotes[]>("whats_new", { version, since });
-/** Omit `version` for the running build; pass one to preview an update's. */
-/**
- * Saves a pasted image for `paneId` and answers the path to type. The
- * bytes go raw, not as a JSON array of numbers; a raw body carries nothing
- * else, so the pane goes in a header.
- */
-export const pasteImage = (paneId: string, bytes: ArrayBuffer) =>
-  invoke<string>("paste_image", bytes, { headers: { "mirador-pane": paneId } });
 /** Raw image bytes, fetched and cached by the backend — never by the page. */
 export const releaseImage = (url: string) =>
   invoke<ArrayBuffer>("release_image", { url });
+/**
+ * Saves a pasted image for `paneId` and answers the path to type: on the
+ * pane's remote for an SSH pane. The bytes go raw, not as a JSON array of
+ * numbers; a raw body carries nothing else, so the pane goes in a header.
+ */
+export const pasteImage = (paneId: string, bytes: ArrayBuffer) =>
+  invoke<string>("paste_image", bytes, { headers: { "mirador-pane": paneId } });
+/** The paths to type for files dropped on `paneId`: theirs, or on an SSH pane, the copies sent to its remote. */
+export const sendFiles = (paneId: string, paths: string[]) =>
+  invoke<string[]>("send_files", { paneId, paths });
+/** Omit `version` for the running build; pass one to preview an update's. */
 export const openWhatsNew = (
   version: string | null = null,
   since: string | null = null,
