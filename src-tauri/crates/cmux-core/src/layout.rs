@@ -2,7 +2,7 @@
 //! is the single source of truth for pane layout; the frontend only renders
 //! snapshots of it.
 
-use cmux_protocol::{Direction, Node, SplitDir};
+use cmux_protocol::{Direction, Node, Preset, SplitDir};
 
 /// Splits the leaf holding `target`. If the leaf's parent already splits in
 /// `dir`, the new pane is inserted next to it (sharing its space); otherwise
@@ -313,19 +313,6 @@ pub fn equalize(node: &mut Node) {
         *ratios = vec![1.0 / children.len() as f32; children.len()];
         children.iter_mut().for_each(equalize);
     }
-}
-
-/// A ready-made arrangement of a tab's panes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Preset {
-    /// Side by side in one row.
-    EvenHorizontal,
-    /// Stacked in one column.
-    EvenVertical,
-    /// A grid of ceil(sqrt(n)) columns, the last row possibly short.
-    Tiled,
-    /// The first pane large on the left, the rest stacked on the right.
-    MainVertical,
 }
 
 /// The main pane's share of the width in `Preset::MainVertical`. Big enough

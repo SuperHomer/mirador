@@ -22,6 +22,20 @@ pub enum Direction {
     Down,
 }
 
+/// A ready-made arrangement of a tab's panes (`cmux_core::layout::preset`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Preset {
+    /// Side by side in one row.
+    EvenHorizontal,
+    /// Stacked in one column.
+    EvenVertical,
+    /// A grid of ceil(sqrt(n)) columns, the last row possibly short.
+    Tiled,
+    /// The first pane large on the left, the rest stacked on the right.
+    MainVertical,
+}
+
 /// The split tree of one tab. Ratios are normalized to sum to 1.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase")]

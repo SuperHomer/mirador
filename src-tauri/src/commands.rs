@@ -6,7 +6,9 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use cmux_core::osc::{OscEvent, OscScanner};
-use cmux_protocol::{BoardPoint, BoardRect, Camera, Direction, NotificationDto, SplitDir, View, WorkspaceSnapshot};
+use cmux_protocol::{
+    BoardPoint, BoardRect, Camera, Direction, NotificationDto, Preset, SplitDir, View, WorkspaceSnapshot,
+};
 
 use crate::{notify, runs, AppState};
 
@@ -738,6 +740,35 @@ pub fn focus_direction(app: AppHandle, state: State<'_, AppState>, direction: Di
     let next = state.workspace.lock().unwrap().focus_direction(direction);
     if let Some(pane) = next {
         notify::mark_pane_read(&state, &pane);
+        emit_workspace(&app);
+    }
+}
+
+/// Swaps the pane with its neighbor in `direction`, the focus going with it.
+#[tauri::command]
+pub fn swap_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String, direction: Direction) {
+    if state.workspace.lock().unwrap().swap_pane(&pane_id, direction) {
+        emit_workspace(&app);
+    }
+}
+
+#[tauri::command]
+pub fn rotate_panes(app: AppHandle, state: State<'_, AppState>, tab_id: String, forward: bool) {
+    if state.workspace.lock().unwrap().rotate_panes(&tab_id, forward) {
+        emit_workspace(&app);
+    }
+}
+
+#[tauri::command]
+pub fn equalize_panes(app: AppHandle, state: State<'_, AppState>, tab_id: String) {
+    if state.workspace.lock().unwrap().equalize_panes(&tab_id) {
+        emit_workspace(&app);
+    }
+}
+
+#[tauri::command]
+pub fn apply_layout(app: AppHandle, state: State<'_, AppState>, tab_id: String, preset: Preset) {
+    if state.workspace.lock().unwrap().apply_layout(&tab_id, preset) {
         emit_workspace(&app);
     }
 }

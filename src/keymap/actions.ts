@@ -6,6 +6,12 @@ import {
   closeTab,
   splitPane,
   focusDirection,
+  swapPane,
+  rotatePanes,
+  equalizePanes,
+  applyLayout,
+  type Direction,
+  type Preset,
   setActiveTab,
   openBrowser,
   openDiff,
@@ -80,6 +86,34 @@ function actionPane(): string | undefined {
   return onWall ? typed : tab?.focusedPane;
 }
 
+function activeTabId(): string | undefined {
+  return useWorkspaceStore.getState().snapshot?.activeTab;
+}
+
+function swapAction(direction: Direction, title: string): ActionDef {
+  return {
+    id: `swap_${direction}`,
+    title: `Pane: Swap ${title}`,
+    group: "pane",
+    run: () => {
+      const pane = actionPane();
+      if (pane) void swapPane(pane, direction);
+    },
+  };
+}
+
+function layoutAction(id: string, title: string, preset: Preset): ActionDef {
+  return {
+    id,
+    title: `Layout: ${title}`,
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void applyLayout(tab, preset);
+    },
+  };
+}
+
 /** Moves `offset` tabs along the sidebar's order, wrapping around. */
 function cycleTab(offset: number) {
   const { snapshot } = useWorkspaceStore.getState();
@@ -151,6 +185,41 @@ export const actions: ActionDef[] = [
     group: "pane",
     run: () => void focusDirection("down"),
   },
+  swapAction("left", "Left"),
+  swapAction("right", "Right"),
+  swapAction("up", "Up"),
+  swapAction("down", "Down"),
+  {
+    id: "rotate_forward",
+    title: "Pane: Rotate Forward",
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void rotatePanes(tab, true);
+    },
+  },
+  {
+    id: "rotate_back",
+    title: "Pane: Rotate Back",
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void rotatePanes(tab, false);
+    },
+  },
+  {
+    id: "layout_even",
+    title: "Layout: Even Sizes",
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void equalizePanes(tab);
+    },
+  },
+  layoutAction("layout_side_by_side", "Side by Side", "even-horizontal"),
+  layoutAction("layout_stacked", "Stacked", "even-vertical"),
+  layoutAction("layout_grid", "Grid", "tiled"),
+  layoutAction("layout_main_stack", "Main and Stack", "main-vertical"),
   { id: "next_tab", title: "Tab: Next", group: "tabs", run: () => cycleTab(1) },
   { id: "prev_tab", title: "Tab: Previous", group: "tabs", run: () => cycleTab(-1) },
   {

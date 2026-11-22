@@ -332,6 +332,7 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘⇧O | Ctrl+Shift+O | board / tabs view |
 | ⌘0 | Ctrl+Shift+0 | board: show everything |
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
+| ⌘⌥⇧arrows | Ctrl+Alt+Shift+arrows | swap pane with its neighbor |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |
 | ⌘I | Ctrl+Shift+I | Inbox |
@@ -339,6 +340,12 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
 | ⌘= / ⌘- | Ctrl+= or Ctrl+Plus / Ctrl+Minus | zoom the terminals in / out |
 | — | Ctrl+0 | reset the terminals' zoom |
+
+The palette also rotates a tab's panes, evens out their sizes, and lays
+them out side by side, stacked, as a grid, or as one main pane beside a
+stack (`rotate_forward`, `rotate_back`, `layout_even`,
+`layout_side_by_side`, `layout_stacked`, `layout_grid`,
+`layout_main_stack`), unbound until you bind them.
 
 All rebindable in `mirador.json`, where `+` and `-` are spelled `plus` and
 `minus` (`"ctrl+plus"`). The zoom keys are Windows Terminal's: plain Ctrl
