@@ -48,7 +48,13 @@ pub fn save(dir: &Path, bytes: &[u8], now: SystemTime) -> Result<PathBuf, String
         let path = dir.join(format!("paste-{stamp}-{}.{ext}", &id[..8]));
         match create_private_file(&path) {
             Ok(mut file) => {
-                file.write_all(bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+                if let Err(e) = file.write_all(bytes) {
+                    // A cut-off image is not one to type a path to, nor
+                    // to leave lying there for a day.
+                    drop(file);
+                    let _ = std::fs::remove_file(&path);
+                    return Err(format!("{}: {e}", path.display()));
+                }
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

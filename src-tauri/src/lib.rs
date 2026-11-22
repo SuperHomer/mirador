@@ -362,6 +362,12 @@ pub fn run() {
             whatsnew::announce_on_launch(app.handle().clone());
             // Off the startup path: it reads (and may write) ~/.claude.
             std::thread::spawn(commands::repair_claude_hooks);
+            // Pastes are for the moment they are pasted in; a day later
+            // they are clutter, and maybe private clutter.
+            std::thread::spawn(|| {
+                let day = std::time::Duration::from_secs(24 * 60 * 60);
+                cmux_core::paste::prune(&cmux_core::paste::local_dir(), day, std::time::SystemTime::now());
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -380,6 +386,7 @@ pub fn run() {
             commands::close_pane,
             commands::focus_pane,
             commands::focus_direction,
+            commands::paste_image,
             commands::set_split_ratios,
             commands::set_view,
             commands::set_camera,

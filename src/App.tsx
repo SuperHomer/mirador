@@ -31,27 +31,12 @@ import {
   readScreenText,
   saveAllScrollbacks,
 } from "./terminal/registry";
+import { quotePath } from "./terminal/pasteImage";
 import { invoke } from "@tauri-apps/api/core";
 
 function collectPaneIds(node: Node): string[] {
   if (node.type === "leaf") return [node.paneId];
   return node.children.flatMap(collectPaneIds);
-}
-
-const isWindows = navigator.platform.toUpperCase().startsWith("WIN");
-
-/**
- * A dropped path, quoted to stay in one piece. Elsewhere than Windows, POSIX
- * single quotes, each `'` closed and escaped: one literal word. On Windows,
- * double quotes (a name cannot contain `"`) only keep a path with spaces
- * together; the shell still expands what is inside — `$` and backticks in
- * PowerShell and Git Bash, `%…%` (and `!…!` with delayed expansion) in
- * cmd. Those are rare in paths, and quoting each shell its own way would
- * mean knowing which shell each pane runs.
- */
-function quotePath(path: string): string {
-  if (isWindows) return `"${path}"`;
-  return `'${path.replaceAll("'", `'\\''`)}'`;
 }
 
 const resolveScreenRead = (requestId: number, text: string) =>

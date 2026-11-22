@@ -19,6 +19,7 @@ permissions = [
   "allow-close-pane",
   "allow-focus-pane",
   "allow-focus-direction",
+  "allow-paste-image",
   "allow-set-split-ratios",
   "allow-set-view",
   "allow-set-camera",

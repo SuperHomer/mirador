@@ -890,6 +890,13 @@ export const setDiffSpec = (paneId: string, spec: string) =>
 export const whatsNew = (version: string, since: string | null) =>
   invoke<ReleaseNotes[]>("whats_new", { version, since });
 /** Omit `version` for the running build; pass one to preview an update's. */
+/**
+ * Saves a pasted image for `paneId` and answers the path to type. The
+ * bytes go raw, not as a JSON array of numbers; a raw body carries nothing
+ * else, so the pane goes in a header.
+ */
+export const pasteImage = (paneId: string, bytes: ArrayBuffer) =>
+  invoke<string>("paste_image", bytes, { headers: { "mirador-pane": paneId } });
 /** Raw image bytes, fetched and cached by the backend — never by the page. */
 export const releaseImage = (url: string) =>
   invoke<ArrayBuffer>("release_image", { url });

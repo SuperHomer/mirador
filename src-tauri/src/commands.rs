@@ -742,6 +742,30 @@ pub fn focus_direction(app: AppHandle, state: State<'_, AppState>, direction: Di
     }
 }
 
+/// Saves an image pasted into `pane` and answers the path to type there.
+/// The bytes come as the raw body, not a JSON array of numbers three times
+/// their size; a raw body carries nothing else, so the pane comes in the
+/// `mirador-pane` header. The pane is asked for so that where the file
+/// goes is decided here, from the pane, not by the page.
+///
+/// Off the main thread (`async`): it writes up to 20 MB.
+#[tauri::command(async)]
+pub fn paste_image(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("a pasted image comes as raw bytes".into());
+    };
+    let pane = request
+        .headers()
+        .get("mirador-pane")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("no pane to paste the image into")?;
+    if state.workspace.lock().unwrap().tab_of_pane(pane).is_none() {
+        return Err(format!("no pane {pane}"));
+    }
+    let path = cmux_core::paste::save(&cmux_core::paste::local_dir(), bytes, std::time::SystemTime::now())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub fn set_split_ratios(
     app: AppHandle,

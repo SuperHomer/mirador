@@ -24,6 +24,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "close_pane",
     "focus_pane",
     "focus_direction",
+    "paste_image",
     "set_split_ratios",
     "set_view",
     "set_camera",
