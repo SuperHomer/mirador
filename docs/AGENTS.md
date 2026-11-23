@@ -872,6 +872,7 @@ mira view board                # every tab on one board
 mira view tabs                 # back to tabs
 mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
+mira completions zsh           # a completion script: zsh, bash, fish, powershell, elvish
 ```
 
 The board shows every tab as a frame and every pane as a card — but a
