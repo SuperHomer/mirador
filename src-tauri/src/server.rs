@@ -264,6 +264,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             state.pty.write(&pane, data.as_bytes())?;
             Ok(Value::Null)
         }
+        Request::SendFile { pane_id, paths } => {
+            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            let typed = crate::send_files::files(&state, &pane, paths)?;
+            // Typed by the pane's terminal, as a drop is: xterm brackets
+            // the paste only when the program asked for that.
+            let text = typed.iter().map(|p| cmux_core::paste::quote_path(p)).collect::<Vec<_>>().join(" ") + " ";
+            app.emit("paste-into-pane", json!({ "paneId": pane, "text": text })).map_err(|e| e.to_string())?;
+            Ok(json!({ "paneId": pane, "paths": typed }))
+        }
         Request::ReadScreen { pane_id, lines } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             let text = read_screen(app, &pane, lines, Duration::from_secs(5))?;

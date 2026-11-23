@@ -312,6 +312,54 @@ fn a_file_sent_to_the_remote_arrives_exact() {
     assert!(!path.with_extension("txt.tmp").exists(), "nothing left beside it");
 }
 
+/// `mira send-file`, as a drop does: into an SSH pane, the file goes to
+/// the remote's paste directory, exact and 0600, and the path typed is
+/// the remote's; into a local pane, the file's own path is typed, quoted;
+/// a file over 20 MB, or a directory, is refused before anything is sent.
+#[test]
+fn a_file_sent_to_an_ssh_pane_is_typed_as_the_remotes_copy() {
+    e2e!();
+    let mut sb = Sandbox::new("sendfile");
+    sb.sshd();
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = remote_pane(&sb);
+    let png: &[u8] = b"\x89PNG\r\n\x1a\n a tiny picture";
+    let shot = sb.project.join("shot one.png");
+    std::fs::write(&shot, png).unwrap();
+    let send = |into: &str, file: &std::path::Path| sb.mira(Some(&first), &["send-file", file.to_str().unwrap(), "--pane", into]);
+    // The screen's lines as one: a long path wraps.
+    let typed = |pane: &str, what: &str, text: String| {
+        sb.wait_for_screen(pane, what, LONG, |s| s.lines().map(str::trim_end).collect::<String>().contains(&text));
+    };
+
+    let (code, out, err) = send(&pane, &shot);
+    assert_eq!(code, 0, "{err}");
+    let remote = out.trim().to_string();
+    let dir = sb.home.join(".cache/mirador/paste");
+    let name = remote.strip_prefix(&format!("{}/", dir.display())).unwrap_or_else(|| panic!("not in the remote's paste directory: {remote}"));
+    assert!(name.starts_with("paste-") && name.ends_with("-shot_one.png"), "{name}");
+    assert_eq!(std::fs::read(&remote).unwrap(), png, "the remote's copy is exact");
+    assert_eq!(std::fs::metadata(&remote).unwrap().permissions().mode() & 0o777, 0o600);
+    typed(&pane, "the remote path typed", format!("'{remote}'"));
+
+    let (code, out, err) = send(&first, &shot);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), shot.to_str().unwrap(), "a local pane gets the file's own path");
+    typed(&first, "the local path typed", format!("'{}'", shot.display()));
+
+    let big = sb.project.join("big.bin");
+    std::fs::write(&big, vec![0u8; 21 * 1024 * 1024]).unwrap();
+    let (code, _, err) = send(&pane, &big);
+    assert_ne!(code, 0);
+    assert!(err.contains("big.bin is 21 MB") && err.contains("up to 20 MB"), "{err}");
+    let (code, _, err) = send(&pane, &sb.project);
+    assert_ne!(code, 0);
+    assert!(err.contains("is a directory"), "{err}");
+    let sent: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+    assert_eq!(sent.len(), 1, "nothing refused was sent: {sent:?}");
+}
+
 /// `agent new --host box --dir <dir>`: plain Claude Code on the remote, in
 /// that directory, told its pane and this app's socket, given Mirador's
 /// hooks, listed as an agent on `box` — and a message sent from a local

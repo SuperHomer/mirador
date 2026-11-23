@@ -19,6 +19,8 @@ permissions = [
   "allow-close-pane",
   "allow-focus-pane",
   "allow-focus-direction",
+  "allow-paste-image",
+  "allow-send-files",
   "allow-set-split-ratios",
   "allow-swap-pane",
   "allow-rotate-panes",

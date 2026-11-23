@@ -948,6 +948,7 @@ mira swap <pane> --dir left    # trade places with its neighbor there (left|righ
 mira rotate [--back]           # every pane of the tab one place along
 mira equalize                  # every split of the tab in equal shares
 mira layout grid               # side-by-side | stacked | grid | main-stack
+mira send-file shot.png        # type its path in, as a drop does; in an SSH pane, sent there first
 mira close-pane <pane>
 mira close-tab <tab>           # the tab and every pane in it
 mira view                      # which view is shown: tabs or board
@@ -1238,10 +1239,10 @@ Newline-delimited JSON on the socket named in the discovery file:
 ```
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
-read_screen notify run list_runs agent_session codex_thread agent_new agent_list
-agent_wall zoom_pane swap_pane rotate_panes equalize_panes apply_layout
-browser_open browser_navigate browser_snapshot browser_click browser_fill
-browser_type browser_press browser_text browser_eval
+read_screen send_file notify run list_runs agent_session codex_thread agent_new
+agent_list agent_wall zoom_pane swap_pane rotate_panes equalize_panes
+apply_layout browser_open browser_navigate browser_snapshot browser_click
+browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add

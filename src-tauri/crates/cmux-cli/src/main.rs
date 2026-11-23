@@ -101,6 +101,14 @@ enum Command {
         #[arg(long)]
         enter: bool,
     },
+    /// Type files' paths into a pane, as dropping them on it does; into an
+    /// SSH pane, the paths of copies sent to its remote first.
+    SendFile {
+        #[arg(required = true)]
+        files: Vec<String>,
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// Read a pane's screen contents as plain text.
     ReadScreen {
         #[arg(long)]
@@ -892,6 +900,18 @@ fn run(cli: Cli) -> Result<(), String> {
             pane_id: pane,
             data: if enter { format!("{data}\n") } else { data },
         },
+        Command::SendFile { files, pane } => Request::SendFile {
+            pane_id: pane,
+            // The app runs elsewhere than this shell: it needs paths that
+            // do not depend on where `mira` was run.
+            paths: files
+                .iter()
+                .map(|f| match std::path::Path::new(f).exists() {
+                    true => std::path::absolute(f).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("{f}: {e}")),
+                    false => Err(format!("no file {f}")),
+                })
+                .collect::<Result<_, _>>()?,
+        },
         Command::ReadScreen { pane, lines } => Request::ReadScreen {
             pane_id: pane,
             lines,
@@ -1534,6 +1554,11 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 .filter(|_| !map.contains_key("tabs"))
             {
                 println!("{view}");
+            } else if let Some(paths) = map.get("paths").and_then(|v| v.as_array()) {
+                // send-file: what was typed, a path a line.
+                for p in paths {
+                    println!("{}", p.as_str().unwrap_or(""));
+                }
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
