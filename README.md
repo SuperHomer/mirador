@@ -210,6 +210,16 @@ Set-PSReadLineOption -PredictionSource History
 
 Add it to your `$PROFILE` to keep it.
 
+**Completing `mira` itself:** `mira completions <shell>` prints a
+completion script (zsh, bash, fish, powershell or elvish). Load it from
+your shell's startup file:
+
+```bash
+source <(mira completions zsh)     # ~/.zshrc, after compinit
+eval "$(mira completions bash)"    # ~/.bashrc; macOS's bash 3.2 can't source <(…)
+mira completions fish | source     # ~/.config/fish/config.fish
+```
+
 Mirador deliberately implements none of this itself. A terminal emulator
 cannot reliably tell where your input line starts or where the cursor sits
 within it, so anything it drew would be guesswork — and it would fight a

@@ -4,7 +4,7 @@
 
 use std::io::Write;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use cmux_protocol::{Request, ResponseEnvelope, SplitDir, View};
 
 #[derive(Parser)]
@@ -215,6 +215,8 @@ enum Command {
     /// Put `mira` on your PATH: a symlink in ~/.local/bin on macOS and
     /// Linux; on Windows, the install directory joins your user PATH.
     Install,
+    /// Print a shell completion script: zsh, bash, fish, powershell or elvish.
+    Completions { shell: clap_complete::Shell },
     /// Session holder: owns one pane's terminal so it outlives the app.
     /// Started by Mirador, not by hand — see docs/design/session-persistence.md.
     #[command(name = "__hold", hide = true)]
@@ -651,6 +653,22 @@ enum BrowserAction {
     },
 }
 
+/// Writes `mira`'s completion script for `shell`. clap_complete offers
+/// hidden subcommands too, so it is given a copy of the CLI without them:
+/// the holder and the hook handlers are Mirador's to run, not a person's.
+/// It is written from a buffer because clap_complete panics on a failed
+/// write, which a closed pipe (`| head`) is.
+fn completions(shell: clap_complete::Shell) -> Result<(), String> {
+    let cli = Cli::command();
+    let mut public = clap::Command::new("mira")
+        .about(cli.get_about().cloned().unwrap_or_default())
+        .args(cli.get_arguments().cloned())
+        .subcommands(cli.get_subcommands().filter(|c| !c.is_hide_set()).cloned());
+    let mut script = Vec::new();
+    clap_complete::generate(shell, &mut public, "mira", &mut script);
+    std::io::stdout().write_all(&script).map_err(|e| e.to_string())
+}
+
 fn main() {
     let cli = Cli::parse();
     match run(cli) {
@@ -1037,6 +1055,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::ClaudeStatusline { run } => claude_statusline(run.as_deref()),
         Command::Hooks { action } => return hooks(&action),
         Command::Install => return install(),
+        Command::Completions { shell } => return completions(shell),
         Command::Quit { end_sessions } => Request::Quit { end_sessions },
         Command::Hold {
             pane,
