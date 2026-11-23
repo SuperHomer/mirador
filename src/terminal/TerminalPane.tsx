@@ -3,13 +3,14 @@ import { Channel } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import type { WebglAddon } from "@xterm/addon-webgl";
-import { SerializeAddon } from "@xterm/addon-serialize";
-import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
+import { createTerminal, attachRenderer, applyConfig, cellWidth } from "./xtermFactory";
 import { listenForImagePaste } from "./pasteImage";
 import {
   fitTerminal,
   isLent,
+  readSavedScrollback,
   reclaimTerminal,
+  replayScrollback,
   registerTerminal,
   setPaneShown,
   unregisterTerminal,
@@ -85,6 +86,24 @@ const IDLE_MODE_RESET =
   "\x1b[?1l" + // application cursor keys
   "\x1b[?25h"; // cursor visible
 
+/**
+ * The size a saved scrollback with no size recorded is replayed at, and
+ * the least Mirador writes its own lines at: xterm's own default.
+ */
+const WRITE_COLS = 80;
+const WRITE_ROWS = 24;
+/** No line of Mirador's is drawn wider than this, however long. */
+const WRITE_COLS_MAX = 500;
+
+/** Back to the normal screen, from the alternate one. */
+const LEAVE_ALT_SCREEN = "\x1b[?1049l";
+
+/** The columns `text` takes: its escape sequences none, its characters as
+ *  wide as the terminal draws them (a CJK character two). */
+function textWidth(text: string): number {
+  return cellWidth(text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ""));
+}
+
 interface Props {
   paneId: string;
   focused: boolean;
@@ -155,6 +174,9 @@ export const TerminalPane = memo(function TerminalPane({
     // dropped while it holds — there is nothing to write to.
     let exited = true;
     let attaching = false;
+    // Attaches started on this mount: a line of Mirador's waiting to be
+    // written belongs to the one it was asked under (`say`).
+    let attaches = 0;
     // A remote agent's pane reattaches by itself when ssh loses the
     // connection: after `retryDelay`, doubled each time a reconnect is
     // lost again soon, and back to the shortest once one has held. Not
@@ -166,15 +188,124 @@ export const TerminalPane = memo(function TerminalPane({
 
     const term = createTerminal(cfg);
     termRef.current = term;
-    const serialize = new SerializeAddon();
-    term.loadAddon(serialize);
-    const fit = new FitAddon();
-    term.loadAddon(fit);
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    // While a saved scrollback is replayed at its own size (`writeAt`),
+    // nothing fits the terminal under it.
+    let sizeHeld = false;
+    /**
+     * While no process backs the pane and it shows the alternate screen —
+     * a restored agent's last screen, or a dead one's — the terminal is kept
+     * at least this wide: the width Mirador wrote that screen and its own
+     * lines at. The pane cuts it off at its edge.
+     *
+     * What is written at a narrow size stays that narrow on the alternate
+     * screen, which xterm never rewraps, and xterm drops whatever lies past
+     * the width the next time it widens. A pane that mounted narrow — the
+     * window small at launch, a thin split — kept its restored screen and
+     * "press any key to rerun" wrapped at two columns once it was wide.
+     */
+    let idleCols = 0;
+    /**
+     * While `idleCols` holds, the size the terminal would have without it:
+     * its box's, at the last fit, or the size it had where nothing fits it
+     * (a rail thumbnail keeps its terminal's size). A process that takes
+     * the pane over gets this, never Mirador's width (`dropIdleWidth`).
+     */
+    let unfloored: { cols: number; rows: number } | null = null;
+    /**
+     * Sizes the terminal, and so its PTY, to the box it is drawn in — never
+     * narrower than `idleCols`, and never to a box with no width or height.
+     * That is a box not laid out (or under `display: none`), not a size:
+     * FitAddon makes anything under three cells two columns by one row.
+     * Whether it was sized.
+     */
+    const fit = {
+      fit: (): boolean => {
+        const box = term.element?.parentElement;
+        if (sizeHeld || !box || box.clientWidth === 0 || box.clientHeight === 0) return false;
+        const dims = fitAddon.proposeDimensions();
+        if (!dims || isNaN(dims.cols) || isNaN(dims.rows)) return false;
+        if (!idleCols) {
+          fitAddon.fit();
+          return true;
+        }
+        unfloored = { cols: dims.cols, rows: dims.rows };
+        term.resize(Math.max(dims.cols, idleCols), dims.rows);
+        return true;
+      },
+    };
     term.open(container);
-    registerTerminal(paneId, term, serialize, fit, container, visibleRef.current);
+    registerTerminal(paneId, term, fit, container, visibleRef.current);
     const stopImagePaste = listenForImagePaste(term, paneId);
     // The renderer is the visibility effect's job.
     fit.fit();
+
+    const writeDone = (data: string) => new Promise<void>((resolve) => term.write(data, resolve));
+    /**
+     * Writes with the terminal `cols` × `rows`, then fits it to wherever it
+     * is drawn now. Only before a PTY backs the pane, so no program sees the
+     * size change.
+     *
+     * Straight to the box's size, not back through the size it had first:
+     * an alternate screen has no scrollback, so a pane that mounted three
+     * rows tall and grew while this wrote would have lost all but three of
+     * its restored rows on the way. Where nothing fits it (a rail thumbnail
+     * keeps its size; a box with no size), a normal screen goes back to the
+     * size it had, rewrapping; an alternate one keeps this size, and its
+     * process will get the old one (`unfloored`).
+     */
+    const writeAt = async (cols: number, rows: number, write: () => Promise<void>) => {
+      const before = { cols: term.cols, rows: term.rows };
+      sizeHeld = true;
+      term.resize(cols, rows);
+      try {
+        await write();
+      } finally {
+        sizeHeld = false;
+        if (!disposed && !fitTerminal(paneId)) {
+          if (term.buffer.active.type === "alternate") unfloored ??= before;
+          else term.resize(before.cols, before.rows);
+        }
+      }
+    };
+    /**
+     * One of Mirador's own lines. Onto the alternate screen of a pane with
+     * no process, at a width that holds it whole (`idleCols`); the normal
+     * screen rewraps it anyway. What is still queued is drawn first: it may
+     * change screens. A line an attach has overtaken meanwhile is dropped:
+     * an exit hint still waiting when a key started the next process would
+     * land on that process's screen.
+     */
+    const say = async (line: string) => {
+      const asked = attaches;
+      await writeDone("");
+      if (disposed || asked !== attaches) return;
+      if (exited && term.buffer.active.type === "alternate") {
+        keepIdleWidth(Math.min(textWidth(line) + 1, WRITE_COLS_MAX));
+      }
+      return writeDone(`${line}\r\n`);
+    };
+    const keepIdleWidth = (cols: number) => {
+      idleCols = Math.max(idleCols, cols);
+      if (term.cols >= idleCols) return;
+      // Directly, not by a fit: a rail thumbnail keeps its terminal's size.
+      unfloored ??= { cols: term.cols, rows: term.rows };
+      term.resize(idleCols, term.rows);
+    };
+    /**
+     * A process is about to back the pane: the terminal takes its box's
+     * size, or where nothing fits it, the size it had before Mirador widened
+     * it. A rail thumbnail's reconnecting SSH agent otherwise started at the
+     * width of its "reconnecting" line.
+     */
+    const dropIdleWidth = () => {
+      if (!idleCols) return;
+      idleCols = 0;
+      const back = unfloored;
+      unfloored = null;
+      if (!fitTerminal(paneId) && back) term.resize(back.cols, back.rows);
+    };
 
     /**
      * One output channel per attach, never shared between them. Rust owns the
@@ -221,6 +352,7 @@ export const TerminalPane = memo(function TerminalPane({
       // lose to "pane already running".
       if (attaching) return;
       attaching = true;
+      attaches++;
       clearTimeout(retryTimer);
       try {
         // Previous session's scrollback, once per pane per app run.
@@ -232,16 +364,49 @@ export const TerminalPane = memo(function TerminalPane({
           if (disposed) return;
           restoredScrollback.add(paneId);
           if (saved) {
-            term.write(saved);
-            term.write(IDLE_MODE_RESET);
-            term.writeln("\r\n\x1b[2m──── session restored ────\x1b[0m");
+            // Replayed at the size it was saved at, the only one its
+            // serialized form is right at (`saveAllScrollbacks`), not at the
+            // size the pane mounted at; Mirador's line after it at least as
+            // wide; then the pane's own size (`writeAt`, `idleCols`).
+            const { data, size } = readSavedScrollback(saved);
+            const cols = Math.max(size?.cols ?? 0, term.cols, WRITE_COLS);
+            const rows = Math.max(size?.rows ?? 0, term.rows, WRITE_ROWS);
+            await writeAt(cols, rows, async () => {
+              await replayScrollback(term, data, size);
+              if (disposed) return;
+              term.resize(cols, rows);
+              // A shell starts anew here, and on the normal screen, as in
+              // any terminal. Left on the alternate screen a restored agent
+              // had, it drew its prompt there, over that agent's last
+              // screen, with no scrollback and never rewrapped. A command
+              // or SSH pane comes back idle and keeps its last screen on
+              // show until a key starts it again.
+              if (!agentCommand && !remoteHost && term.buffer.active.type === "alternate") {
+                await writeDone(LEAVE_ALT_SCREEN);
+              }
+              await writeDone(`${IDLE_MODE_RESET}\r\n\x1b[2m──── session restored ────\x1b[0m\r\n`);
+              if (term.buffer.active.type === "alternate") idleCols = cols;
+            });
+            if (idleCols) keepIdleWidth(idleCols);
           }
         }
         if (disposed) return;
+        // A key starts the pane's command or shell again: on the normal
+        // screen, as any new process starts, not under the last one's.
+        if (rerun) {
+          if (term.buffer.active.type === "alternate") await writeDone(LEAVE_ALT_SCREEN);
+          dropIdleWidth();
+        }
+        // Again after every wait: a pane closed meanwhile must not attach,
+        // or Rust, finding no pane, would start a shell for nobody.
+        if (disposed) return;
+        // Whatever this attach finds — a live holder included — gets the
+        // pane's own size, never the width an idle screen is held at.
+        const size = idleCols && unfloored ? unfloored : { cols: term.cols, rows: term.rows };
         const status = await attachPane(
           paneId,
-          term.cols,
-          term.rows,
+          size.cols,
+          size.rows,
           newChannel(),
           rerun,
         );
@@ -249,13 +414,15 @@ export const TerminalPane = memo(function TerminalPane({
         if (status === "restored") {
           // Command/remote pane from the previous session: idle until a
           // keypress — never auto-rerun or auto-reconnect on launch.
-          term.writeln(
+          await say(
             remoteHost
               ? `\x1b[2m[press any key to reconnect: ssh ${remoteHost}]\x1b[0m`
               : `\x1b[2m[press any key to rerun: ${agentCommand ?? "command"}]\x1b[0m`,
           );
           return;
         }
+        // A process backs the pane now, at the size it was given.
+        dropIdleWidth();
         // Not before: until the PTY exists, every keystroke written to it is
         // silently dropped.
         exited = false;
@@ -280,7 +447,7 @@ export const TerminalPane = memo(function TerminalPane({
           void writePty(paneId, "\x0c");
         }
       } catch (err) {
-        term.writeln(`\x1b[31mfailed to attach shell: ${err}\x1b[0m`);
+        void say(`\x1b[31mfailed to attach shell: ${err}\x1b[0m`);
       } finally {
         attaching = false;
       }
@@ -383,9 +550,7 @@ export const TerminalPane = memo(function TerminalPane({
             : event.payload.is_command
               ? "press any key to rerun"
               : "press any key to start a new shell";
-        term.writeln(
-          `\r\n${color}[${status}]\x1b[0m \x1b[2m— ${hint}\x1b[0m`,
-        );
+        void say(`\r\n${color}[${status}]\x1b[0m \x1b[2m— ${hint}\x1b[0m`);
       },
     ).then((fn) => {
       if (disposed) fn();

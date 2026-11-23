@@ -1,15 +1,21 @@
 // Live Terminal instances by pane id, for automation round-trips
 // (read-screen), scrollback persistence, and the agent wall, which borrows
 // a pane's terminal to draw it somewhere else.
+import type { IBuffer, IBufferCell, IBufferLine } from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { storeScrollback } from "../bindings";
+
+/** Sizes the terminal to wherever it is drawn: the pane's own fit, which
+ *  knows when not to (`TerminalPane`), and says whether it did. */
+export interface Fitter {
+  fit(): boolean;
+}
 
 interface Entry {
   term: Terminal;
   serialize: SerializeAddon;
-  fit: FitAddon;
+  fit: Fitter;
   /** The pane's own container, where the terminal lives when not lent. */
   home: HTMLElement;
   /** The element the terminal is lent to, if it is. */
@@ -47,11 +53,14 @@ export function watchTerminal(paneId: string, fn: () => void): () => void {
 export function registerTerminal(
   paneId: string,
   term: Terminal,
-  serialize: SerializeAddon,
-  fit: FitAddon,
+  fit: Fitter,
   home: HTMLElement,
   shown: boolean,
 ) {
+  // Saves only, so not loaded into the terminal: it reads it through
+  // `clippedToWidth`.
+  const serialize = new SerializeAddon();
+  serialize.activate(clippedToWidth(term));
   const entry: Entry = {
     term,
     serialize,
@@ -64,6 +73,13 @@ export function registerTerminal(
   };
   term.onWriteParsed(() => {
     entry.dirty = true;
+  });
+  // A save is replayed at the size it records. An alternate screen saved
+  // while the window was small would come back small; saved again after a
+  // resize, it comes back the size it has now. The normal screen rewraps
+  // from any size, so a resize alone does not save it again.
+  term.onResize(() => {
+    if (term.buffer.active.type === "alternate") entry.dirty = true;
   });
   terminals.set(paneId, entry);
   changed(paneId);
@@ -174,11 +190,11 @@ export function reclaimTerminal(paneId: string) {
  * Refits the pane's terminal to wherever it is drawn now, unless it is
  * lent to a tile that keeps its size (`fit: false`): fitted to that tile,
  * it would take the tile's box, which is the terminal itself less its
- * scrollbar, and lose two columns each time.
+ * scrollbar, and lose two columns each time. Whether it was fitted.
  */
-export function fitTerminal(paneId: string) {
+export function fitTerminal(paneId: string): boolean {
   const entry = terminals.get(paneId);
-  if (entry && !entry.keepsSize) entry.fit.fit();
+  return !!entry && !entry.keepsSize && entry.fit.fit();
 }
 
 /**
@@ -220,9 +236,24 @@ export function registeredPanes(): string[] {
 }
 
 /**
+ * Ahead of a saved scrollback, the size it was taken at: an OSC no
+ * terminal acts on, so a version that does not know it, reading the file,
+ * writes it into xterm harmlessly.
+ */
+const SIZE_RECORD = "\x1b]5379;mirador-size=";
+
+/**
  * Persist the scrollback of every pane that changed since its last save
  * (30s tick + window blur). Serializing 10k lines blocks the renderer, so
  * idle panes — most of them, with many tabs open — are skipped.
+ *
+ * Each save starts with the size it was taken at (`scrollbackRecord`):
+ * what the serializer writes is only right at that size. It marks a line
+ * that wrapped by filling the row to its last column and letting the
+ * terminal wrap, and places the cursor for that width, so replayed at
+ * another width it leaves runs of dashes and misplaced text behind; and a
+ * restored alternate screen, which xterm never rewraps, keeps whatever
+ * width it was replayed at.
  */
 export function saveAllScrollbacks(maxLines = 10_000) {
   for (const [paneId, entry] of terminals) {
@@ -230,11 +261,97 @@ export function saveAllScrollbacks(maxLines = 10_000) {
     try {
       const data = entry.serialize.serialize({ scrollback: maxLines });
       entry.dirty = false;
-      if (data) void storeScrollback(paneId, data);
+      if (data) void storeScrollback(paneId, scrollbackRecord(entry.term) + data);
     } catch {
       /* pane mid-teardown */
     }
   }
+}
+
+/**
+ * `term` as a save reads it: no line longer than the terminal is wide. An
+ * alternate screen narrowed under its content keeps the cells past the new
+ * width (xterm never rewraps that screen, and clearing it erases only up to
+ * the width), and the serializer writes each line to its own length. Those
+ * cells were not on screen at the size the save records, and replayed at it
+ * they wrapped onto the rows below.
+ *
+ * A double-width character cut by the edge — its first half in the last
+ * column, its second past it — reads as a blank cell: written whole, it
+ * would not fit, and would wrap to a row of its own.
+ */
+export function clippedToWidth(term: Terminal): Terminal {
+  const bound = (target: object, key: string | symbol) => {
+    const value: unknown = Reflect.get(target, key);
+    return typeof value === "function" ? value.bind(target) : value;
+  };
+  const line = (l: IBufferLine | undefined, b: IBuffer) => {
+    if (!l || l.length <= term.cols) return l;
+    const edge = term.cols - 1;
+    const cut = l.getCell(edge)?.getWidth() === 2;
+    // The cut character's cell emptied, keeping its colours, and one column
+    // wide: a zero-wide cell is, to the serializer, a wide character's
+    // second half. On a cell of its own, since the serializer reuses the one
+    // it passes; that one is filled too, with the same colours, because the
+    // serializer sometimes reads colours from it and not from the return.
+    const blank = (cell?: IBufferCell) => {
+      l.getCell(edge, cell);
+      const own = l.getCell(edge, b.getNullCell());
+      const empty: Record<string | symbol, () => number | string> = {
+        getWidth: () => 1,
+        getChars: () => "",
+        getCode: () => 0,
+      };
+      return own && new Proxy(own, { get: (c, k) => empty[k] ?? bound(c, k) });
+    };
+    return new Proxy(l, {
+      get: (t, k) => {
+        if (k === "length") return term.cols;
+        if (k === "getCell" && cut) {
+          return (x: number, cell?: IBufferCell) => (x === edge ? blank(cell) : t.getCell(x, cell));
+        }
+        return bound(t, k);
+      },
+    });
+  };
+  const buffer = (b: IBuffer) =>
+    new Proxy(b, { get: (t, k) => (k === "getLine" ? (y: number) => line(t.getLine(y), t) : bound(t, k)) });
+  const buffers = new Proxy(term.buffer, {
+    get: (t, k) => (k === "normal" || k === "alternate" || k === "active" ? buffer(t[k]) : bound(t, k)),
+  });
+  return new Proxy(term, { get: (t, k) => (k === "buffer" ? buffers : bound(t, k)) });
+}
+
+/** The size a save was taken at: the terminal's. */
+export interface SavedSize {
+  cols: number;
+  rows: number;
+}
+
+/** The record of the size `term` is saved at, to go ahead of the save. */
+export function scrollbackRecord(term: Terminal): string {
+  return `${SIZE_RECORD}${term.cols}x${term.rows}\x07`;
+}
+
+/** A saved scrollback, and the size it was taken at when the save says. */
+export function readSavedScrollback(saved: string): { data: string; size: SavedSize | null } {
+  const end = saved.startsWith(SIZE_RECORD) ? saved.indexOf("\x07") : -1;
+  if (end < 0) return { data: saved, size: null };
+  const data = saved.slice(end + 1);
+  const match = /^(\d{1,4})x(\d{1,4})$/.exec(saved.slice(SIZE_RECORD.length, end));
+  const cols = Number(match?.[1]);
+  const rows = Number(match?.[2]);
+  // A size no terminal had is no size: the data is replayed as it is.
+  return match && cols >= 2 && rows >= 1 ? { data, size: { cols, rows } } : { data, size: null };
+}
+
+/**
+ * Writes a save into `term` at the size it was taken at, both screens; with
+ * no size, as it is, at the terminal's size now.
+ */
+export async function replayScrollback(term: Terminal, data: string, size: SavedSize | null) {
+  if (size) term.resize(size.cols, size.rows);
+  return new Promise<void>((resolve) => term.write(data, resolve));
 }
 
 /**

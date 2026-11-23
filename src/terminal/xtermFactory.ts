@@ -1,4 +1,5 @@
 import { Terminal } from "@xterm/xterm";
+import type { IUnicodeVersionProvider } from "@xterm/xterm";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
@@ -7,6 +8,26 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { ResolvedConfig } from "../bindings";
 import { toXtermTheme, checkFontAvailable } from "../state/configStore";
 import "@xterm/xterm/css/xterm.css";
+
+/**
+ * Unicode 11's character widths, which every terminal here draws with
+ * (`createTerminal`). The addon hands its provider to whatever terminal it
+ * is activated on, and xterm offers no way to ask a terminal for it.
+ */
+const unicode11: IUnicodeVersionProvider = (() => {
+  let provider: IUnicodeVersionProvider | undefined;
+  const capture = { unicode: { register: (p: IUnicodeVersionProvider) => (provider = p) } };
+  new Unicode11Addon().activate(capture as unknown as Terminal);
+  if (!provider) throw new Error("the Unicode 11 addon registered no widths");
+  return provider;
+})();
+
+/** The cells `text` takes in a terminal, escape sequences removed first. */
+export function cellWidth(text: string): number {
+  let width = 0;
+  for (const ch of text) width += unicode11.wcwidth(ch.codePointAt(0) ?? 0);
+  return width;
+}
 
 export function createTerminal(config: ResolvedConfig): Terminal {
   checkFontAvailable(config.fontFamily);
