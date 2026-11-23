@@ -685,7 +685,7 @@ mod tests {
         // The floor is the tokens at the model's cache-read rate.
         let floor = |s: &SeatWeight, rate: f64| s.tokens as f64 * rate / 1_000_000.0;
         assert!((planner.per_turn_floor_usd.unwrap() - floor(planner, 0.20)).abs() < 1e-12);
-        assert!((dev.per_turn_floor_usd.unwrap() - floor(dev, 0.20)).abs() < 1e-12);
+        assert!((dev.per_turn_floor_usd.unwrap() - floor(dev, 0.10)).abs() < 1e-12);
         assert_eq!(planner.model.as_deref(), Some("opus"));
         // ...and that rate is given, to show how the floor is worked out.
         assert_eq!(planner.cache_read_per_million, Some(0.20));

@@ -401,7 +401,14 @@ never guesses the reader's OS. Check the rendered page, not the bundle
 
 **Releases** go straight to `main` as a `Release vX.Y.Z` commit touching four
 files — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
-and the lockfile. Then a *draft* release with its notes, then the tag:
+and the lockfile. Before it, run `npm run check:prices`: the team cost
+estimates come from a hand-copied table in `cmux-core/src/pricing.rs`, and
+nothing else notices when Anthropic ships a model or moves a price — a role
+on a new model just shows no cost, and a moved price shows a wrong one. It
+fetches Anthropic's pricing page and fails on any difference; fix the
+table, set `PRICES_CHECKED` to the day, and commit that before the release
+commit. It is not in CI on purpose: a docs page changing shape should not
+block a release build. Then a *draft* release with its notes, then the tag:
 
 ```bash
 gh release create vX.Y.Z --draft --title "vX.Y.Z — …" --notes-file notes.md
