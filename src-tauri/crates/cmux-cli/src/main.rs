@@ -5,7 +5,7 @@
 use std::io::Write;
 
 use clap::{Parser, Subcommand};
-use cmux_protocol::{Request, ResponseEnvelope, SplitDir, View};
+use cmux_protocol::{Direction, Preset, Request, ResponseEnvelope, SplitDir, View};
 
 #[derive(Parser)]
 #[command(name = "mira", version, about = "Automation client for the Mirador terminal")]
@@ -56,6 +56,37 @@ enum Command {
         pane: Option<String>,
         #[arg(long)]
         off: bool,
+    },
+    /// Swap a pane with its neighbor on one side; the focus goes with it.
+    /// PANE defaults to the focused pane.
+    Swap {
+        pane: Option<String>,
+        /// left, right, up or down.
+        #[arg(long)]
+        dir: String,
+    },
+    /// Move every pane of a tab one place along, the last one first; with
+    /// --back, the other way.
+    Rotate {
+        #[arg(long)]
+        back: bool,
+        /// The tab; else the one this runs in, else the active one.
+        #[arg(long)]
+        tab: Option<String>,
+    },
+    /// Give every pane of a tab an equal share of its split.
+    Equalize {
+        /// The tab; else the one this runs in, else the active one.
+        #[arg(long)]
+        tab: Option<String>,
+    },
+    /// Lay a tab's panes out afresh, in their order: side-by-side, stacked,
+    /// grid, or main-stack (the first pane large, the rest stacked beside).
+    Layout {
+        preset: String,
+        /// The tab; else the one this runs in, else the active one.
+        #[arg(long)]
+        tab: Option<String>,
     },
     /// Show the workspace as `tabs` or as the `board`; without either,
     /// print which one is shown.
@@ -844,6 +875,24 @@ fn run(cli: Cli) -> Result<(), String> {
             pane_id: pane,
             zoom: off.then_some(false),
         },
+        Command::Swap { pane, dir } => Request::SwapPane {
+            pane_id: pane,
+            direction: parse_direction(&dir)?,
+        },
+        Command::Rotate { back, tab } => Request::RotatePanes {
+            tab_id: tab,
+            pane_id: own_pane(),
+            back,
+        },
+        Command::Equalize { tab } => Request::EqualizePanes {
+            tab_id: tab,
+            pane_id: own_pane(),
+        },
+        Command::Layout { preset, tab } => Request::ApplyLayout {
+            tab_id: tab,
+            pane_id: own_pane(),
+            preset: parse_preset(&preset)?,
+        },
         Command::View { view } => Request::View {
             view: view.as_deref().map(parse_view).transpose()?,
         },
@@ -1328,6 +1377,16 @@ fn parse_dir(s: &str) -> Result<SplitDir, String> {
         "column" | "down" | "vertical" => Ok(SplitDir::Column),
         other => Err(format!("invalid direction `{other}` (row|column)")),
     }
+}
+
+fn parse_direction(s: &str) -> Result<Direction, String> {
+    serde_json::from_value(serde_json::json!(s))
+        .map_err(|_| format!("invalid direction `{s}` (left|right|up|down)"))
+}
+
+fn parse_preset(s: &str) -> Result<Preset, String> {
+    serde_json::from_value(serde_json::json!(s))
+        .map_err(|_| format!("invalid layout `{s}` (side-by-side|stacked|grid|main-stack)"))
 }
 
 fn parse_view(s: &str) -> Result<View, String> {
@@ -2837,6 +2896,17 @@ mod tests {
             panic!()
         };
         assert_eq!((message.join(" ").as_str(), card.as_deref()), ("use -v", Some("ab12")));
+    }
+
+    #[test]
+    fn layouts_and_directions_go_by_their_names() {
+        assert_eq!(parse_preset("side-by-side"), Ok(Preset::SideBySide));
+        assert_eq!(parse_preset("stacked"), Ok(Preset::Stacked));
+        assert_eq!(parse_preset("grid"), Ok(Preset::Grid));
+        assert_eq!(parse_preset("main-stack"), Ok(Preset::MainStack));
+        assert!(parse_preset("tiled").unwrap_err().contains("side-by-side|stacked|grid|main-stack"));
+        assert_eq!(parse_direction("up"), Ok(Direction::Up));
+        assert!(parse_direction("north").is_err());
     }
 
     /// How a hook knows which pane its agent runs in. The tty fallback is

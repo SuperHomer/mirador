@@ -4,6 +4,8 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 
 export type SplitDir = "row" | "column";
 export type Direction = "left" | "right" | "up" | "down";
+/** A ready-made arrangement of a tab's panes (cmux-protocol's `Preset`). */
+export type Preset = "side-by-side" | "stacked" | "grid" | "main-stack";
 
 export type Node =
   | { type: "leaf"; paneId: string }
@@ -817,6 +819,18 @@ export const focusPane = (paneId: string) =>
   invoke<void>("focus_pane", { paneId });
 export const focusDirection = (direction: Direction) =>
   invoke<void>("focus_direction", { direction });
+/**
+ * Swaps the pane with its neighbor in `direction`; the focus goes with it.
+ * This and the three below answer whether the tab changed.
+ */
+export const swapPane = (paneId: string, direction: Direction) =>
+  invoke<boolean>("swap_pane", { paneId, direction });
+export const rotatePanes = (tabId: string, forward: boolean) =>
+  invoke<boolean>("rotate_panes", { tabId, forward });
+export const equalizePanes = (tabId: string) =>
+  invoke<boolean>("equalize_panes", { tabId });
+export const applyLayout = (tabId: string, preset: Preset) =>
+  invoke<boolean>("apply_layout", { tabId, preset });
 export const setView = (view: View) => invoke<void>("set_view", { view });
 /**
  * Saved with the session; sends no snapshot back. With the board's size on

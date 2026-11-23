@@ -304,6 +304,10 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+alt+right", "focus_right"),
     ("mod+alt+up", "focus_up"),
     ("mod+alt+down", "focus_down"),
+    ("mod+alt+shift+left", "swap_left"),
+    ("mod+alt+shift+right", "swap_right"),
+    ("mod+alt+shift+up", "swap_up"),
+    ("mod+alt+shift+down", "swap_down"),
     ("mod+b", "toggle_sidebar"),
     ("mod+k", "command_palette"),
     ("mod+i", "notifications"),
@@ -357,6 +361,10 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+alt+right", "focus_right"),
     ("ctrl+alt+up", "focus_up"),
     ("ctrl+alt+down", "focus_down"),
+    ("ctrl+alt+shift+left", "swap_left"),
+    ("ctrl+alt+shift+right", "swap_right"),
+    ("ctrl+alt+shift+up", "swap_up"),
+    ("ctrl+alt+shift+down", "swap_down"),
     ("ctrl+shift+b", "toggle_sidebar"),
     ("ctrl+shift+k", "command_palette"),
     ("ctrl+shift+i", "notifications"),
@@ -1046,6 +1054,25 @@ mod tests {
         assert_eq!(resolved.colors.background, "#000000");
         assert_eq!(resolved.keybindings["mod+t"], "split_right");
         assert!(!resolved.keybindings.contains_key("mod+w"));
+    }
+
+    /// A config written before the swaps had keys — the starter file lists
+    /// the defaults of its day — still gets them: defaults are merged under
+    /// whatever the file binds, never replaced by it.
+    #[test]
+    fn a_config_from_before_the_swaps_gets_their_keys() {
+        let old: HashMap<String, String> = default_keybindings()
+            .into_iter()
+            .filter(|(_, action)| !action.starts_with("swap_"))
+            .collect();
+        let resolved = resolve(&Config {
+            keybindings: old,
+            ..Default::default()
+        });
+        for d in ["left", "right", "up", "down"] {
+            let action = format!("swap_{d}");
+            assert!(resolved.keybindings.values().any(|a| *a == action), "{action}");
+        }
     }
 
     #[test]

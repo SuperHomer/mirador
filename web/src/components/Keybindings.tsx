@@ -9,6 +9,7 @@ const KEYS: [string, string, string][] = [
   ["Board / tabs view", "⌘⇧O", "Ctrl+Shift+O"],
   ["Board: show everything", "⌘0", "Ctrl+Shift+0"],
   ["Focus pane by direction", "⌘⌥arrows", "Ctrl+Alt+arrows"],
+  ["Swap pane with its neighbor", "⌘⌥⇧arrows", "Ctrl+Alt+Shift+arrows"],
   ["Jump to tab", "⌘1…9", "Alt+1…9"],
   ["Command palette", "⌘K", "Ctrl+Shift+K"],
   ["Inbox", "⌘I", "Ctrl+Shift+I"],

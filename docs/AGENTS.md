@@ -944,6 +944,10 @@ mira split --dir column --command "npm run dev"
 mira focus <pane>
 mira zoom <pane>               # that pane alone, filling its tab
 mira zoom <pane> --off         # the whole tab again
+mira swap <pane> --dir left    # trade places with its neighbor there (left|right|up|down)
+mira rotate [--back]           # every pane of the tab one place along
+mira equalize                  # every split of the tab in equal shares
+mira layout grid               # side-by-side | stacked | grid | main-stack
 mira send-file shot.png        # type its path in, as a drop does; in an SSH pane, sent there first
 mira close-pane <pane>
 mira close-tab <tab>           # the tab and every pane in it
@@ -953,6 +957,13 @@ mira view tabs                 # back to tabs
 mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
 ```
+
+`rotate`, `equalize` and `layout` act on `--tab <tab>`, else the tab
+they run in, else the active one; `swap` without a pane swaps the focused
+one. The focus stays with its pane wherever it goes, and panes keep
+running as they move. Each refuses a change that changes nothing — no
+neighbor on that side, a tab of one pane, sizes already even — with an
+error, so a script can tell.
 
 The board shows every tab as a frame and every pane as a card — but a
 tab showing its agent wall shows the wall in its frame, its agents or its
@@ -1228,9 +1239,10 @@ Newline-delimited JSON on the socket named in the discovery file:
 ```
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
-read_screen send_file notify run list_runs agent_session codex_thread agent_new agent_list
-agent_wall zoom_pane browser_open browser_navigate browser_snapshot
-browser_click browser_fill browser_type browser_press browser_text browser_eval
+read_screen send_file notify run list_runs agent_session codex_thread agent_new
+agent_list agent_wall zoom_pane swap_pane rotate_panes equalize_panes
+apply_layout browser_open browser_navigate browser_snapshot browser_click
+browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add

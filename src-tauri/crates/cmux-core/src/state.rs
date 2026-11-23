@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use cmux_protocol::{
-    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, TaskLayout,
+    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, Preset, SplitDir, TabSnapshot, TaskLayout,
     View, WallMode, WallView, WorkspaceSnapshot,
 };
 
@@ -814,6 +814,58 @@ impl Workspace {
         }
     }
 
+    /// Swaps `pane` with its neighbor in `direction`; false when it has
+    /// none there. Focus stays on the pane, wherever it went.
+    pub fn swap_pane(&mut self, pane: &str, direction: Direction) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        let Some(other) = layout::neighbor(&tab.root, pane, direction) else {
+            return false;
+        };
+        layout::swap(&mut tab.root, pane, &other);
+        tab.zoomed = None;
+        true
+    }
+
+    /// Moves every pane of the tab one place along its pane order,
+    /// wrapping; false when nothing moved (one pane, or no such tab).
+    pub fn rotate_panes(&mut self, tab_id: &str, forward: bool) -> bool {
+        self.rearrange(tab_id, |root| layout::rotate(root, forward))
+    }
+
+    /// Gives every pane of the tab an equal share of its split; false when
+    /// they already had one.
+    pub fn equalize_panes(&mut self, tab_id: &str) -> bool {
+        self.rearrange(tab_id, layout::equalize)
+    }
+
+    /// Lays the tab's panes out afresh as `preset`, in their current order;
+    /// false when they already were.
+    pub fn apply_layout(&mut self, tab_id: &str, preset: Preset) -> bool {
+        self.rearrange(tab_id, |root| {
+            if let Some(fresh) = layout::preset(&layout::pane_ids(root), preset) {
+                *root = fresh;
+            }
+        })
+    }
+
+    /// Changes a tab's split tree, keeping its panes and its focus. A tab
+    /// rearranged is asked for whole, so a zoom is let go — as a split
+    /// lets it go — but only when the tree did change.
+    fn rearrange(&mut self, tab_id: &str, change: impl FnOnce(&mut Node)) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) else {
+            return false;
+        };
+        let before = tab.root.clone();
+        change(&mut tab.root);
+        if tab.root == before {
+            return false;
+        }
+        tab.zoomed = None;
+        true
+    }
+
     /// Shows the workspace as tabs or as the board. False when it already was.
     pub fn set_view(&mut self, view: View) -> bool {
         std::mem::replace(&mut self.view, view) != view
@@ -1311,6 +1363,81 @@ mod tests {
         assert!(ws.unzoom(&claude));
         assert_eq!(zoomed(&ws), None);
         assert!(!ws.unzoom(&claude), "nothing to let go of");
+    }
+
+    /// [a | [b over c]], the tab's id with it.
+    fn three_panes() -> (Workspace, String, [String; 3]) {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        let c = ws.split_pane(&b, SplitDir::Column).unwrap();
+        let tab = ws.tabs[0].id.clone();
+        (ws, tab, [a, b, c])
+    }
+
+    #[test]
+    fn a_swapped_pane_keeps_the_focus_in_its_new_place() {
+        let (mut ws, _, [a, b, c]) = three_panes();
+        ws.focus_pane(&c);
+        ws.zoom_pane(&c);
+        assert!(ws.swap_pane(&c, Direction::Up));
+        assert_eq!(layout::pane_ids(&ws.tabs[0].root), vec![a.clone(), c.clone(), b]);
+        assert_eq!(ws.focused_pane(), c);
+        assert_eq!(ws.tabs[0].zoomed, None, "the tab is shown whole again");
+        assert_eq!(layout::neighbor(&ws.tabs[0].root, &c, Direction::Left), Some(a));
+    }
+
+    #[test]
+    fn a_swap_with_no_neighbor_on_that_side_changes_nothing() {
+        let (mut ws, _, [a, ..]) = three_panes();
+        ws.zoom_pane(&a);
+        let before = ws.tabs[0].root.clone();
+        assert!(!ws.swap_pane(&a, Direction::Left));
+        assert!(!ws.swap_pane("no-such-pane", Direction::Right));
+        assert_eq!(ws.tabs[0].root, before);
+        assert_eq!(ws.tabs[0].zoomed, Some(a), "a swap that did nothing keeps the zoom");
+    }
+
+    #[test]
+    fn rotating_a_tab_moves_its_panes_and_keeps_the_focus() {
+        let (mut ws, tab, [a, b, c]) = three_panes();
+        ws.focus_pane(&a);
+        ws.zoom_pane(&a);
+        assert!(ws.rotate_panes(&tab, true));
+        assert_eq!(layout::pane_ids(&ws.tabs[0].root), vec![c.clone(), a.clone(), b.clone()]);
+        assert_eq!(ws.focused_pane(), a);
+        assert_eq!(ws.tabs[0].zoomed, None);
+        assert!(ws.rotate_panes(&tab, false));
+        assert_eq!(layout::pane_ids(&ws.tabs[0].root), vec![a, b, c]);
+
+        let (lone, _) = ws.new_tab();
+        assert!(!ws.rotate_panes(&lone, true), "one pane has nowhere to go");
+        assert!(!ws.rotate_panes("no-such-tab", true));
+    }
+
+    #[test]
+    fn evening_a_tab_out_twice_changes_it_once() {
+        let (mut ws, tab, [a, ..]) = three_panes();
+        ws.set_split_ratios(&tab, &[], vec![0.8, 0.2]);
+        ws.zoom_pane(&a);
+        assert!(ws.equalize_panes(&tab));
+        assert_eq!(ws.tabs[0].zoomed, None);
+        assert!(!ws.equalize_panes(&tab), "already even");
+    }
+
+    #[test]
+    fn a_layout_keeps_the_tabs_panes_their_order_and_its_focus() {
+        let (mut ws, tab, [a, b, c]) = three_panes();
+        ws.focus_pane(&b);
+        ws.zoom_pane(&b);
+        assert!(ws.apply_layout(&tab, Preset::SideBySide));
+        let root = &ws.tabs[0].root;
+        assert_eq!(layout::pane_ids(root), vec![a, b.clone(), c]);
+        assert!(matches!(root, Node::Split { dir: SplitDir::Row, children, .. } if children.len() == 3));
+        assert_eq!(ws.focused_pane(), b);
+        assert_eq!(ws.tabs[0].zoomed, None);
+        assert!(!ws.apply_layout(&tab, Preset::SideBySide), "already laid out so");
+        assert!(!ws.apply_layout("no-such-tab", Preset::Grid));
     }
 
     #[test]
