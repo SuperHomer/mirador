@@ -154,10 +154,12 @@ fn a_page_keeps_loaded_and_takes_its_new_size() {
     // Gone if the page is ever loaded again.
     assert_eq!(eval("window.stayed = 42").as_deref(), Some("42"));
 
-    // `browser open` splits the pane beside it: side by side already, so
-    // stack them first.
+    // `browser open` splits the pane beside it, so it starts side by side.
+    // Each step waits for the width to move, never for any width: right
+    // after a layout the page can still report the one before it.
+    let beside = width("the page's width beside its pane", &|w| w > 0.0);
     mira(&sb, &first, &["layout", "stacked"]);
-    let full = width("the stacked page's width", &|w| w > 0.0);
+    let full = width("the stacked page's width", &|w| w > beside * 1.4);
     mira(&sb, &first, &["layout", "side-by-side"]);
     let half = width("the side-by-side page's width", &|w| w < full * 0.7);
     assert!(half > full * 0.3, "side by side, {half} of {full}");
