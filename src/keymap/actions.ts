@@ -33,6 +33,7 @@ import { useClaudeStore } from "../state/claudeStore";
 import { getTerminal, isLent, paneWithFocus, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
 import { opensInTab } from "../state/configStore";
+import { pasteFromClipboard } from "../terminal/pasteImage";
 
 /** The palette's groups: what an action is about. */
 export type ActionGroup = "agents" | "git" | "pane" | "view" | "app" | "tabs";
@@ -197,13 +198,7 @@ export const actions: ActionDef[] = [
       const term =
         terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
       if (!term) return;
-      void navigator.clipboard.readText().then((text) => {
-        // Through xterm, not straight to the PTY: it applies bracketed
-        // paste (a multi-line paste must not run line by line) and newline
-        // normalization, and its input path keeps the paste in order with
-        // typing.
-        if (text) term.paste(text);
-      });
+      void pasteFromClipboard(term, paneWithFocus() ?? pane);
     },
   },
   {

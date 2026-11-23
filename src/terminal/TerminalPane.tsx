@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
+import { listenForImagePaste } from "./pasteImage";
 import {
   fitTerminal,
   isLent,
@@ -171,6 +172,7 @@ export const TerminalPane = memo(function TerminalPane({
     term.loadAddon(fit);
     term.open(container);
     registerTerminal(paneId, term, serialize, fit, container, visibleRef.current);
+    const stopImagePaste = listenForImagePaste(term, paneId);
     // The renderer is the visibility effect's job.
     fit.fit();
 
@@ -407,6 +409,7 @@ export const TerminalPane = memo(function TerminalPane({
       unlisten?.();
       termRef.current = null;
       webglRef.current = null;
+      stopImagePaste();
       unregisterTerminal(paneId, term);
       // The PTY itself belongs to the Rust tree; unmount only drops the view.
       term.dispose();

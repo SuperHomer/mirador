@@ -944,6 +944,7 @@ mira split --dir column --command "npm run dev"
 mira focus <pane>
 mira zoom <pane>               # that pane alone, filling its tab
 mira zoom <pane> --off         # the whole tab again
+mira send-file shot.png        # type its path in, as a drop does; in an SSH pane, sent there first
 mira close-pane <pane>
 mira close-tab <tab>           # the tab and every pane in it
 mira view                      # which view is shown: tabs or board
@@ -1227,7 +1228,7 @@ Newline-delimited JSON on the socket named in the discovery file:
 ```
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
-read_screen notify run list_runs agent_session codex_thread agent_new agent_list
+read_screen send_file notify run list_runs agent_session codex_thread agent_new agent_list
 agent_wall zoom_pane browser_open browser_navigate browser_snapshot
 browser_click browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts

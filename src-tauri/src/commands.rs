@@ -742,6 +742,34 @@ pub fn focus_direction(app: AppHandle, state: State<'_, AppState>, direction: Di
     }
 }
 
+/// Saves an image pasted into `pane` and answers the path to type there:
+/// on the pane's remote for an SSH pane (`send_files`). The bytes come as
+/// the raw body, not a JSON array of numbers three times their size; a
+/// raw body carries nothing else, so the pane comes in the `mirador-pane`
+/// header.
+///
+/// Off the main thread (`async`): it writes up to 20 MB, maybe over ssh.
+#[tauri::command(async)]
+pub fn paste_image(state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("a pasted image comes as raw bytes".into());
+    };
+    let pane = request
+        .headers()
+        .get("mirador-pane")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("no pane to paste the image into")?;
+    crate::send_files::image(&state, pane, bytes)
+}
+
+/// The paths to type into `pane_id` for files dropped on it: their own in
+/// a local pane, copies sent to the remote in an SSH pane. Off the main
+/// thread (`async`): that may be an upload.
+#[tauri::command(async)]
+pub fn send_files(state: State<'_, AppState>, pane_id: String, paths: Vec<String>) -> Result<Vec<String>, String> {
+    crate::send_files::files(&state, &pane_id, paths)
+}
+
 #[tauri::command]
 pub fn set_split_ratios(
     app: AppHandle,

@@ -23,6 +23,7 @@ const COMMANDS = [
   'mira computer test prod',
   'mira team start squad --host prod --dir /srv/app',
   'mira team start squad --on prod',
+  'mira send-file shot.png',
   'mira notify "build green"',
   'mira hooks setup',
   'mira quit --end-sessions',
@@ -81,6 +82,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira computer test <span style={{ color: "var(--mauve)" }}>prod</span><span style={{ color: "var(--muted)" }}>    # can agents run there?</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> --host <span style={{ color: "var(--mauve)" }}>prod</span> --dir <span style={{ color: "var(--sapphire)" }}>/srv/app</span><span style={{ color: "var(--muted)" }}> # agents there</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> --on <span style={{ color: "var(--mauve)" }}>prod</span><span style={{ color: "var(--muted)" }}>    # on a saved computer</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira send-file <span style={{ color: "var(--green)" }}>shot.png</span><span style={{ color: "var(--muted)" }}>    # its path, or an SSH pane's copy</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira notify <span style={{ color: "var(--green)" }}>"build green"</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira hooks setup<span style={{ color: "var(--muted)" }}>           # Claude Code</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira quit --end-sessions<span style={{ color: "var(--muted)" }}>   # Cmd+Q keeps them</span></div>
