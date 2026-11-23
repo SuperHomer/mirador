@@ -148,9 +148,9 @@ fn wide(s: &OsStr) -> Vec<u16> {
 
 /// `path` as [`wide`] gives it, with every `/` turned into `\`. JSON
 /// invites `"C:/Tools/conpty"`, which `is_absolute` accepts, but
-/// LoadLibraryExW asks for backslashes, and LOAD_WITH_ALTERED_SEARCH_PATH
-/// is undefined for a path it does not take as absolute. Done on the
-/// UTF-16 units, so a path that is not valid Unicode keeps its spelling.
+/// LoadLibraryExW asks for backslashes, and LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
+/// takes only a fully qualified path. Done on the UTF-16 units, so a path
+/// that is not valid Unicode keeps its spelling.
 #[cfg(windows)]
 fn wide_backslashed(path: &Path) -> Vec<u16> {
     let (slash, backslash) = (u16::from(b'/'), u16::from(b'\\'));
@@ -170,7 +170,7 @@ fn conpty_loaded() -> bool {
 #[cfg(windows)]
 fn apply(choice: &Conpty) -> Result<(), String> {
     use windows_sys::Win32::System::LibraryLoader::{
-        LoadLibraryExW, SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_SYSTEM32, LOAD_WITH_ALTERED_SEARCH_PATH,
+        LoadLibraryExW, SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
     };
     if *choice != Conpty::Auto && conpty_loaded() {
         return Err("conpty: a conpty.dll is already loaded in this process; panes run under it".into());
@@ -197,8 +197,11 @@ fn apply(choice: &Conpty) -> Result<(), String> {
         // Loaded here by its full path, it is the module named conpty.dll
         // in this process, and a later load by that name is handed the
         // module already loaded, wherever it came from. Never freed: the
-        // process's PTYs use it until it exits. The altered search makes
-        // the dlls it needs in turn resolve from its own folder first.
+        // process's PTYs use it until it exits. The dlls it needs in turn
+        // resolve from its own folder and System32 alone, for this load
+        // only: not from the Windows folder, the current directory or
+        // PATH, which LOAD_WITH_ALTERED_SEARCH_PATH (not to be combined
+        // with these flags) went on to search after those two.
         Conpty::Folder(dir) => {
             use windows_sys::Win32::System::Diagnostics::Debug::{
                 SetThreadErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX,
@@ -212,7 +215,11 @@ fn apply(choice: &Conpty) -> Result<(), String> {
             // a NUL-terminated wide string that outlives the call.
             let module = unsafe {
                 SetThreadErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX, &mut before);
-                let module = LoadLibraryExW(file.as_ptr(), std::ptr::null_mut(), LOAD_WITH_ALTERED_SEARCH_PATH);
+                let module = LoadLibraryExW(
+                    file.as_ptr(),
+                    std::ptr::null_mut(),
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
+                );
                 let error = std::io::Error::last_os_error();
                 SetThreadErrorMode(before, std::ptr::null_mut());
                 (module, error)
@@ -343,8 +350,20 @@ mod tests {
     /// stopped by a loader dialog would not, fails the test.
     #[cfg(windows)]
     fn run_probe(exe: &Path, value: &str) -> (Option<String>, Option<PathBuf>) {
+        run_probe_on(exe, value, None)
+    }
+
+    /// [`run_probe`], with `first` put at the front of the probe's PATH.
+    #[cfg(windows)]
+    fn run_probe_on(exe: &Path, value: &str, first: Option<&Path>) -> (Option<String>, Option<PathBuf>) {
         use std::io::Read;
-        let mut child = std::process::Command::new(exe)
+        let mut command = std::process::Command::new(exe);
+        if let Some(first) = first {
+            let rest = std::env::var_os("PATH").unwrap_or_default();
+            let path = std::env::join_paths(std::iter::once(first.to_path_buf()).chain(std::env::split_paths(&rest))).unwrap();
+            command.env("PATH", path);
+        }
+        let mut child = command
             .args(["--exact", "pty::conpty::tests::probe_conpty_load_by_name", "--ignored", "--nocapture", "--test-threads=1"])
             .env("MIRADOR_CONPTY_PROBE", value)
             .stdout(std::process::Stdio::piped())
@@ -420,6 +439,50 @@ mod tests {
             assert_eq!(run_probe(&exe, &value), (None, Some(wanted.clone())), "{value}");
         }
         for d in [dir, chosen] {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    /// The dlls a folder's conpty.dll needs come from that folder or
+    /// System32, never from PATH, which the load searched after them while
+    /// it ran with LOAD_WITH_ALTERED_SEARCH_PATH. The conpty.dll here is a
+    /// copy of System32's cmutil.dll whose import of VERSION.dll is renamed
+    /// to a dll Windows does not have; a copy of version.dll under that
+    /// name goes on the probe's PATH, then into the folder. Skipped on a
+    /// Windows without that cmutil.dll.
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_conpty_dll_takes_the_dlls_it_needs_from_its_folder_or_system32_only() {
+        let system32 = PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())).join("System32");
+        let (import, renamed) = (b"VERSION.dll\0", b"MIRDEPV.dll\0");
+        let source = std::fs::read(system32.join("cmutil.dll")).unwrap_or_default();
+        let Some(at) = source.windows(import.len()).position(|w| w.eq_ignore_ascii_case(import)) else {
+            eprintln!("skipped: no cmutil.dll importing VERSION.dll in {}", system32.display());
+            return;
+        };
+        let mut patched = source;
+        patched[at..at + renamed.len()].copy_from_slice(renamed);
+        let dep = "MIRDEPV.dll";
+
+        let (dir, exe) = probe_binary("deps");
+        let chosen = folder("deps-chosen", &[HOST]);
+        std::fs::write(chosen.join(DLL), patched).unwrap();
+        let on_path = folder("deps-on-path", &[]);
+        std::fs::copy(system32.join("version.dll"), on_path.join(dep)).unwrap();
+        let wanted = std::fs::canonicalize(chosen.join(DLL)).unwrap();
+        let value = chosen.to_str().unwrap();
+
+        // Only on PATH: the load fails, and the system's is used, as for
+        // any folder whose conpty.dll does not load.
+        let (reported, got) = run_probe_on(&exe, value, Some(&on_path));
+        assert_ne!(got, Some(wanted.clone()), "the folder's conpty.dll loaded with what it needs taken from PATH");
+        let reported = reported.expect("the failed load is reported");
+        assert!(reported.contains("loading") && reported.contains("Windows' own"), "{reported}");
+
+        // In its own folder: it loads, so the fixture is a loadable dll.
+        std::fs::copy(system32.join("version.dll"), chosen.join(dep)).unwrap();
+        assert_eq!(run_probe_on(&exe, value, Some(&on_path)), (None, Some(wanted)));
+        for d in [dir, chosen, on_path] {
             let _ = std::fs::remove_dir_all(d);
         }
     }
