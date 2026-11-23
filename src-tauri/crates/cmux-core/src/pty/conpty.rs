@@ -8,10 +8,10 @@
 //! what else was installed, and the two do not draw a resized screen the
 //! same way. The key makes it a choice:
 //!
-//! - `auto`, the default: as before, the first `conpty.dll` Windows finds,
-//!   else the system's.
-//! - `system`: the system's. No `conpty.dll` outside System32 is loaded,
-//!   on PATH or beside the program.
+//! - `system`, the default: the system's. No `conpty.dll` outside System32
+//!   is loaded, on PATH or beside the program.
+//! - `auto`: the first `conpty.dll` Windows finds, else the system's, as
+//!   every pane ran before `system` became the default.
 //! - a folder: the `conpty.dll` in it, with the `OpenConsole.exe` it
 //!   starts beside it, as WezTerm and Windows Terminal ship them.
 //!
@@ -39,14 +39,14 @@ pub enum Conpty {
     Folder(PathBuf),
 }
 
-/// What the key's value asks for. Unset, empty or `auto` is [`Conpty::Auto`].
-/// A folder has to be an absolute path holding both [`DLL`] and [`HOST`]:
+/// What the key's value asks for. Unset, empty or `system` is
+/// [`Conpty::System`]; `auto` is [`Conpty::Auto`]. A folder has to be an absolute path holding both [`DLL`] and [`HOST`]:
 /// a `conpty.dll` without its host fails to start a console, and every pane
 /// with it. Anything else is an error saying why.
 pub fn parse(value: Option<&str>) -> Result<Conpty, String> {
     match value.map(str::trim).unwrap_or("") {
-        "" | "auto" => Ok(Conpty::Auto),
-        "system" => Ok(Conpty::System),
+        "" | "system" => Ok(Conpty::System),
+        "auto" => Ok(Conpty::Auto),
         path => match folder_problem(Path::new(path)) {
             None => Ok(Conpty::Folder(PathBuf::from(path))),
             Some(problem) => Err(format!("conpty {path}: {problem}")),
@@ -242,11 +242,12 @@ mod tests {
     }
 
     #[test]
-    fn unset_empty_and_auto_are_auto_and_system_is_system() {
-        assert_eq!(parse(None), Ok(Conpty::Auto));
-        assert_eq!(parse(Some("")), Ok(Conpty::Auto));
+    fn unset_empty_and_system_are_system_and_auto_is_auto() {
+        assert_eq!(parse(None), Ok(Conpty::System));
+        assert_eq!(parse(Some("")), Ok(Conpty::System));
+        assert_eq!(parse(Some(" system ")), Ok(Conpty::System));
+        assert_eq!(parse(Some("auto")), Ok(Conpty::Auto));
         assert_eq!(parse(Some(" auto ")), Ok(Conpty::Auto));
-        assert_eq!(parse(Some("system")), Ok(Conpty::System));
     }
 
     #[test]
@@ -287,7 +288,8 @@ mod tests {
     #[test]
     fn a_value_that_names_nothing_usable_gives_the_system_conpty_with_why() {
         assert_eq!(effective(Some("system")), (Conpty::System, None));
-        assert_eq!(effective(None), (Conpty::Auto, None));
+        assert_eq!(effective(None), (Conpty::System, None));
+        assert_eq!(effective(Some("auto")), (Conpty::Auto, None));
         let half = folder("effective-half", &[DLL]);
         let (choice, why) = effective(half.to_str());
         assert_eq!(choice, Conpty::System, "not auto, which could load that same conpty.dll from PATH");
@@ -366,17 +368,20 @@ mod tests {
         (line("settle: "), std::fs::canonicalize(file).ok())
     }
 
-    /// `system` must not take a conpty.dll beside the program, which a load
-    /// by name searches first. `auto` loads it, so the probe can see one.
+    /// `system`, and so a key left unset, must not take a conpty.dll beside
+    /// the program, which a load by name searches first. `auto` loads it,
+    /// so the probe can see one.
     #[cfg(windows)]
     #[test]
     fn system_loads_no_conpty_dll_beside_the_program() {
         let (dir, exe) = probe_binary("beside");
         let beside = std::fs::canonicalize(dir.join(DLL)).unwrap();
         assert_eq!(run_probe(&exe, "auto"), (None, Some(beside.clone())), "auto loads the conpty.dll beside the program");
-        let (reported, got) = run_probe(&exe, "system");
-        assert_eq!(reported, None);
-        assert_ne!(got, Some(beside), "system loaded the conpty.dll beside the program");
+        for value in ["system", ""] {
+            let (reported, got) = run_probe(&exe, value);
+            assert_eq!(reported, None, "{value:?}");
+            assert_ne!(got, Some(beside.clone()), "{value:?} loaded the conpty.dll beside the program");
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -184,18 +184,21 @@ status light up. Nothing needs Git Bash. If you want it anyway:
 `mira run "npm test"` hands the command to whichever shell that is, so
 quoting follows your shell's rules.
 
-**Which ConPTY?** Panes run under the first `conpty.dll` Windows finds,
-and that can be another program's: WezTerm puts one on PATH, with its own
-`OpenConsole.exe`, and with it installed every pane runs under that one
-instead of Windows' own. The two draw a resized screen differently.
-`conpty` picks: `"auto"` (that, the default), `"system"` (Windows' own,
-whatever is on PATH), or a folder holding `conpty.dll` and the
+**Which ConPTY?** Panes run under Windows' own ConPTY, whatever else is
+installed. Another program can bring its own: WezTerm puts a `conpty.dll`
+on PATH, with its own `OpenConsole.exe`, and the two draw a resized screen
+differently. `conpty` picks: `"system"` (Windows' own, the default),
+`"auto"` (the first `conpty.dll` Windows finds, one on PATH included,
+else Windows' own), or a folder holding `conpty.dll` and the
 `OpenConsole.exe` it starts, such as WezTerm's. The Settings pane offers
-every folder on PATH that has one.
+every folder on PATH that has one. If you use WezTerm and want its
+ConPTY in Mirador, set `"auto"` or WezTerm's folder: up to v0.1.49,
+`"auto"` was the default, and panes on a machine with WezTerm ran under
+WezTerm's.
 
 ```jsonc
 // %APPDATA%\mirador\mirador.json
-{ "conpty": "system" }
+{ "conpty": "C:\\Program Files\\WezTerm" }
 ```
 
 It applies to new panes. With `persistSessions` off the app runs panes
