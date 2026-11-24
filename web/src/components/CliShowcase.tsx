@@ -20,6 +20,7 @@ const COMMANDS = [
   'mira ssh open prod-box',
   'mira notify "build green"',
   'mira hooks setup',
+  'mira completions zsh',
   'mira quit --end-sessions',
 ].join("\n");
 
@@ -73,6 +74,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira ssh open <span style={{ color: "var(--mauve)" }}>prod-box</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira notify <span style={{ color: "var(--green)" }}>"build green"</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira hooks setup<span style={{ color: "var(--muted)" }}>           # Claude Code</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira completions <span style={{ color: "var(--sapphire)" }}>zsh</span><span style={{ color: "var(--muted)" }}>       # Tab-complete mira</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira quit --end-sessions<span style={{ color: "var(--muted)" }}>   # Cmd+Q keeps them</span></div>
         </div>
       </div>
