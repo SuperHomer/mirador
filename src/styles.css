@@ -4372,13 +4372,23 @@ button.inbox-update:hover {
 }
 
 /* Messages held back from an agent behind the person's draft. Shown in
-   its bar and its card's header; never shrunk, beside a title that is. */
+   its bar, never shrunk there, and in its card's header. */
 .queued-label {
   flex-shrink: 0;
   padding: 0 6px;
   border-radius: 4px;
   color: var(--status-needs-you);
   box-shadow: inset 0 0 0 1px var(--status-needs-you);
+  white-space: nowrap;
+}
+
+/* On a narrow card it shares the shrinking with the title: alone, the
+   title would collapse to nothing and push the close button out. */
+.card-header .queued-label {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

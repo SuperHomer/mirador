@@ -116,7 +116,7 @@ export function QueuedLabel({ count }: { count: number }) {
   return (
     <span
       className="queued-label"
-      title="Messages from other agents. They go in once your draft is sent or cleared."
+      title="Messages from agents, typed in one at a time once your draft is sent or cleared and the agent is free"
     >
       {count === 1 ? "1 message waiting" : `${count} messages waiting`}
     </span>
