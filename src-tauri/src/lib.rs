@@ -41,6 +41,12 @@ pub struct AppState {
     /// Pending read-screen round-trips to the webview.
     pub screen_requests: Mutex<HashMap<u64, std::sync::mpsc::Sender<ScreenRead>>>,
     pub next_screen_request: AtomicU64,
+    /// The person's keystrokes held from panes a handoff is typing into
+    /// (`handoff::Typing`). `write_pty` writes under this lock, so a held
+    /// key handed back cannot be overtaken by one typed after it.
+    pub key_hold: Mutex<cmux_core::handoff::KeyHold>,
+    /// When the person last typed into each pane.
+    pub typed_at: Mutex<HashMap<String, std::time::Instant>>,
     /// Command-pane run history (agent audit log).
     pub run_history: Mutex<Vec<RunRecord>>,
     /// Raw output captured per live command pane.
@@ -313,6 +319,8 @@ pub fn run() {
             window_focused: AtomicBool::new(true),
             screen_requests: Mutex::new(HashMap::new()),
             next_screen_request: AtomicU64::new(1),
+            key_hold: Mutex::new(Default::default()),
+            typed_at: Mutex::new(HashMap::new()),
             run_history: Mutex::new(Vec::new()),
             run_captures: Mutex::new(HashMap::new()),
             run_waiters: Mutex::new(HashMap::new()),

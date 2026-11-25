@@ -382,6 +382,10 @@ pub fn showing(screen: &str) -> Showing<'_> {
 /// after what was typed once it is not — further along the glyph's line,
 /// or on a line below it for a draft of several lines.
 ///
+/// One draft this misses: one whose cursor was moved back to its start
+/// (Home, Ctrl+A) reads as empty. When the person last typed into the pane
+/// covers that in practice — they are mid-edit.
+///
 /// Only Claude Code and Codex, whose glyph this finds the box by, are
 /// judged; any other harness, and a screen that is not showing an input
 /// box, has no draft here.
@@ -395,6 +399,46 @@ pub fn has_draft(screen: &str, cursor: (usize, usize), harness: Option<cmux_prot
     let line = screen[at..].lines().next().unwrap_or_default();
     let glyph = line.chars().take_while(|c| c.is_whitespace()).count();
     cursor != (row, glyph + 2)
+}
+
+/// The person's keystrokes held back from panes a handoff is typing into.
+/// A message is a paste and, a moment later, an Enter; a key the person
+/// presses in between would land inside the message and be sent with it
+/// (#244: a trailing `u` went out that way). So while a pane is held, what
+/// the person types into it is kept, in order, and handed back once the
+/// Enter is written, to be typed after it.
+///
+/// Holds nest: two handoffs typing into one pane at once hand the keys
+/// back only when the last of them is done.
+#[derive(Debug, Default)]
+pub struct KeyHold {
+    held: std::collections::HashMap<String, (usize, Vec<u8>)>,
+}
+
+impl KeyHold {
+    /// Starts holding `pane`'s keystrokes.
+    pub fn hold(&mut self, pane: &str) {
+        self.held.entry(pane.to_string()).or_default().0 += 1;
+    }
+
+    /// Keeps `bytes` typed into `pane` if it is held, and says so; false
+    /// means they are to be written now.
+    pub fn keep(&mut self, pane: &str, bytes: &[u8]) -> bool {
+        let Some((_, kept)) = self.held.get_mut(pane) else { return false };
+        kept.extend_from_slice(bytes);
+        true
+    }
+
+    /// Ends one hold on `pane`: what was kept, in the order typed, once no
+    /// hold is left on it; nothing while another is.
+    pub fn release(&mut self, pane: &str) -> Vec<u8> {
+        let Some((holds, _)) = self.held.get_mut(pane) else { return Vec::new() };
+        *holds -= 1;
+        if *holds > 0 {
+            return Vec::new();
+        }
+        self.held.remove(pane).map(|(_, kept)| kept).unwrap_or_default()
+    }
 }
 
 /// What `mira agent wait` has seen so far, and whether it is done.
@@ -1093,6 +1137,46 @@ ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rena
         assert!(!has_draft(CODEX_IDLE, (10, 2), Some(Codex)));
         let typed = CODEX_IDLE.replace("› Ask Codex to do anything", "› pause");
         assert!(has_draft(&typed, (10, 7), Some(Codex)));
+    }
+
+    #[test]
+    fn finds_the_cursor_after_an_indented_glyph() {
+        use cmux_protocol::Harness::Codex;
+        let screen = "• ok\n\n  › Ask Codex to do anything\n";
+        assert!(!has_draft(screen, (2, 4), Some(Codex)));
+        assert!(has_draft(screen, (2, 2), Some(Codex)));
+    }
+
+    #[test]
+    fn keys_pass_through_a_pane_not_held() {
+        let mut hold = KeyHold::default();
+        assert!(!hold.keep("p1", b"a"));
+        hold.hold("p2");
+        assert!(!hold.keep("p1", b"b"));
+        assert_eq!(hold.release("p1"), b"");
+    }
+
+    #[test]
+    fn held_keys_come_back_in_order_once_released() {
+        let mut hold = KeyHold::default();
+        hold.hold("p1");
+        assert!(hold.keep("p1", b"pa"));
+        assert!(hold.keep("p1", b"u"));
+        assert_eq!(hold.release("p1"), b"pau");
+        // Released, the pane takes keys again, and nothing is left.
+        assert!(!hold.keep("p1", b"x"));
+        assert_eq!(hold.release("p1"), b"");
+    }
+
+    #[test]
+    fn a_nested_hold_keeps_keys_until_the_last_ends() {
+        let mut hold = KeyHold::default();
+        hold.hold("p1");
+        hold.hold("p1");
+        assert!(hold.keep("p1", b"a"));
+        assert_eq!(hold.release("p1"), b"");
+        assert!(hold.keep("p1", b"b"));
+        assert_eq!(hold.release("p1"), b"ab");
     }
 
     #[test]

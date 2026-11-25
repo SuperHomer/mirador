@@ -2724,10 +2724,17 @@ pub async fn load_scrollback(state: State<'_, AppState>, pane_id: String) -> Res
 
 /// Async so keystrokes never queue behind the UI thread's other work
 /// (output delivery, snapshot emits); the frontend keeps one call in flight
-/// per pane, which preserves their order.
+/// per pane, which preserves their order. Held back while a handoff is
+/// typing a message into the pane (`handoff::Typing`).
 #[tauri::command]
 pub async fn write_pty(app: AppHandle, pane_id: String, data: String) -> Result<(), String> {
-    app.state::<AppState>().pty.write(&pane_id, data.as_bytes())
+    let state = app.state::<AppState>();
+    state.typed_at.lock().unwrap().insert(pane_id.clone(), std::time::Instant::now());
+    let mut hold = state.key_hold.lock().unwrap();
+    if hold.keep(&pane_id, data.as_bytes()) {
+        return Ok(());
+    }
+    state.pty.write(&pane_id, data.as_bytes())
 }
 
 #[tauri::command]
@@ -2768,6 +2775,7 @@ pub(crate) fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[
     }
     notify::forget_panes(state, panes);
     state.trail_files.lock().unwrap().retain(|pane, _| !panes.contains(pane));
+    state.typed_at.lock().unwrap().retain(|pane, _| !panes.contains(pane));
     for pane in panes {
         crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);

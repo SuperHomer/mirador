@@ -238,6 +238,7 @@ pub fn send(
     let before = (harness == Some(cmux_protocol::Harness::Codex))
         .then(|| crate::server::read_screen(app, &pane, None, std::time::Duration::from_secs(2)).ok())
         .flatten();
+    let typing = Typing::start(state, &pane);
     state.pty.write(&pane, &paste)?;
     if let Some(before) = before {
         // Characters, not bytes: Codex handles one key per character.
@@ -248,9 +249,37 @@ pub fn send(
     // as part of the paste and leave the message unsent.
     std::thread::sleep(cmux_core::handoff::enter_delay(harness));
     state.pty.write(&pane, &enter)?;
+    drop(typing);
     let from = from.unwrap_or_else(|| "you".into());
     crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card, title);
     Ok(pane)
+}
+
+/// Holds the person's keystrokes to `pane` while a message is typed into
+/// it (`cmux_core::handoff::KeyHold`), and types them once it is dropped —
+/// on every way out, an error's included: a hold left behind would swallow
+/// the person's keyboard.
+struct Typing<'a> {
+    state: &'a AppState,
+    pane: String,
+}
+
+impl<'a> Typing<'a> {
+    fn start(state: &'a AppState, pane: &str) -> Self {
+        state.key_hold.lock().unwrap().hold(pane);
+        Typing { state, pane: pane.to_string() }
+    }
+}
+
+impl Drop for Typing<'_> {
+    fn drop(&mut self) {
+        // Written under the lock, so a key typed meanwhile waits behind them.
+        let mut hold = self.state.key_hold.lock().unwrap_or_else(|e| e.into_inner());
+        let kept = hold.release(&self.pane);
+        if !kept.is_empty() {
+            let _ = self.state.pty.write(&self.pane, &kept);
+        }
+    }
 }
 
 /// Reads `pane`'s screen until the paste of `chars` characters written
@@ -314,10 +343,12 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
         }
     }
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;
+    let typing = Typing::start(state, pane);
     state.pty.write(pane, line.as_bytes()).map_err(|e| ("not running", e))?;
     // Enter on its own read, as `send` does.
     std::thread::sleep(cmux_core::handoff::enter_delay(harness));
     state.pty.write(pane, b"\r").map_err(|e| ("not running", e))?;
+    drop(typing);
     // A Pi's or an OpenCode's `/new` moves it to a conversation of its own
     // making, whose id is not cheap to learn: Pi writes the new session's
     // file only on its first message, in a directory every Pi in that
