@@ -209,8 +209,8 @@ export default function TeamsShowcase() {
           its teammates by name and hands them work with{" "}
           <span className="mono" style={{ color: "var(--text)" }}>mira agent send</span> —{" "}
           <span className="mono" style={{ color: "var(--text)" }}>--wait</span> blocks until
-          a Claude Code teammate is done; nobody can wait on a Codex agent, so a Codex
-          teammate reports back with its own{" "}
+          a Claude Code teammate is done; nobody can wait on a Codex, Pi or OpenCode
+          agent, so such a teammate reports back with its own{" "}
           <span className="mono" style={{ color: "var(--text)" }}>mira agent send</span>.
           Mirador keeps track of the team across restarts: list it, bring
           back the members that stopped, add one. In the editor a team is a page —

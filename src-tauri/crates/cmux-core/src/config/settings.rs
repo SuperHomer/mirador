@@ -2,12 +2,15 @@
 //! group, kind, default and description, the values a file sets them to,
 //! and the one function that writes a key back.
 
+use std::ffi::OsStr;
 use std::path::Path;
 
 use cmux_protocol::{ChoiceOption, SettingKind, SettingRow};
 use serde_json::{json, Value};
 
-use super::{config_path, default_font_family, Config};
+use super::zoom::{FONT_SIZE_MAX, FONT_SIZE_MIN};
+use super::{config_path, default_font_family, Computer, Config, FOCUS_RAIL_WIDTH, SIDEBAR_WIDTH, SIDEBAR_WIDTH_DEFAULT};
+use crate::pty::conpty;
 
 /// One mirador.json key, as the Settings pane describes it.
 pub struct Setting {
@@ -30,12 +33,64 @@ fn setting(key: &'static str, group: &'static str, kind: SettingKind, default: &
     Setting { key, group, kind, default: default.into(), description }
 }
 
+/// A width in whole pixels within `range`. The kind allows a fraction in
+/// range; [`accepts`] refuses it, since [`Config`] reads a `u32`.
+fn pixels(range: &std::ops::RangeInclusive<u32>) -> SettingKind {
+    SettingKind::Number { min: f64::from(*range.start()), max: f64::from(*range.end()) }
+}
+
 /// What themeSource takes: the sources, then every named theme, so a
 /// theme added to the table is a choice without touching this list.
 fn theme_sources() -> Vec<&'static str> {
     let mut sources = vec!["auto", "ghostty", "wezterm", "builtin", "none"];
     sources.extend(super::NAMED_THEMES.iter().map(|t| t.name));
     sources
+}
+
+/// conpty's options as the pane offers them. [`settings`] gives auto and
+/// system; a folder anywhere is taken too ([`accepts`]). Only here, for the
+/// pane, is PATH (`path`) looked at: [`settings`] runs on every config
+/// write, a zoom step or a sidebar drop included, and one PATH folder on a
+/// drive that does not answer would hold each of them up. On Windows the
+/// pane offers each folder on PATH that holds a conpty.dll, the ConPTYs
+/// this machine already has, and says what auto loads here and which
+/// folders hold a ConPTY that works (a conpty.dll without the
+/// OpenConsole.exe it starts does not). The file's own folder, when it is
+/// not one of those, shows as itself.
+fn conpty_view_options(mut options: Vec<ChoiceOption>, value: Option<&Value>, path: Option<&OsStr>) -> Vec<ChoiceOption> {
+    let on_path = match path {
+        Some(path) if cfg!(windows) => conpty::on_path(path),
+        _ => Vec::new(),
+    };
+    let first_on_path = on_path.first().map(|dir| dir.to_string_lossy().into_owned());
+    options.extend(on_path.iter().map(|dir| option(json!(dir.to_string_lossy()))));
+    if let Some(v) = value.and_then(Value::as_str) {
+        let named = matches!(conpty::parse(Some(v)), Ok(conpty::Conpty::Auto | conpty::Conpty::System));
+        if !named && !options.iter().any(|o| o.value == *v) {
+            options.push(option(json!(v)));
+        }
+    }
+    if !cfg!(windows) {
+        return options;
+    }
+    options
+        .into_iter()
+        .map(|o| {
+            let (available, note) = match o.value.as_str() {
+                Some("auto") => match &first_on_path {
+                    Some(dir) => (true, Some(format!("Loads the conpty.dll in {dir}"))),
+                    None => (true, Some("No conpty.dll on PATH: Windows' own".to_string())),
+                },
+                Some("system") => (true, Some("Windows' own ConPTY".to_string())),
+                Some(dir) => match conpty::folder_problem(Path::new(dir)) {
+                    None => (true, None),
+                    Some(problem) => (false, Some(problem.to_string())),
+                },
+                None => (true, None),
+            };
+            ChoiceOption { available, note, ..o }
+        })
+        .collect()
 }
 
 /// Every key of [`Config`], in the order the Settings pane shows them.
@@ -48,9 +103,12 @@ pub fn settings() -> Vec<Setting> {
         setting("weztermScheme", "Appearance", Text, "none",
             "The wezterm scheme a wezterm theme source reads: a name in ~/.config/wezterm/colors, or a .toml path."),
         setting("fontFamily", "Appearance", Text, default_font_family(), "The terminal font, as a CSS font list."),
-        setting("fontSize", "Appearance", Number { min: 6.0, max: 72.0 }, "13", "The terminal font size, in points."),
+        setting("fontSize", "Appearance", Number { min: f64::from(FONT_SIZE_MIN), max: f64::from(FONT_SIZE_MAX) }, "13",
+            "The terminal font size, in points. Zooming the terminals (View: Zoom Terminals In / Out, or Ctrl + wheel over one) sets it; resetting their zoom clears it."),
         setting("colors", "Appearance", ReadOnly, "the theme's",
             "Colors that override the theme's: background, foreground, cursor, selection, palette."),
+        setting("sidebarWidth", "Appearance", pixels(&SIDEBAR_WIDTH), &SIDEBAR_WIDTH_DEFAULT.to_string(),
+            "The sidebar's width, in pixels. Dragging its edge sets it; a double-click on the edge clears it."),
         setting("scrollback", "Terminal", Number { min: 0.0, max: u32::MAX as f64 }, "10000", "Lines each terminal keeps above the screen."),
         setting("macOptionIsMeta", "Terminal", Bool, "false",
             "macOS only: Option+key sends Meta instead of typing its character, which non-US layouts need for [ ] { } |."),
@@ -60,14 +118,22 @@ pub fn settings() -> Vec<Setting> {
             "Where a new tab's first pane starts; splits inherit their pane's directory."),
         setting("persistSessions", "Terminal", Bool, "true",
             "Keep terminals running when Mirador quits, and reattach to them next launch. Applies to new panes."),
+        setting("conpty", "Terminal", choice(&["auto", "system"]), "auto",
+            "Windows only: the ConPTY panes run under. auto loads the first conpty.dll Windows finds, one on PATH included; system is Windows' own; or a folder with conpty.dll and OpenConsole.exe. Applies to new panes; with persistSessions off, after a restart."),
         setting("agentsPerTab", "Agents", SettingKind::Choice { options: vec![option(json!(4)), option(json!(6)), option(json!(9))] }, "4",
             "How many agents a page of the wall's Grid layout holds."),
+        setting("focusRailPosition", "Agents", choice(&["right", "top", "bottom"]), "right",
+            "Where Focus shows the wall's other agents and tools: a column on the right, tabs in the header of the one shown large, or a row of tabs under it."),
+        setting("focusRailWidth", "Agents", pixels(&FOCUS_RAIL_WIDTH), "a third of the wall",
+            "The width of Focus's column beside the agent shown large, in pixels. Dragging its edge sets it; a double-click on the edge clears it."),
         setting("teamCostWarnUsd", "Agents", Number { min: f64::MIN_POSITIVE, max: f64::MAX }, "0.5",
             "What starting a team may cost, in US dollars, before its weight in the editor warns."),
         setting("agentClick", "Agents", choice(&["wall", "pane"]), "wall",
             "What clicking an agent in the sidebar does: its tab's wall, or the agent alone."),
         setting("agentRoles", "Agents", ReadOnly, "none",
             "Named ways to start a Claude Code agent, each with its own model and system prompt."),
+        setting("computers", "Agents", ReadOnly, "none",
+            "Computers agents can work on over SSH: a name, an ssh host and the directory there. Added, changed and removed in the Computers pane or with mira computer."),
         setting("editorOpensIn", "Panes", choice(&["tab", "split"]), "tab", "Where the roles, ways and teams editor opens."),
         setting("diffOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where a diff opens."),
         setting("graphOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where the commit graph opens."),
@@ -82,6 +148,12 @@ pub fn settings() -> Vec<Setting> {
 /// (a fraction in `scrollback` is a number in range, and not a `u32`).
 fn accepts(setting: &Setting, value: &Value) -> bool {
     let kind_allows = match &setting.kind {
+        // Only what conpty::parse takes: auto, system, or a folder holding a
+        // ConPTY, wherever it is. Not by being offered: a folder on PATH is
+        // offered for its conpty.dll alone, and may lack the OpenConsole.exe.
+        SettingKind::Choice { .. } if setting.key == "conpty" => {
+            value.as_str().is_some_and(|v| conpty::parse(Some(v)).is_ok())
+        }
         SettingKind::Choice { options } => options.iter().any(|o| o.value == *value),
         SettingKind::Bool => value.is_boolean(),
         SettingKind::Number { min, max } => value.as_f64().is_some_and(|n| n >= *min && n <= *max),
@@ -113,8 +185,10 @@ pub fn settings_view() -> Result<Vec<SettingRow>, String> {
 /// that value is valid. A file that does not parse is that error, not a
 /// view of the defaults, which would show as if nothing were set.
 /// `ghostty` is where a Ghostty config would be and `wezterm_colors` where
-/// wezterm schemes are by name, for themeSource's notes; nothing else on
-/// disk is looked at.
+/// wezterm schemes are by name, for themeSource's notes. On Windows the
+/// folders on PATH are looked at too, for conpty's ([`conpty_view_options`]):
+/// a PATH folder on a drive that does not answer slows this view, never a
+/// write. Nothing else on disk is looked at.
 fn settings_view_in(path: &Path, ghostty: &Path, wezterm_colors: Option<&Path>) -> Result<Vec<SettingRow>, String> {
     let obj = read_object(path)?;
     Ok(settings()
@@ -124,6 +198,11 @@ fn settings_view_in(path: &Path, ghostty: &Path, wezterm_colors: Option<&Path>) 
             let kind = match s.kind.clone() {
                 SettingKind::Choice { options } if s.key == "themeSource" => {
                     SettingKind::Choice { options: theme_options(options, &obj, ghostty, wezterm_colors) }
+                }
+                SettingKind::Choice { options } if s.key == "conpty" => {
+                    SettingKind::Choice {
+                        options: conpty_view_options(options, value.as_ref(), std::env::var_os("PATH").as_deref()),
+                    }
                 }
                 kind => kind,
             };
@@ -204,6 +283,12 @@ pub(super) fn set_config_value_in(path: &Path, key: &str, value: Option<Value>) 
         }
     }
     let mut obj = read_object(path)?;
+    // Nothing to change, nothing written: a reset of a key the file does
+    // not hold (a double-click on an edge never dragged) or a value it
+    // already has would only reformat the person's file.
+    if obj.get(key) == value.as_ref() {
+        return Ok(());
+    }
     match value {
         Some(v) => {
             obj.insert(key.into(), v);
@@ -212,11 +297,141 @@ pub(super) fn set_config_value_in(path: &Path, key: &str, value: Option<Value>) 
             obj.shift_remove(key);
         }
     }
+    write_object(path, obj)
+}
+
+fn write_object(path: &Path, obj: serde_json::Map<String, Value>) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let text = serde_json::to_string_pretty(&Value::Object(obj)).map_err(|e| e.to_string())?;
     std::fs::write(path, text + "\n").map_err(|e| e.to_string())
+}
+
+/// Adds a computer to mirador.json's `computers`.
+pub fn add_computer(name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    add_computer_in(&config_path(), name, host, dir)
+}
+
+/// Changes the computer `original` in mirador.json's `computers`.
+pub fn update_computer(original: &str, name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    update_computer_in(&config_path(), original, name, host, dir)
+}
+
+/// Removes the computer `name` from mirador.json's `computers`.
+pub fn remove_computer(name: &str) -> Result<(), String> {
+    remove_computer_in(&config_path(), name)
+}
+
+/// Appends a computer to `computers` in the file at `path`, as
+/// [`set_config_value_in`] edits a key: as JSON, so nothing else in the
+/// file changes. `computers` is read-only in the Settings pane, since it
+/// takes no single value, so this, [`update_computer_in`] and
+/// [`remove_computer_in`] are the ways the app writes it.
+pub(super) fn add_computer_in(path: &Path, name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    let computer = checked_computer(name, host, dir)?;
+    let mut obj = read_object(path)?;
+    let mut list = computer_list(&obj)?;
+    unclaimed(&list, &computer.name)?;
+    list.push(serde_json::to_value(&computer).map_err(|e| e.to_string())?);
+    obj.insert("computers".into(), Value::Array(list));
+    write_object(path, obj)?;
+    Ok(computer)
+}
+
+/// Replaces the computer `original` in the file at `path` where it is,
+/// as [`add_computer_in`] writes: the other computers in their order,
+/// nothing else changed, not even a key of the entry `Computer` does not
+/// know. It may keep its name or take one no other computer has. The
+/// entry changed is the one `computers_in` lists; a later entry of the
+/// same name, which only a hand edit makes, is left alone. A change that
+/// changes nothing writes nothing, as [`set_config_value_in`].
+pub(super) fn update_computer_in(path: &Path, original: &str, name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    let computer = checked_computer(name, host, dir)?;
+    let mut obj = read_object(path)?;
+    let mut list = computer_list(&obj)?;
+    let at = listed_at(&list, original)?;
+    if computer.name != original.trim() {
+        unclaimed(&list, &computer.name)?;
+    }
+    let before = list[at].clone();
+    for (key, value) in [("name", &computer.name), ("host", &computer.host), ("dir", &computer.dir)] {
+        list[at][key] = json!(value);
+    }
+    if list[at] == before {
+        return Ok(computer);
+    }
+    obj.insert("computers".into(), Value::Array(list));
+    write_object(path, obj)?;
+    Ok(computer)
+}
+
+/// Removes the computer `name` from the file at `path`, as
+/// [`update_computer_in`] finds it. A later entry of the same name is left
+/// alone, and is the one `computers_in` lists from then on.
+pub(super) fn remove_computer_in(path: &Path, name: &str) -> Result<(), String> {
+    let mut obj = read_object(path)?;
+    let mut list = computer_list(&obj)?;
+    let at = listed_at(&list, name)?;
+    list.remove(at);
+    obj.insert("computers".into(), Value::Array(list));
+    write_object(path, obj)
+}
+
+/// A computer as it is saved: trimmed. The name goes on command lines and
+/// in palette entries, so it is a role's kind of name (`roles::is_name`).
+fn checked_computer(name: &str, host: &str, dir: &str) -> Result<Computer, String> {
+    let computer = Computer { name: name.trim().into(), host: host.trim().into(), dir: dir.trim().into() };
+    if !crate::roles::is_name(&computer.name) {
+        return Err(format!(
+            "`{}` can't name a computer: letters, digits, `-`, `_` and `.`, not starting with `-` or `.`",
+            computer.name
+        ));
+    }
+    if computer.host.is_empty() {
+        return Err("a computer needs an ssh host".into());
+    }
+    if computer.dir.is_empty() {
+        return Err("a computer needs the directory where the work is".into());
+    }
+    Ok(computer)
+}
+
+/// `computers` in `obj`, to be edited. One that is not a list of computers
+/// is refused, not repaired: as set_config_value_in, the app never writes
+/// what Config cannot read back.
+fn computer_list(obj: &serde_json::Map<String, Value>) -> Result<Vec<Value>, String> {
+    let list = match obj.get("computers") {
+        None => Vec::new(),
+        Some(Value::Array(list)) => list.clone(),
+        Some(_) => return Err("computers in mirador.json is not a list".into()),
+    };
+    if serde_json::from_value::<Config>(json!({ "computers": list })).is_err() {
+        return Err("computers in mirador.json has an entry that is not a computer".into());
+    }
+    Ok(list)
+}
+
+/// Refuses `name` when an entry in `list` has it: no two computers share
+/// a name.
+fn unclaimed(list: &[Value], name: &str) -> Result<(), String> {
+    if list.iter().any(|c| c["name"].as_str().map(str::trim) == Some(name)) {
+        return Err(format!("there is already a computer `{name}`"));
+    }
+    Ok(())
+}
+
+/// Where in `list`, a [`computer_list`], the computer `computers_in` lists
+/// as `name` is.
+fn listed_at(list: &[Value], name: &str) -> Result<usize, String> {
+    let name = name.trim();
+    let config: Config = serde_json::from_value(json!({ "computers": list })).map_err(|e| e.to_string())?;
+    let unknown = || format!("there is no computer `{name}`");
+    let listed = super::computers_in(&config).into_iter().find(|c| c.name == name).ok_or_else(unknown)?;
+    // The first entry that trims to it: an earlier one would have been
+    // usable too, and listed instead.
+    let trimmed = |c: &Computer| Computer { name: c.name.trim().into(), host: c.host.trim().into(), dir: c.dir.trim().into() };
+    config.computers.iter().position(|c| trimmed(c) == listed).ok_or_else(unknown)
 }
 
 #[cfg(test)]
@@ -234,6 +449,150 @@ mod tests {
     }
 
     #[test]
+    fn a_computer_is_added_and_nothing_else_changes() {
+        let path = temp_config("computers");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"fontSize": 14, "someFutureKey": {"kept": true}}"#).unwrap();
+        let added = add_computer_in(&path, " box ", "devbox", "~/work/app").unwrap();
+        assert_eq!(added, Computer { name: "box".into(), host: "devbox".into(), dir: "~/work/app".into() });
+        add_computer_in(&path, "gpu", "-p 2222 me@gpu.example", "/srv/app").unwrap();
+        let file = read(&path);
+        assert_eq!(file["fontSize"], 14);
+        assert_eq!(file["someFutureKey"], json!({ "kept": true }), "a key Config does not know survives");
+        assert_eq!(
+            file["computers"],
+            json!([
+                { "name": "box", "host": "devbox", "dir": "~/work/app" },
+                { "name": "gpu", "host": "-p 2222 me@gpu.example", "dir": "/srv/app" },
+            ])
+        );
+        let config: Config = serde_json::from_value(file).unwrap();
+        assert_eq!(config.computers.len(), 2);
+    }
+
+    #[test]
+    fn a_computer_needs_a_new_shell_safe_name_a_host_and_a_dir() {
+        let path = temp_config("computers-bad");
+        add_computer_in(&path, "box", "devbox", "~/work").unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+        let dup = add_computer_in(&path, "box", "other", "~/x").unwrap_err();
+        assert_eq!(dup, "there is already a computer `box`");
+        for bad in ["", "my box", "-box", ".box", "box;rm", "bo$x"] {
+            let err = add_computer_in(&path, bad, "devbox", "~/work").unwrap_err();
+            assert!(err.contains("can't name a computer"), "{bad}: {err}");
+        }
+        assert!(add_computer_in(&path, "b2", " ", "~/work").unwrap_err().contains("ssh host"));
+        assert!(add_computer_in(&path, "b2", "devbox", "").unwrap_err().contains("directory"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "a refused computer changes nothing");
+
+        std::fs::write(&path, r#"{"computers": ["nope"]}"#).unwrap();
+        assert!(add_computer_in(&path, "b2", "devbox", "~/w").unwrap_err().contains("not a computer"));
+        std::fs::write(&path, r#"{"computers": "nope"}"#).unwrap();
+        assert!(add_computer_in(&path, "b2", "devbox", "~/w").unwrap_err().contains("not a list"));
+        // The Settings pane does not write it: it takes no single value.
+        assert!(set_config_value_in(&path, "computers", Some(json!([]))).is_err());
+    }
+
+    /// Three computers and keys of other kinds, as a file to change.
+    fn three_computers(name: &str) -> std::path::PathBuf {
+        let path = temp_config(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{"fontSize": 14, "someFutureKey": {"kept": true}}"#).unwrap();
+        for (name, host) in [("a", "ha"), ("box", "devbox"), ("c", "hc")] {
+            add_computer_in(&path, name, host, "/w").unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn a_computer_is_changed_in_its_place_and_nothing_else_changes() {
+        let path = three_computers("computers-update");
+        let changed = update_computer_in(&path, " box ", "box", " other ", " ~/x ").unwrap();
+        assert_eq!(changed, Computer { name: "box".into(), host: "other".into(), dir: "~/x".into() });
+        update_computer_in(&path, "c", "lab", "hc", "/w").unwrap();
+        let file = read(&path);
+        assert_eq!(file["computers"][1]["host"], "other");
+        assert_eq!(file["fontSize"], 14);
+        assert_eq!(file["someFutureKey"], json!({ "kept": true }));
+        assert_eq!(
+            file["computers"],
+            json!([
+                { "name": "a", "host": "ha", "dir": "/w" },
+                { "name": "box", "host": "other", "dir": "~/x" },
+                { "name": "lab", "host": "hc", "dir": "/w" },
+            ])
+        );
+    }
+
+    /// An entry keeps what the app does not know of it, and a change to
+    /// what it already is does not rewrite the file.
+    #[test]
+    fn a_change_keeps_the_rest_of_its_entry_and_none_writes_nothing() {
+        let path = temp_config("computers-update-keep");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let text = r#"{"computers":[{"name":"box","host":"devbox","dir":"/w","someFutureField":1}]}"#;
+        std::fs::write(&path, text).unwrap();
+        update_computer_in(&path, "box", "box", "devbox", " /w ").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "nothing changed, nothing written");
+        update_computer_in(&path, "box", "box", "other", "/w").unwrap();
+        assert_eq!(read(&path)["computers"], json!([{ "name": "box", "host": "other", "dir": "/w", "someFutureField": 1 }]));
+    }
+
+    #[test]
+    fn a_change_is_refused_with_the_file_unchanged() {
+        let path = three_computers("computers-update-bad");
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(update_computer_in(&path, "box", "c", "devbox", "/w").unwrap_err(), "there is already a computer `c`");
+        assert_eq!(update_computer_in(&path, "nope", "nope", "h", "/w").unwrap_err(), "there is no computer `nope`");
+        assert!(update_computer_in(&path, "box", "my box", "devbox", "/w").unwrap_err().contains("can't name a computer"));
+        assert!(update_computer_in(&path, "box", "box", " ", "/w").unwrap_err().contains("ssh host"));
+        assert!(update_computer_in(&path, "box", "box", "devbox", "").unwrap_err().contains("directory"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "a refused change writes nothing");
+
+        for (text, says) in [(r#"{"computers": ["nope"]}"#, "not a computer"), (r#"{"computers": "nope"}"#, "not a list")] {
+            std::fs::write(&path, text).unwrap();
+            assert!(update_computer_in(&path, "box", "box", "h", "/w").unwrap_err().contains(says), "{text}");
+            assert!(remove_computer_in(&path, "box").unwrap_err().contains(says), "{text}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "not repaired");
+        }
+    }
+
+    #[test]
+    fn a_computer_is_removed_and_nothing_else_changes() {
+        let path = three_computers("computers-remove");
+        remove_computer_in(&path, " box ").unwrap();
+        let file = read(&path);
+        assert_eq!((&file["fontSize"], &file["someFutureKey"]), (&json!(14), &json!({ "kept": true })));
+        assert_eq!(
+            file["computers"],
+            json!([{ "name": "a", "host": "ha", "dir": "/w" }, { "name": "c", "host": "hc", "dir": "/w" }])
+        );
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(remove_computer_in(&path, "box").unwrap_err(), "there is no computer `box`");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    /// A hand edit can repeat a name or leave an entry unusable. A change
+    /// or a removal goes to the entry the app lists, the first usable one
+    /// of that name; the others stay as they are.
+    #[test]
+    fn a_change_goes_to_the_listed_entry_of_a_repeated_name() {
+        let path = temp_config("computers-repeated");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let unusable = json!({ "name": "box", "host": "nodir" });
+        let later = json!({ "name": "box", "host": "h2", "dir": "/two" });
+        let file = json!({ "computers": [unusable, { "name": " box ", "host": "h1", "dir": "/one" }, later] });
+        std::fs::write(&path, file.to_string()).unwrap();
+
+        update_computer_in(&path, "box", "box", "h1", "/changed").unwrap();
+        assert_eq!(read(&path)["computers"], json!([unusable, { "name": "box", "host": "h1", "dir": "/changed" }, later]));
+        remove_computer_in(&path, "box").unwrap();
+        assert_eq!(read(&path)["computers"], json!([unusable, later]));
+        let config: Config = serde_json::from_value(read(&path)).unwrap();
+        assert_eq!(super::super::computers_in(&config)[0].host, "h2", "the later one is listed now");
+    }
+
+    #[test]
     fn every_config_key_has_a_setting() {
         // Config serializes every field, unset ones as null, so a field
         // added without a setting shows here.
@@ -243,6 +602,25 @@ mod tests {
         fields.sort();
         keys.sort();
         assert_eq!(fields, keys);
+    }
+
+    /// A double-click on an edge never dragged resets a width the file does
+    /// not hold: the person's file is left byte for byte, not reformatted.
+    #[test]
+    fn a_change_that_changes_nothing_leaves_the_file_alone() {
+        let path = temp_config("noop");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mine = "{\"fontSize\":14,\n  \"shell\" : \"pwsh\"}";
+        std::fs::write(&path, mine).unwrap();
+
+        set_config_value_in(&path, "sidebarWidth", None).unwrap();
+        set_config_value_in(&path, "fontSize", Some(json!(14))).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine);
+
+        // Removing a key the file has still writes.
+        set_config_value_in(&path, "fontSize", None).unwrap();
+        assert_eq!(read(&path), json!({ "shell": "pwsh" }));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
     #[test]
@@ -281,6 +659,9 @@ mod tests {
             ("themeSource", json!("solarized")), // not a choice
             ("scrollback", json!(u64::from(u32::MAX) + 1)),
             ("agentsPerTab", json!(5)),
+            ("focusRailPosition", json!("left")), // not a choice
+            ("focusRailPosition", json!("off")),
+            ("focusRailPosition", json!(true)),
             ("agentsPerTab", json!("6")), // a choice of numbers
             ("fontSize", json!(200)),     // out of range
             ("fontSize", json!(73)),
@@ -299,6 +680,41 @@ mod tests {
         std::fs::write(&path, "{ broken").unwrap();
         assert!(set_config_value_in(&path, "fontSize", Some(json!(14))).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn the_rail_position_takes_its_three_choices() {
+        // What the wall's Rail control writes.
+        let path = temp_config("rail");
+        for position in ["top", "bottom", "right"] {
+            set_config_value_in(&path, "focusRailPosition", Some(json!(position))).unwrap();
+            assert_eq!(read(&path), json!({ "focusRailPosition": position }));
+        }
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    }
+
+    #[test]
+    fn widths_take_whole_pixels_in_their_range() {
+        let path = temp_config("widths");
+        // What a drag writes, and the Settings pane.
+        set_config_value_in(&path, "sidebarWidth", Some(json!(300))).unwrap();
+        set_config_value_in(&path, "focusRailWidth", Some(json!(520))).unwrap();
+        assert_eq!(read(&path), json!({ "sidebarWidth": 300, "focusRailWidth": 520 }));
+        for (key, value) in [
+            ("sidebarWidth", json!(159)),
+            ("sidebarWidth", json!(601)),
+            ("sidebarWidth", json!(300.5)), // in range, but no u32
+            ("focusRailWidth", json!(149)),
+            ("focusRailWidth", json!(1601)),
+            ("focusRailWidth", json!("wide")),
+        ] {
+            assert!(set_config_value_in(&path, key, Some(value.clone())).is_err(), "{key} = {value}");
+        }
+        assert_eq!(read(&path), json!({ "sidebarWidth": 300, "focusRailWidth": 520 }));
+        // A double-click on the edge: the key goes, the default is back.
+        set_config_value_in(&path, "focusRailWidth", None).unwrap();
+        assert_eq!(read(&path), json!({ "sidebarWidth": 300 }));
         let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
@@ -410,9 +826,9 @@ mod tests {
         std::fs::copy(&scheme, colors.join("Light.toml")).unwrap();
         assert_eq!(choice_of(&theme_choices(&path, &ghostty), "wezterm"), (true, None));
 
-        // Other choices carry no notes.
+        // Other choices carry no notes, but conpty's, which has its own test.
         let rows = settings_view_in(&path, &ghostty, Some(&wezterm_colors(&path))).unwrap();
-        for row in rows.iter().filter(|r| r.key != "themeSource") {
+        for row in rows.iter().filter(|r| r.key != "themeSource" && r.key != "conpty") {
             if let SettingKind::Choice { options } = &row.kind {
                 assert!(options.iter().all(|o| o.available && o.note.is_none()), "{}", row.key);
             }
@@ -436,6 +852,120 @@ mod tests {
         set_config_value_in(&path, "themeSource", Some(json!("wezterm"))).unwrap();
         set_config_value_in(&path, "themeSource", Some(json!("none"))).unwrap();
         assert_eq!(read(&path), json!({ "themeSource": "none" }));
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    /// The probe the test below runs in a process of its own, with a PATH
+    /// it chose: prints the conpty options of the list every config write
+    /// goes through. Run alone, without the variable, it does nothing.
+    #[test]
+    #[ignore = "run in a process of its own by writing_a_setting_does_not_look_at_path"]
+    fn probe_conpty_options_of_a_write() {
+        if std::env::var_os("MIRADOR_SETTINGS_PROBE").is_none() {
+            return;
+        }
+        let row = settings().into_iter().find(|s| s.key == "conpty").unwrap();
+        let SettingKind::Choice { options } = row.kind else { panic!("conpty is a choice") };
+        println!("\noptions: {}", json!(options.into_iter().map(|o| o.value).collect::<Vec<_>>()));
+    }
+
+    /// What every config write goes through offers conpty auto and system
+    /// only: it does not look at PATH, where one folder on a drive that does
+    /// not answer would hold up each write. The pane's view does. Checked in
+    /// a process whose PATH is one folder holding a conpty.dll, so the
+    /// result does not depend on this machine's PATH.
+    #[test]
+    fn writing_a_setting_does_not_look_at_path() {
+        let dir = std::env::temp_dir().join(format!("mirador-settings-write-path-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(conpty::DLL), b"").unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "config::settings::tests::probe_conpty_options_of_a_write", "--ignored", "--nocapture", "--test-threads=1"])
+            .env("MIRADOR_SETTINGS_PROBE", "1")
+            .env("PATH", std::env::join_paths([&dir]).unwrap())
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let options = stdout.lines().find_map(|l| l.strip_prefix("options: ")).unwrap_or_else(|| panic!("no probe line: {stdout}"));
+        assert_eq!(serde_json::from_str::<Value>(options).unwrap(), json!(["auto", "system"]), "{stdout}");
+    }
+
+    /// A folder on PATH is offered, in the pane, for its conpty.dll alone.
+    /// Offered is not taken: without its OpenConsole.exe it is refused, and
+    /// shown so.
+    #[test]
+    fn an_offered_conpty_folder_without_its_host_is_refused_all_the_same() {
+        let dir = std::env::temp_dir().join(format!("mirador-settings-offered-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(conpty::DLL), b"").unwrap();
+        let named = json!(dir.to_str().unwrap());
+        let setting = settings().into_iter().find(|s| s.key == "conpty").unwrap();
+        assert!(!accepts(&setting, &named), "a folder without OpenConsole.exe is taken for being offered");
+        if cfg!(windows) {
+            let SettingKind::Choice { options } = setting.kind.clone() else { unreachable!() };
+            let path = std::env::join_paths([&dir]).unwrap();
+            let shown = conpty_view_options(options, None, Some(&path));
+            let offered = shown.iter().find(|o| o.value == named).expect("a folder on PATH with a conpty.dll is offered");
+            assert!(!offered.available);
+            assert_eq!(offered.note.as_deref(), Some("no OpenConsole.exe beside its conpty.dll"));
+            let auto = shown.iter().find(|o| o.value == "auto").unwrap();
+            assert_eq!(auto.note, Some(format!("Loads the conpty.dll in {}", dir.display())));
+        }
+        std::fs::write(dir.join(conpty::HOST), b"").unwrap();
+        assert!(accepts(&setting, &named), "with both files it is a ConPTY");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn conpty_takes_auto_system_or_a_folder_with_a_conpty_in_it() {
+        let path = temp_config("conpty");
+        let dir = path.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "{}").unwrap();
+        let row = |path: &Path| {
+            let rows = settings_view_in(path, &no_ghostty(path), Some(&wezterm_colors(path))).unwrap();
+            rows.into_iter().find(|r| r.key == "conpty").unwrap()
+        };
+        let options = |row: &SettingRow| match &row.kind {
+            SettingKind::Choice { options } => options.clone(),
+            other => panic!("conpty is a choice, not {other:?}"),
+        };
+
+        // A folder with a ConPTY in it, on no PATH: auto, system and it are taken.
+        let folder = dir.join("openconsole");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(conpty::DLL), b"").unwrap();
+        std::fs::write(folder.join(conpty::HOST), b"").unwrap();
+        let named = json!(folder.to_str().unwrap());
+        for value in [json!("auto"), json!("system"), named.clone()] {
+            set_config_value_in(&path, "conpty", Some(value.clone())).unwrap();
+            assert_eq!(read(&path)["conpty"], value);
+        }
+        // The file's folder shows as itself, set, valid and available.
+        let shown = row(&path);
+        assert!(shown.set && shown.valid);
+        let own = options(&shown).into_iter().find(|o| o.value == named).expect("the file's folder is offered");
+        assert!(own.available);
+        assert!(options(&shown).iter().any(|o| o.value == "auto") && options(&shown).iter().any(|o| o.value == "system"));
+
+        // Without the OpenConsole.exe it starts, the folder is no ConPTY:
+        // refused, and so are a bare name and a number.
+        std::fs::remove_file(folder.join(conpty::HOST)).unwrap();
+        for value in [named.clone(), json!("WezTerm"), json!(1)] {
+            assert!(set_config_value_in(&path, "conpty", Some(value.clone())).is_err(), "{value}");
+        }
+        assert_eq!(read(&path)["conpty"], named, "the file is left alone");
+        // A file that still names it shows it invalid, and on Windows why.
+        let shown = row(&path);
+        assert!(shown.set && !shown.valid);
+        if cfg!(windows) {
+            let own = options(&shown).into_iter().find(|o| o.value == named).unwrap();
+            assert!(!own.available);
+            assert_eq!(own.note.as_deref(), Some("no OpenConsole.exe beside its conpty.dll"));
+        }
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

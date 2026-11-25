@@ -37,7 +37,7 @@ fn real_agents_start() {
     sb.launch();
     let first = sb.first_pane();
     let start = |role: &str| {
-        sb.call(Request::AgentNew { role: Some(role.into()), harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()) })
+        sb.call(Request::AgentNew { role: Some(role.into()), harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()), host: None, dir: None, on: None })
             ["paneId"]
             .as_str()
             .unwrap()
@@ -99,6 +99,9 @@ fn mirador_test_team_hands_off() {
                 .into(),
         ),
         pane_id: Some(first),
+        host: None,
+        dir: None,
+        on: None,
     });
 
     // Each member, by its pane, is the agent its role says: `team list`

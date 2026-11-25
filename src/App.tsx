@@ -6,14 +6,17 @@ import {
   getConfig,
   WorkspaceSnapshot,
   ResolvedConfig,
+  sendFiles,
 } from "./bindings";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useConfigStore } from "./state/configStore";
 import { useNotificationStore } from "./state/notificationStore";
 import { useKeymap } from "./keymap/useKeymap";
+import { useZoomWheel } from "./keymap/useZoomWheel";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
 import { BoardHost, TabLayer } from "./layout/BoardHost";
+import { ErrorBar } from "./layout/ErrorBar";
 import { CommandPalette } from "./palette/CommandPalette";
 import { ActivityPanel } from "./agents/ActivityPanel";
 import { NotificationPanel } from "./notifications/NotificationPanel";
@@ -23,33 +26,18 @@ import {
   listNotifications,
   setBrowserVisible,
 } from "./bindings";
-import { useUiStore } from "./state/uiStore";
+import { reportFailure, useUiStore } from "./state/uiStore";
 import {
   getTerminal,
   readScreenText,
   saveAllScrollbacks,
 } from "./terminal/registry";
+import { quotePath } from "./terminal/pasteImage";
 import { invoke } from "@tauri-apps/api/core";
 
 function collectPaneIds(node: Node): string[] {
   if (node.type === "leaf") return [node.paneId];
   return node.children.flatMap(collectPaneIds);
-}
-
-const isWindows = navigator.platform.toUpperCase().startsWith("WIN");
-
-/**
- * A dropped path, quoted to stay in one piece. Elsewhere than Windows, POSIX
- * single quotes, each `'` closed and escaped: one literal word. On Windows,
- * double quotes (a name cannot contain `"`) only keep a path with spaces
- * together; the shell still expands what is inside — `$` and backticks in
- * PowerShell and Git Bash, `%…%` (and `!…!` with delayed expansion) in
- * cmd. Those are rare in paths, and quoting each shell its own way would
- * mean knowing which shell each pane runs.
- */
-function quotePath(path: string): string {
-  if (isWindows) return `"${path}"`;
-  return `'${path.replaceAll("'", `'\\''`)}'`;
 }
 
 const resolveScreenRead = (requestId: number, text: string) =>
@@ -65,6 +53,7 @@ export default function App() {
   const wallBrowsers = useUiStore((s) => s.wallBrowsers);
   const newMenuOpen = useUiStore((s) => s.newMenuOpen);
   useKeymap();
+  useZoomWheel();
 
   // Native child webviews float above the host webview: hide the ones on
   // inactive tabs, and all of them while an overlay is open. A tab showing
@@ -134,15 +123,24 @@ export default function App() {
         .elementFromPoint(x, y)
         ?.closest<HTMLElement>("[data-pane]")?.dataset.pane;
       if (!pane) return;
-      getTerminal(pane)?.paste(
-        e.payload.paths.map(quotePath).join(" ") + " ",
-      );
+      // Rust answers what to type: the paths themselves in a local pane,
+      // the copies it sent there in an SSH pane.
+      const paths = e.payload.paths;
+      void sendFiles(pane, paths)
+        .then((typed) => getTerminal(pane)?.paste(typed.map(quotePath).join(" ") + " "))
+        .catch((err) => reportFailure("Drop files", err));
     });
+    // `mira send-file`: typed by the terminal, as a drop is, so xterm
+    // brackets it only for a program that asked for bracketed paste.
+    const unlistenPasteInto = listen<{ paneId: string; text: string }>("paste-into-pane", (e) =>
+      getTerminal(e.payload.paneId)?.paste(e.payload.text),
+    );
     const onBlur = () => saveAllScrollbacks();
     window.addEventListener("blur", onBlur);
     return () => {
       void unlistenScrollback.then((fn) => fn());
       void unlistenDrop.then((fn) => fn());
+      void unlistenPasteInto.then((fn) => fn());
       window.removeEventListener("blur", onBlur);
       void unlistenRead.then((fn) => fn());
       disposed = true;
@@ -163,34 +161,41 @@ export default function App() {
       style={{ "--term-bg": config.colors.background } as React.CSSProperties}
     >
       <Sidebar />
-      <BoardHost board={board}>
-        {snapshot.tabs.map((tab) => (
-          <TabLayer
-            key={tab.id}
-            tab={tab}
-            board={board}
-            current={tab.id === snapshot.activeTab}
-          >
-            <SplitLayer
+      {/* The error bar takes a row of its own above the panes rather than
+          floating over them, where a browser page, a native view, would
+          cover it. */}
+      <div className="app-main">
+        <ErrorBar />
+        <BoardHost board={board}>
+          {snapshot.tabs.map((tab) => (
+            <TabLayer
+              key={tab.id}
               tab={tab}
               board={board}
-              active={board || tab.id === snapshot.activeTab}
               current={tab.id === snapshot.activeTab}
-              agents={snapshot.agents}
-              unreadPanes={snapshot.unreadPanes}
-              agentPanes={snapshot.agentPanes}
-              browserPanes={snapshot.browserPanes}
-              remotePanes={snapshot.remotePanes}
-              diffPanes={snapshot.diffPanes}
-              whatsNewPanes={snapshot.whatsNewPanes}
-              graphPanes={snapshot.graphPanes}
-              agentEditorPanes={snapshot.agentEditorPanes ?? []}
-              settingsPanes={snapshot.settingsPanes ?? []}
-              usagePanes={snapshot.usagePanes ?? []}
-            />
-          </TabLayer>
-        ))}
-      </BoardHost>
+            >
+              <SplitLayer
+                tab={tab}
+                board={board}
+                active={board || tab.id === snapshot.activeTab}
+                current={tab.id === snapshot.activeTab}
+                agents={snapshot.agents}
+                unreadPanes={snapshot.unreadPanes}
+                agentPanes={snapshot.agentPanes}
+                browserPanes={snapshot.browserPanes}
+                remotePanes={snapshot.remotePanes}
+                diffPanes={snapshot.diffPanes}
+                whatsNewPanes={snapshot.whatsNewPanes}
+                graphPanes={snapshot.graphPanes}
+                agentEditorPanes={snapshot.agentEditorPanes ?? []}
+                settingsPanes={snapshot.settingsPanes ?? []}
+                usagePanes={snapshot.usagePanes ?? []}
+                computersPanes={snapshot.computersPanes ?? []}
+              />
+            </TabLayer>
+          ))}
+        </BoardHost>
+      </div>
       <CommandPalette />
       <NotificationPanel />
       <ActivityPanel />

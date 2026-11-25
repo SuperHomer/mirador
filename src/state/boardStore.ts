@@ -30,19 +30,36 @@ interface BoardStore {
   moveTo: (camera: Camera) => void;
   /** Moves the camera there smoothly. */
   flyTo: (camera: Camera) => void;
+  /**
+   * Shows a camera the app was told of and saved already (`SetCamera`),
+   * the `sets`-th set from outside: stops a fly in progress and drops a
+   * save still pending, which would land over it, and saves nothing
+   * itself. A save already sent says it saw fewer, and the app drops it.
+   */
+  adopt: (camera: Camera, sets: number) => void;
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let settleTimer: ReturnType<typeof setTimeout> | undefined;
 let held = false;
 let flight = 0;
+/**
+ * Cameras set from outside so far, as the app counts them: a pan asked for
+ * before the latest is dropped, and each save says how many it has seen.
+ */
+let adoptions = 0;
+
+/** Starts the count where the app has it, for a board drawn after some. */
+export function knowCameraSets(sets: number) {
+  adoptions = Math.max(adoptions, sets);
+}
 
 export const useBoardStore = create<BoardStore>((set, get) => {
   const save = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       const { camera, viewport } = get();
-      if (camera && viewport.width > 0) void setCamera(camera, viewport);
+      if (camera && viewport.width > 0) void setCamera(camera, viewport, adoptions);
     }, SAVE_DELAY_MS);
   };
   const stir = () => {
@@ -67,6 +84,13 @@ export const useBoardStore = create<BoardStore>((set, get) => {
       stir();
       set({ camera });
       save();
+    },
+    adopt: (camera, sets) => {
+      adoptions = Math.max(adoptions, sets);
+      flight++;
+      clearTimeout(saveTimer);
+      stir();
+      set({ camera });
     },
     flyTo: (target) => {
       const from = get().camera ?? target;
@@ -130,9 +154,15 @@ export function flyToCard(paneId: string) {
   void boardCardCamera(paneId, viewport.width, viewport.height).then(flyTo);
 }
 
-/** Brings a pane's card into view, centred, at the zoom the board has. */
+/**
+ * Brings a pane's card into view, centred, at the zoom the board has —
+ * unless a camera was adopted while the app answered where that is.
+ */
 export function panToCard(paneId: string) {
   const { viewport, camera, flyTo } = useBoardStore.getState();
   if (viewport.width === 0 || !camera) return;
-  void boardCardCamera(paneId, viewport.width, viewport.height, camera.zoom).then(flyTo);
+  const asked = adoptions;
+  void boardCardCamera(paneId, viewport.width, viewport.height, camera.zoom).then((c) => {
+    if (asked === adoptions) flyTo(c);
+  });
 }

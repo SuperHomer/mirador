@@ -5,10 +5,10 @@
 use std::io::Write;
 
 use clap::{CommandFactory, Parser, Subcommand};
-use cmux_protocol::{Request, ResponseEnvelope, SplitDir, View};
+use cmux_protocol::{Direction, Preset, Request, ResponseEnvelope, SplitDir, View};
 
 #[derive(Parser)]
-#[command(name = "mira", about = "Automation client for the Mirador terminal")]
+#[command(name = "mira", version, about = "Automation client for the Mirador terminal")]
 struct Cli {
     /// Print raw JSON responses.
     #[arg(long, global = true)]
@@ -27,11 +27,20 @@ enum Command {
         command: Option<String>,
     },
     /// Split a pane (the focused one unless --pane is given).
+    ///
+    /// The new shell opens where the pane it splits is: a split of a local
+    /// pane in its current directory, a split of an SSH pane on the same
+    /// remote, in the directory its shell is in now when the app can know
+    /// it, else the one the pane was opened in, else the home there.
     Split {
+        /// row or column: which way the pane is split, the new one beside
+        /// it or below it.
         #[arg(long, default_value = "row")]
         dir: String,
         #[arg(long)]
         pane: Option<String>,
+        /// Run this instead of a shell. It runs here, on this computer,
+        /// even when split from an SSH pane.
         #[arg(short, long)]
         command: Option<String>,
     },
@@ -48,6 +57,37 @@ enum Command {
         #[arg(long)]
         off: bool,
     },
+    /// Swap a pane with its neighbor on one side; the focus goes with it.
+    /// PANE defaults to the focused pane.
+    Swap {
+        pane: Option<String>,
+        /// left, right, up or down.
+        #[arg(long)]
+        dir: String,
+    },
+    /// Move every pane of a tab one place along, the last one first; with
+    /// --back, the other way.
+    Rotate {
+        #[arg(long)]
+        back: bool,
+        /// The tab; else the one this runs in, else the active one.
+        #[arg(long)]
+        tab: Option<String>,
+    },
+    /// Give every pane of a tab an equal share of its split.
+    Equalize {
+        /// The tab; else the one this runs in, else the active one.
+        #[arg(long)]
+        tab: Option<String>,
+    },
+    /// Lay a tab's panes out afresh, in their order: side-by-side, stacked,
+    /// grid, or main-stack (the first pane large, the rest stacked beside).
+    Layout {
+        preset: String,
+        /// The tab; else the one this runs in, else the active one.
+        #[arg(long)]
+        tab: Option<String>,
+    },
     /// Show the workspace as `tabs` or as the `board`; without either,
     /// print which one is shown.
     View { view: Option<String> },
@@ -60,6 +100,14 @@ enum Command {
         /// Append a newline (press Enter).
         #[arg(long)]
         enter: bool,
+    },
+    /// Type files' paths into a pane, as dropping them on it does; into an
+    /// SSH pane, the paths of copies sent to its remote first.
+    SendFile {
+        #[arg(required = true)]
+        files: Vec<String>,
+        #[arg(long)]
+        pane: Option<String>,
     },
     /// Read a pane's screen contents as plain text.
     ReadScreen {
@@ -144,8 +192,8 @@ enum Command {
         #[arg(long)]
         split: bool,
     },
-    /// Agents: start a Claude Code one with a role; list and watch every
-    /// agent, Codex, OpenCode and the rest included.
+    /// Agents: start Claude Code, Codex, Pi or OpenCode, with a role or
+    /// plain; list and watch every agent, Gemini CLI and the rest included.
     Agent {
         #[command(subcommand)]
         action: AgentAction,
@@ -166,6 +214,11 @@ enum Command {
     Ssh {
         #[command(subcommand)]
         action: SshAction,
+    },
+    /// Computers agents can work on over SSH, saved in mirador.json.
+    Computer {
+        #[command(subcommand)]
+        action: ComputerAction,
     },
     /// Send a notification (prints OSC 777; works from inside any pane,
     /// even over SSH). Use --socket to target the app directly instead.
@@ -199,9 +252,9 @@ enum Command {
         run: Option<String>,
     },
     /// Install or remove the Claude Code integration: the hooks that light
-    /// up Mirador tabs, the `/mira-diff` slash command, and (on macOS and
-    /// Linux) a wrapper in front of your status line that keeps your
-    /// plan's limits, your own status line still shown.
+    /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
+    /// teaches Claude this CLI, and a wrapper in front of your status line
+    /// that keeps your plan's limits, your own status line still shown.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -237,7 +290,31 @@ enum Command {
         /// Run `ssh -tt <HOST>` instead of an interactive shell.
         #[arg(long)]
         ssh: Option<String>,
+        /// With --ssh: run this command line on the host, not a login shell
+        /// there.
+        #[arg(long, requires = "ssh")]
+        ssh_command: Option<String>,
     },
+    /// Start a holder for a pane, detached, and return once it answers:
+    /// what Mirador runs on a remote, so an agent there outlives the ssh
+    /// connection that started it.
+    #[command(name = "__hold-start", hide = true)]
+    HoldStart {
+        #[arg(long)]
+        pane: String,
+        #[arg(long)]
+        command: String,
+    },
+    /// End a pane's holder and what it runs, waiting for it to go: what
+    /// Mirador runs on a remote when an agent's pane there is closed.
+    #[command(name = "__hold-end", hide = true)]
+    HoldEnd {
+        #[arg(long)]
+        pane: String,
+    },
+    /// Attach this terminal to a pane's held session on this computer;
+    /// closing the terminal leaves the session running.
+    Attach { pane: String },
 }
 
 #[derive(Subcommand)]
@@ -249,6 +326,19 @@ enum TeamAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
+        /// Run every member on a computer you reach by ssh (an alias from
+        /// ~/.ssh/config, or a destination); the team and its roles are
+        /// still this computer's.
+        #[arg(long, requires = "dir")]
+        host: Option<String>,
+        /// With --host: the directory there the team works in.
+        #[arg(long, requires = "host")]
+        dir: Option<String>,
+        /// Run every member on a saved computer (`mira computer add`, or
+        /// the Computers pane): its host and directory, instead of --host
+        /// and --dir.
+        #[arg(long, conflicts_with_all = ["host", "dir"])]
+        on: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -258,12 +348,18 @@ enum TeamAction {
         #[arg(long)]
         defined: bool,
     },
-    /// Add a member to this tab's team, beside this pane.
+    /// Add a member to this tab's team, beside this pane. TASK is its
+    /// first message.
     Add {
         role: String,
         /// What to call it; the role's name, numbered if taken, otherwise.
         #[arg(long)]
         name: Option<String>,
+        /// The title of the task's card, instead of its first line.
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(trailing_var_arg = true)]
+        task: Vec<String>,
     },
     /// Start again this tab's members whose agent exited or whose pane was
     /// closed — the ones named, or all of them. A member's shell must be
@@ -300,15 +396,16 @@ enum TaskAction {
         #[arg(long)]
         all: bool,
     },
-    /// Write a card in this tab, in To do, and print its id. It moves only
-    /// when moved: `task move`, `task done`.
+    /// Write a card in To do, and print its id: on this tab's board, or with
+    /// --to on the board of that agent's tab. It moves only when moved:
+    /// `task move`, `task done`.
     Add {
         // Not trailing_var_arg: `--to` after the title is an option, not
         // more title.
         #[arg(required = true)]
         title: Vec<String>,
-        /// The agent it is for: a teammate's name in this tab, as
-        /// `agent send` takes it.
+        /// The agent it is for: a teammate's name in this tab, or
+        /// `<team>/<name>` in another tab's team, as `agent send` takes it.
         #[arg(long)]
         to: Option<String>,
         /// More about it than the title says.
@@ -332,8 +429,9 @@ enum AgentAction {
         /// A role this directory sees (`mira agent roles` lists them).
         #[arg(short, long)]
         role: Option<String>,
-        /// Without a role: start Codex instead of Claude Code.
-        #[arg(long, value_parser = ["claude", "codex"], conflicts_with = "role")]
+        /// Without a role: start Codex, Pi or OpenCode instead of Claude
+        /// Code. Only Claude Code runs on a remote.
+        #[arg(long, value_parser = ["claude", "codex", "pi", "opencode"], conflicts_with = "role")]
         harness: Option<String>,
         /// Open a new tab instead of splitting this pane.
         #[arg(long)]
@@ -341,6 +439,19 @@ enum AgentAction {
         /// The title of the task's card, instead of its first line.
         #[arg(long)]
         title: Option<String>,
+        /// Run it on a computer you reach by ssh (an alias from
+        /// ~/.ssh/config, or a destination): Claude Code, plain or as a role
+        /// of this computer's; not Codex, Pi or OpenCode yet.
+        #[arg(long, requires = "dir")]
+        host: Option<String>,
+        /// With --host: the directory there it works in.
+        #[arg(long, requires = "host")]
+        dir: Option<String>,
+        /// Run it on a saved computer (`mira computer add`, or the
+        /// Computers pane): its host and directory, instead of --host and
+        /// --dir.
+        #[arg(long, conflicts_with_all = ["host", "dir"])]
+        on: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -355,8 +466,9 @@ enum AgentAction {
     },
     /// Type a message into another agent's terminal, as its next prompt.
     /// TO is a teammate's name in this tab — a team member's, a session's,
-    /// a role's — or a pane id. It says who it is from when this pane is
-    /// an agent. Refused for a pane running no agent, and for an agent
+    /// a role's — or `<team>/<name>` for an agent of another tab's running
+    /// team, or a pane id. It says who it is from when this pane is an
+    /// agent. Refused for a pane running no agent, and for an agent
     /// waiting on a person (a permission prompt) unless --force.
     Send {
         to: String,
@@ -382,9 +494,10 @@ enum AgentAction {
         timeout: u64,
     },
     /// Start an agent on a new conversation, as typing /clear into it does
-    /// (Codex's /new): NAME as `agent send` takes it, else this pane's
-    /// agent. Its role's prompt is kept. A working agent starts over once
-    /// its turn ends; one waiting on a person is refused unless --force.
+    /// (/new for Codex, Pi and OpenCode): NAME as `agent send` takes it,
+    /// else this pane's agent. Its role's prompt is kept. A working agent
+    /// starts over once its turn ends; one waiting on a person is refused
+    /// unless --force.
     Clear {
         name: Option<String>,
         /// The agent's pane, instead of a name.
@@ -415,7 +528,8 @@ enum AgentAction {
     },
     /// Wait until an agent has worked and stopped: exit 0 when it is idle,
     /// 2 when it stopped to ask a person, 3 when it exited, 124 on timeout.
-    /// Needs Claude Code's hooks (`mira hooks setup`) to see it stop.
+    /// NAME as `agent send` takes it, `<team>/<name>` included. Needs
+    /// Claude Code's hooks (`mira hooks setup`) to see it stop.
     Wait {
         name: String,
         #[arg(long, default_value_t = 1800)]
@@ -491,21 +605,41 @@ enum AgentAction {
 enum SshAction {
     /// Open a remote pane running `ssh -tt <host>`. HOST is an ssh alias
     /// (from ~/.ssh/config) or a full destination, optionally with ssh
-    /// options: "-p 2222 user@box".
+    /// options: "-p 2222 user@box". Or --on a saved computer, as the
+    /// palette's "SSH to a Computer" opens it.
     Open {
         /// Hyphens allowed so a full spec like "-p 2222 user@box" works.
-        #[arg(allow_hyphen_values = true)]
-        host: String,
+        #[arg(allow_hyphen_values = true, required_unless_present = "on")]
+        host: Option<String>,
         /// Open in a new tab instead of a split.
         #[arg(long)]
         tab: bool,
+        /// The directory there its shell starts in, as a saved computer's
+        /// does; the home without it. Quote a ~ ('~/work') so this shell
+        /// does not expand it to this computer's home.
+        #[arg(long, allow_hyphen_values = true)]
+        dir: Option<String>,
+        /// A saved computer (`mira computer add`, or the Computers pane):
+        /// a tab of its own on its host, its shell in its directory,
+        /// instead of HOST and --dir.
+        #[arg(long, conflicts_with_all = ["host", "dir"])]
+        on: Option<String>,
     },
     /// List host aliases from ~/.ssh/config.
     Hosts,
     /// Forward localhost:PORT to the remote's localhost:PORT (so the
-    /// browser pane can reach a remote dev server).
+    /// browser pane can reach a remote dev server), or with --app this
+    /// app's socket.
     Forward {
-        port: u16,
+        #[arg(required_unless_present = "app")]
+        port: Option<u16>,
+        /// Forward this app's socket to the computer instead, and print its
+        /// path there: a `mira` there reaches the app with MIRA_SOCKET set
+        /// to it.
+        #[arg(long, conflicts_with = "port")]
+        app: bool,
+        /// The SSH pane whose computer it goes to; the active tab's SSH pane,
+        /// or any, otherwise.
         #[arg(long)]
         pane: Option<String>,
     },
@@ -514,6 +648,65 @@ enum SshAction {
         port: u16,
         #[arg(long)]
         pane: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ComputerAction {
+    /// The saved computers: name, host and directory, one per line.
+    List,
+    /// Save a computer: NAME for an ssh host and the directory there where
+    /// the work is.
+    Add {
+        name: String,
+        /// An alias from ~/.ssh/config, or a destination: "-p 2222 me@box".
+        #[arg(long, allow_hyphen_values = true)]
+        host: String,
+        /// The directory there where the work is. Quote a ~ ('~/work') so
+        /// this shell does not expand it to this computer's home.
+        #[arg(long, allow_hyphen_values = true)]
+        dir: String,
+    },
+    /// Change a saved computer: each of --name, --host and --dir given
+    /// replaces its own.
+    Update {
+        name: String,
+        /// Its new name.
+        #[arg(long = "name", required_unless_present_any = ["host", "dir"])]
+        new_name: Option<String>,
+        /// Its ssh host: an alias from ~/.ssh/config, or a destination.
+        #[arg(long, allow_hyphen_values = true)]
+        host: Option<String>,
+        /// The directory there where the work is. Quote a ~ ('~/work') so
+        /// this shell does not expand it to this computer's home.
+        #[arg(long, allow_hyphen_values = true)]
+        dir: Option<String>,
+    },
+    /// Remove a saved computer.
+    Remove { name: String },
+    /// Show the computers pane, or open it: where `editorOpensIn` says, or
+    /// as --tab or --split say.
+    Open {
+        /// Open in a new tab.
+        #[arg(long, conflicts_with = "split")]
+        tab: bool,
+        /// Open as a split of this pane.
+        #[arg(long)]
+        split: bool,
+    },
+    /// Test a computer for agents, as starting one there would meet it: a
+    /// saved one by NAME, or --host and --dir before saving it. Exits 0
+    /// when agents can run there.
+    Test {
+        #[arg(required_unless_present = "host", conflicts_with = "host")]
+        name: Option<String>,
+        /// An ssh host to test: an alias from ~/.ssh/config, or a destination.
+        #[arg(long, requires = "dir", allow_hyphen_values = true)]
+        host: Option<String>,
+        /// The directory there where the work is. Quote a ~ ('~/work') so
+        /// this shell does not expand it to this computer's home.
+        #[arg(long, requires = "host", allow_hyphen_values = true)]
+        dir: Option<String>,
     },
 }
 
@@ -662,6 +855,7 @@ fn completions(shell: clap_complete::Shell) -> Result<(), String> {
     let cli = Cli::command();
     let mut public = clap::Command::new("mira")
         .about(cli.get_about().cloned().unwrap_or_default())
+        .version(cli.get_version().map(|_| env!("CARGO_PKG_VERSION")))
         .args(cli.get_arguments().cloned())
         .subcommands(cli.get_subcommands().filter(|c| !c.is_hide_set()).cloned());
     let mut script = Vec::new();
@@ -700,12 +894,42 @@ fn run(cli: Cli) -> Result<(), String> {
             pane_id: pane,
             zoom: off.then_some(false),
         },
+        Command::Swap { pane, dir } => Request::SwapPane {
+            pane_id: pane,
+            direction: parse_direction(&dir)?,
+        },
+        Command::Rotate { back, tab } => Request::RotatePanes {
+            tab_id: tab,
+            pane_id: own_pane(),
+            back,
+        },
+        Command::Equalize { tab } => Request::EqualizePanes {
+            tab_id: tab,
+            pane_id: own_pane(),
+        },
+        Command::Layout { preset, tab } => Request::ApplyLayout {
+            tab_id: tab,
+            pane_id: own_pane(),
+            preset: parse_preset(&preset)?,
+        },
         Command::View { view } => Request::View {
             view: view.as_deref().map(parse_view).transpose()?,
         },
         Command::SendInput { data, pane, enter } => Request::SendInput {
             pane_id: pane,
             data: if enter { format!("{data}\n") } else { data },
+        },
+        Command::SendFile { files, pane } => Request::SendFile {
+            pane_id: pane,
+            // The app runs elsewhere than this shell: it needs paths that
+            // do not depend on where `mira` was run.
+            paths: files
+                .iter()
+                .map(|f| match std::path::Path::new(f).exists() {
+                    true => std::path::absolute(f).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("{f}: {e}")),
+                    false => Err(format!("no file {f}")),
+                })
+                .collect::<Result<_, _>>()?,
         },
         Command::ReadScreen { pane, lines } => Request::ReadScreen {
             pane_id: pane,
@@ -796,11 +1020,16 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Agent { action } => match action {
-            AgentAction::New { role, harness, tab, title, task } => Request::AgentNew {
+            AgentAction::New { role, harness, tab, title, host, dir, on, task } => Request::AgentNew {
                 role,
                 title,
+                host,
+                dir,
+                on,
                 harness: harness.map(|h| match h.as_str() {
                     "codex" => cmux_protocol::Harness::Codex,
+                    "pi" => cmux_protocol::Harness::Pi,
+                    "opencode" => cmux_protocol::Harness::OpenCode,
                     _ => cmux_protocol::Harness::Claude,
                 }),
                 task: (!task.is_empty()).then(|| task.join(" ")),
@@ -890,15 +1119,24 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Team { action } => match action {
-            TeamAction::Start { team, title, task } => Request::TeamStart {
+            TeamAction::Start { team, title, host, dir, on, task } => Request::TeamStart {
                 team,
+                host,
+                dir,
+                on,
                 task: (!task.is_empty()).then(|| task.join(" ")),
                 pane_id: own_pane(),
                 title,
             },
             TeamAction::List { defined: true } => return defined_teams(cli.json),
             TeamAction::List { defined: false } => Request::TeamList,
-            TeamAction::Add { role, name } => Request::TeamAdd { role, name, pane_id: own_pane() },
+            TeamAction::Add { role, name, title, task } => Request::TeamAdd {
+                role,
+                name,
+                task: (!task.is_empty()).then(|| task.join(" ")),
+                pane_id: own_pane(),
+                title,
+            },
             TeamAction::Restart { members } => Request::TeamRestart { members, pane_id: own_pane() },
             TeamAction::Clear { force } => Request::TeamClear { pane_id: own_pane(), force },
             TeamAction::Save { name } => Request::TeamSave { name, pane_id: own_pane() },
@@ -930,14 +1168,24 @@ fn run(cli: Cli) -> Result<(), String> {
             },
         },
         Command::Ssh { action } => match action {
-            SshAction::Open { host, tab } => Request::SshOpen {
+            SshAction::Open { host, tab, dir, on } => Request::SshOpen {
                 host,
                 target: tab.then(|| "tab".to_string()),
+                dir,
+                on,
             },
             SshAction::Hosts => Request::SshHosts,
-            SshAction::Forward { port, pane } => Request::SshForward {
+            SshAction::Forward { app: true, pane, .. } => {
+                let resp = send_request(Request::SshForwardApp { pane_id: pane })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                println!("{}", resp.data.as_ref().and_then(|d| d["socket"].as_str()).unwrap_or_default());
+                return Ok(());
+            }
+            SshAction::Forward { port, pane, .. } => Request::SshForward {
                 pane_id: pane,
-                port,
+                port: port.ok_or("a port, or --app")?,
                 cancel: false,
             },
             SshAction::Unforward { port, pane } => Request::SshForward {
@@ -945,6 +1193,21 @@ fn run(cli: Cli) -> Result<(), String> {
                 port,
                 cancel: true,
             },
+        },
+        Command::Computer { action } => match action {
+            ComputerAction::List => Request::ComputerList,
+            ComputerAction::Add { name, host, dir } => Request::ComputerAdd { name, host, dir },
+            ComputerAction::Update { name, new_name, host, dir } => Request::ComputerUpdate { name, new_name, host, dir },
+            ComputerAction::Remove { name } => Request::ComputerRemove { name },
+            ComputerAction::Open { tab, split } => Request::ComputerOpen {
+                pane_id: own_pane(),
+                target: if tab {
+                    Some("tab".to_string())
+                } else {
+                    split.then(|| "split".to_string())
+                },
+            },
+            ComputerAction::Test { name, host, dir } => Request::ComputerTest { name, host, dir },
         },
         Command::Browser { action } => match action {
             BrowserAction::Open { url, tab } => Request::BrowserOpen {
@@ -1045,6 +1308,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 title,
                 body,
                 job: own_job(),
+                kind: None,
             }
         }
         Command::ClaudeHook { event } => return claude_hook(&event),
@@ -1065,7 +1329,11 @@ fn run(cli: Cli) -> Result<(), String> {
             rows,
             command,
             ssh,
-        } => return hold(pane, socket, cwd, cols, rows, command, ssh),
+            ssh_command,
+        } => return hold(pane, socket, cwd, cols, rows, command, ssh, ssh_command),
+        Command::HoldStart { pane, command } => return hold_start(&pane, &command),
+        Command::HoldEnd { pane } => return hold_end(&pane),
+        Command::Attach { pane } => return attach(&pane),
     };
 
     let response = send_request(req)?;
@@ -1131,6 +1399,16 @@ fn parse_dir(s: &str) -> Result<SplitDir, String> {
     }
 }
 
+fn parse_direction(s: &str) -> Result<Direction, String> {
+    serde_json::from_value(serde_json::json!(s))
+        .map_err(|_| format!("invalid direction `{s}` (left|right|up|down)"))
+}
+
+fn parse_preset(s: &str) -> Result<Preset, String> {
+    serde_json::from_value(serde_json::json!(s))
+        .map_err(|_| format!("invalid layout `{s}` (side-by-side|stacked|grid|main-stack)"))
+}
+
 fn parse_view(s: &str) -> Result<View, String> {
     match s {
         "tabs" => Ok(View::Tabs),
@@ -1143,10 +1421,18 @@ fn send_request(req: Request) -> Result<ResponseEnvelope, String> {
     use cmux_protocol::RequestEnvelope;
     use std::io::{BufRead, BufReader};
 
-    let disc = cmux_core::ipc::read_discovery()
-        .ok_or("Mirador is not running (no socket discovery file)")?;
-    let stream = cmux_core::transport::connect(&disc.socket)
-        .map_err(|e| format!("Mirador is not running ({e})"))?;
+    let named = std::env::var_os(cmux_core::ipc::SOCKET_ENV).filter(|s| !s.is_empty());
+    let stream = match named {
+        Some(socket) => cmux_core::transport::connect(std::path::Path::new(&socket)).map_err(|e| {
+            format!("no Mirador at {}={} ({e})", cmux_core::ipc::SOCKET_ENV, socket.to_string_lossy())
+        })?,
+        None => {
+            let disc = cmux_core::ipc::read_discovery()
+                .ok_or("Mirador is not running (no socket discovery file)")?;
+            cmux_core::transport::connect(&disc.socket)
+                .map_err(|e| format!("Mirador is not running ({e})"))?
+        }
+    };
 
     let envelope = RequestEnvelope { id: Some(1), req };
     let mut line = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
@@ -1216,6 +1502,28 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 for h in hosts {
                     println!("{}", h.as_str().unwrap_or(""));
                 }
+            } else if let Some(computers) = map.get("computers").or_else(|| map.get("computer")) {
+                // A list, or the one computer saved: a line each.
+                let computers: Vec<cmux_core::config::Computer> = match computers {
+                    serde_json::Value::Array(_) => serde_json::from_value(computers.clone()),
+                    one => serde_json::from_value(one.clone()).map(|c| vec![c]),
+                }
+                .map_err(|e| format!("bad response: {e}"))?;
+                if computers.is_empty() {
+                    println!("(no computers saved: mira computer add <name> --host <host> --dir <dir>)");
+                }
+                for c in computers {
+                    println!("{}\t{}\t{}", c.name, c.host, c.dir);
+                }
+            } else if let Some(check) = map.get("check") {
+                let check: cmux_protocol::ComputerCheck =
+                    serde_json::from_value(check.clone()).map_err(|e| format!("bad response: {e}"))?;
+                for line in check_lines(&check) {
+                    println!("{line}");
+                }
+                if check.agents.is_some() {
+                    std::process::exit(1);
+                }
             } else if map.contains_key("runs") {
                 render_runs(&data);
             } else if let Some(accounts) = map.get("accounts") {
@@ -1266,6 +1574,11 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 .filter(|_| !map.contains_key("tabs"))
             {
                 println!("{view}");
+            } else if let Some(paths) = map.get("paths").and_then(|v| v.as_array()) {
+                // send-file: what was typed, a path a line.
+                for p in paths {
+                    println!("{}", p.as_str().unwrap_or(""));
+                }
             } else if let Some(id) = map
                 .get("paneId")
                 .or_else(|| map.get("tabId"))
@@ -1315,8 +1628,18 @@ fn render_teams(teams: &[serde_json::Value]) {
         println!("(no teams running — `mira team start <team>` starts one)");
         return;
     }
+    for line in team_lines(teams) {
+        println!("{line}");
+    }
+}
+
+/// A line per team, saying the host when it runs on a remote, then one per
+/// member.
+fn team_lines(teams: &[serde_json::Value]) -> Vec<String> {
+    let mut lines = Vec::new();
     for t in teams {
-        println!("{}  (tab {})", t["name"].as_str().unwrap_or(""), t["tabId"].as_str().unwrap_or(""));
+        let on = t["remoteHost"].as_str().map(|h| format!("  on {h}")).unwrap_or_default();
+        lines.push(format!("{}{on}  (tab {})", t["name"].as_str().unwrap_or(""), t["tabId"].as_str().unwrap_or("")));
         for m in t["members"].as_array().into_iter().flatten() {
             let status = match (m["state"].as_str(), m["status"].as_str()) {
                 (Some("running"), Some("needsYou")) => "needs-you",
@@ -1325,15 +1648,16 @@ fn render_teams(teams: &[serde_json::Value]) {
                 _ => "-",
             };
             let lead = if m["lead"].as_bool() == Some(true) { "  (lead)" } else { "" };
-            println!(
+            lines.push(format!(
                 "  {:<14}  {:<12}  {:<9}  {}{lead}",
                 m["name"].as_str().unwrap_or(""),
                 m["role"].as_str().unwrap_or(""),
                 status,
                 m["pane"].as_str().unwrap_or(""),
-            );
+            ));
         }
     }
+    lines
 }
 
 /// The board: a heading per column that has cards, then a line per card
@@ -1878,6 +2202,20 @@ fn render_runs(data: &serde_json::Value) {
     }
 }
 
+/// A computer's test as `mira computer test` shows it, a line each, as
+/// the computers pane does: reached and its system, its directory, and
+/// whether agents can run there or why not.
+fn check_lines(check: &cmux_protocol::ComputerCheck) -> Vec<String> {
+    vec![
+        format!("reached: {}", check.system),
+        format!("directory: {}", if check.dir_found { "found" } else { "not found" }),
+        match &check.agents {
+            None => "agents: can run there".to_string(),
+            Some(why) => format!("agents: cannot run there: {why}"),
+        },
+    ]
+}
+
 /// An account as `mira usage` shows it: who it is, then its limits, then
 /// what it used. `now` is in Unix seconds, as `resets_at` is.
 fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
@@ -1890,8 +2228,9 @@ fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
     };
     let plan = account.plan.as_deref().map(|p| format!(" ({p})")).unwrap_or_default();
     let email = account.email.as_deref().map(|e| format!(" · {e}")).unwrap_or_default();
+    let provider = account.provider.as_deref().map(|p| format!(" · via {p}")).unwrap_or_default();
     let note = account.note.as_deref().map(|n| format!(" · {n}")).unwrap_or_default();
-    let mut lines = vec![format!("{} — {login}{plan}{email}{note}", account.harness.label())];
+    let mut lines = vec![format!("{} — {login}{plan}{email}{provider}{note}", account.harness.label())];
     for w in &account.limits {
         let resets = match w.resets_at {
             Some(at) if at > now => format!(", resets in {}", until(at - now)),
@@ -2010,6 +2349,7 @@ fn own_tty() -> Option<String> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn hold(
     pane: String,
     socket: std::path::PathBuf,
@@ -2018,6 +2358,7 @@ fn hold(
     rows: u16,
     command: Option<String>,
     ssh: Option<String>,
+    ssh_command: Option<String>,
 ) -> Result<(), String> {
     use cmux_core::hold::server::{serve, HoldConfig, Program};
     // Nothing inherited survives: on macOS a socket becomes close-on-exec
@@ -2039,7 +2380,7 @@ fn hold(
     }
     let program = match (command, ssh) {
         (Some(cmd), _) => Program::Command(cmd),
-        (None, Some(host)) => Program::Ssh(host),
+        (None, Some(host)) => Program::Ssh(host, ssh_command),
         (None, None) => Program::Shell,
     };
     let code = serve(HoldConfig {
@@ -2071,6 +2412,193 @@ fn close_inherited_fds() {
     }
 }
 
+#[cfg(unix)]
+fn hold_start(pane: &str, command: &str) -> Result<(), String> {
+    use cmux_core::hold::{self, server::Program};
+    let mira = std::env::current_exe().map_err(|e| e.to_string())?;
+    hold::launch(
+        &mira,
+        pane,
+        &hold::socket_path(pane),
+        None,
+        80,
+        24,
+        &Program::Command(command.into()),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Nothing answering is nothing to end: not an error.
+#[cfg(unix)]
+fn hold_end(pane: &str) -> Result<(), String> {
+    if cmux_core::hold::end(pane, std::time::Duration::from_secs(10)) {
+        Ok(())
+    } else {
+        Err(format!("the holder of {pane} still answers"))
+    }
+}
+
+#[cfg(not(unix))]
+fn hold_end(_pane: &str) -> Result<(), String> {
+    Err("__hold-end is not available on Windows".into())
+}
+
+#[cfg(not(unix))]
+fn hold_start(_pane: &str, _command: &str) -> Result<(), String> {
+    Err("__hold-start is not available on Windows".into())
+}
+
+/// Set by SIGWINCH; the input loop sends the new size.
+#[cfg(unix)]
+static RESIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set before `attach` detaches, so the holder hanging up after is not
+/// taken for the session being lost.
+#[cfg(unix)]
+static DETACHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn on_winch(_: libc::c_int) {
+    RESIZED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The terminal's settings before raw mode, put back on every way out.
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+struct Cooked(libc::termios);
+
+#[cfg(unix)]
+impl Cooked {
+    fn restore(&self) {
+        unsafe {
+            libc::tcsetattr(0, libc::TCSANOW, &self.0);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn terminal_size() -> (u16, u16) {
+    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+    if unsafe { libc::ioctl(0, libc::TIOCGWINSZ, &mut ws) } == 0 && ws.ws_col > 0 && ws.ws_row > 0 {
+        (ws.ws_col, ws.ws_row)
+    } else {
+        (80, 24)
+    }
+}
+
+#[cfg(unix)]
+fn hostname() -> String {
+    let mut buf = [0u8; 256];
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } != 0 {
+        return "this computer".into();
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..end]).into_owned()
+}
+
+#[cfg(unix)]
+fn attach(pane: &str) -> Result<(), String> {
+    use cmux_core::hold::{self, client, wire::{read_frame, write_frame, Frame}};
+    use std::io::Write;
+
+    if unsafe { libc::isatty(0) } != 1 {
+        return Err("attach needs a terminal".into());
+    }
+    let (cols, rows) = terminal_size();
+    let Ok(attached) = client::attach(&hold::socket_path(pane), cols, rows) else {
+        return Err(format!(
+            "no session {pane} on {}: it has ended, or never started here",
+            hostname()
+        ));
+    };
+
+    let mut cooked: libc::termios = unsafe { std::mem::zeroed() };
+    if unsafe { libc::tcgetattr(0, &mut cooked) } != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    let cooked = Cooked(cooked);
+    let mut raw = cooked.0;
+    unsafe {
+        libc::cfmakeraw(&mut raw);
+        libc::tcsetattr(0, libc::TCSANOW, &raw);
+        // No SA_RESTART: a resize wakes the poll below at once.
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = on_winch as *const () as libc::sighandler_t;
+        libc::sigaction(libc::SIGWINCH, &sa, std::ptr::null_mut());
+    }
+
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(&attached.replay);
+    let _ = stdout.flush();
+    let mut frames = attached.stream.try_clone().map_err(|e| {
+        cooked.restore();
+        e.to_string()
+    })?;
+    let gone = format!("\r\nmira: session {pane} was taken by another attach, or its holder went away\r\n");
+    std::thread::spawn(move || {
+        let mut stdout = std::io::stdout();
+        loop {
+            match read_frame(&mut frames) {
+                Ok(Some(Frame::Output(bytes))) => {
+                    let _ = stdout.write_all(&bytes);
+                    let _ = stdout.flush();
+                }
+                Ok(Some(Frame::Exited(code))) => {
+                    cooked.restore();
+                    std::process::exit(code.unwrap_or(1));
+                }
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => {
+                    if DETACHING.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
+                    cooked.restore();
+                    let _ = stdout.write_all(gone.as_bytes());
+                    std::process::exit(1);
+                }
+            }
+        }
+    });
+
+    let mut stream = attached.stream;
+    let mut buf = [0u8; 4096];
+    loop {
+        let mut fds = libc::pollfd {
+            fd: 0,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // A timeout as well, for a resize that lands just before the poll.
+        let ready = unsafe { libc::poll(&mut fds, 1, 500) };
+        if RESIZED.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let (cols, rows) = terminal_size();
+            let _ = write_frame(&mut stream, &Frame::Resize { cols, rows });
+        }
+        if ready <= 0 {
+            continue;
+        }
+        let n = unsafe { libc::read(0, buf.as_mut_ptr().cast(), buf.len()) };
+        if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        if n <= 0 {
+            break;
+        }
+        if write_frame(&mut stream, &Frame::Input(buf[..n as usize].to_vec())).is_err() {
+            break;
+        }
+    }
+    DETACHING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = write_frame(&mut stream, &Frame::Detach);
+    cooked.restore();
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn attach(_pane: &str) -> Result<(), String> {
+    Err("attach is not available on Windows".into())
+}
+
 /// The Claude Code daemon job this process runs under, if any. A session
 /// the daemon hosts has `CLAUDE_JOB_DIR` set to `…/jobs/<job>`; it is the
 /// one thing that ties it to the pane running `claude attach <job>`.
@@ -2095,11 +2623,14 @@ fn claude_statusline(run: Option<&str>) -> ! {
 }
 
 /// Runs a status line command with `input` on its stdin and our stdout as
-/// its own; its exit code, or 1 when it could not be run.
-#[cfg(unix)]
+/// its own; its exit code, or 1 when it could not be run. Through `sh` on
+/// every platform: Claude Code runs the status line through Git Bash on
+/// Windows, whose `usr/bin` (and so `sh`) is on the PATH we inherit.
 fn run_statusline(command: &str, input: &[u8]) -> i32 {
     use std::process::{Command, Stdio};
     let Ok(mut child) = Command::new("sh").arg("-c").arg(command).stdin(Stdio::piped()).spawn() else {
+        // Otherwise the status line just vanishes, with nothing to say why.
+        eprintln!("mira claude-statusline: sh not found");
         return 1;
     };
     if let Some(mut stdin) = child.stdin.take() {
@@ -2107,14 +2638,6 @@ fn run_statusline(command: &str, input: &[u8]) -> i32 {
         let _ = stdin.write_all(input);
     }
     child.wait().ok().and_then(|s| s.code()).unwrap_or(1)
-}
-
-/// Windows has no `sh`, and which shell Claude Code runs a status line
-/// with there is not known here, so the wrapper runs nothing: Mirador does
-/// not put itself in front of a status line on Windows.
-#[cfg(not(unix))]
-fn run_statusline(_command: &str, _input: &[u8]) -> i32 {
-    0
 }
 
 fn claude_hook(event: &str) -> Result<(), String> {
@@ -2163,6 +2686,11 @@ fn claude_hook(event: &str) -> Result<(), String> {
             title: Some("Claude Code".into()),
             body,
             job,
+            kind: cmux_core::agents::hook_notify_kind(
+                event,
+                payload["notification_type"].as_str(),
+                payload["message"].as_str(),
+            ),
         });
     }
     Ok(())
@@ -2197,7 +2725,7 @@ fn own_path() -> Result<std::path::PathBuf, String> {
 }
 
 /// Idempotently installs (or removes) the Mirador hooks in
-/// ~/.claude/settings.json and the `/mira-diff` skill beside them.
+/// ~/.claude/settings.json and the `/mira-diff` and `mira` skills beside them.
 fn hooks(action: &str) -> Result<(), String> {
     use cmux_core::claude_integration::{self, Action};
     let action = match action {
@@ -2209,7 +2737,7 @@ fn hooks(action: &str) -> Result<(), String> {
         println!("{line}");
     }
     if action == Action::Setup {
-        println!("note: agents and /mira-diff call `mira` by name; `mira install` puts it on PATH");
+        println!("note: agents and the skills call `mira` by name; `mira install` puts it on PATH");
     }
     Ok(())
 }
@@ -2244,6 +2772,7 @@ mod tests {
             plan: Some("claude_max".into()),
             email: Some("you@example.com".into()),
             note: None,
+            provider: None,
             limits: vec![],
             as_of: None,
             limits_note: None,
@@ -2262,6 +2791,7 @@ mod tests {
             plan: None,
             email: None,
             note: None,
+            provider: None,
             as_of: None,
             limits_note: None,
             limits_setup: false,
@@ -2287,6 +2817,12 @@ mod tests {
                 "  last 7d: 0 tokens · $0.00",
             ]
         );
+        let gateway = AccountUsage {
+            provider: Some("Azure OpenAI · llm.example:4000".into()),
+            note: Some("AZURE_KEY not set".into()),
+            ..codex.clone()
+        };
+        assert_eq!(usage_lines(&gateway, now)[0], "Codex — API key · via Azure OpenAI · llm.example:4000 · AZURE_KEY not set");
         let declined = AccountUsage { email: None, note: Some("API key in env, declined".into()), ..claude.clone() };
         assert_eq!(usage_lines(&declined, now)[0], "Claude Code — subscription (claude_max) · API key in env, declined");
         let either = AccountUsage { login: Login::PlanOrApiKey, email: None, ..claude.clone() };
@@ -2312,6 +2848,19 @@ mod tests {
         assert_eq!(usage_lines(&how, now)[1], "  Limits appear after Claude Code's next reply.");
         let signed_out = AccountUsage { login: Login::None, plan: None, email: None, ..claude };
         assert_eq!(usage_lines(&signed_out, now)[0], "Claude Code — not signed in");
+    }
+
+    #[test]
+    fn team_list_says_where_a_team_on_a_remote_runs() {
+        let member = serde_json::json!({ "name": "lead", "role": "planner", "pane": "p1", "lead": true, "state": "running", "status": "idle" });
+        let teams = [
+            serde_json::json!({ "name": "squad", "tabId": "t1", "remoteHost": "box", "members": [member] }),
+            serde_json::json!({ "name": "home", "tabId": "t2", "remoteHost": null, "members": [] }),
+        ];
+        let lines = team_lines(&teams);
+        assert_eq!(lines[0], "squad  on box  (tab t1)");
+        assert_eq!(lines[1], "  lead            planner       idle       p1  (lead)");
+        assert_eq!(lines[2], "home  (tab t2)");
     }
 
     #[test]
@@ -2369,6 +2918,17 @@ mod tests {
         assert_eq!((message.join(" ").as_str(), card.as_deref()), ("use -v", Some("ab12")));
     }
 
+    #[test]
+    fn layouts_and_directions_go_by_their_names() {
+        assert_eq!(parse_preset("side-by-side"), Ok(Preset::SideBySide));
+        assert_eq!(parse_preset("stacked"), Ok(Preset::Stacked));
+        assert_eq!(parse_preset("grid"), Ok(Preset::Grid));
+        assert_eq!(parse_preset("main-stack"), Ok(Preset::MainStack));
+        assert!(parse_preset("tiled").unwrap_err().contains("side-by-side|stacked|grid|main-stack"));
+        assert_eq!(parse_direction("up"), Ok(Direction::Up));
+        assert!(parse_direction("north").is_err());
+    }
+
     /// How a hook knows which pane its agent runs in. The tty fallback is
     /// unix-only, so on Windows this environment variable is the only
     /// mechanism — if it stopped being read, every notification would land
@@ -2384,6 +2944,165 @@ mod tests {
 
         std::env::remove_var(cmux_core::pty::PANE_ENV);
         assert_eq!(own_pane(), None);
+    }
+
+    /// `computer` add, update, remove, open and test, each as the pane
+    /// does: update changes at least one thing, and a test is a saved
+    /// computer's name or a host and a directory, never both.
+    #[test]
+    fn computers_are_saved_changed_removed_and_tested() {
+        let Command::Computer { action: ComputerAction::Add { name, host, dir } } =
+            parse(&["computer", "add", "gpu", "--host", "-p 2222 me@gpu", "--dir", "~/work"])
+        else {
+            panic!()
+        };
+        assert_eq!((name.as_str(), host.as_str(), dir.as_str()), ("gpu", "-p 2222 me@gpu", "~/work"));
+        assert!(Cli::try_parse_from(["mira", "computer", "add", "gpu", "--host", "box"]).is_err());
+
+        let Command::Computer { action: ComputerAction::Update { name, new_name, host, dir } } =
+            parse(&["computer", "update", "gpu", "--name", "lab"])
+        else {
+            panic!()
+        };
+        assert_eq!((name.as_str(), new_name.as_deref(), host, dir), ("gpu", Some("lab"), None, None));
+        let Command::Computer { action: ComputerAction::Update { new_name, dir, .. } } = parse(&["computer", "update", "gpu", "--dir", "/srv"])
+        else {
+            panic!()
+        };
+        assert_eq!((new_name, dir.as_deref()), (None, Some("/srv")));
+        assert!(Cli::try_parse_from(["mira", "computer", "update", "gpu"]).is_err(), "nothing to change");
+
+        let Command::Computer { action: ComputerAction::Remove { name } } = parse(&["computer", "remove", "gpu"]) else {
+            panic!()
+        };
+        assert_eq!(name, "gpu");
+        let Command::Computer { action: ComputerAction::Open { tab, split } } = parse(&["computer", "open", "--tab"]) else {
+            panic!()
+        };
+        assert_eq!((tab, split), (true, false));
+        assert!(Cli::try_parse_from(["mira", "computer", "open", "--tab", "--split"]).is_err());
+
+        let Command::Computer { action: ComputerAction::Test { name, host, dir } } = parse(&["computer", "test", "gpu"]) else {
+            panic!()
+        };
+        assert_eq!((name.as_deref(), host, dir), (Some("gpu"), None, None));
+        let Command::Computer { action: ComputerAction::Test { name, host, dir } } =
+            parse(&["computer", "test", "--host", "box", "--dir", "/srv"])
+        else {
+            panic!()
+        };
+        assert_eq!((name, host.as_deref(), dir.as_deref()), (None, Some("box"), Some("/srv")));
+        for refused in [
+            &["computer", "test"][..],
+            &["computer", "test", "--host", "box"],
+            &["computer", "test", "--dir", "/srv"],
+            &["computer", "test", "gpu", "--host", "box", "--dir", "/srv"],
+        ] {
+            assert!(Cli::try_parse_from(["mira"].iter().chain(refused)).is_err(), "{refused:?}");
+        }
+    }
+
+    /// A computer's test as `computer test` prints it: reached and its
+    /// system, its directory, then that agents can run there or why not.
+    #[test]
+    fn a_computers_test_is_three_lines() {
+        let mut check = cmux_protocol::ComputerCheck {
+            system: "Linux x86_64".into(),
+            dir_found: true,
+            claude_found: true,
+            agents: None,
+        };
+        assert_eq!(check_lines(&check), ["reached: Linux x86_64", "directory: found", "agents: can run there"]);
+        check.dir_found = false;
+        check.agents = Some("the directory is not there".into());
+        assert_eq!(
+            check_lines(&check),
+            ["reached: Linux x86_64", "directory: not found", "agents: cannot run there: the directory is not there"]
+        );
+    }
+
+    /// `agent new --host` goes with `--dir`: both, or neither.
+    #[test]
+    fn an_agent_on_a_host_needs_a_directory_there() {
+        let Command::Agent { action: AgentAction::New { host, dir, task, .. } } =
+            parse(&["agent", "new", "--host", "box", "--dir", "/srv", "look"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), dir.as_deref(), task), (Some("box"), Some("/srv"), vec!["look".to_string()]));
+        assert!(Cli::try_parse_from(["mira", "agent", "new", "--host", "box", "look"]).is_err());
+        assert!(Cli::try_parse_from(["mira", "agent", "new", "--dir", "/srv", "look"]).is_err());
+        // A team's, the same.
+        let Command::Team { action: TeamAction::Start { host, dir, .. } } =
+            parse(&["team", "start", "squad", "--host", "box", "--dir", "/srv", "go"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), dir.as_deref()), (Some("box"), Some("/srv")));
+        assert!(Cli::try_parse_from(["mira", "team", "start", "squad", "--host", "box", "go"]).is_err());
+    }
+
+    /// `--on` names a saved computer in place of `--host` and `--dir`:
+    /// alone, never with either.
+    #[test]
+    fn on_a_saved_computer_stands_for_host_and_directory() {
+        let Command::Agent { action: AgentAction::New { host, dir, on, task, .. } } = parse(&["agent", "new", "--on", "box", "look"]) else {
+            panic!()
+        };
+        assert_eq!((host, dir, on.as_deref(), task), (None, None, Some("box"), vec!["look".to_string()]));
+        let Command::Team { action: TeamAction::Start { host, dir, on, .. } } = parse(&["team", "start", "squad", "--on", "box", "go"]) else {
+            panic!()
+        };
+        assert_eq!((host, dir, on.as_deref()), (None, None, Some("box")));
+        for with in [&["--host", "box"][..], &["--dir", "/srv"], &["--host", "box", "--dir", "/srv"]] {
+            let agent = [&["mira", "agent", "new", "--on", "box"][..], with, &["look"]].concat();
+            assert!(Cli::try_parse_from(agent).is_err(), "{with:?}");
+            let team = [&["mira", "team", "start", "squad", "--on", "box"][..], with, &["go"]].concat();
+            assert!(Cli::try_parse_from(team).is_err(), "{with:?}");
+        }
+    }
+
+    /// `ssh forward` takes a port, or --app for the app's socket: not both,
+    /// not neither.
+    #[test]
+    fn ssh_forward_takes_a_port_or_the_app() {
+        let Command::Ssh { action: SshAction::Forward { port, app, .. } } = parse(&["ssh", "forward", "3000"]) else {
+            panic!()
+        };
+        assert_eq!((port, app), (Some(3000), false));
+        let Command::Ssh { action: SshAction::Forward { port, app, pane } } =
+            parse(&["ssh", "forward", "--app", "--pane", "p1"])
+        else {
+            panic!()
+        };
+        assert_eq!((port, app, pane.as_deref()), (None, true, Some("p1")));
+        assert!(Cli::try_parse_from(["mira", "ssh", "forward"]).is_err());
+        assert!(Cli::try_parse_from(["mira", "ssh", "forward", "3000", "--app"]).is_err());
+    }
+
+    /// `ssh open` takes a host, with --dir if it likes, or --on a saved
+    /// computer, which stands for both: one of them, never a computer and
+    /// a host or a directory. --tab beside --on changes nothing.
+    #[test]
+    fn ssh_open_takes_a_host_or_a_saved_computer() {
+        let Command::Ssh { action: SshAction::Open { host, tab, dir, on } } =
+            parse(&["ssh", "open", "-p 2222 me@box", "--tab", "--dir", "~/work"])
+        else {
+            panic!()
+        };
+        assert_eq!((host.as_deref(), tab, dir.as_deref(), on), (Some("-p 2222 me@box"), true, Some("~/work"), None));
+        let Command::Ssh { action: SshAction::Open { host, dir, on, .. } } = parse(&["ssh", "open", "--on", "devbox"]) else {
+            panic!()
+        };
+        assert_eq!((host, dir, on.as_deref()), (None, None, Some("devbox")));
+        parse(&["ssh", "open", "--on", "devbox", "--tab"]);
+        for refused in [
+            &["ssh", "open"][..],
+            &["ssh", "open", "box", "--on", "devbox"],
+            &["ssh", "open", "--on", "devbox", "--dir", "/srv"],
+        ] {
+            assert!(Cli::try_parse_from([&["mira"][..], refused].concat()).is_err(), "{refused:?}");
+        }
     }
 
     /// Screenshots taken in the same millisecond each get a file of their

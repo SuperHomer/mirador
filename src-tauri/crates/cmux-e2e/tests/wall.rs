@@ -42,12 +42,12 @@ fn size(sb: &Sandbox, pane: &str) -> Option<(u32, u32)> {
     Some((it.next()?, it.next()?))
 }
 
-/// Sets `agentsPerTab` in the sandbox's mirador.json, which the app picks
-/// up like any edit: the Grid's pages, and so its tiles, change size.
-fn set_agents_per_tab(sb: &Sandbox, n: u8) {
+/// Sets `key` in the sandbox's mirador.json, which the app picks up like
+/// any edit.
+fn set_config(sb: &Sandbox, key: &str, value: serde_json::Value) {
     let path = sb.config.join("mirador/mirador.json");
     let mut cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    cfg["agentsPerTab"] = n.into();
+    cfg[key] = value;
     std::fs::write(&path, cfg.to_string()).unwrap();
 }
 
@@ -79,7 +79,7 @@ fn a_tile_that_goes_gives_its_terminal_back() {
     sb.wait_for("A to stop being an agent", LONG, || agent(&sb, &a).is_none().then_some(()));
 
     // Pages of nine: three columns, three rows, every tile smaller.
-    set_agents_per_tab(&sb, 9);
+    set_config(&sb, "agentsPerTab", 9.into());
     let small = sb.wait_for("B's tile to shrink", LONG, || size(&sb, &b).filter(|s| s.0 < full.0 && s.1 < full.1));
     start_agent(&sb, &a);
     sb.wait_for("A's tile to be sized like B's", LONG, || (size(&sb, &a) == Some(small)).then_some(()));
@@ -163,4 +163,45 @@ fn focus_fits_the_agent_shown_large_and_never_resizes_the_rail() {
         size(&sb, &c).filter(|s| s.1 == large.1)
     });
     assert_eq!(fresh_size(&sb, &b), in_b, "the rail never resizes its terminals");
+}
+
+/// A config reload refits a terminal to a new font where it is drawn, but
+/// never one on the rail: a thumbnail draws its terminal at the size it
+/// has, and fitted to the thumbnail's box — the terminal itself, less a
+/// scrollbar — every edit of mirador.json took it two columns narrower.
+/// The large tile still fits the new font, and so does the pane the rail's
+/// terminal goes back to.
+#[test]
+fn a_config_reload_refits_the_large_tile_and_never_the_rail() {
+    e2e!();
+    let mut sb = Sandbox::new("wallconfig");
+    sb.launch();
+    let a = sb.first_pane();
+    let b = split(&sb, &a);
+    start_agent(&sb, &a);
+    // A Codex, so it goes to the rail (see the test above).
+    sb.type_into(&b, "codex --model e2e\r");
+    sb.wait_for("B's process", LONG, || agent(&sb, &b).filter(|a| a["model"] == "e2e"));
+    let in_a = settled_size(&sb, &a);
+    let in_b = settled_size(&sb, &b);
+
+    let (code, out, err) = sb.mira(Some(&a), &["agent", "wall", "--focus"]);
+    assert_eq!((code, out.trim()), (0, "wall on: focus"), "{err}");
+    let mut large = sb.wait_for("A's terminal to take the large tile", LONG, || {
+        size(&sb, &a).filter(|s| s.1 > in_a.1)
+    });
+
+    // Each reload changes the font, which the large tile refits to: that
+    // refit says the reload reached the terminals.
+    for font in [16, 13, 16] {
+        set_config(&sb, "fontSize", font.into());
+        large = sb.wait_for("A's terminal to fit the new font", LONG, || size(&sb, &a).filter(|s| *s != large));
+        assert_eq!(fresh_size(&sb, &b), in_b, "a reload never resizes the rail");
+    }
+
+    // The splits again: B's pane takes its terminal back and fits it to
+    // the larger font, narrower than it was.
+    let (code, out, err) = sb.mira(Some(&a), &["agent", "wall"]);
+    assert_eq!((code, out.trim()), (0, "wall off"), "{err}");
+    sb.wait_for("B's terminal to fit its pane", LONG, || size(&sb, &b).filter(|s| s.1 < in_b.1));
 }

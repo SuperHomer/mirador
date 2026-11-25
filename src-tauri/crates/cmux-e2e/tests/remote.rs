@@ -1,0 +1,929 @@
+//! A remote computer, end to end: the sandbox's own sshd, reached as `box`
+//! from an ssh pane. Skipped unless `MIRA_E2E=1`.
+
+// The remote is a Unix sshd sandbox reached over Unix sockets, and the
+// Windows side of remotes is not done: none of this builds there.
+#![cfg(unix)]
+
+use std::os::unix::fs::PermissionsExt;
+use std::time::Duration;
+
+use cmux_e2e::{e2e, flag, Sandbox};
+use cmux_protocol::Request;
+
+const LONG: Duration = Duration::from_secs(45);
+
+/// The app's version, which every crate of the workspace shares: the
+/// `mira` a remote must run.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Where a remote agent's files go: `<home>/.mirador/run/<pane>`, then
+/// `.sh`, `.prompt.md`, `.settings.json`.
+fn run_base(sb: &Sandbox, pane: &str) -> String {
+    format!("{}/.mirador/run/{pane}", sb.home.display())
+}
+
+/// Asserts the settings file at `path` gives the agent Mirador's hooks,
+/// calling the remote's `mira`.
+fn assert_hooks(path: &str, mira: &std::path::Path) {
+    let settings: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        settings["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+        format!("\"{}\" claude-hook session-start", mira.display()),
+        "{settings}"
+    );
+    assert_eq!(settings["hooks"]["Stop"][0]["hooks"][0]["command"], format!("\"{}\" claude-hook stop", mira.display()));
+    assert!(settings.get("statusLine").is_none(), "the status line is the person's own: {settings}");
+}
+
+/// An ssh pane to `box`, in a tab of its own (a split would be narrow
+/// enough to wrap a path), once its shell is up: the pane's master
+/// connection is what the app's ssh requests ride on.
+fn remote_pane(sb: &Sandbox) -> String {
+    let pane = sb.call(Request::SshOpen { host: Some("box".into()), target: Some("tab".into()), dir: None, on: None })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_for_prompt(sb, &pane);
+    pane
+}
+
+/// Waits for `pane`'s remote shell to prompt. The login shell is the
+/// passwd entry's: zsh on this Mac (`host% `), bash on CI's runner
+/// (`host:dir user$ `), after macOS's banner urging zsh. The prompt is
+/// the last line written.
+fn wait_for_prompt(sb: &Sandbox, pane: &str) {
+    sb.wait_for_screen(pane, "the remote shell's prompt", LONG, |s| {
+        s.lines().map(str::trim_end).rfind(|l| !l.is_empty()).is_some_and(|l| l.ends_with('%') || l.ends_with('$'))
+    });
+}
+
+/// Where `pane`'s shell is, as `pwd -P` prints it: the directory with its
+/// links resolved, as the test's own paths are. A split is narrow enough
+/// to wrap the path, so the screen's lines are read as one.
+fn wait_for_pwd(sb: &Sandbox, pane: &str, want: &std::path::Path, what: &str) {
+    wait_for_prompt(sb, pane);
+    sb.type_into(pane, "pwd -P\r");
+    let want = format!("pwd -P{}", want.to_str().unwrap());
+    sb.wait_for_screen(pane, what, LONG, |s| s.lines().map(str::trim_end).collect::<String>().contains(&want));
+}
+
+/// `box` is in `ssh hosts`, an ssh pane reaches it, and the login there
+/// looks like the sandbox: its home, its `bin` first on the PATH, and no
+/// `MIRA_PANE`, which ssh does not carry.
+#[test]
+fn an_ssh_pane_reaches_the_sandboxs_own_remote() {
+    e2e!();
+    let mut sb = Sandbox::new("remote");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+
+    let (code, hosts, err) = sb.mira(None, &["ssh", "hosts"]);
+    assert!(code == 0 && hosts.lines().any(|l| l == "box"), "{hosts}{err}");
+
+    let pane = remote_pane(&sb);
+    sb.type_into(&pane, "echo home=$HOME; echo \"pane=[$MIRA_PANE]\"; echo ssh=$SSH_CONNECTION; command -v claude\r");
+    let home = format!("home={}", sb.home.display());
+    let claude = format!("{}/claude", sb.root.join("bin").display());
+    let screen = sb.wait_for_screen(&pane, "the remote's answers", LONG, |s| {
+        s.lines().any(|l| l.trim_end() == claude)
+    });
+    let lines: Vec<&str> = screen.lines().map(str::trim_end).collect();
+    assert!(lines.contains(&home.as_str()), "{screen}");
+    assert!(lines.contains(&"pane=[]"), "{screen}");
+    assert!(lines.iter().any(|l| l.starts_with("ssh=127.0.0.1 ")), "over ssh, not a local shell: {screen}");
+}
+
+/// A saved computer's tab: `ssh open --tab --dir` opens an ssh pane on
+/// box whose shell starts in that directory there. A split of it, from
+/// `mira split`, is a shell on box too, in the directory the tab was
+/// opened in. A split of a local pane stays
+/// local, and so does a command split from the remote one. And `mira agent
+/// new` from inside the remote tab, with no --host, starts here: only the
+/// app asks where.
+#[test]
+fn a_remote_tab_splits_on_its_remote() {
+    e2e!();
+    let mut sb = Sandbox::new("rsplit");
+    sb.sshd();
+    sb.launch();
+    let first = sb.first_pane();
+    std::fs::create_dir_all(sb.home.join("work")).unwrap();
+    let work = sb.home.join("work").canonicalize().unwrap();
+    let ok = |args: &[&str]| {
+        let (code, out, err) = sb.mira(None, args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        out.trim().to_string()
+    };
+    let on_box = |pane: &str| {
+        sb.snapshot()["remotePanes"].as_array().unwrap().iter().any(|r| r["paneId"] == pane && r["host"] == "box")
+    };
+
+    let tab = ok(&["ssh", "open", "box", "--tab", "--dir", "~/work"]);
+    assert!(on_box(&tab), "the tab is an ssh pane on box");
+    wait_for_pwd(&sb, &tab, &work, "the tab's shell in box's ~/work");
+
+    let split = ok(&["split", "--pane", &tab]);
+    assert!(on_box(&split), "a split of a remote shell is on the remote");
+    wait_for_pwd(&sb, &split, &work, "the split's shell in the same directory");
+
+    let command = ok(&["split", "--pane", &tab, "--command", "true"]);
+    assert!(!on_box(&command), "a command split runs here");
+    let local = ok(&["split", "--pane", &first]);
+    assert!(!on_box(&local), "a split of a local pane stays local");
+
+    // The app asks where an agent from a remote pane runs; `mira` asks
+    // nothing: with no --host it starts here, even from inside box's tab.
+    let (code, out, err) = sb.mira(Some(&tab), &["agent", "new", "look around"]);
+    assert_eq!(code, 0, "{err}");
+    let agent = out.trim().to_string();
+    sb.wait_for("the agent's start", LONG, || sb.events("start", &agent).into_iter().next());
+    assert!(!on_box(&agent), "mira agent new from a remote tab, no --host: here");
+}
+
+/// A split of a remote shell starts where that shell has gone, not where
+/// its tab was opened: the app asks the remote about the shell whose pid
+/// its start printed. The sandbox's zsh reports no directory (no OSC 7),
+/// so the asking is what this exercises.
+#[test]
+fn a_remote_split_starts_where_its_shell_has_gone() {
+    e2e!();
+    let mut sb = Sandbox::new("rlive");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    std::fs::create_dir_all(sb.home.join("work/deeper")).unwrap();
+    let deeper = sb.home.join("work/deeper").canonicalize().unwrap();
+    let ok = |args: &[&str]| {
+        let (code, out, err) = sb.mira(None, args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        out.trim().to_string()
+    };
+
+    let tab = ok(&["ssh", "open", "box", "--tab", "--dir", "~/work"]);
+    wait_for_prompt(&sb, &tab);
+    sb.type_into(&tab, "cd deeper\r");
+    wait_for_pwd(&sb, &tab, &deeper, "the tab's shell moved on");
+
+    let split = ok(&["split", "--pane", &tab]);
+    wait_for_pwd(&sb, &split, &deeper, "the split's shell where the tab's has gone");
+}
+
+/// `ssh open --on` a saved computer opens it as the palette's "SSH to a
+/// Computer" row does: a tab of its own, an ssh pane on its host, its
+/// shell in its directory. An unknown name is refused with the names there
+/// are, and so is a name given with a host; neither opens a pane.
+#[test]
+fn a_saved_computer_opens_in_a_tab_of_its_own() {
+    e2e!();
+    let mut sb = Sandbox::new("rssh");
+    sb.sshd();
+    std::fs::create_dir_all(sb.home.join("work")).unwrap();
+    let work = sb.home.join("work").canonicalize().unwrap();
+    let path = sb.config.join("mirador/mirador.json");
+    let mut cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    cfg["computers"] = serde_json::json!([{ "name": "devbox", "host": "box", "dir": work.to_str().unwrap() }]);
+    std::fs::write(&path, cfg.to_string()).unwrap();
+    sb.launch();
+    sb.first_pane();
+    let tabs = || sb.snapshot()["tabs"].as_array().unwrap().len();
+
+    let (code, _, err) = sb.mira(None, &["ssh", "open", "--on", "lab"]);
+    assert!(code != 0 && err.contains("no computer `lab` (there are: devbox)"), "{err}");
+    let err = sb
+        .request(Request::SshOpen { host: Some("box".into()), target: None, dir: None, on: Some("devbox".into()) })
+        .expect_err("a saved computer and a host");
+    assert!(err.contains("not both"), "{err}");
+    assert_eq!((sb.panes().len(), tabs()), (1, 1), "a refusal opens nothing");
+
+    let (code, out, err) = sb.mira(None, &["ssh", "open", "--on", "devbox"]);
+    assert_eq!(code, 0, "{err}");
+    let pane = out.trim().to_string();
+    assert_eq!(tabs(), 2, "a tab of its own, with no --tab");
+    let remote = sb.snapshot()["remotePanes"].as_array().unwrap().iter().any(|r| r["paneId"] == pane.as_str() && r["host"] == "box");
+    assert!(remote, "an ssh pane on the computer's host");
+    wait_for_pwd(&sb, &pane, &work, "the shell in the computer's directory");
+}
+
+/// A `mira` on the remote has no discovery file there, so it finds no app
+/// — until the app forwards its socket over the pane's connection, and
+/// `MIRA_SOCKET` names it: then it is this app that answers.
+#[test]
+fn mira_on_the_remote_reaches_the_app_through_its_forwarded_socket() {
+    e2e!();
+    let mut sb = Sandbox::new("forward");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    let pane = remote_pane(&sb);
+
+    sb.type_into(&pane, "mira list-tabs\r");
+    sb.wait_for_screen(&pane, "mira finding no app", LONG, |s| s.contains("Mirador is not running"));
+
+    let forwarded = sb.call(Request::SshForwardApp { pane_id: Some(pane.clone()) });
+    assert_eq!(forwarded["paneId"], pane.as_str());
+    let socket = forwarded["socket"].as_str().unwrap().to_string();
+    assert!(socket.ends_with(".sock") && socket.len() < 104, "{socket}");
+    sb.type_into(&pane, &format!("MIRA_SOCKET={socket} mira list-tabs\r"));
+    let tabs: Vec<String> = sb.snapshot()["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(tabs.len(), 2, "the first tab and the ssh pane's");
+    sb.wait_for_screen(&pane, "the app's tabs, listed on the remote", LONG, |s| tabs.iter().all(|t| s.contains(t)));
+
+    // The app relaunched while the connection lives on (it outlives the
+    // app; the sandbox ends it only at the end): no record of the forward,
+    // which the master still holds, so it is cancelled, removed and made
+    // again — and the socket is still served, at the same path, which a
+    // forward redone over the same master without the cancel would not be.
+    sb.quit();
+    sb.launch();
+    let again = sb.call(Request::SshForwardApp { pane_id: Some(pane.clone()) });
+    assert_eq!(again["socket"], socket.as_str());
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok(), "nothing serves {socket} after the relaunch");
+}
+
+/// A remote that has the `mira` of this version already keeps it: the app
+/// answers its path, and it runs there.
+#[test]
+fn a_remote_keeps_the_mira_it_has() {
+    e2e!();
+    let mut sb = Sandbox::new("mirakeep");
+    sb.sshd();
+    let placed = sb.place_remote_mira(VERSION);
+    sb.launch();
+    sb.first_pane();
+    let pane = remote_pane(&sb);
+
+    let answer = sb.call(Request::SshMira { pane_id: Some(pane.clone()) });
+    assert_eq!(answer["paneId"], pane.as_str());
+    assert_eq!(answer["mira"], placed.to_str().unwrap());
+    sb.type_into(&pane, &format!("{} --version\r", placed.display()));
+    sb.wait_for_screen(&pane, "the remote's mira version", LONG, |s| s.lines().any(|l| l.trim_end() == format!("mira {VERSION}")));
+}
+
+/// None is published for macOS, which this remote is: the app says so,
+/// naming the system and where a person may put one by hand. The fetch
+/// itself, on Linux, is never run here: no test touches the network.
+#[test]
+fn a_remote_with_no_published_mira_says_where_to_put_one() {
+    e2e!();
+    let mut sb = Sandbox::new("miranone");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    let pane = remote_pane(&sb);
+
+    let err = sb.request(Request::SshMira { pane_id: Some(pane) }).expect_err("no mira for macOS");
+    let machine = std::process::Command::new("uname").arg("-m").output().unwrap().stdout;
+    let machine = String::from_utf8_lossy(&machine).trim().to_string();
+    assert!(err.contains(&format!("no mira is published for darwin/{machine}")), "{err}");
+    let by_hand = sb.home.join(format!(".mirador/bin/mira-{VERSION}"));
+    assert!(err.contains(by_hand.to_str().unwrap()), "{err}");
+}
+
+/// A file sent to the remote arrives byte for byte, owner-only, its
+/// directory made: a quote, `$HOME`, a backslash, a line equal to the
+/// delimiter its script uses, and no final newline. The remote is this
+/// computer, so the file is read straight off the disk.
+#[test]
+fn a_file_sent_to_the_remote_arrives_exact() {
+    e2e!();
+    let mut sb = Sandbox::new("put");
+    sb.sshd();
+    sb.launch();
+    sb.first_pane();
+    let pane = remote_pane(&sb);
+
+    let path = sb.home.join(".mirador/sent/probe.txt");
+    let text = "it's $HOME \\ here\nMIRA_EOF\nEOF\nno newline at the end";
+    let answer = sb.call(Request::SshPut {
+        pane_id: Some(pane.clone()),
+        path: path.to_str().unwrap().into(),
+        text: text.into(),
+    });
+    assert_eq!(answer["paneId"], pane.as_str());
+    assert_eq!(std::fs::read(&path).unwrap(), text.as_bytes());
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert!(!path.with_extension("txt.tmp").exists(), "nothing left beside it");
+}
+
+/// `mira send-file`, as a drop does: into an SSH pane, the file goes to
+/// the remote's paste directory, exact and 0600, and the path typed is
+/// the remote's; into a local pane, the file's own path is typed, quoted;
+/// a file over 20 MB, or a directory, is refused before anything is sent.
+#[test]
+fn a_file_sent_to_an_ssh_pane_is_typed_as_the_remotes_copy() {
+    e2e!();
+    let mut sb = Sandbox::new("sendfile");
+    sb.sshd();
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = remote_pane(&sb);
+    let png: &[u8] = b"\x89PNG\r\n\x1a\n a tiny picture";
+    let shot = sb.project.join("shot one.png");
+    std::fs::write(&shot, png).unwrap();
+    let send = |into: &str, file: &std::path::Path| sb.mira(Some(&first), &["send-file", file.to_str().unwrap(), "--pane", into]);
+    // The screen's lines as one: a long path wraps.
+    let typed = |pane: &str, what: &str, text: String| {
+        sb.wait_for_screen(pane, what, LONG, |s| s.lines().map(str::trim_end).collect::<String>().contains(&text));
+    };
+
+    let (code, out, err) = send(&pane, &shot);
+    assert_eq!(code, 0, "{err}");
+    let remote = out.trim().to_string();
+    let dir = sb.home.join(".cache/mirador/paste");
+    let name = remote.strip_prefix(&format!("{}/", dir.display())).unwrap_or_else(|| panic!("not in the remote's paste directory: {remote}"));
+    assert!(name.starts_with("paste-") && name.ends_with("-shot_one.png"), "{name}");
+    assert_eq!(std::fs::read(&remote).unwrap(), png, "the remote's copy is exact");
+    assert_eq!(std::fs::metadata(&remote).unwrap().permissions().mode() & 0o777, 0o600);
+    typed(&pane, "the remote path typed", format!("'{remote}'"));
+
+    let (code, out, err) = send(&first, &shot);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), shot.to_str().unwrap(), "a local pane gets the file's own path");
+    typed(&first, "the local path typed", format!("'{}'", shot.display()));
+
+    let big = sb.project.join("big.bin");
+    std::fs::write(&big, vec![0u8; 21 * 1024 * 1024]).unwrap();
+    let (code, _, err) = send(&pane, &big);
+    assert_ne!(code, 0);
+    assert!(err.contains("big.bin is 21 MB") && err.contains("up to 20 MB"), "{err}");
+    let (code, _, err) = send(&pane, &sb.project);
+    assert_ne!(code, 0);
+    assert!(err.contains("is a directory"), "{err}");
+    let sent: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+    assert_eq!(sent.len(), 1, "nothing refused was sent: {sent:?}");
+}
+
+/// `agent new --host box --dir <dir>`: plain Claude Code on the remote, in
+/// that directory, told its pane and this app's socket, given Mirador's
+/// hooks, listed as an agent on `box` — and a message sent from a local
+/// pane reaches it. A `~/` directory is the remote's home's. Codex there
+/// is not done yet, and a host goes with a directory.
+#[test]
+fn a_plain_agent_runs_on_the_remote() {
+    e2e!();
+    let mut sb = Sandbox::new("ragent");
+    sb.sshd();
+    let mira = sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let agent_new = |role: Option<&str>, harness: Option<cmux_protocol::Harness>| Request::AgentNew {
+        role: role.map(String::from),
+        harness,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.clone()),
+        host: Some("box".into()),
+        dir: Some(dir.clone()),
+        on: None,
+    };
+
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--host", "box", "look around"]);
+    assert!(code != 0 && err.contains("--dir"), "{err}");
+    let err = sb.request(agent_new(None, Some(cmux_protocol::Harness::Codex))).expect_err("not on a remote yet");
+    assert!(err.contains("not done yet"), "{err}");
+    assert_eq!(sb.panes().len(), 1, "a refusal opens no pane");
+
+    let pane = sb.call(agent_new(None, None))["paneId"].as_str().unwrap().to_string();
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    assert_eq!(start["kind"], "claude");
+    assert_eq!(start["cwd"], dir.as_str());
+    // Even a plain agent has settings there: Mirador's hooks.
+    let settings = format!("{}.settings.json", run_base(&sb, &pane));
+    assert_eq!(start["args"], serde_json::json!(["--settings", settings, "look around"]));
+    assert_hooks(&settings, &mira);
+    let socket = start["socket"].as_str().unwrap_or_default();
+    assert!(socket.ends_with(".sock") && std::path::Path::new(socket).exists(), "{start}");
+
+    // A shell split from the agent's pane is on box too, in the directory
+    // the agent was started in there.
+    let (code, out, err) = sb.mira(None, &["split", "--pane", &pane]);
+    assert_eq!(code, 0, "{err}");
+    let split = out.trim().to_string();
+    let remote = sb.snapshot()["remotePanes"].as_array().cloned().unwrap_or_default();
+    assert!(remote.iter().any(|r| r["paneId"] == split.as_str() && r["host"] == "box"), "the split is on box: {remote:?}");
+    wait_for_pwd(&sb, &split, std::path::Path::new(&dir), "the split's shell in the agent's directory");
+
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+    let listed = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));
+    assert_eq!((listed["harness"].as_str(), listed["remoteHost"].as_str()), (Some("claude"), Some("box")), "{listed}");
+
+    sb.call(Request::AgentSend {
+        to: pane.clone(),
+        message: "hello from here".into(),
+        pane_id: Some(first.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message on the remote", LONG, || {
+        sb.events("message", &pane).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
+    });
+
+    // A directory typed from the home, as a terminal there takes it: `~`
+    // is the remote's home, not a directory named `~`.
+    std::fs::create_dir_all(sb.home.join("work")).unwrap();
+    let from_home = sb
+        .call(Request::AgentNew {
+            role: None,
+            harness: None,
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(first.clone()),
+            host: Some("box".into()),
+            dir: Some("~/work".into()),
+            on: None,
+        })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the agent started in ~/work", LONG, || sb.events("start", &from_home).into_iter().next());
+    assert_eq!(start["cwd"], sb.home.join("work").canonicalize().unwrap().to_str().unwrap());
+}
+
+/// A computer saved in the app's mirador.json stands for its host and
+/// directory: `agent new --on` runs the agent there, in that directory,
+/// as --host and --dir do. An unknown name is refused with the names
+/// there are, a name given with a host too is refused, so is a name while
+/// mirador.json does not parse, with the file's problem; none opens a
+/// pane.
+#[test]
+fn an_agent_runs_on_a_saved_computer_named_by_on() {
+    e2e!();
+    let mut sb = Sandbox::new("ron");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    // Not the project, where an agent started here would be too.
+    let work = sb.home.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let dir = work.canonicalize().unwrap().to_str().unwrap().to_string();
+    let path = sb.config.join("mirador/mirador.json");
+    let mut cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    cfg["computers"] = serde_json::json!([{ "name": "devbox", "host": "box", "dir": dir }]);
+    std::fs::write(&path, cfg.to_string()).unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--on", "lab", "look around"]);
+    assert!(code != 0 && err.contains("no computer `lab` (there are: devbox)"), "{err}");
+    let err = sb
+        .request(Request::AgentNew {
+            role: None,
+            harness: None,
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(first.clone()),
+            host: Some("box".into()),
+            dir: None,
+            on: Some("devbox".into()),
+        })
+        .expect_err("a saved computer and a host");
+    assert!(err.contains("not both"), "{err}");
+    // The file is read at the request: one that does not parse is the
+    // answer, not "there are none" from the defaults it loads as.
+    let good = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, r#"{ "computers": [ }"#).unwrap();
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--on", "devbox", "look around"]);
+    assert!(code != 0 && err.contains("mirador.json: expected value"), "{err}");
+    std::fs::write(&path, good).unwrap();
+    assert_eq!(sb.panes().len(), 1, "a refusal opens no pane");
+
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "new", "--on", "devbox", "look around"]);
+    assert_eq!(code, 0, "{err}");
+    let pane = sb.panes().into_iter().find(|p| *p != first).unwrap_or_else(|| sb.fail("no agent pane"));
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    assert_eq!(start["kind"], "claude");
+    assert_eq!(start["cwd"], dir.as_str());
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+    let listed = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));
+    assert_eq!(listed["remoteHost"], "box", "{listed}");
+}
+
+/// The pid of the ssh this computer runs for `pane`'s attach, if any. The
+/// remote is this computer too, so its side of the attach is in the same
+/// process table: `mira attach <pane>`, and the login shell that ran it,
+/// given the line with the pane id still quoted. Only the pane's own ssh
+/// has `ssh` and `-tt` before that quoted id. The pattern starts at `ssh`
+/// for a second reason: pgrep takes one that starts with `-` as an option.
+fn attach_ssh(pane: &str) -> Option<String> {
+    let out = std::process::Command::new("pgrep").args(["-f", &format!("ssh .*-tt .*attach '{pane}'")]).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().next().map(String::from)
+}
+
+/// A remote agent runs under a holder there, and its pane only attaches to
+/// it: the connection dropped, the pane says so and the agent runs on,
+/// started once. The pane reattaches by itself, the agent's screen comes
+/// back from the holder, and it takes messages and reaches the app again.
+#[test]
+fn a_remote_agent_outlives_its_connection() {
+    e2e!();
+    let mut sb = Sandbox::new("rhold");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holder = cmux_core::hold::conn::endpoint(&sb.remote_holders(), &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
+    sb.wait_for_screen(&pane, "the agent, through the attach", LONG, |s| s.contains("❯"));
+    let socket = start["socket"].as_str().unwrap_or_default().to_string();
+    let first_ssh = attach_ssh(&pane).unwrap_or_else(|| sb.fail("no ssh for the pane's attach"));
+
+    // Drop the connection: its master goes, and every session over it.
+    let dropped = std::process::Command::new(sb.root.join("bin/ssh"))
+        .args(["-o", &format!("ControlPath={}/mirador/ssh/cm-%C", sb.runtime.display()), "-O", "exit", "box"])
+        .env("HOME", &sb.home)
+        .output()
+        .unwrap();
+    assert!(dropped.status.success(), "ssh -O exit: {}", String::from_utf8_lossy(&dropped.stderr));
+    sb.wait_for_screen(&pane, "the pane to say it lost the connection", LONG, |s| {
+        s.contains("[disconnected]") && s.contains("reconnecting in 2s")
+    });
+
+    assert!(cmux_core::hold::conn::is_alive(&holder), "the holder went with the connection");
+    assert!(running(&start["pid"]), "the agent ({}) went with the connection", start["pid"]);
+
+    // Back by itself: a new ssh, the agent's screen from the holder's
+    // replay, the app's socket forwarded again, and still one agent.
+    sb.wait_for("the pane's ssh to reattach", LONG, || attach_ssh(&pane).filter(|p| *p != first_ssh));
+    sb.wait_for_screen(&pane, "the agent back in the pane", LONG, |s| match s.rsplit_once("reconnecting in") {
+        Some((_, after)) => after.contains("❯"),
+        // The replay may clear the screen first.
+        None => s.contains("❯"),
+    });
+    sb.wait_for("the app's socket forwarded again", LONG, || std::os::unix::net::UnixStream::connect(&socket).ok());
+    sb.call(Request::AgentSend {
+        to: pane.clone(),
+        message: "hello after the drop".into(),
+        pane_id: Some(first.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message after the drop", LONG, || {
+        sb.events("message", &pane).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello after the drop")))
+    });
+    assert_eq!(sb.events("start", &pane).len(), 1, "the agent started more than once");
+}
+
+/// Starts a plain agent on `box` from `first`, and waits for its start
+/// event: its pane, and that event.
+fn start_remote_agent(sb: &Sandbox, first: &str) -> (String, serde_json::Value) {
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.to_string()),
+        host: Some("box".into()),
+        dir: Some(dir),
+        on: None,
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let start = sb.wait_for("the remote agent's start", LONG, || sb.events("start", &pane).into_iter().next());
+    (pane, start)
+}
+
+/// Whether the process `pid` (a JSON number, from a start event) runs.
+fn running(pid: &serde_json::Value) -> bool {
+    let kill = std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status();
+    kill.unwrap().success()
+}
+
+/// *Quit and end all sessions* ends a remote agent too, and its holder,
+/// before the app goes.
+#[test]
+fn quitting_and_ending_all_sessions_ends_remote_agents() {
+    e2e!();
+    let mut sb = Sandbox::new("rquit");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holders = sb.remote_holders();
+    let holder = cmux_core::hold::conn::endpoint(&holders, &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder) && running(&start["pid"]), "the agent is not running there");
+
+    sb.quit(); // with end_sessions, as the palette's *Quit and end all sessions*
+    sb.wait_for("the holder there to go", LONG, || (!cmux_core::hold::conn::is_alive(&holder)).then_some(()));
+    sb.wait_for("the agent there to go", LONG, || (!running(&start["pid"])).then_some(()));
+    assert_eq!(cmux_core::hold::conn::live_panes(&holders), Vec::<String>::new(), "a holder is left for the sandbox to end");
+}
+
+/// Closing a remote agent's pane ends the agent there, and its holder:
+/// nothing would reach it again.
+#[test]
+fn closing_a_remote_agents_pane_ends_it_there() {
+    e2e!();
+    let mut sb = Sandbox::new("rclose");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    let first = sb.first_pane();
+    let (pane, start) = start_remote_agent(&sb, &first);
+    let holders = sb.remote_holders();
+    let holder = cmux_core::hold::conn::endpoint(&holders, &pane);
+    assert!(cmux_core::hold::conn::is_alive(&holder), "no holder on the remote at {}", holder.display());
+    assert!(running(&start["pid"]), "the agent ({}) is not running", start["pid"]);
+
+    sb.call(Request::ClosePane { pane_id: pane.clone() });
+    sb.wait_for("the holder there to go", LONG, || (!cmux_core::hold::conn::is_alive(&holder)).then_some(()));
+    sb.wait_for("the agent there to go", LONG, || (!running(&start["pid"])).then_some(()));
+    assert_eq!(cmux_core::hold::conn::live_panes(&holders), Vec::<String>::new(), "a holder is left for the sandbox to end");
+}
+
+/// A role from this computer's catalog runs on the remote: its model, its
+/// prompt and its settings — sent there, Mirador's hooks in them — and it
+/// reports: the hooks it runs reach this app through the forwarded
+/// socket, and its pane gets a status. A role that keeps only some skills
+/// is not done on a remote yet: listing them runs Claude Code here.
+#[test]
+fn a_role_runs_on_the_remote_and_reports_through_its_hooks() {
+    e2e!();
+    let mut sb = Sandbox::new("rrole");
+    sb.sshd();
+    let mira = sb.place_remote_mira(VERSION);
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(".mirador/roles/charts.md", "---\nskills: [pdf]\n---\nCharts.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let agent_new = |role: &str| Request::AgentNew {
+        role: Some(role.into()),
+        harness: None,
+        title: None,
+        task: Some("look around".into()),
+        target: None,
+        pane_id: Some(first.clone()),
+        host: Some("box".into()),
+        dir: Some(dir.clone()),
+        on: None,
+    };
+
+    let err = sb.request(agent_new("charts")).expect_err("a skills list is not done on a remote");
+    assert!(err.contains("not done on a remote yet"), "{err}");
+    assert_eq!(sb.panes().len(), 1, "a refusal opens no pane");
+
+    let pane = sb.call(agent_new("reviewer"))["paneId"].as_str().unwrap().to_string();
+    let args = sb.nth_start(&pane, 1);
+    let base = run_base(&sb, &pane);
+    assert_eq!(flag(&args, "--model").as_deref(), Some("haiku"), "{args:?}");
+    let prompt = format!("{base}.prompt.md");
+    let settings = format!("{base}.settings.json");
+    assert_eq!(flag(&args, "--append-system-prompt-file"), Some(prompt.clone()), "{args:?}");
+    assert_eq!(flag(&args, "--settings"), Some(settings.clone()), "{args:?}");
+    assert_eq!(args.last().map(String::as_str), Some("look around"));
+    assert!(std::fs::read_to_string(&prompt).unwrap().contains("You review."));
+    assert_hooks(&settings, &mira);
+
+    let listed = sb.wait_for("the remote agent's status, from its hooks", LONG, || {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.into_iter().find(|a| a["paneId"] == pane.as_str() && !a["status"].is_null())
+    });
+    assert_eq!((listed["role"].as_str(), listed["remoteHost"].as_str()), (Some("reviewer"), Some("box")), "{listed}");
+    let hooked = sb.events("hooked", &pane);
+    assert_eq!(hooked.first().map(|h| h["ok"].clone()), Some(serde_json::json!(true)), "{hooked:?}");
+}
+
+/// `team start --host box --dir <dir>`: every member on the remote, the
+/// team and its roles still this computer's. Each starts in the directory
+/// there, the lead with the task; each is told its teammates and calls
+/// `mira` by its path there, never this machine's; each reports through
+/// its hooks; a message from a local pane reaches one. A team with a Codex
+/// member opens nothing, naming the member; a restart is not done yet.
+#[test]
+fn a_team_runs_on_the_remote() {
+    e2e!();
+    let mut sb = Sandbox::new("rteam");
+    sb.sshd();
+    let mira = sb.place_remote_mira(VERSION);
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(".mirador/roles/coder.md", "---\nharness: codex\n---\nYou code.\n");
+    sb.write(".mirador/teams/squad.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n---\nShip small.\n");
+    sb.write(".mirador/teams/mixed.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: coder\n---\nMixed.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let team_start = |team: &str| Request::TeamStart {
+        team: team.into(),
+        task: Some("plan the chart".into()),
+        pane_id: Some(first.clone()),
+        title: None,
+        host: Some("box".into()),
+        dir: Some(dir.clone()),
+        on: None,
+    };
+
+    let err = sb.request(team_start("mixed")).expect_err("Codex is not done on a remote");
+    assert!(err.contains("member `coder`") && err.contains("not done yet"), "{err}");
+    assert_eq!(sb.snapshot()["tabs"].as_array().unwrap().len(), 1, "a team that cannot start opens nothing");
+
+    sb.call(team_start("squad"));
+    sb.wait_for("the team to list", LONG, || {
+        let names: Vec<String> = sb.teams().first()?["members"].as_array()?.iter().map(|m| m["name"].as_str().unwrap().to_string()).collect();
+        (names == ["planner", "reviewer"]).then_some(())
+    });
+    assert_eq!(sb.teams()[0]["remoteHost"], "box", "the team knows where it runs");
+    let (planner, reviewer) = (pane_of(&sb, "planner"), pane_of(&sb, "reviewer"));
+    for pane in [&planner, &reviewer] {
+        let start = sb.wait_for("a member's start", LONG, || sb.events("start", pane).into_iter().next());
+        assert_eq!(start["cwd"], dir.as_str(), "{start}");
+    }
+    let lead = sb.nth_start(&planner, 1);
+    assert_eq!(lead.last().map(String::as_str), Some("plan the chart"), "{lead:?}");
+    assert_ne!(sb.nth_start(&reviewer, 1).last().map(String::as_str), Some("plan the chart"), "only the lead gets the task");
+    let prompt = std::fs::read_to_string(flag(&lead, "--append-system-prompt-file").unwrap()).unwrap();
+    assert!(prompt.starts_with("You plan.\n\n# Your team: squad"), "{prompt}");
+    assert!(prompt.contains("- `reviewer` (reviewer)") && prompt.contains(mira.to_str().unwrap()), "{prompt}");
+    assert!(!prompt.contains("target/debug/mira"), "never this machine's mira: {prompt}");
+
+    sb.wait_for("both members' status, from their hooks", LONG, || {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        let reporting = |pane: &str| agents.iter().any(|a| a["paneId"] == pane && a["remoteHost"] == "box" && !a["status"].is_null());
+        (reporting(&planner) && reporting(&reviewer)).then_some(())
+    });
+
+    sb.call(Request::AgentSend {
+        to: reviewer.clone(),
+        message: "hello from here".into(),
+        pane_id: Some(first.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message on the remote", LONG, || {
+        sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello from here")))
+    });
+
+    // A member whose agent ends there: its holder sees the exit and goes,
+    // the pane's attach ends with it (1: killed, no code), and the member
+    // reads as exited. Restarted, it gets a fresh pane, started there again.
+    let pid = sb.events("start", &reviewer)[0]["pid"].as_u64().expect("the agent's pid");
+    assert!(std::process::Command::new("kill").arg(pid.to_string()).status().unwrap().success());
+    let state = |name: &str| sb.member(name).and_then(|m| m["state"].as_str().map(String::from));
+    sb.wait_for("the reviewer to read as exited", LONG, || (state("reviewer").as_deref() == Some("exited")).then_some(()));
+    sb.wait_for_screen(&reviewer, "the reviewer's exit in its pane", LONG, |s| s.contains("[exit 1]"));
+    let old_holder = cmux_core::hold::conn::endpoint(&sb.remote_holders(), &reviewer);
+    sb.wait_for("the reviewer's holder to go", LONG, || (!cmux_core::hold::conn::is_alive(&old_holder)).then_some(()));
+    let outcome = |done: &serde_json::Value, name: &str| -> Option<(String, String)> {
+        let m = done["members"].as_array()?.iter().find(|m| m["name"] == name)?;
+        Some((m["outcome"].as_str()?.to_string(), m["pane"].as_str()?.to_string()))
+    };
+    let done = sb.call(Request::TeamRestart { members: vec!["reviewer".into()], pane_id: Some(planner.clone()) });
+    let (what, reopened) = outcome(&done, "reviewer").unwrap_or_else(|| sb.fail(&format!("no reviewer: {done}")));
+    assert_eq!(what, "reopened", "{done}");
+    assert_ne!(reopened, reviewer, "a fresh pane");
+    assert_eq!(pane_of(&sb, "reviewer"), reopened, "the seat follows it");
+    assert!(!sb.snapshot()["tabs"].to_string().contains(&reviewer), "the old pane is closed");
+    let start = sb.wait_for("the restarted reviewer's start", LONG, || sb.events("start", &reopened).into_iter().next());
+    assert_eq!(start["cwd"], dir.as_str(), "{start}");
+    sb.call(Request::AgentSend {
+        to: "reviewer".into(),
+        message: "welcome back".into(),
+        pane_id: Some(planner.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message to the restarted reviewer", LONG, || {
+        sb.events("message", &reopened).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("welcome back")))
+    });
+    let done = sb.call(Request::TeamRestart { members: vec![], pane_id: Some(planner.clone()) });
+    assert_eq!(outcome(&done, "planner"), Some(("running".into(), planner.clone())), "{done}");
+    assert_eq!(outcome(&done, "reviewer"), Some(("running".into(), reopened.clone())), "{done}");
+    let reviewer = reopened;
+
+    // A member added to the team starts on the remote too, as its
+    // teammates did: in the team's directory, with Mirador's hooks, told
+    // its teammates call the remote's `mira`.
+    let added = sb.call(Request::TeamAdd {
+        role: "reviewer".into(),
+        name: None,
+        pane_id: Some(planner.clone()),
+        task: Some("check the axes".into()),
+        title: None,
+    })["paneId"]
+        .as_str()
+        .expect("the new member's pane")
+        .to_string();
+    let name = sb.wait_for("the new member to list", LONG, || {
+        let members = sb.teams().first()?["members"].as_array()?.clone();
+        members.iter().find(|m| m["pane"] == added.as_str()).and_then(|m| m["name"].as_str().map(String::from))
+    });
+    // A message sent at once, as a lead does right after `team add`,
+    // waiting for nothing: the agent is started over ssh first, and its
+    // pane attaches to it only after. The send waits for the attach
+    // rather than being refused.
+    sb.call(Request::AgentSend {
+        to: name.clone(),
+        message: "hello, new one".into(),
+        pane_id: Some(planner.clone()),
+        force: false,
+        card: None,
+        title: None,
+    });
+    sb.wait_for("the message to the new member", LONG, || {
+        sb.events("message", &added).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.contains("hello, new one")))
+    });
+    let start = sb.wait_for("the new member's start", LONG, || sb.events("start", &added).into_iter().next());
+    assert_eq!(start["cwd"], dir.as_str(), "{start}");
+    let args = sb.nth_start(&added, 1);
+    assert_eq!(args.last().map(String::as_str), Some("check the axes"), "{args:?}");
+    let base = run_base(&sb, &added);
+    assert_eq!(flag(&args, "--settings"), Some(format!("{base}.settings.json")), "{args:?}");
+    assert_hooks(&format!("{base}.settings.json"), &mira);
+    let prompt = std::fs::read_to_string(flag(&args, "--append-system-prompt-file").unwrap()).unwrap();
+    assert!(prompt.contains("You review.") && prompt.contains(mira.to_str().unwrap()), "{prompt}");
+    assert!(!prompt.contains("target/debug/mira"), "never this machine's mira: {prompt}");
+    sb.wait_for("the new member's status, from its hooks", LONG, || {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.iter().any(|a| a["paneId"] == added.as_str() && a["remoteHost"] == "box" && !a["status"].is_null()).then_some(())
+    });
+
+    // A Codex member is not done on a remote: refused, and no seat taken.
+    let seats = || sb.teams()[0]["members"].as_array().map_or(0, Vec::len);
+    let before = seats();
+    let err = sb
+        .request(Request::TeamAdd { role: "coder".into(), name: None, pane_id: Some(planner), task: None, title: None })
+        .expect_err("Codex is not done on a remote");
+    assert!(err.contains("not done yet"), "{err}");
+    assert_eq!(seats(), before, "a refused member takes no seat");
+    // A role on a remote asked for in a team's tab would be a member there,
+    // or an agent outside the team: neither is done yet.
+    let err = sb
+        .request(Request::AgentNew {
+            role: Some("reviewer".into()),
+            harness: None,
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(reviewer.clone()),
+            host: Some("box".into()),
+            dir: Some(dir.clone()),
+            on: None,
+        })
+        .expect_err("not in a team's tab yet");
+    assert!(err.contains("in a team's tab is not done yet"), "{err}");
+}
+
+/// `mira computer`, as the computers pane's buttons: `box` saved, changed
+/// and listed; tested by its name, where agents can run, and by a host
+/// and a directory before saving one, where a missing directory says so
+/// and exits non-zero; a host ssh cannot reach is an error; and removed.
+#[test]
+fn a_computer_is_saved_tested_and_removed_from_the_cli() {
+    e2e!();
+    let mut sb = Sandbox::new("rcomp");
+    sb.sshd();
+    sb.place_remote_mira(VERSION);
+    sb.launch();
+    sb.first_pane();
+    let dir = sb.project.canonicalize().unwrap().to_str().unwrap().to_string();
+    let mira = |args: &[&str]| sb.mira(None, args);
+    let ok = |args: &[&str]| {
+        let (code, out, err) = mira(args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+        out
+    };
+
+    assert_eq!(ok(&["computer", "add", "devbox", "--host", "box", "--dir", "/nope"]), "devbox\tbox\t/nope\n");
+    assert_eq!(ok(&["computer", "update", "devbox", "--dir", &dir]), format!("devbox\tbox\t{dir}\n"));
+    assert_eq!(ok(&["computer", "list"]), format!("devbox\tbox\t{dir}\n"));
+
+    let uname = |flag: &str| String::from_utf8_lossy(&std::process::Command::new("uname").arg(flag).output().unwrap().stdout).trim().to_string();
+    let reached = format!("reached: {} {}", uname("-s"), uname("-m"));
+    assert_eq!(ok(&["computer", "test", "devbox"]), format!("{reached}\ndirectory: found\nagents: can run there\n"));
+    let (code, out, err) = mira(&["computer", "test", "--host", "box", "--dir", "~/nope"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (1, format!("{reached}\ndirectory: not found\nagents: cannot run there: the directory is not there\n").as_str()),
+        "{err}"
+    );
+    let (code, out, err) = mira(&["computer", "test", "--host", "nohost.invalid", "--dir", "/w"]);
+    assert!(code != 0 && out.is_empty() && err.contains("nohost.invalid"), "{code} {out} {err}");
+
+    assert_eq!(ok(&["computer", "remove", "devbox"]), "");
+    assert!(ok(&["computer", "list"]).starts_with("(no computers saved"));
+    let (code, _, err) = mira(&["computer", "test", "devbox"]);
+    assert!(code != 0 && err.contains("no computer `devbox`"), "{err}");
+}
+
+fn pane_of(sb: &Sandbox, name: &str) -> String {
+    sb.member(name).and_then(|m| m["pane"].as_str().map(String::from)).expect(name)
+}

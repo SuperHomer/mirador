@@ -21,7 +21,9 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
                 m.is_some_and(|m| m.is_agent()),
                 m.is_some_and(|m| m.agent_live),
                 m.and_then(|m| m.agent_started_at).map(|t| t.elapsed()),
-                cmux_core::agents::AUTO_RESUME,
+                // No process on a remote is ever seen from here, as none is
+                // on Windows.
+                cmux_core::agents::AUTO_RESUME && !m.is_some_and(|m| m.remote_host.is_some()),
             )
         };
         match readiness {
@@ -34,6 +36,30 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
     }
 }
 
+/// Waits for the terminal of a remote agent's pane opened moments ago —
+/// by `agent new`, `team add` or a restart — to attach, for no longer than
+/// the app waits for any agent to start (`cmux_core::agents::START_GRACE`).
+/// The agent is started over ssh before the app shows its pane, so its
+/// hooks can report it running while the pane's own `mira attach` is still
+/// to come: a message sent then was refused for a pane about to be back.
+/// One between attaches for any other reason — reconnecting, restored and
+/// waiting for a key, done — is not waited for: nothing says it is coming.
+/// Never asleep holding the lock.
+fn wait_attached(state: &AppState, pane: &str) {
+    while !state.pty.is_running(pane) {
+        let restored = state.restored_panes.lock().unwrap().contains(pane);
+        let opening = state.meta.lock().unwrap().get(pane).is_some_and(|m| {
+            m.remote_command.is_some()
+                && m.remote_host.is_some()
+                && m.agent_started_at.is_some_and(|t| t.elapsed() < cmux_core::agents::START_GRACE)
+        });
+        if restored || !opening {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
 /// How long a Claude Code or Codex agent, once running, is given to show
 /// its input box. It draws one within a second or two of starting, and
 /// `wait_started` has waited for it to start already; a screen still
@@ -43,7 +69,7 @@ fn wait_started(state: &AppState, pane: &str) -> Result<(), String> {
 const INPUT_BOX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Why what is typed must not go into `pane` now, by what its screen shows
-/// (`cmux_core::handoff::showing`): a menu, which the Enter after it would
+/// (`cmux_core::handoff::showing_in`): a menu, which the Enter after it would
 /// answer; or, for a harness whose input box Mirador knows, no input box
 /// within [`INPUT_BOX_WAIT`] — the paste might dismiss a welcome screen
 /// and the Enter land on the menu that replaces it. No read outlives that
@@ -54,7 +80,7 @@ fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_proto
     use cmux_core::handoff::Showing;
     use cmux_protocol::Harness;
     use std::time::{Duration, Instant};
-    let knows_input_box = matches!(harness, Some(Harness::Claude | Harness::Codex));
+    let knows_input_box = matches!(harness, Some(Harness::Claude | Harness::Codex | Harness::Pi | Harness::OpenCode));
     let no_input_box =
         || Some("shows no input box yet: it may still be starting, or waiting on a screen of its own — look at its pane".into());
     let deadline = Instant::now() + INPUT_BOX_WAIT;
@@ -71,7 +97,7 @@ fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_proto
             Err(_) if seen_neither => return no_input_box(),
             Err(_) => return None,
         };
-        match cmux_core::handoff::showing(&screen) {
+        match cmux_core::handoff::showing_in(&screen, harness) {
             Showing::Choice(row) => return Some(format!("is showing a choice, `{row}`: answer it in its pane")),
             Showing::Composer => return None,
             Showing::Neither if !knows_input_box => return None,
@@ -87,8 +113,40 @@ fn screen_refusal(app: &tauri::AppHandle, pane: &str, harness: Option<cmux_proto
 fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> {
     let ws = state.workspace.lock().unwrap();
     let tab = ws.tab_of_pane(caller).ok_or_else(|| format!("no pane {caller}"))?;
-    let meta = state.meta.lock().unwrap();
-    Ok(cmux_core::layout::pane_ids(&tab.root)
+    Ok(agents_of(tab, &state.meta.lock().unwrap()))
+}
+
+/// The agents of the tab running the team called `team`: none when no
+/// tab runs one, and an error when two do, since a name could then mean
+/// either.
+fn team_candidates(state: &AppState, team: &str) -> Result<Option<Vec<Candidate>>, String> {
+    let ws = state.workspace.lock().unwrap();
+    let tabs: Vec<&cmux_core::state::Tab> =
+        ws.tabs.iter().filter(|t| t.team.as_ref().is_some_and(|run| run.name == team)).collect();
+    match tabs.as_slice() {
+        [] => Ok(None),
+        [tab] => Ok(Some(agents_of(tab, &state.meta.lock().unwrap()))),
+        many => {
+            let ids: Vec<&str> = many.iter().map(|t| t.id.as_str()).collect();
+            Err(format!("team `{team}` is running in more than one tab ({}): name the pane by its id", ids.join(", ")))
+        }
+    }
+}
+
+/// The names of the teams running now, for an error that names a team
+/// that is not one of them.
+fn running_teams(state: &AppState) -> String {
+    let ws = state.workspace.lock().unwrap();
+    let names: Vec<&str> = ws.tabs.iter().filter_map(|t| Some(t.team.as_ref()?.name.as_str())).collect();
+    if names.is_empty() {
+        " — there are none".into()
+    } else {
+        format!(" (there are: {})", names.join(", "))
+    }
+}
+
+fn agents_of(tab: &cmux_core::state::Tab, meta: &std::collections::HashMap<String, cmux_core::state::PaneMeta>) -> Vec<Candidate> {
+    cmux_core::layout::pane_ids(&tab.root)
         .into_iter()
         .filter_map(|pane| {
             let m = meta.get(&pane).filter(|m| m.is_agent())?;
@@ -99,17 +157,28 @@ fn candidates(state: &AppState, caller: &str) -> Result<Vec<Candidate>, String> 
                 .map(|s| s.name.clone());
             Some(Candidate { member, session: m.agent_name.clone(), role: m.agent_role.clone(), pane })
         })
-        .collect())
+        .collect()
 }
 
-/// The pane `name` means from `caller`'s tab: a teammate by name, or any
-/// pane by its id.
+/// The pane `name` means from `caller`'s tab: a teammate by name, the
+/// agent `<name>` of the tab running team `<team>` as `<team>/<name>`, or
+/// any pane by its id.
 pub fn find(state: &AppState, name: &str, caller: Option<String>) -> Result<String, String> {
     if state.workspace.lock().unwrap().all_pane_ids().iter().any(|p| p == name) {
         return Ok(name.to_string());
     }
     let caller = caller.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    cmux_core::handoff::resolve(name, &candidates(state, &caller)?)
+    let here = || cmux_core::handoff::resolve(name, &candidates(state, &caller)?, None);
+    let Some((team, member)) = name.trim().split_once('/') else {
+        return here();
+    };
+    let team = team.trim();
+    match team_candidates(state, team)? {
+        Some(there) => cmux_core::handoff::resolve(member, &there, Some(team)),
+        // A session's name is free text and may hold a `/` of its own:
+        // what reached a teammate before still does.
+        None => here().map_err(|_| format!("no team `{team}` is running{}", running_teams(state))),
+    }
 }
 
 /// Types `message` into `to`'s terminal, said to be from the caller when
@@ -127,7 +196,7 @@ pub fn send(
 ) -> Result<String, String> {
     use tauri::Manager;
     let state = &*app.state::<AppState>();
-    let card = card.map(|id| crate::tasks::written(state, &id)).transpose()?;
+    let card = card.map(|id| crate::tasks::written(state, &id).map(|c| c.id)).transpose()?;
     let pane = find(state, to, caller.clone())?;
     if caller.as_deref() == Some(pane.as_str()) {
         return Err("that is the pane this runs in: an agent cannot message itself".into());
@@ -141,8 +210,15 @@ pub fn send(
         Ok::<_, String>((m.status(), m.harness()))
     };
     cmux_core::handoff::can_receive(status(state)?.0, force).map_err(|e| format!("{to}: {e}"))?;
+    wait_attached(state, &pane);
     if !state.pty.is_running(&pane) {
-        return Err(format!("{to}'s terminal has not started yet: show its tab once, then send again"));
+        // A remote agent's pane with no terminal is between attaches:
+        // reconnecting, waiting for a key, or done. The app cannot tell.
+        let remote = state.meta.lock().unwrap().get(&pane).filter(|m| m.remote_command.is_some()).and_then(|m| m.remote_host.clone());
+        return Err(match remote {
+            Some(host) => format!("{to} on {host} is not attached right now: send again once its pane is back"),
+            None => format!("{to}'s terminal has not started yet: show its tab once, then send again"),
+        });
     }
     wait_started(state, &pane).map_err(|e| format!("{to}: {e}"))?;
     // As it is once up, not as it was before the wait: still an agent, and
@@ -156,9 +232,18 @@ pub fn send(
             return Err(format!("{to} {why}, or send with --force"));
         }
     }
-    let from = caller.as_deref().and_then(|c| sender(state, c));
+    let to_tab = state.workspace.lock().unwrap().tab_of_pane(&pane).map(|t| t.id.clone());
+    let from = caller.as_deref().and_then(|c| sender_in(state, c, to_tab.as_deref()));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
+    let before = (harness == Some(cmux_protocol::Harness::Codex))
+        .then(|| crate::server::read_screen(app, &pane, None, std::time::Duration::from_secs(2)).ok())
+        .flatten();
     state.pty.write(&pane, &paste)?;
+    if let Some(before) = before {
+        // Characters, not bytes: Codex handles one key per character.
+        let chars = std::str::from_utf8(&paste).map_or(paste.len(), |s| s.chars().count());
+        wait_pasted(app, &pane, before, chars);
+    }
     // Enter on its own read: a TUI that gets it with the paste can take it
     // as part of the paste and leave the message unsent.
     std::thread::sleep(cmux_core::handoff::enter_delay(harness));
@@ -166,6 +251,30 @@ pub fn send(
     let from = from.unwrap_or_else(|| "you".into());
     crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card, title);
     Ok(pane)
+}
+
+/// Reads `pane`'s screen until the paste of `chars` characters written
+/// after `before` was read shows there (`cmux_core::handoff::PasteWatch`,
+/// which says why). A screen that cannot be read, or a Codex that never
+/// shows the paste, must not hang the send, so this returns anyway once
+/// the read fails or the budget runs out, and the Enter goes as it would
+/// have. The budget grows with the paste (`cmux_core::handoff::paste_wait`,
+/// beside the measurement it comes from).
+fn wait_pasted(app: &tauri::AppHandle, pane: &str, before: String, chars: usize) {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + cmux_core::handoff::paste_wait(chars);
+    let mut watch = cmux_core::handoff::PasteWatch::new(before);
+    loop {
+        std::thread::sleep(Duration::from_millis(150));
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        let Ok(screen) = crate::server::read_screen(app, pane, None, left) else { return };
+        if watch.landed(&screen) {
+            return;
+        }
+    }
 }
 
 /// Starts the agent in `pane` on a new conversation, by typing its
@@ -183,8 +292,17 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
         Ok((m.status(), m.harness()))
     };
     agent(state)?;
+    wait_attached(state, pane);
     if !state.pty.is_running(pane) {
-        return Err(("not running", "its terminal has not started yet: show its tab once, then clear again".into()));
+        // As for a send: a remote agent's pane between attaches.
+        let remote = state.meta.lock().unwrap().get(pane).filter(|m| m.remote_command.is_some()).and_then(|m| m.remote_host.clone());
+        return Err((
+            "not running",
+            match remote {
+                Some(host) => format!("it is not attached on {host} right now: clear again once its pane is back"),
+                None => "its terminal has not started yet: show its tab once, then clear again".into(),
+            },
+        ));
     }
     wait_started(state, pane).map_err(|e| ("not running", e))?;
     // As it is once up, not as it was before the wait.
@@ -200,6 +318,21 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
     // Enter on its own read, as `send` does.
     std::thread::sleep(cmux_core::handoff::enter_delay(harness));
     state.pty.write(pane, b"\r").map_err(|e| ("not running", e))?;
+    // A Pi's or an OpenCode's `/new` moves it to a conversation of its own
+    // making, whose id is not cheap to learn: Pi writes the new session's
+    // file only on its first message, in a directory every Pi in that
+    // project shares, and OpenCode keeps its ids in its server's store. The
+    // one Mirador started it on is the cleared one, and a restart must not
+    // bring that back: the record goes, and the pane comes back with
+    // nothing to resume. Only this clear is known: a `/new` or a session
+    // switch typed in the pane itself leaves the record on the old
+    // conversation, which a restart or a save then brings back.
+    if matches!(harness, Some(cmux_protocol::Harness::Pi | cmux_protocol::Harness::OpenCode)) {
+        if let Some(m) = state.meta.lock().unwrap().get_mut(pane) {
+            m.agent_session = None;
+        }
+        state.session_dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     Ok(())
 }
 
@@ -225,4 +358,26 @@ pub fn sender(state: &AppState, pane: &str) -> Option<String> {
         .into_iter()
         .find(|x| x.pane == pane)
         .and_then(|x| cmux_core::handoff::sender_name(&x))
+}
+
+/// [`sender`], as an agent in tab `seen_from` can reply to it: its name
+/// from its own tab; from another, `<team>/<name>` when its tab runs a
+/// team only it runs, else its pane id — a bare name would find nobody
+/// there, or someone else. None when it is no agent.
+pub fn sender_in(state: &AppState, pane: &str, seen_from: Option<&str>) -> Option<String> {
+    let name = sender(state, pane);
+    let ws = state.workspace.lock().unwrap();
+    let tab = ws.tab_of_pane(pane);
+    if seen_from.is_none() || tab.map(|t| t.id.as_str()) == seen_from {
+        return name;
+    }
+    if !state.meta.lock().unwrap().get(pane).is_some_and(|m| m.is_agent()) {
+        return None;
+    }
+    let team = tab.and_then(|t| t.team.as_ref()).map(|run| run.name.as_str());
+    let only = |team: &str| ws.tabs.iter().filter(|t| t.team.as_ref().is_some_and(|r| r.name == team)).count() == 1;
+    Some(match (team, name) {
+        (Some(team), Some(name)) if only(team) => format!("{team}/{name}"),
+        _ => pane.to_string(),
+    })
 }

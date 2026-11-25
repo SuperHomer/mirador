@@ -37,6 +37,36 @@ fn a_pane_mounts_and_its_terminal_echoes() {
     assert!(cwd.ends_with("proj"), "the first pane works in defaultCwd, not {cwd:?}");
 }
 
+/// Output the app strips before the terminal sees it is not output the
+/// terminal owes an ack for. 3 MB of OSC 99 with an empty payload — a
+/// notification sequence the scanner drops, and that raises nothing —
+/// is more than the 2 MB a pane may have unacked. Counted, it parked the
+/// reader for good: the pane froze with the shell blocked on its write,
+/// and nothing typed afterwards ever showed.
+#[test]
+fn a_pane_keeps_running_through_output_it_never_shows() {
+    e2e!();
+    let mut sb = Sandbox::new("stripped");
+    sb.launch();
+    let pane = sb.first_pane();
+    // The sums are the shell's, as above: the typed line shows `$((…))`,
+    // so only output past the flood prints `flood-42`.
+    sb.type_into(
+        &pane,
+        "yes $'\\e]99;;\\a' | head -n 450000 | tr -d '\\n'; echo; echo flood-$((6*7))\r",
+    );
+    sb.wait_for_screen(
+        &pane,
+        "output after 3 MB of stripped notifications",
+        LONG,
+        |s| s.lines().any(|l| l.trim() == "flood-42"),
+    );
+    sb.type_into(&pane, "echo alive-$((6*7+1))\r");
+    sb.wait_for_screen(&pane, "typing after the flood", LONG, |s| {
+        s.lines().any(|l| l.trim() == "alive-43")
+    });
+}
+
 /// The app's own webview keeps its plugins now that the capability names
 /// it, `"webviews": ["main"]`, rather than its window. It learns of a
 /// pane added after launch, and answers `read-screen`, through Tauri's
@@ -93,6 +123,9 @@ fn a_role_pane_comes_back_resumed_with_its_model_and_limits() {
         task: Some("look at main".into()),
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -193,6 +226,9 @@ fn a_codex_records_its_thread_through_notify_and_keeps_the_persons_own() {
         task: None,
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -229,6 +265,9 @@ fn a_codex_role_pane_comes_back_resuming_its_thread() {
         task: Some("look at main".into()),
         target: None,
         pane_id: Some(first),
+        host: None,
+        dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -251,6 +290,105 @@ fn a_codex_role_pane_comes_back_resuming_its_thread() {
     assert!(given.contains(&"default_permissions=\"mirador\""), "{args:?}");
     // Its task was the launch's, not the resume's.
     assert!(!args.iter().any(|a| a == "look at main"), "{args:?}");
+}
+
+/// Pi and OpenCode start plain from `mira agent new --harness`, each with
+/// the task as its first message the way its CLI takes one — Pi as an
+/// argument after `--`, OpenCode's TUI as `--prompt` — and are listed as
+/// what they are from the start.
+#[test]
+fn plain_pi_and_opencode_start_with_their_task() {
+    e2e!();
+    let mut sb = Sandbox::new("piopencode");
+    sb.launch();
+    let first = sb.first_pane();
+    // Each on a conversation Mirador picked, so it can resume it.
+    for (harness, kind, session, task, listed) in [
+        ("pi", "pi", "--session-id", ["--", "do x"], "pi"),
+        ("opencode", "opencode", "--session", ["--prompt", "do x"], "openCode"),
+    ] {
+        let (code, out, err) = sb.mira(Some(&first), &["agent", "new", "--harness", harness, "do x"]);
+        assert_eq!(code, 0, "{harness}: {err}");
+        let pane = out.trim().to_string();
+        let started = sb.wait_for(&format!("{kind} to start"), LONG, || sb.events("start", &pane).into_iter().next());
+        assert_eq!(started["kind"], kind, "{started}");
+        let args: Vec<String> = serde_json::from_value(started["args"].clone()).unwrap();
+        assert_eq!((args.len(), args[0].as_str(), &args[2..]), (4, session, &task.map(String::from)[..]), "{args:?}");
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap();
+        let agent = agents.iter().find(|a| a["paneId"] == pane.as_str()).unwrap_or_else(|| sb.fail("not in agent list"));
+        assert_eq!(agent["harness"], listed, "{agent}");
+    }
+}
+
+/// A Pi's and an OpenCode's pane come back on the conversation each was
+/// started on: Mirador picks the id up front (`--session-id`,
+/// `--session`) and types the same launch line, no task, with the same id
+/// after a relaunch. A cleared one is not brought back, since `/new` left
+/// that conversation. And a team with a Pi member is saved and resumed on
+/// its id.
+#[test]
+fn pi_and_opencode_panes_come_back_on_their_conversation() {
+    e2e!();
+    let mut sb = Sandbox::new("piocrestore");
+    sb.write(".mirador/roles/builder.md", "---\nharness: pi\nmodel: sonnet\n---\nYou build.\n");
+    sb.write(".mirador/roles/helper.md", "---\nharness: opencode\n---\nYou help.\n");
+    sb.write(".mirador/roles/spare.md", "---\nharness: pi\n---\nYou spare.\n");
+    sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: builder\n    lead: true\n---\nShip small.\n");
+    sb.launch();
+    let first = sb.first_pane();
+    let start = |role: &str| {
+        sb.call(Request::AgentNew {
+            role: Some(role.into()),
+            harness: None,
+            title: None,
+            task: Some("look at main".into()),
+            target: None,
+            pane_id: Some(first.clone()),
+            host: None,
+            dir: None,
+            on: None,
+        })["paneId"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let (builder, helper, spare) = (start("builder"), start("helper"), start("spare"));
+    let pi = sb.nth_start(&builder, 1);
+    let pi_id = cmux_e2e::flag(&pi, "--session-id").expect("a session id");
+    assert_eq!(pi.last().map(String::as_str), Some("look at main"), "{pi:?}");
+    let oc = sb.nth_start(&helper, 1);
+    let oc_id = cmux_e2e::flag(&oc, "--session").expect("a session");
+    assert!(oc_id.starts_with("ses_"), "{oc:?}");
+    sb.nth_start(&spare, 1);
+    // `/new` moves the spare to a conversation Mirador does not know.
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "clear", &spare]);
+    assert_eq!(code, 0, "{err}");
+    sb.wait_for("the spare's /new", LONG, || sb.events("message", &spare).into_iter().find(|m| m["text"] == "/new"));
+
+    sb.quit();
+    sb.launch();
+    let pi = sb.nth_start(&builder, 2);
+    assert_eq!(cmux_e2e::flag(&pi, "--session-id").as_deref(), Some(pi_id.as_str()), "{pi:?}");
+    assert_eq!(cmux_e2e::flag(&pi, "--model").as_deref(), Some("sonnet"), "{pi:?}");
+    assert!(!pi.iter().any(|a| a == "look at main"), "the task was the launch's: {pi:?}");
+    let oc = sb.nth_start(&helper, 2);
+    assert_eq!(oc[0], "--standalone", "{oc:?}");
+    assert_eq!(cmux_e2e::flag(&oc, "--session").as_deref(), Some(oc_id.as_str()), "{oc:?}");
+    assert_eq!(sb.events("start", &spare).len(), 1, "the cleared conversation is not brought back");
+
+    // A team's Pi member, saved and resumed in a tab of its own.
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    let member = sb.wait_for("the pair's builder", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
+    let id = cmux_e2e::flag(&sb.nth_start(&member, 1), "--session-id").expect("a session id");
+    let (code, _, err) = sb.mira(Some(&member), &["team", "save"]);
+    assert_eq!(code, 0, "{err}");
+    let tab = sb.teams()[0]["tabId"].as_str().unwrap().to_string();
+    sb.call(Request::CloseTab { tab_id: tab });
+    sb.wait_for("the pair gone", LONG, || sb.teams().is_empty().then_some(()));
+    sb.call(Request::TeamResume { name: "pair".into() });
+    let member = sb.wait_for("the pair resumed", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
+    let args = sb.nth_start(&member, 1);
+    assert_eq!(cmux_e2e::flag(&args, "--session-id").as_deref(), Some(id.as_str()), "{args:?}");
 }
 
 /// The editor for role, way and team files opens beside the pane it is
@@ -332,6 +470,55 @@ fn there_is_one_settings_pane() {
     sb.quit();
     sb.launch();
     assert_eq!(listed(&sb), [settings], "it comes back as the settings pane, not a shell");
+}
+
+/// The computers are in mirador.json, one file, so there is one computers
+/// pane: `computer open` opens it beside the pane it is asked from, asked
+/// again from another tab it is focused rather than opened twice, and it
+/// comes back after a relaunch. What it draws is the webview's, out of
+/// reach here; that it draws without taking the page down is not.
+#[test]
+fn there_is_one_computers_pane() {
+    e2e!();
+    let mut sb = Sandbox::new("computers");
+    let path = sb.config.join("mirador/mirador.json");
+    let mut cfg: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    cfg["computers"] = serde_json::json!([{ "name": "devbox", "host": "box", "dir": "/srv/app" }]);
+    std::fs::write(&path, cfg.to_string()).unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+    let (code, out, err) = sb.mira(Some(&first), &["computer", "open", "--split"]);
+    assert_eq!(code, 0, "{err}");
+    let computers = out.trim().to_string();
+    let listed = |sb: &Sandbox| -> Vec<String> {
+        sb.snapshot()["computersPanes"]
+            .as_array()
+            .map(|l| l.iter().filter_map(|c| c["paneId"].as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(listed(&sb), std::slice::from_ref(&computers));
+    assert_eq!(sb.panes(), [first.clone(), computers.clone()]);
+    // A render throw in the pane takes the whole tree down with it: the
+    // terminal beside it still answering says the page survived it.
+    sb.type_into(&first, "echo still-$((40+2))\r");
+    sb.wait_for("the terminal beside the computers pane", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
+    });
+
+    let (code, out, err) = sb.mira(None, &["new-tab"]);
+    assert_eq!(code, 0, "{err}");
+    let elsewhere = out.trim().to_string();
+    let (code, out, err) = sb.mira(Some(&elsewhere), &["computer", "open", "--tab"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), computers, "the open computers pane again");
+    assert_eq!(listed(&sb), std::slice::from_ref(&computers));
+    let snap = sb.snapshot();
+    let active = snap["tabs"].as_array().unwrap().iter().find(|t| t["id"] == snap["activeTab"]).unwrap().clone();
+    assert_eq!(active["focusedPane"], computers.as_str(), "shown, in its own tab");
+
+    sb.quit();
+    sb.launch();
+    assert_eq!(listed(&sb), [computers], "it comes back as the computers pane, not a shell");
 }
 
 /// `mira usage` reads the accounts from the sandbox's own home, the
@@ -517,7 +704,7 @@ fn the_wall_is_a_view_of_its_tab_and_comes_back() {
     sb.launch();
     let first = sb.first_pane();
     sb.wait_for("the first pane to mount", LONG, || sb.screen(&first));
-    let agent = sb.call(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()) })
+    let agent = sb.call(Request::AgentNew { role: None, harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()), host: None, dir: None, on: None })
         ["paneId"]
         .as_str()
         .unwrap()

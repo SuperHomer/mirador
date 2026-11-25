@@ -8,7 +8,7 @@
 
 /// When the rates below were last checked against Anthropic's model table:
 /// what a cost shown from them is as of.
-pub const PRICES_CHECKED: &str = "2026-10-06";
+pub const PRICES_CHECKED: &str = "2026-11-23";
 
 /// A model's prices, in US dollars per million tokens.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,18 +32,26 @@ pub struct Usage {
 
 /// Model, input, output, and cache read where the table gives one; any
 /// other model's cache read is 0.1× its input.
+///
+/// `npm run check:prices` compares this with Anthropic's pricing page; run
+/// it before a release, and move `PRICES_CHECKED` when it passes.
 const TABLE: &[(&str, f64, f64, Option<f64>)] = &[
+    ("claude-fable-5-2", 8.0, 40.0, Some(0.20)),
+    ("claude-mythos-5-2", 8.0, 40.0, Some(0.20)),
     ("claude-fable-5-1", 10.0, 50.0, Some(0.25)),
+    ("claude-mythos-5-1", 10.0, 50.0, Some(0.25)),
     ("claude-fable-5", 10.0, 50.0, None),
-    ("claude-mythos-5-1", 10.0, 50.0, None),
+    ("claude-mythos-5", 10.0, 50.0, None),
     ("claude-opus-5-5", 4.0, 20.0, Some(0.20)),
     ("claude-opus-5", 5.0, 25.0, None),
     ("claude-opus-4-8", 5.0, 25.0, None),
     ("claude-opus-4-7", 5.0, 25.0, None),
     ("claude-opus-4-6", 5.0, 25.0, None),
-    ("claude-sonnet-5-5", 2.0, 10.0, Some(0.20)),
+    ("claude-opus-4-5", 5.0, 25.0, None),
+    ("claude-sonnet-5-5", 2.0, 10.0, Some(0.10)),
     ("claude-sonnet-5", 2.0, 10.0, None),
     ("claude-sonnet-4-6", 3.0, 15.0, None),
+    ("claude-sonnet-4-5", 3.0, 15.0, None),
     // Up to a 100K-token prompt. Above that it is 0.50 / 2.50, which is
     // not modelled: these rates undercount such a turn.
     ("claude-haiku-5-5", 0.10, 0.50, None),
@@ -55,7 +63,7 @@ const ALIASES: &[(&str, &str)] = &[
     ("opus", "claude-opus-5-5"),
     ("sonnet", "claude-sonnet-5-5"),
     ("haiku", "claude-haiku-5-5"),
-    ("fable", "claude-fable-5-1"),
+    ("fable", "claude-fable-5-2"),
 ];
 
 /// `model`'s rates: a full id (`claude-opus-5-5`), a dated one
@@ -114,7 +122,7 @@ mod tests {
         assert_eq!(rates("claude-opus-5-5-20261001"), Some(opus));
         assert_eq!(rates("sonnet"), rates("claude-sonnet-5-5"));
         assert_eq!(rates("haiku"), rates("claude-haiku-5-5"));
-        assert_eq!(rates("fable"), rates("claude-fable-5-1"));
+        assert_eq!(rates("fable"), rates("claude-fable-5-2"));
         assert_eq!(rates("claude-haiku-4-5-20251001"), rates("claude-haiku-4-5"));
         // Only a date comes off: `-5` is part of the name.
         assert_ne!(rates("claude-opus-5"), Some(opus));
@@ -130,6 +138,8 @@ mod tests {
         assert!(close(haiku.cache_read, 0.1));
         assert!(close(haiku.cache_write, 1.25));
         assert_eq!(rates("claude-fable-5-1").unwrap().cache_read, 0.25);
+        let fable = rates("claude-fable-5-2").unwrap();
+        assert_eq!((fable.input, fable.output, fable.cache_read), (8.0, 40.0, 0.20));
         assert!(close(rates("claude-fable-5").unwrap().cache_read, 1.0));
     }
 

@@ -513,10 +513,10 @@ mod tests {
     fn prices_each_bucket_at_its_rate() {
         let cost = |usage: &str| feed(&[&reply("m1", "claude-sonnet-5-5", usage)]).summary().cost_usd.unwrap();
         let close = |a: f64, b: f64| (a - b).abs() < 1e-12;
-        // Sonnet 5.5: $2 in, $2.50 cache write, $0.20 cache read, $10 out.
+        // Sonnet 5.5: $2 in, $2.50 cache write, $0.10 cache read, $10 out.
         assert!(close(cost(r#""input_tokens":1000000"#), 2.0));
         assert!(close(cost(r#""cache_creation_input_tokens":1000000"#), 2.5));
-        assert!(close(cost(r#""cache_read_input_tokens":1000000"#), 0.20));
+        assert!(close(cost(r#""cache_read_input_tokens":1000000"#), 0.10));
         assert!(close(cost(r#""output_tokens":1000000"#), 10.0));
     }
 

@@ -47,6 +47,16 @@ pub struct SessionPane {
     pub agent_session: Option<String>,
     #[serde(default)]
     pub remote_host: Option<String>,
+    /// What a remote agent's pane runs on `remote_host`: attaching to the
+    /// agent's holder there. A keypress on the restored pane runs it again,
+    /// back to the same agent if it is still running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_command: Option<String>,
+    /// The directory a remote pane, a shell or an agent, was opened in on
+    /// `remote_host`: where a restored shell starts again, and where a
+    /// shell split from either starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_dir: Option<String>,
     #[serde(default)]
     pub diff_repo: Option<String>,
     #[serde(default)]
@@ -74,6 +84,9 @@ pub struct SessionPane {
     /// Usage pane: it comes back empty and reads the files again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub usage: bool,
+    /// Computers pane: it comes back and reads mirador.json again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub computers: bool,
     /// Graph pane: the repository it draws, and the diff pane it
     /// retargets when a commit is clicked (ignored if that pane is gone).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -194,6 +207,8 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         browser_url: m.and_then(|m| m.browser_url.clone()),
                         agent_session: m.and_then(|m| m.agent_session.clone()),
                         remote_host: m.and_then(|m| m.remote_host.clone()),
+                        remote_command: m.and_then(|m| m.remote_command.clone()),
+                        remote_dir: m.and_then(|m| m.remote_dir.clone()),
                         diff_repo: m.and_then(|m| m.diff_repo.clone()),
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
@@ -203,6 +218,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_editor: m.is_some_and(|m| m.agent_editor),
                         settings: m.is_some_and(|m| m.settings),
                         usage: m.is_some_and(|m| m.usage),
+                        computers: m.is_some_and(|m| m.computers),
                         graph_repo: m.and_then(|m| m.graph_repo.clone()),
                         graph_diff_pane: m.and_then(|m| m.graph_diff_pane.clone()),
                         whats_new: m.and_then(|m| m.whats_new.clone()),
@@ -298,6 +314,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
         view: file.view,
         camera: file.camera,
         viewport: None,
+        camera_sets: 0,
     };
     // A session written before frames were kept apart may have them
     // overlapping; from here on they never do.
@@ -319,6 +336,8 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     browser_url: p.browser_url,
                     agent_session: p.agent_session,
                     remote_host: p.remote_host,
+                    remote_command: p.remote_command,
+                    remote_dir: p.remote_dir,
                     diff_repo: p.diff_repo,
                     diff_spec: p.diff_spec,
                     agent_role: p.agent_role,
@@ -327,6 +346,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_editor: p.agent_editor,
                     settings: p.settings,
                     usage: p.usage,
+                    computers: p.computers,
                     graph_repo: p.graph_repo,
                     graph_diff_pane: p.graph_diff_pane,
                     whats_new: p.whats_new,
@@ -382,6 +402,7 @@ mod tests {
                 cmux_protocol::TeamSeat { name: "lead".into(), role: "planner".into(), pane: panes[0].clone(), lead: true },
                 cmux_protocol::TeamSeat { name: "dev".into(), role: "dev".into(), pane: panes[1].clone(), lead: false },
             ],
+            remote: None,
         };
         let tab = ws.new_team_tab(crate::teams::layout(&panes, None), run.clone(), "squad");
         let file = capture(&ws, &HashMap::new());
@@ -392,6 +413,26 @@ mod tests {
         assert_eq!(t.title.as_deref(), Some("squad"));
         // A tab with no team writes nothing for it.
         assert!(!json.contains(r#""team":null"#));
+    }
+
+    /// A team on a remote comes back knowing where it runs, and one saved
+    /// before teams kept that loads as a local team.
+    #[test]
+    fn a_team_comes_back_knowing_where_it_runs() {
+        let mut ws = Workspace::default();
+        let panes = Workspace::fresh_pane_ids(1);
+        let run = cmux_protocol::TeamRun {
+            name: "squad".into(),
+            members: vec![cmux_protocol::TeamSeat { name: "lead".into(), role: "planner".into(), pane: panes[0].clone(), lead: true }],
+            remote: Some(cmux_protocol::TeamRemote { host: "box".into(), dir: "~/work".into() }),
+        };
+        let tab = ws.new_team_tab(crate::teams::layout(&panes, None), run.clone(), "squad");
+        let json = serde_json::to_string(&capture(&ws, &HashMap::new())).unwrap();
+        let (back, _) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(back.tabs.iter().find(|t| t.id == tab).unwrap().team.as_ref(), Some(&run));
+
+        let old: cmux_protocol::TeamRun = serde_json::from_str(r#"{ "name": "squad", "members": [] }"#).unwrap();
+        assert_eq!(old.remote, None);
     }
 
     #[test]
@@ -531,6 +572,21 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_shell_comes_back_in_its_directory() {
+        let ws = Workspace::default();
+        let pane = ws.focused_pane();
+        let mut meta = HashMap::new();
+        meta.insert(
+            pane.clone(),
+            PaneMeta { remote_host: Some("devbox".into()), remote_dir: Some("~/work".into()), ..Default::default() },
+        );
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        let (_, back) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!((back[&pane].remote_host.as_deref(), back[&pane].remote_dir.as_deref()), (Some("devbox"), Some("~/work")));
+        assert_eq!(back[&pane].remote_command, None, "a shell, not an agent");
+    }
+
+    #[test]
     fn the_board_comes_back_as_it_was_left() {
         let mut ws = Workspace::default();
         let a = ws.focused_pane();
@@ -653,6 +709,20 @@ mod tests {
         assert!(!rmeta.get(&shell).is_some_and(|m| m.usage));
         // A shell's entry does not say it is not one.
         assert_eq!(json.matches("\"usage\"").count(), 1);
+    }
+
+    #[test]
+    fn a_computers_pane_comes_back_as_one() {
+        let mut ws = Workspace::default();
+        let shell = ws.focused_pane();
+        let computers = ws.split_pane(&shell, SplitDir::Row).unwrap();
+        let meta = HashMap::from([(computers.clone(), PaneMeta { computers: true, ..Default::default() })]);
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        let (_, rmeta) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert!(rmeta[&computers].computers);
+        assert!(!rmeta.get(&shell).is_some_and(|m| m.computers));
+        // A shell's entry does not say it is not one.
+        assert_eq!(json.matches("\"computers\"").count(), 1);
     }
 
     #[test]

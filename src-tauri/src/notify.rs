@@ -4,7 +4,7 @@
 
 use std::sync::atomic::Ordering;
 
-use cmux_protocol::NotificationDto;
+use cmux_protocol::{NotificationDto, NotifyKind};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
@@ -46,13 +46,29 @@ fn now_ms() -> u64 {
 }
 
 /// Entry point for OSC notification events (runs on a forwarder thread).
+/// `kind` is what a hook's notification is about; in a team tab it decides
+/// whether the notification is raised at all (`teams::team_should_notify`).
 pub fn handle_notification(
     app: &AppHandle,
     pane_id: &str,
     title: Option<String>,
     body: String,
+    kind: Option<NotifyKind>,
 ) {
     let state = app.state::<AppState>();
+    let wanted = {
+        let ws = state.workspace.lock().unwrap();
+        let meta = state.meta.lock().unwrap();
+        match ws.tab_of_pane(pane_id).and_then(|t| t.team.as_ref()) {
+            Some(team) => cmux_core::teams::team_should_notify(team, pane_id, kind, |p| {
+                meta.get(p).and_then(|m| m.status())
+            }),
+            None => true,
+        }
+    };
+    if !wanted {
+        return;
+    }
     let window_focused = state.window_focused.load(Ordering::Relaxed);
 
     // A notification for the pane you're looking at needs no attention ring.

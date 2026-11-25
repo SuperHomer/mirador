@@ -36,8 +36,8 @@ later). The hooks call `mira` by its absolute path, so they work whether or
 not `mira` is on PATH; if the app moves, the next launch points them at the
 new location.
 
-This wires these hooks, all calling `mira claude-hook`, and installs the
-`/mira-diff` skill in `~/.claude/skills/mira-diff/`:
+This installs two skills in `~/.claude/skills/` — `/mira-diff` for you and
+`mira` for the model — and wires these hooks, all calling `mira claude-hook`:
 
 - **Notification** → the pane running that Claude session lights up with
   Claude's message (needs-permission, idle, …)
@@ -49,11 +49,17 @@ This wires these hooks, all calling `mira claude-hook`, and installs the
   The tool hooks fire on every tool call; the app answers them without a
   lookup unless some agent is waiting on you.
 
+In a team's tab, members hand work to each other all day, so only two
+things notify: a member that needs you (a permission prompt, a question)
+or whose turn failed, and the lead's turn end once no other member is
+working — the team has stopped. Members' turn ends, their OSC 9s and
+everyone's idle reminders are silent.
+
 A launch that finds hooks from an earlier version, which installed fewer
 events, adds the missing ones — calling the same `mira` the hooks already
 call.
 
-On macOS and Linux it also puts `mira claude-statusline` in front of your
+It also puts `mira claude-statusline` in front of your
 `statusLine`, because the status line is the only place Claude Code tells
 your plan's limits (`rate_limits`): the wrapper keeps the latest in
 `claude-limits.json` in Mirador's data directory, then runs your own
@@ -62,16 +68,30 @@ command becomes `"<mira>" claude-statusline --run '<your command>'`, kept
 whole in one quoted argument, its other keys (`padding`, …) untouched;
 `mira hooks remove` puts it back exactly. With no status line of your own,
 setup adds the bare wrapper, which prints nothing; remove takes it out. A
-status line that is not a `command` is left as it is. Windows is skipped:
-Claude Code runs status lines there through Git Bash or PowerShell, and
-the wrapper does not run your command on Windows.
+status line that is not a `command` is left as it is. The wrapper runs
+your command with `sh -c` on every platform: on Windows, Claude Code runs
+the status line through Git Bash, whose `sh` the wrapper finds on the
+PATH it inherits.
 
 `/mira-diff` is the human's side of `mira diff`: typing it in a Claude Code
 pane opens the same review surface, with the same arguments. It sets
 `disable-model-invocation`, because an agent that wants a diff pane should
-run `mira diff` rather than reach for a slash command. Both actions only
-touch a file carrying their own marker, so a `/mira-diff` you wrote yourself
-is left alone by `setup` and by `remove`.
+run `mira diff` rather than reach for a slash command.
+
+`mira` is the model's. Without it a plain Claude Code session in a Mirador
+pane never learns the CLI exists: the hooks only report to Mirador, and
+only a team's members are told about `mira`, in their prompt. Claude loads
+it when you name Mirador, `mira` or a pane, or ask it to start, message or
+wait for another agent or a team, or for a card on the task board. Its body
+is a one-screen map of the main commands that points at
+`mira <command> --help` for the rest. Its description is the only cost in
+every session; the body loads only when the skill is used. It pre-approves
+no command, so each `mira` call goes through your own permission rules.
+
+Both skills carry the same marker, and both actions only touch a file
+carrying it, so a `/mira-diff` or `mira` skill you wrote yourself is left
+alone by `setup` and by `remove`. Delete the marker line from an installed
+one and Mirador stops managing it.
 
 A skill rather than a `commands/mira-diff.md`: Claude Code merged custom
 commands into skills and both spellings still produce `/mira-diff`, but
@@ -262,6 +282,7 @@ mira agent edit [--tab]                       # a pane to edit them, and teams; 
 mira agent new --role reviewer "review the auth change"   # a pane beside this one
 mira agent new --tab "fix the flaky test"     # plain claude, in a tab of its own
 mira agent new --harness codex "fix the flaky test"   # plain codex, beside this one
+mira agent new --harness pi "fix the flaky test"      # plain pi; or --harness opencode
 mira agent list                               # pane, status, harness, name, model
 mira agent wall                               # this tab as its agents' wall, or its splits again
 mira agent wall --focus | --grid              # the wall, in that layout (never turns it off)
@@ -295,7 +316,7 @@ any role can share:
 ```markdown
 <!-- .mirador/roles/reviewer.md -->
 ---
-harness: claude        # or codex; Claude Code when absent
+harness: claude        # or codex, pi, opencode; Claude Code when absent
 model: haiku
 effort: high           # how hard the model thinks; its default when absent
 way: our-way           # .mirador/ways/our-way.md, appended after this prompt
@@ -316,7 +337,9 @@ whole catalog, including `problem` on a role that cannot start.
 `effort` goes to Claude Code as `--effort` (`low`, `medium`, `high`,
 `xhigh`, `max`) and to Codex as `-c model_reasoning_effort="…"` (`low`,
 `medium`, `high`, `xhigh`, `max`, `ultra` — Codex itself refuses one the
-model does not support, and only some models take `ultra`). Lower case
+model does not support, and only some models take `ultra`); to Pi as
+`--thinking` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`);
+OpenCode takes none. Lower case
 only: any other value is the role's `problem`, which names the accepted
 ones, and the role is listed greyed out until it is fixed.
 
@@ -335,8 +358,8 @@ permission syntax. They become one settings file passed with `--settings`
 kept with the pane so a resume passes it again. `skills` and `plugins`
 first ask `claude` itself what exists, in the agent's directory; an
 unknown name stops the launch with the list. A repository's role may not
-`allow` tools, and a Codex role may not use any of these yet — both are
-reported as the role's `problem`.
+`allow` tools, and a Codex, Pi or OpenCode role may not use any of these
+yet — both are reported as the role's `problem`.
 
 `agent new` splits the pane it runs in (the focused pane, from outside
 Mirador), opens a shell there and types the agent into it, with the task as
@@ -346,9 +369,23 @@ way's) through `--append-system-prompt-file`; the session resumes like any
 other, on the role's model and effort, and keeps that prompt. Codex gets
 `--model`, `model_reasoning_effort`, `--profile` and the prompt as
 `-c developer_instructions="…"`; it has no session Mirador can resume.
-Without a role, `--harness codex` starts plain Codex instead of plain
-Claude Code (no other harness can be started that way, and `--harness`
-with `--role` is refused: a role names its own).
+Pi gets `--model`, its effort as `--thinking` (off, minimal, low, medium,
+high, xhigh, max), `--name`, and the prompt through
+`--append-system-prompt`, given the file's path, whose contents it reads.
+OpenCode's TUI has no flag for a model or a prompt: an OpenCode role runs
+`opencode --standalone`, on a server of its own, with
+`OPENCODE_CONFIG_CONTENT` holding its model (`provider/model`) and an agent
+named after it, the default, whose prompt is `{file:<the prompt file>}`.
+It takes no effort, and is not done on Windows yet. Neither keeps a session
+Mirador resumes yet.
+Without a role, `--harness codex`, `pi` or `opencode` starts that agent
+plain instead of plain Claude Code (no other harness can be started that
+way, and `--harness` with `--role` is refused: a role names its own).
+Pi gets the task as an argument after `--`, OpenCode as `--prompt`. None
+of the three runs on a remote yet: there, only Claude Code starts.
+In a team's tab, `agent new --role` (without `--tab`) is `team add`: the
+agent joins the running team as a member, told its teammates (see
+*Teams*). A plain agent there, with no role, is no member.
 Any Codex, a role's or plain, also gets `-c` overrides for a permissions profile, `mirador`, that
 extends the one Codex would run on — your `default_permissions`, else
 `:workspace` in a trusted project and `:read-only` elsewhere — with
@@ -414,8 +451,9 @@ hook. `--json` adds the cwd, branch and when the status last changed.
 ```bash
 mira team list --defined                 # teams this directory can start
 mira team start squad "add OAuth"        # a tab of its own; the task goes to the lead
+mira team start squad --host prod --dir /srv/app "add OAuth"   # every member on prod (see section 8)
 mira team list                           # running teams: each member's state and pane
-mira team add reviewer [--name gate]     # another member, beside this pane
+mira team add reviewer [--name gate] [task…]  # another member, beside this pane; the task is its first message
 mira team restart [member…]              # bring back exited or closed members
 mira team clear [--force]                # every running member on a new conversation, the lead last
 mira team save [name]                    # this team's conversations, as name (the team's by default)
@@ -558,19 +596,37 @@ each member, teammates first and the lead last, and reports each as
 covers, unless `--force`, a member whose screen shows a numbered menu, or
 no input box after the wait `send` makes. `team add`, `team
 restart` and `team clear` act on the team of the calling pane's tab.
+`team add` gives the new member its task as its first message, as `team
+start` gives the lead its, and files the task's card for it. In a team's
+tab, `agent new --role` is `team add`, and so is a role opened from the
+app there (+ New, a pane's menu, the palette). A member added either way
+belongs to the running team, kept with its tab, never to the team's
+file: the next `team start` does not have it.
+On a team running on a remote, `team add` and `team restart` start the
+member there, and a restart reopens it in a fresh pane rather than typing
+into its old one (section 8). `agent new --role --host` in a team's tab
+is refused, for now, whatever the host, the team's own included: `team
+add` there is the way to add a member where the team runs.
 
 A save is what to make before turning the computer off: running agents
 survive quitting Mirador, not a restart. It is `saves/<name>.json` in the
 data directory (beside `session.json`): the team, its layout and cwd, and
 each member's role, harness, cwd and conversation — Claude Code's session
-id, the thread id of the rollout a Codex holds open. Saving again under a
-name replaces it. Nothing is saved unless every member can be: not one
-exited or closed, run by Claude Code's background daemon (`claude --bg`,
-whose jobs do not outlive a restart), or Codex on Windows, which cannot
-see a process's open files. `team resume` opens a team's save as `team
+id, the thread id of the rollout a Codex holds open, the id Mirador
+started a Pi or an OpenCode on (`--session-id`, `--session ses_…`). Saving
+again under a name replaces it. Nothing is saved unless every member can
+be: not one exited or closed, run by Claude Code's background daemon
+(`claude --bg`, whose jobs do not outlive a restart), Codex on Windows,
+which cannot see a process's open files, or a Pi or an OpenCode cleared
+since it started: `/new` moves it to a conversation of its own making,
+whose id Mirador does not learn. Only Mirador's own clear is known: a
+`/new` or a switch of session typed in the pane itself (Pi's `/resume`,
+OpenCode's session list) leaves the record on the old conversation, and
+the save keeps that one. `team resume` opens a team's save as `team
 start` lays a team out, a team like any other from then on; each member
 runs `claude --resume <id>` or `codex resume <id>` with its role's flags,
-its prompt passed again, since a conversation keeps its own only until it
+or its Pi's or OpenCode's launch line with the saved id, its prompt
+passed again, since a conversation keeps its own only until it
 is compacted. A resume is refused while any pane runs one of the saved
 conversations, naming it — two processes on one conversation write over
 each other — and `team resume` refuses an agent's save, `agent resume` a
@@ -596,10 +652,15 @@ mira agent clear [name | --pane <id>] [--force]  # a new conversation; this pane
 `send` resolves a name among the agents of the calling pane's tab — a
 team member's name first, then a Claude session's, then a role's; the
 first kind that matches must match exactly one pane — or takes any pane id.
+`<team>/<name>` looks the name up the same way in the tab running team
+`<team>` (`mira team list` names them).
 It writes the message as a bracketed paste (`ESC[200~ … ESC[201~`), every
 control character but newline and tab removed so nothing in it can end
 the paste, then Enter as a separate write. When the caller is an agent the
-message opens with `[message from <name>, via mira agent send]`. An agent
+message opens with `[message from <name>, via mira agent send]`, where
+`<name>` is what the recipient replies to: from another tab it is
+`<team>/<name>` when the sender's tab runs a team, else the sender's pane
+id. An agent
 started but not yet running (just launched, resumed or restored, its
 command still to reach its shell) is waited for, up to the 20 s the app
 gives any agent to show up. Refused: a pane that runs no agent, the
@@ -608,9 +669,15 @@ has not started within that time, and an agent whose status is `needsYou`
 unless `--force`. Unless `--force`, `send` also reads the agent's screen,
 since a dialog reports no status (Codex's update prompt, an approval,
 Claude Code's own questions). It refuses a numbered menu (`❯ 1. Yes`),
-naming the selected row. For Claude Code or Codex, it waits up to 10 s for
-the input box (`❯ `, `› `), then refuses: without one, the message could
-dismiss a welcome screen and its Enter pick from the menu that follows.
+naming the selected row, and Pi's and OpenCode's menus by how each draws
+them: Pi's project-trust question and pickers (`→ Trust`, `/resume`'s
+`› dev`), OpenCode's permission prompt (`Allow once   Always allow
+Reject`) and its dialogs (the command palette, `/models`, `/sessions`,
+whose title row ends in `esc`); Pi asks no approval for its tools. For Claude Code, Codex, Pi and OpenCode, it waits up to 10 s for
+the input box — `❯ `, `› `, Pi's box between its last two rules over its
+footer, OpenCode's ending in its `╹▀` edge — then refuses: without one,
+the message could dismiss a welcome screen and its Enter pick from the
+menu that follows.
 
 `wait` polls `agent list` once a second and ends on a status that changed
 after it started, or after it saw the agent working — so a wait begun
@@ -620,15 +687,15 @@ wait by exiting.
 
 `clear` finds the agent as `send` does and types its harness's
 new-conversation command as plain keystrokes — `/clear` for Claude Code,
-`/new` for Codex — then Enter as a separate write; any other harness is
-refused. The process keeps running, so the role's prompt (a launch flag)
+`/new` for Codex, Pi and OpenCode — then Enter as a separate write; any
+other harness is refused. The process keeps running, so the role's prompt (a launch flag)
 holds. Refused as `send` is, except that it may name the caller's own
 pane. A working agent is not refused: the line queues behind its turn.
 
 ### Tasks, the board and history
 
 ```bash
-mira task add <title…> [--to <name>] [--description <text>]   # a card in this tab, in To do; prints its id
+mira task add <title…> [--to <name>] [--description <text>]   # a card in To do, on this tab's board or --to's agent's; prints its id
 mira task move <id> <todo|doing|needs-you|done>
 mira task done <id>                            # same as move <id> done
 mira task list [--all]                         # this tab's cards by column; every tab's
@@ -639,9 +706,11 @@ mira agent board                               # this tab's wall, on its Tasks s
 
 Mirador keeps a log of tasks: one line per event, kept across restarts.
 It logs a task given once the start or the send has worked — `team start`
-(the task, to the lead), `agent new` with a task, `agent send` — each with who sent it (the calling agent's
-name, or `you`), the agent it went to (its team member name, else its
-session's, else its role's, else its harness's: `claude`, `codex`), and
+(the task, to the lead), `team add` and `agent new` with a task, `agent
+send` — each with who sent it (the calling agent's name — from another
+tab `<team>/<name>` or its pane id — or `you`), the agent it went to (its
+team member name, else its session's, else its role's, else its
+harness's: `claude`, `codex`), and
 its tab and team. It logs a Claude Code agent's turn ending when its
 status changes: working or needs-you to idle is done, anything to
 needs-you is needs-you, needs-you back to working is a resume — that
@@ -843,9 +912,19 @@ files, and never a credential — only the shape of the login.
   from the transcripts under `projects/`, subagents' included.
 - **Codex**: the login in `$CODEX_HOME/auth.json` (`~/.codex`); a key
   in `OPENAI_API_KEY` counts only when that file holds no login, as
-  Codex prefers its stored one. The limits and the plan are the ones
-  the newest rollout last recorded, so they are as of Codex's last turn.
-  It has no cost: Mirador knows no OpenAI prices.
+  Codex prefers its stored one. A `model_provider` in `config.toml`
+  that names one of its `model_providers` (a gateway, Azure) wins over
+  both, since Codex sends there instead: the login is an API key when
+  the variable its `env_key` names is set (only whether, never its
+  value), else not signed in, with `<VAR> not set`. The limits and the
+  plan are the ones the newest rollout on that provider last recorded,
+  so they are as of Codex's last turn there; a rollout from before a
+  switch of provider counts its tokens but not its limits. It has no
+  cost: Mirador knows no OpenAI prices.
+
+An account that does not talk to its maker's own API says where it does,
+as `via <name> · <host>`: Codex's custom provider, or the host of
+`OPENAI_BASE_URL` or, for Claude Code, `ANTHROPIC_BASE_URL`.
 
 Codex's limits are "as of" the rollout line that carried them.
 
@@ -865,6 +944,11 @@ mira split --dir column --command "npm run dev"
 mira focus <pane>
 mira zoom <pane>               # that pane alone, filling its tab
 mira zoom <pane> --off         # the whole tab again
+mira swap <pane> --dir left    # trade places with its neighbor there (left|right|up|down)
+mira rotate [--back]           # every pane of the tab one place along
+mira equalize                  # every split of the tab in equal shares
+mira layout grid               # side-by-side | stacked | grid | main-stack
+mira send-file shot.png        # type its path in, as a drop does; in an SSH pane, sent there first
 mira close-pane <pane>
 mira close-tab <tab>           # the tab and every pane in it
 mira view                      # which view is shown: tabs or board
@@ -874,6 +958,13 @@ mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
 mira completions zsh           # a completion script: zsh, bash, fish, powershell, elvish
 ```
+
+`rotate`, `equalize` and `layout` act on `--tab <tab>`, else the tab
+they run in, else the active one; `swap` without a pane swaps the focused
+one. The focus stays with its pane wherever it goes, and panes keep
+running as they move. Each refuses a change that changes nothing — no
+neighbor on that side, a tab of one pane, sizes already even — with an
+error, so a script can tell.
 
 The board shows every tab as a frame and every pane as a card — but a
 tab showing its agent wall shows the wall in its frame, its agents or its
@@ -894,6 +985,8 @@ mira ssh hosts                     # aliases from ~/.ssh/config
 mira ssh open prod                 # remote pane running `ssh -tt prod`
 mira ssh open "-p 2222 user@box"   # or a full destination with options
 mira ssh open prod --tab
+mira ssh open prod --tab --dir '~/work/app'   # its shell starts there; quote the ~
+mira ssh open --on devbox          # a saved computer: a tab on its host, in its directory
 mira ssh forward 3000              # remote localhost:3000 -> your localhost:3000
 mira ssh unforward 3000
 ```
@@ -908,9 +1001,234 @@ Forwarding is what makes a remote dev server reviewable: `mira ssh forward
 3000` then `mira browser open http://localhost:3000` and the browser pane
 renders the remote app.
 
-Disconnects leave the pane idle with `[press any key to reconnect]`;
-restarting Mirador restores remote panes idle too — it never re-opens an
-SSH session behind your back.
+Disconnects leave a plain SSH pane idle with `[press any key to
+reconnect]`; restarting Mirador restores remote panes idle too — it never
+re-opens an SSH session behind your back. (An agent's pane on a remote
+reconnects by itself: below.)
+
+**`mira split` of a remote pane is remote.** Splitting is a property of
+the pane split: as a split of a local pane opens in its directory, a
+split of an SSH pane is another shell on the same host, in the directory
+its shell is in now: the one the shell reports itself (OSC 7), else the
+remote's answer when asked where the pane's shell is (from `/proc`, or
+`lsof`), within a few seconds. Failing both — a pane opened with no
+directory, whose shell has no pid the app was told, a remote that does
+not answer, Windows — it is the directory the pane was opened in
+(`--dir`, or a saved computer's), or with none the home there. A split of a remote agent's pane is a shell on its host, in the
+agent's directory. An agent driving `mira` should expect this: `mira
+split --pane <ssh pane>` is not a local shell. `split --command` and
+`run` still run here, whatever pane they come from, and `new-tab` is
+local. A remote pane from an older session has no directory, so its
+splits start in the home (an agent's, until restarted). On Windows, with
+no ControlMaster, each split logs in again.
+
+### Saved computers
+
+```bash
+mira computer list                                          # name, host, dir; --json for the data
+mira computer add devbox --host devbox --dir '~/work/app'
+mira computer update devbox --host "-p 2222 me@devbox"      # --name, --host, --dir: at least one
+mira computer remove devbox
+mira computer test devbox                                   # a saved one, or --host H --dir D before saving
+mira computer open                                          # the Computers pane; --tab or --split
+```
+
+A computer is an entry of `computers` in mirador.json: a name, an ssh
+host and the directory there. A `~` in the directory is the remote's
+home; quote it, or the shell you type in expands it to its own. `~user`
+is not expanded. The app reads the file at each request, and a file that
+does not parse is the answer, not an empty list.
+
+`computer test` connects as an agent's start would (BatchMode, over the
+shared ControlMaster), changes nothing there, and gives up after 30
+seconds. It prints three lines:
+
+```
+reached: Linux x86_64
+directory: found
+agents: can run there
+```
+
+or `directory: not found`, and `agents: cannot run there: <why>`. It
+exits 0 when agents can run there and 1 when they cannot. A computer
+not reached is ssh's error on stderr, exit 1. With `--json`, a computer
+that was reached exits 0 whatever the answer, which is in `check`
+(`check.agents` null when agents can run), as `run --wait --json` leaves
+the exit code in its answer; one not reached still exits 1.
+
+### Agents and teams on a remote computer
+
+An agent, or a whole team, can run on a computer you reach by ssh. The
+agents, their files and their `mira` are there; their panes, tabs,
+board and every name stay here, in the one Mirador, which they reach
+through a forwarded socket. A local agent messages a remote one by name,
+as a teammate in its tab, or from another tab as `<team>/<name>`; from
+anywhere, by pane id.
+
+```bash
+mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
+mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
+mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+mira agent new --on prod "look at the failing job"                                  # a saved computer's host and dir
+```
+
+`--host` is an alias from `~/.ssh/config` or a destination, and `--dir`
+the directory there the agents work in; the two go together. `--on
+<name>` stands for both: a computer saved in mirador.json's `computers`
+(*Saved computers*, above; `{ "name": "prod", "host": "prod", "dir":
+"/srv/app" }`), looked up by the app in its own config, since a `mira`
+on a remote has none. It is refused with `--host` or `--dir`, and an
+unknown name is refused with the names there are; neither opens a pane.
+`agent new` and `team start` ask nothing and follow no pane: without
+`--host` or `--on` they run here, even when run from a remote pane. (In
+the app, starting one from a remote pane asks *This computer* or *On
+<name>*; that is the person's question, not the socket's.) The remote
+needs Linux on x86_64 or aarch64 (other systems: see its `mira`, below),
+ssh by key or agent (nothing answers a password prompt), and Claude
+Code, installed and signed in (`claude setup-token` for agents nobody
+sits in front of). Nothing of this machine's logins is copied there.
+
+Roles and teams are this computer's: the ones the calling pane's
+directory sees, as for agents here; the remote's own `.mirador` is not
+read. A role's prompt and settings are worked out here and sent there,
+as `~/.mirador/run/<pane>.prompt.md` and `<pane>.settings.json`. Every
+agent there, role or plain, gets Mirador's hooks in its own
+`--settings`, calling the remote's `mira`, so its status comes back
+here whatever the remote's Claude Code settings hold (where `mira hooks
+setup` was also run there, both fire). The status line is not given:
+that is the person's own.
+
+An agent's pane opens only once the remote has its `mira`, this app's
+socket and the agent's files. The agent then runs there under a
+*holder*: the same `mira __hold` that keeps terminals running here when
+Mirador quits, started by the remote's `mira`. The holder runs
+`sh ~/.mirador/run/<pane>.sh`, a script written there first: nothing is
+typed into the pane, and nothing is quoted for the remote's login
+shell. The script starts the person's login shell as an interactive
+login shell, for the PATH their own terminal there would have (where
+nvm or `npm -g` put `claude`), and that shell runs the script again with
+`sh`, which goes to the directory (or says loudly there is none) and
+starts `claude` with `MIRA_PANE` and `MIRA_SOCKET` set. An rc file that
+execs tmux or fish takes the agent's terminal over before the agent
+starts: the pane shows tmux or a fish prompt, and no agent.
+
+The pane only looks at the agent: it runs `ssh -tt <host> '<mira>'
+attach '<pane>'`. So the agent outlives the connection. When the
+connection drops (wifi gone, the laptop asleep), the agent keeps
+working, and the pane says `[disconnected] — reconnecting in 2s` and
+reattaches by itself. It waits 2s, then 4, 8 and so on up to 30s
+between tries while the host stays out of reach (ssh gives up on each
+after 15s), back to 2s once a connection has held a minute. A key
+retries at once. Reattached, the pane shows what the agent printed
+meanwhile. A send that meets the pane between tries is refused: `<name>
+on <host> is not attached right now: send again once its pane is back`.
+A pane opened moments ago (by `agent new`, `team add` or a restart) has
+its agent started before it attaches; a send or clear then waits for the
+attach, as long as it would wait for an agent to start, rather than being
+refused.
+The agent's own exit shows as a command's does, `[done ✓]` or
+`[exit N]`, and is not retried.
+
+Closing the pane or its tab ends the agent there, holder and all; so
+does *Quit and end all sessions*. A remote that cannot be reached then
+keeps it running, and the app's log says so.
+A plain quit leaves the agent running: after a restart its pane comes
+back idle like any SSH pane, and a keypress reattaches to the same
+agent, if it still runs. Before each attach the socket's forward is
+checked, and made again if the connection it rode on is gone, so the
+agent reaches this app again; if that forward fails, the pane says so.
+
+Mirador sees no process on the remote, so a send does not wait for the
+agent to be seen running, as on Windows; its status comes from its
+hooks.
+
+On the remote, `~/.mirador/bin/mira-<version> attach <pane>` (the id
+from `mira agent list`; that `mira` is on no PATH there unless you put it
+there) shows an agent in any terminal there and takes its keys, as its
+pane does here; closing that terminal leaves the agent running. A
+holder has one viewer at a time, the newest: the pane here then says
+`taken by another attach` and waits for a key. With no session for
+that pane there it says `mira: no session <pane> on <host>: it has
+ended, or never started here`, and exits 1.
+
+The holder's socket is in the runtime directory there:
+`$XDG_RUNTIME_DIR/mirador/holders`, or `~/.mirador/holders` without one.
+Two things follow:
+- On a systemd remote, `/run/user/<uid>` goes when your last session
+  there ends, and with `KillUserProcesses=yes` your processes go too,
+  the agent's included, unless lingering is on for you:
+  `loginctl enable-linger`.
+- A shell startup file that sets `XDG_RUNTIME_DIR` itself sends `mira
+  attach` to a different directory than the holder's, and it finds no
+  session.
+
+`team start --host` starts every member as `agent new --host` starts
+one, in one tab here. Each member is told its teammates as usual, with
+`mira` named by its path on the remote. A team with a member a remote
+cannot run is refused, naming that member, before anything opens or
+reaches the remote. Every member's files are sent before the tab opens,
+and each member starts once it has, so its first status finds its pane.
+A team that cannot start opens nothing here, and ends there any member
+it had started.
+
+The team keeps its host and directory with its tab, and `team list`
+names the host. `team add` starts the new member there, in that
+directory, as `team start` started the others, and refuses a role the
+remote cannot run before anything opens. `team restart` counts a member
+there as running while its pane is attached, since its agent is never
+seen from here. It reopens one that exited or was closed: a fresh pane
+in the old one's place (else beside a teammate), started there again,
+with the old pane closed. Every member's files are sent before any pane
+opens, and the members start once all their panes are in the tab. One
+that cannot start is named; its seat stays on its closed pane, so the
+next restart tries it again, and the others run on. It is not rerun in
+its old pane: a remote pane runs again only on a keypress. So a member
+whose pane is between reconnects, or idle since a relaunch, has no
+terminal here and reads as exited too, although its agent may still run
+there. A restart then starts it afresh, not on the conversation it had,
+and ends the old agent there with its old pane.
+
+Not done yet: Codex, Pi or OpenCode there; a role that keeps only some
+skills or plugins (listing them runs Claude Code here, which says nothing
+of the remote's); resuming a save of a member there (`team save` and `agent
+save` write one, but `team resume` and `agent resume` start it on this
+computer, where its conversation is not); and a Windows remote, or
+Mirador on Windows driving one.
+
+### How a remote reaches this app
+
+```bash
+mira ssh forward --app [--pane <id>]   # this app's socket, on the remote; prints its path there
+```
+
+The `mira` a remote runs is its own, never copied from this machine
+(whose `mira` is built for macOS): `~/.mirador/bin/mira-<version>` on
+the remote, of this app's version exactly. The first time it is needed,
+the remote fetches it with `curl` (or `wget`) from that version's
+release on GitHub, `mira-linux-x86_64` or `mira-linux-aarch64`, and
+keeps it. Only Linux on those two is published; on any other system,
+or with no network there, put a `mira` built for it at that path by
+hand, and it is used as it is (`mira --version` says which version a
+`mira` is).
+
+`mira ssh forward --app`, macOS and Linux only for now, forwards this
+app's socket to the pane's host over the same ControlMaster, and prints
+the socket's path there: `$XDG_RUNTIME_DIR/mira-<hash>.sock` on the
+remote (`/tmp` without one, or when that path would be too long for a
+socket), named for this app's own socket, so it is the same path after
+the app restarts. sshd makes it owner-only. A `mira` on the remote
+reaches this app with `MIRA_SOCKET` set to that path. `MIRA_SOCKET`,
+wherever it is set, names the socket outright, before any discovery
+file; a remote has none, so without it `mira` there says Mirador is not
+running. Agents started there are given it; this command is for
+anything else run there by hand.
+
+Starting agents on a computer means trusting it with this Mirador: the
+forwarded socket is the whole automation socket. Whoever can act as
+that user on the remote, or as root there, can drive this Mirador while
+it is forwarded, `send-input` into any local pane included, which runs
+commands on this machine as you. The socket's owner-only mode keeps
+other users there out, not those.
 
 ## 9. Raw socket protocol
 
@@ -922,12 +1240,14 @@ Newline-delimited JSON on the socket named in the discovery file:
 ```
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
-read_screen notify run list_runs agent_session codex_thread agent_new agent_list
-agent_wall zoom_pane browser_open browser_navigate browser_snapshot
-browser_click browser_fill browser_type browser_press browser_text browser_eval
+read_screen send_file notify run list_runs agent_session codex_thread agent_new
+agent_list agent_wall zoom_pane swap_pane rotate_panes equalize_panes
+apply_layout browser_open browser_navigate browser_snapshot browser_click
+browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
-agent_trail agent_trail_detail usage usage_open`. Requests are
+agent_trail agent_trail_detail usage usage_open computer_list computer_add
+computer_update computer_remove computer_test computer_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

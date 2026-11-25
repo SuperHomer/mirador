@@ -1,20 +1,21 @@
-import { openAgent, openAgentEditor, startTeam, TabSnapshot, toggleAgentWall } from "../bindings";
+import { Harness, HARNESS_LABEL, openAgent, openAgentEditor, startTeam, TabSnapshot, toggleAgentWall } from "../bindings";
+import { startHere } from "./startHere";
 import { roleLine, useRoleCatalog } from "./NewMenu";
 import { opensInTab } from "../state/configStore";
 
 /**
  * The wall of a tab with no agents yet (21d): the ways to start one — a
- * role of this repository, a whole team, or plain Claude Code or Codex —
- * or back to the splits.
+ * role of this repository, a whole team, or plain Claude Code, Codex, Pi or
+ * OpenCode — or back to the splits.
  */
 export function EmptyWall({ tab }: { tab: TabSnapshot }) {
   const pane = tab.focusedPane;
   const catalog = useRoleCatalog(pane);
   const roles = catalog?.roles ?? [];
   const teams = catalog?.teams ?? [];
-  const start = (role: string | null, harness: "claude" | "codex" | null) =>
-    openAgent(role, null, pane, false, harness).catch((e) =>
-      console.error(`mirador: ${role ?? harness}: ${e}`),
+  const start = (role: string | null, harness: Harness | null) =>
+    startHere(pane, { role, harness }, `Start ${role ?? HARNESS_LABEL[harness ?? "claude"]}`, (remote) =>
+      openAgent(role, null, pane, false, harness, remote !== null),
     );
   return (
     <div className="empty-wall">
@@ -58,7 +59,9 @@ export function EmptyWall({ tab }: { tab: TabSnapshot }) {
                 <button
                   className="empty-wall-link"
                   onClick={() =>
-                    startTeam(t.name, null, pane).catch((e) => console.error(`mirador: team ${t.name}: ${e}`))
+                    startHere(pane, { team: t.name }, `Start team ${t.name}`, (remote) =>
+                      startTeam(t.name, null, pane, remote !== null),
+                    )
                   }
                 >
                   Start team…
@@ -72,9 +75,11 @@ export function EmptyWall({ tab }: { tab: TabSnapshot }) {
           <button className="empty-wall-link" onClick={() => void start(null, "claude")}>
             Plain Claude Code
           </button>
-          <button className="empty-wall-link" onClick={() => void start(null, "codex")}>
-            Plain Codex
-          </button>
+          {(["codex", "pi", "openCode"] as Harness[]).map((h) => (
+            <button key={h} className="empty-wall-link" onClick={() => void start(null, h)}>
+              Plain {HARNESS_LABEL[h]}
+            </button>
+          ))}
           <button className="empty-wall-link" onClick={() => void toggleAgentWall(pane)}>
             Show Splits
           </button>

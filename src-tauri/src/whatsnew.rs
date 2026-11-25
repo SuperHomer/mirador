@@ -20,11 +20,9 @@ use tauri::{AppHandle, Manager};
 
 use crate::AppState;
 
-/// Where the notes come from. The repository is pinned rather than derived
-/// from the updater endpoint: this only ever fetches public release notes
-/// for this product, and a config-driven URL would be a way to point the
-/// pane at someone else's text.
-const REPO: &str = "SuperHomer/mirador";
+use cmux_core::image::sniff_image;
+/// Where the notes come from (pinned: see [`cmux_core::REPO`]).
+use cmux_core::REPO;
 
 /// GitHub rejects API requests without one.
 const USER_AGENT: &str = "mirador-whats-new";
@@ -289,30 +287,6 @@ const IMAGE_HOSTS: &[&str] = &["github.com", "githubusercontent.com"];
 /// Per image, and across one release. A note is a page to read, not a
 /// payload: a demo GIF is worth a few megabytes, a disk image is not.
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
-
-/// What a stored image may be. Checked against the bytes themselves rather
-/// than a header or a file extension, so nothing but a raster image is
-/// ever written to disk or handed to the webview — an SVG, which can carry
-/// script, does not qualify.
-fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
-    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
-    if bytes.starts_with(PNG) {
-        return Some("png");
-    }
-    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        return Some("gif");
-    }
-    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        return Some("jpeg");
-    }
-    if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        return Some("webp");
-    }
-    if bytes.len() > 12 && &bytes[4..12] == b"ftypavif" {
-        return Some("avif");
-    }
-    None
-}
 
 /// True when `url` is an https URL on a host we will fetch an image from.
 fn allowed_image_url(url: &str) -> bool {
@@ -665,23 +639,6 @@ mod tests {
         assert!(!allowed_image_url("https://github.com@evil.test/a.png"));
         assert!(!allowed_image_url(""));
         assert!(!allowed_image_url("javascript:alert(1)"));
-    }
-
-    #[test]
-    fn only_raster_image_bytes_are_accepted() {
-        assert_eq!(sniff_image(b"\x89PNG\r\n\x1a\nrest"), Some("png"));
-        assert_eq!(sniff_image(b"GIF89a....."), Some("gif"));
-        assert_eq!(sniff_image(b"GIF87a....."), Some("gif"));
-        assert_eq!(sniff_image(&[0xff, 0xd8, 0xff, 0xe0, 0x00]), Some("jpeg"));
-        assert_eq!(sniff_image(b"RIFF\0\0\0\0WEBPVP8 "), Some("webp"));
-        assert_eq!(sniff_image(b"\0\0\0\x20ftypavif\0\0"), Some("avif"));
-
-        // An SVG can carry script, so it is not something this will store
-        // or hand to the webview, whatever the server called it.
-        assert_eq!(sniff_image(b"<svg xmlns=\"http://www.w3.org/2000/svg\">"), None);
-        assert_eq!(sniff_image(b"<!doctype html><script>"), None);
-        assert_eq!(sniff_image(b""), None);
-        assert_eq!(sniff_image(b"RIFF"), None, "a truncated header is not a webp");
     }
 
     #[test]

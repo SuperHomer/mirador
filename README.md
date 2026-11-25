@@ -18,7 +18,9 @@ downloads, the feature tour and the keybinding reference.
   port chips, cwd, and notifications
 - **Agent notifications**: panes get an attention ring and tabs light up on
   OSC 9/99/777 sequences or `mira notify`; native notifications when the
-  window is unfocused; notification panel on `mod+I`
+  window is unfocused; notification panel on `mod+I`. In a team, only a
+  member that needs you (or failed) notifies, plus the lead once the whole
+  team has stopped; members' turn ends and idle reminders are silent
 - **Command panes** (`mira run`): agent-launched commands run in a visible,
   interruptible pane; `--wait` returns clean output + exit code to the caller
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,
@@ -35,8 +37,8 @@ downloads, the feature tour and the keybinding reference.
   sidebar's **Splits · Wall · Tasks · Board** switch turns it over to the
   tab's task board.
   **Agent roles** (`.mirador/roles/*.md` in the repository, or your own)
-  start Claude Code or Codex with their own model, prompt and shared way of
-  working (`mira agent new --role reviewer "…"`). **Teams**
+  start Claude Code, Codex, Pi or OpenCode with their own model, prompt
+  and shared way of working (`mira agent new --role reviewer "…"`). **Teams**
   (`.mirador/teams/*.md`) start several in a tab of their own, each told
   its teammates, and stay tracked across restarts (`mira team start`)
 - **Task board**, the agent wall's Tasks side (**Tasks** in the sidebar's
@@ -85,14 +87,17 @@ downloads, the feature tour and the keybinding reference.
   Claude Code on an API key where the model's price is known. Claude's
   plan limits come from Claude Code's status line once `mira hooks setup`
   wraps it (your own line still shows), or read "limit reached" after a
-  refused request. The Usage pane (`mira usage --tab`, *App: Usage*) and
+  refused request. An account on a gateway or a custom Codex provider
+  says where it connects. The Usage pane (`mira usage --tab`, *App: Usage*) and
   `mira usage` show it in full. Read from local files, never the network
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
   it, reads its console errors — while you watch (`mira browser …`)
 - **Remote workspaces**: `mira ssh open <host>` panes run the system ssh
-  (agent auth, 2FA, ProxyJump all work); ControlMaster-backed port
-  forwarding brings remote dev servers to your browser pane
+  (agent auth, 2FA, ProxyJump all work); a saved computer opens in a tab,
+  and a split there is another shell on it; ControlMaster-backed port
+  forwarding brings remote dev servers to your browser pane; agents and
+  whole teams can run there too, their tabs and board here
 - **Automation socket**: every action drivable via the `mira` CLI / Unix socket
 - **Session persistence**: layout, cwds, scrollback, and browser URLs
   survive restarts and crashes
@@ -102,12 +107,13 @@ downloads, the feature tour and the keybinding reference.
   `tokyo-night`, `gruvbox-dark`, `nord`), configurable keybindings,
   command palette (`mod+K`)
 - **Claude Code integration**: lights up tabs when your agent needs you,
-  enables per-pane session resume, adds a `/mira-diff` skill for
-  reviewing the turn's work, and (macOS, Linux) wraps your status line to
-  keep your plan's limits, your own line still shown. Mirador offers to
-  set it up on first launch
-  when it finds Claude Code (or: palette → *Set Up Claude Code
-  Integration*, or `mira install && mira hooks setup`)
+  enables per-pane session resume, adds a `/mira-diff` skill for reviewing
+  the turn's work and a `mira` skill that teaches Claude the CLI, and
+  wraps your status line to keep your plan's limits, your own line still
+  shown (on Windows through Git Bash, which Claude Code runs the status
+  line with). Mirador offers to set it up on first launch when it finds
+  Claude Code (or: palette → *Set Up Claude Code Integration*, or
+  `mira install && mira hooks setup`)
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself
@@ -126,8 +132,8 @@ npm run tauri build          # builds Mirador.app + .dmg (and the mira CLI)
 
 The bundle lands in `src-tauri/target/release/bundle/`. If you use Claude
 Code, the first launch offers to set up the integration — `mira` on your
-PATH, the hooks and `/mira-diff` — in one click. To do it by hand instead
-(the CLI ships inside the app):
+PATH, the hooks, `/mira-diff` and the `mira` skill — in one click. To do it
+by hand instead (the CLI ships inside the app):
 
 ```bash
 /Applications/Mirador.app/Contents/MacOS/mira install   # → ~/.local/bin/mira
@@ -177,6 +183,27 @@ status light up. Nothing needs Git Bash. If you want it anyway:
 
 `mira run "npm test"` hands the command to whichever shell that is, so
 quoting follows your shell's rules.
+
+**Which ConPTY?** Panes run under the first `conpty.dll` Windows finds,
+and that can be another program's: WezTerm puts one on PATH, with its own
+`OpenConsole.exe`, and with it installed every pane runs under that one
+instead of Windows' own. The two draw a resized screen differently.
+`conpty` picks: `"auto"` (that, the default), `"system"` (Windows' own,
+whatever is on PATH), or a folder holding `conpty.dll` and the
+`OpenConsole.exe` it starts, such as WezTerm's. The Settings pane offers
+every folder on PATH that has one.
+
+```jsonc
+// %APPDATA%\mirador\mirador.json
+{ "conpty": "system" }
+```
+
+It applies to new panes. With `persistSessions` off the app runs panes
+itself and keeps the ConPTY its first pane loaded, so there a change
+applies after a restart. A value Mirador cannot use runs panes under
+Windows' own. The Settings pane marks a relative name or a folder without
+both files, with the reason; a `conpty.dll` that is there but does not
+load falls back without a word.
 
 Two Windows caveats: notifications only appear once the app is installed
 (Windows toasts need a Start Menu entry — a bare `mirador.exe` stays
@@ -256,6 +283,20 @@ The app asks for
 `latest-{{target}}-{{arch}}.json` under `/releases/latest/download/`, which
 GitHub resolves to the newest release, so no workflow rewrites any config.
 
+Each release also carries the `mira` CLI alone for Linux,
+`mira-linux-x86_64` and `mira-linux-aarch64`
+([build-linux-cli.yml](.github/workflows/build-linux-cli.yml)), static
+against musl so that they run on any distribution, and for Windows,
+`mira-windows-x86_64.exe`, the `mira.exe` the installers carry. Mirador
+has no Linux app; these are the `mira` a remote computer runs its agents
+with. The first time a remote needs one, it fetches the one for its
+system from the release of the app's own version and keeps it as
+`~/.mirador/bin/mira-<version>` (*Teams on a remote computer*, below, and
+[`docs/AGENTS.md`](docs/AGENTS.md) section 8). Only the Linux ones are
+fetched for now: Windows remotes are not done yet. They are named by OS
+and architecture, x86_64 or aarch64 as `uname -m` spells them, and are
+not updater payloads.
+
 ## Development
 
 ```bash
@@ -311,13 +352,35 @@ pairs macOS spells with Shift take a second letter instead.
 | ⌘⇧O | Ctrl+Shift+O | board / tabs view |
 | ⌘0 | Ctrl+Shift+0 | board: show everything |
 | ⌘⌥arrows | Ctrl+Alt+arrows | focus pane by direction |
+| ⌘⌥⇧arrows | Ctrl+Alt+Shift+arrows | swap pane with its neighbor |
 | ⌘1…9 | Alt+1…9 | jump to tab |
 | ⌘K | Ctrl+Shift+K | command palette |
 | ⌘I | Ctrl+Shift+I | Inbox |
 | ⌘B | Ctrl+Shift+B | toggle sidebar |
 | ⌘C / ⌘V (menu) | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste |
+| ⌘= / ⌘- | Ctrl+= or Ctrl+Plus / Ctrl+Minus | zoom the terminals in / out |
+| — | Ctrl+0 | reset the terminals' zoom |
 
-All rebindable in `mirador.json`.
+The palette also rotates a tab's panes, evens out their sizes, and lays
+them out side by side, stacked, as a grid, or as one main pane beside a
+stack (`rotate_forward`, `rotate_back`, `layout_even`,
+`layout_side_by_side`, `layout_stacked`, `layout_grid`,
+`layout_main_stack`), unbound until you bind them.
+
+All rebindable in `mirador.json`, where `+` and `-` are spelled `plus` and
+`minus` (`"ctrl+plus"`). The zoom keys are Windows Terminal's: plain Ctrl
+with them types nothing a shell needs. Plus is the numpad's, or Shift and
+whichever key makes `+` on your layout.
+
+### Zoom
+
+The zoom keys, and Ctrl + wheel over a terminal, zoom every terminal's
+text a point at a step. The size is kept in `mirador.json` as `fontSize`
+(6–72), so it outlives a restart and shows in *App: Settings*; *View:
+Reset Terminal Zoom* (Ctrl+0, or the palette on macOS, where ⌘0 fits the
+board) removes it again. A program in the terminal that reads the mouse,
+such as tmux or vim with the mouse on, gets Ctrl + wheel itself; the keys
+still zoom there. On the board, Ctrl + wheel zooms the board, as before.
 
 On macOS, Option types the character your layout puts there — `[ ] { } |`
 on Swiss, German, French and other non-US layouts — rather than acting as
@@ -350,6 +413,32 @@ where there is nothing to inherit: a new tab, the first pane on a fresh
 install, and the tab Mirador recreates when you close the last one. A
 restored session keeps each pane's own saved directory.
 
+## The sidebar's and Focus's widths
+
+Drag the sidebar's right edge, or the edge between the agent Focus shows
+large and the column beside it, and the width you leave is kept in
+`mirador.json`; a double-click on an edge goes back to the default. The
+same two keys, in pixels, are in *App: Settings* to type exactly:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "sidebarWidth": 300, "focusRailWidth": 520 }
+```
+
+`sidebarWidth` takes 160–600 (248 by default), `focusRailWidth` 150–1600
+(by default about a third of the wall, never under 240). A hand-edited value outside the
+range is brought into it. However wide the column is set, a narrow window
+keeps the agent shown large at least 240 pixels wide.
+
+The column can go elsewhere: the wall toolbar's **Rail** control, in Focus,
+switches between **Right** (the column, as above), **Top** — the other
+agents and tools as tabs in the header of the one shown large, beside its
+name — and **Bottom**, a centered row of tabs under it, the one shown
+large among them. A tab is a status mark, a name and how long it has been
+in that state; clicking it shows that agent large. The choice is
+`focusRailPosition` (`"right"`, `"top"` or `"bottom"`), also in
+*App: Settings*.
+
 ## Where the editor, diffs and the graph open
 
 Opened from the app — the palette, a frame's + menu, the wall — the roles,
@@ -374,9 +463,10 @@ only when there is none.
 
 ## Agent roles and the agent wall
 
-A role is a named way to start an agent — Claude Code or Codex, its own
-model and effort, and its own instructions — written as a Markdown file: the
-frontmatter says how it starts, the body is its prompt.
+A role is a named way to start an agent — Claude Code, Codex, Pi or
+OpenCode, its own model and effort, and its own instructions — written as
+a Markdown file: the frontmatter says how it starts, the body is its
+prompt.
 
 ```markdown
 <!-- .mirador/roles/reviewer.md -->
@@ -402,8 +492,14 @@ You implement what the plan says, one step at a time.
 `effort` is how hard the model thinks: Claude Code gets it as `--effort`
 (`low`, `medium`, `high`, `xhigh`, `max`), Codex as
 `model_reasoning_effort` (the same, plus `ultra`, which only some models
-take). Absent, the harness's default. Any other value, upper case
-included, greys the role out with the values it takes.
+take), Pi as `--thinking` (`off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, `max`); OpenCode takes none. Absent, the harness's default. Any
+other value, upper case included, greys the role out with the values it
+takes.
+
+Each OpenCode role's pane runs an OpenCode server of its own
+(`--standalone`, about 300 MB), so the role's model and prompt apply to
+that pane only; the server ends with the pane.
 
 A Codex role can also name one of your Codex **profiles** —
 `profile: yolo` starts it with `--profile yolo` — for what a role cannot
@@ -460,8 +556,8 @@ hidden from the agent, not from you: `/name` still works when you type it.
 `tools.allow` is refused in `.mirador/roles` — rules given at launch are
 Claude Code's highest-priority settings, and would skip the trust prompt
 it shows before a project's own settings apply. Put `allow` in a role of
-your own. Codex roles cannot be limited yet: a Codex role with any of
-these fields does not start.
+your own. Codex, Pi and OpenCode roles cannot be limited yet: one with
+any of these fields does not start.
 
 **Edit them in the app:** *Agents: Edit Roles, Ways & Teams* in the palette (or
 `mira agent edit`) opens a pane — from the app in a tab of its own (see
@@ -501,16 +597,26 @@ listed the same way. The agent opens in a pane
 beside the one you are in — it joins the tab you are working in, and its
 row appears under **Agents** — as a shell with the agent typed into it, in
 that pane's directory: `claude --model … --effort …
---append-system-prompt-file … --name <role>`, or `codex --model … -c
-model_reasoning_effort=… --profile … -c developer_instructions=…`. (`mira
+--append-system-prompt-file … --name <role>`, `codex --model … -c
+model_reasoning_effort=… --profile … -c developer_instructions=…`, `pi
+--model … --thinking … --append-system-prompt … --name <role>`, or
+`opencode --standalone` with its model and prompt in
+`OPENCODE_CONFIG_CONTENT`. (`mira
 agent new --tab` gives it a tab of its own instead.) Codex also gets a
 permissions profile — the one it would run on anyway, plus Mirador's socket
 and nothing else — so `mira agent send` and `wait` work from inside its
 sandbox; not when your Codex config uses `sandbox_mode`, gives full access,
 or cannot be read. Exiting the agent
 leaves the shell; restarting Mirador resumes the conversation — Claude
-Code's, or Codex's with `codex resume` — on the role's model and effort,
-with its prompt. To know which Codex conversation that is, Mirador gives
+Code's, Codex's with `codex resume`, or a Pi's or an OpenCode's, started
+on an id Mirador picked and given it again — on the role's model and
+effort, with its prompt. A Pi or an OpenCode cleared with `mira agent
+clear` comes back without a conversation: its `/new` started one whose id
+Mirador does not learn, and the cleared one is not brought back. Only
+Mirador's own clear is known: a `/new` or a switch of session you make
+yourself in the pane (Pi's `/resume`, OpenCode's session list) leaves the
+record on the old conversation, and a restart or a save brings that one
+back. To know which Codex conversation that is, Mirador gives
 Codex a `notify` (`mira codex-notify`) that records it after each turn,
 then runs your own `notify`, if you have one, as before.
 
@@ -572,7 +678,7 @@ Mirador keeps track of the team with its tab, across restarts:
 mira team list               # each member: running, exited, or closed
 mira team restart            # start the exited and closed ones again
 mira team restart dev-2      # …or just these
-mira team add reviewer       # another member, beside this pane: reviewer-2
+mira team add reviewer "look at the auth change"  # reviewer-2, beside this pane, with its first task
 mira team list --defined     # the teams this directory can start
 mira team cost squad         # what it costs to start, and a turn, before you start it
 ```
@@ -628,18 +734,24 @@ mira agent wait dev-2                           # block until dev-2 has finished
 `agent send` types the message into the teammate's terminal as its next
 prompt, headed with who it is from, as one bracketed paste — a message of
 several lines arrives whole. A name is a teammate's in your tab (a team
-member's, a Claude session's, a role's); a pane id reaches any pane. It
-refuses a pane running no agent, where the message would run as a shell
-command, and an agent waiting on you (a permission prompt), where it would
-answer the prompt — `--force` overrides that one. `agent wait` exits 0 once
-the agent has worked and stopped, 2 if it stopped to ask you something, 3
-if it exited, 124 on `--timeout`; it needs Claude Code's hooks (`mira hooks
-setup`) to see an agent stop.
+member's, a Claude session's, a role's); `<team>/<name>` reaches a member of
+another tab's team, and a message across tabs names its sender the way the
+recipient can reply to, `<team>/<name>` or a pane id; a pane id reaches any
+pane. It refuses a pane running no agent, where the message would run as a
+shell command, and an agent waiting on you (a permission prompt), where it
+would answer the prompt — `--force` overrides that one. `agent wait` exits 0
+once the agent has worked and stopped, 2 if it stopped to ask you something,
+3 if it exited, 124 on `--timeout`; it needs Claude Code's hooks (`mira
+hooks setup`) to see an agent stop.
 
 `team restart` types a member's command back into its pane when its shell
 is idle — never into a shell running something else, which it reports as
 `busy` — and opens a new pane beside a teammate for one whose pane was
 closed. Run `team add` and `team restart` from a pane of the team's tab.
+A role started in a team's tab — from + New, a pane's menu, the palette
+or `mira agent new --role` — is a `team add`: it joins the running team
+for the session, told its teammates, and the team's file is never
+changed. A plain agent, with no role, started there is no member.
 
 The **agent wall** is a way of showing a tab: in place of its splits, the
 tab's agents in a grid — roles, and any agent you started by hand:
@@ -654,8 +766,9 @@ board draws a walled tab's wall in its frame, in place of its cards. The tiles a
 agents' real terminals, moved there while the wall is on screen, so you
 can type into one to answer a permission prompt without leaving the wall;
 the keyboard goes to the focused agent's tile when the wall comes up. A
-new agent from **+ New**, in the bar over the wall — a role of the repository, or
-plain Claude Code or Codex, with an optional first message that also
+new agent from **+ New**, in the bar over the wall — a role of the
+repository, or plain Claude Code, Codex, Pi or OpenCode, with an
+optional first message that also
 becomes its card — splits the tab under the wall and gets a tile. A tab
 with neither agents nor tools yet shows its roles and teams there
 instead, ready to start.
@@ -729,7 +842,7 @@ an agent's row does (or, with `"pane"`, alone). Each tab's agents are
 its own: switch tabs and the tree moves with you,
 and every other tab shows a pip per agent with its status. The tab
 shortcuts (`mod+1…9`, next and previous tab) go over tabs only, by the
-number beside each. At the sidebar's foot, **Inbox** counts the agents that need you,
+number beside each. Under the list, **+ New tab** opens a tab, as `mod+T` does. At the sidebar's foot, **Inbox** counts the agents that need you,
 across every tab, and opens the notifications; **Commands** opens the
 palette.
 
@@ -739,7 +852,8 @@ hides and shows the sidebar, as `mod+B` does. Then come the tab's name
 and the branch of its focused pane. At its right is **+ New**: a
 terminal, in a new tab (`mod+T`) or a split, right or down; an agent,
 with an optional first message, then a role of the repository, plain
-Claude Code or Codex, or a team; a diff; the commit graph; or a
+Claude Code, Codex, Pi or OpenCode, or a team; a diff; the commit
+graph; or a
 browser. Each row runs the same
 command as its key or the palette, and shows its shortcut when one is
 bound (the commit graph and a browser have none by default). On the
@@ -763,6 +877,176 @@ of either is ignored for its default.
 
 Status comes from the Claude Code hooks, so it needs the integration set up
 (an install from an earlier version gains the extra hooks on next launch).
+
+### Computers
+
+A computer is somewhere agents can work over SSH: a host — an alias from
+`~/.ssh/config`, or a destination such as `-p 2222 me@gpu.example` — and
+the directory on it where the work is. The Computers pane (*Pane:
+Computers* in the palette, or `mira computer open`) adds, edits, removes
+and tests them, and keeps them in mirador.json:
+
+```jsonc
+{ "computers": [{ "name": "devbox", "host": "devbox", "dir": "~/work/app" }] }
+```
+
+A name is letters, digits, `-`, `_` and `.`, and no two computers share
+one. From the app, an agent or a team runs on a computer when you start
+it from a pane there (*Remote terminals*, below). From `mira`, `mira
+agent new --on <name>` and `mira team start --on <name>` run it on a
+saved computer, its host and directory standing in for `--host` and
+`--dir` (*Teams on a remote computer*, below).
+
+In the pane, *+ Add a computer* — or the palette's *Pane: Add a Remote
+Computer* — starts a new one: a name, the SSH host (your `~/.ssh/config`
+aliases are offered; anything `ssh` takes can be typed) and the
+directory. A `~` in the directory is the home there: `~/work/app` is
+that home's `work/app`. `~user` is not expanded. *Pane: SSH to a
+Computer…* opens a saved one in a new tab, its shell in the computer's
+directory.
+
+**Test connection** connects as an agent's start would — one
+connection, never a password prompt, nothing written there — and
+answers within 30 seconds:
+
+- **Reached**, and the system there (`Linux x86_64`). A computer ssh
+  cannot reach shows ssh's own message instead.
+- **The directory found**, or not found.
+- **Agents can run there**, or why not yet: no `mira` is published for
+  that system (put one at `~/.mirador/bin/mira-<version>` there), Claude
+  Code is not on the PATH of a login shell there, or the directory is
+  not there.
+
+A test is offered, never required: a computer can be saved while it is
+off. Remove asks first, in the pane. mirador.json must be plain JSON: for
+a file that does not parse, the pane and `mira computer` say why, rather
+than read it as having no computers.
+
+The same from any terminal:
+
+```bash
+mira computer list                                         # name, host and directory, one per line
+mira computer add devbox --host devbox --dir '~/work/app'   # quote the ~, or this shell makes it its own home
+mira computer update devbox --dir /srv/app                 # --name, --host, --dir: what is given changes
+mira computer test devbox                                  # or --host devbox --dir '~/work/app', before saving
+mira computer remove devbox
+mira computer open                                         # the pane; --tab or --split
+mira ssh open --on devbox                                  # a tab on it, in its directory, as the palette opens one
+mira ssh open devbox --tab --dir '~/work/app'               # the same tab by hand, from a host and a directory
+```
+
+`mira computer test` prints the same three answers, a line each, and
+exits 0 only when agents can run there.
+
+### Remote terminals
+
+A remote pane is a terminal like any other. A split of it — from the
+keys, *+ New*, the board or `mira split` — is another shell on the same
+remote, in the directory its shell is in now, as a local split follows
+its pane's: the app asks the remote where that shell is, or takes the
+directory the shell reports itself (OSC 7) when it does. Where it cannot
+know — a pane opened with no directory whose shell reports none, a
+remote that does not answer within seconds, Windows — the split starts
+in the directory the pane was opened in, or the home there. A split of a
+remote agent's pane is a shell on its host, in the directory the agent
+works in. A split with a command (`mira split --command`, `mira run`)
+runs here, and a new tab is local.
+
+Starting an agent or a team from a remote pane asks where it runs, in
+the palette: *This computer*, or *On devbox* — the saved computer with
+that host and directory, else the host — with the directory beside it.
+It is asked wherever the app starts one: the palette, *+ New*, the
+empty wall and the board's frame menu. Esc starts nothing. There is no
+question, and it starts here, when there is no choice:
+
+- from a local pane;
+- for Codex, Pi or OpenCode, a role the remote cannot take (one that
+  keeps only some skills or plugins), or a team with such a member;
+- for a role started in a team's tab: it joins that team, and runs
+  where the team runs;
+- from the role and team editor, whose own pane is never remote;
+- on Windows, where agents on a remote are not done yet.
+
+`mira` asks nothing: `mira agent new` and `mira team start` run where
+`--host` and `--dir`, or `--on`, say, or here, whatever pane they are
+run from. When a start fails — a remote that cannot take it, a pane
+closed meanwhile — a bar at the top of the window says why, until you
+dismiss it.
+
+A remote pane from a session before this has no directory: its splits
+start in the home there, and a remote agent's until it is restarted.
+On Windows, with no ControlMaster, each split on a host that asks for a
+password or a second factor logs in again.
+
+### Teams on a remote computer
+
+An agent, or a whole team, can run on a computer you reach by ssh, while
+this Mirador stays the one place with the tabs, the teams, the task board
+and every name. The agents work there; their panes are here, and a local
+agent messages a remote one by name, as a teammate in its tab, or from
+another tab as `<team>/<name>`.
+
+```bash
+mira agent new --host prod --dir /srv/app "look at the failing job"               # plain Claude Code there
+mira agent new --host prod --dir /srv/app --role reviewer "review the auth change"
+mira team start squad --host prod --dir /srv/app "add OAuth"                       # every member there
+mira team start squad --on prod "add OAuth"                                         # a saved computer's host and dir
+```
+
+`--host` is an alias from `~/.ssh/config` or a destination; `--dir` is the
+directory there the agents work in. `--on` names a computer saved in
+mirador.json (*Computers*, above) instead, and stands for both. A team
+started there stays there: `mira team list` names its host, and
+`team add` starts the new member on that computer, in that directory.
+`team restart` starts a member whose agent ended there again, in a
+fresh pane. A member whose pane is reconnecting, or has sat idle since
+Mirador was relaunched, reads as ended too: it is started afresh rather
+than on the conversation it had, and its old agent, if it still runs
+there, is ended.
+What the remote needs:
+
+- **Linux on x86_64 or aarch64**, for now.
+- **ssh by key or agent**: nothing answers a password prompt.
+- **`curl` or `wget`, once**: the remote fetches the `mira` of this
+  Mirador's version from its GitHub release, into
+  `~/.mirador/bin/mira-<version>`. With no network there, or on another
+  system, put a `mira` built for it at that path by hand.
+- **Claude Code, installed and signed in** there — `claude setup-token`
+  is the way for agents nobody sits in front of.
+
+Starting agents on a computer means trusting it with this Mirador. They
+reach it through its automation socket, forwarded there whole: whoever
+can act as you on that computer, or as root there, can drive this
+Mirador while it is forwarded — type into any pane here included, which
+runs commands on this machine as you.
+
+Each agent runs there under a holder, the one that keeps terminals
+running here after a quit (below), and its pane only attaches to it.
+Drop the connection and the agent keeps working: the pane reconnects by
+itself, waiting a little longer each time the remote stays out of reach
+(2s up to 30s), and a key retries at once. An agent's own exit shows as
+an exit. Closing its pane, or its tab, ends it there; so does *Quit and
+end all sessions*. A plain quit leaves it running, and after a restart a
+keypress in its pane reattaches. From any terminal on the remote,
+`~/.mirador/bin/mira-<version> attach <pane>` shows an agent (its id is
+in `mira agent list`; that `mira` is on no PATH there unless you put
+it there). On a systemd remote, run `loginctl enable-linger` there once,
+or your agents may end with your last login session there.
+
+What lives where: roles and teams are this computer's, the ones the
+calling pane's directory sees, and a remote's own `.mirador` is not read.
+Each agent's prompt and settings are sent to `~/.mirador/run` on the
+remote; its hooks come with it, in its own settings, so its status
+reaches this Mirador whatever the remote's Claude Code settings hold. The
+status line is not installed there — that is yours. Nothing of this
+machine's logins is copied.
+
+Not done yet: Codex, Pi or OpenCode on a remote; a role that keeps only
+some skills or plugins; resuming a save of a member there (`team save`
+and `agent save` write one, but a resume starts it on this computer,
+where its conversation is not); and Windows remotes, or Mirador on
+Windows driving one.
+[`docs/AGENTS.md`](docs/AGENTS.md) (section 8) has how it works.
 
 ## Terminals that keep running when you quit
 

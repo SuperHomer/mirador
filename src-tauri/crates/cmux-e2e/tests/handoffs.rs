@@ -36,7 +36,7 @@ fn agents_hand_each_other_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()) });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
     sb.wait_for("the planner", LONG, || sb.member("planner"));
     let planner = pane_of(&sb, "planner");
     let r1 = pane_of(&sb, "reviewer-1");
@@ -106,6 +106,124 @@ fn agents_hand_each_other_work() {
     assert!(!std::path::Path::new("/tmp/should-not-exist").exists());
 }
 
+/// The sender a message's header names: what its recipient replies to.
+fn header_from(text: &str) -> &str {
+    text.strip_prefix("[message from ").and_then(|t| t.split_once(", via mira agent send]")).map(|(from, _)| from).unwrap_or("")
+}
+
+/// An agent outside a team's tab reaches its members as `<team>/<name>`;
+/// a bare name still looks only in the sender's own tab. A message across
+/// tabs names its sender the way its recipient can reply to.
+#[test]
+fn another_tabs_team_is_reached_by_team_and_name() {
+    e2e!();
+    let mut sb = Sandbox::new("crosstab");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/dev.md", "---\nmodel: haiku\n---\nYou build.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(".mirador/teams/squad.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: dev\n---\nShip small.\n");
+    sb.write(".mirador/teams/gate.md", "---\nmembers:\n  - role: reviewer\n    lead: true\n---\nCheck it.\n");
+    sb.launch();
+    let shell = sb.first_pane();
+    let start_squad = |sb: &Sandbox| -> String {
+        let started = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+        started["tabId"].as_str().unwrap().to_string()
+    };
+    let squad_tab = start_squad(&sb);
+    sb.wait_for("the planner", LONG, || sb.member("planner"));
+    let planner = pane_of(&sb, "planner");
+    sb.wait_for("the planner's session", LONG, || sb.events("hooked", &planner).into_iter().next());
+    // A plain agent beside the first shell: in its tab, not the team's.
+    let loner = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(shell.clone()),
+        host: None,
+        dir: None,
+        on: None,
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    send(&sb, &loner, "squad/planner", "from the other tab").unwrap();
+    let got = sb.wait_for("the message, to the planner", LONG, || {
+        sb.events("message", &planner).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.ends_with("from the other tab")))
+    });
+    // A tab with no team: the loner is named by its pane id.
+    assert_eq!(header_from(got["text"].as_str().unwrap()), loner, "{got}");
+    // `agent wait` finds it the same way, through the CLI.
+    let (code, _, err) = sb.mira(Some(&loner), &["agent", "wait", "squad/planner", "--timeout", "2"]);
+    // Its turn may still be running (0) or long over (124); a name it
+    // could not find would be neither.
+    assert!(code == 0 || code == 124, "wait squad/planner: {code} {err}");
+
+    // A card for a member goes on the team's board, not the sender's.
+    let card = sb.call(Request::TaskAdd {
+        title: "chart for the other tab".into(),
+        to: Some("squad/dev".into()),
+        pane_id: Some(loner.clone()),
+        description: None,
+    })["cardId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let board = |pane: &str| -> Vec<String> {
+        let cards = sb.call(Request::TaskList { all: false, pane_id: Some(pane.into()) });
+        cards["cards"].as_array().unwrap().iter().filter_map(|c| c["id"].as_str().map(String::from)).collect()
+    };
+    let dev = pane_of(&sb, "dev");
+    assert!(board(&dev).contains(&card), "not on the team's board: {:?}", board(&dev));
+    assert!(!board(&loner).contains(&card), "on the sender's board too");
+    let cards = sb.call(Request::TaskList { all: false, pane_id: Some(dev.clone()) });
+    let filed = cards["cards"].as_array().unwrap().iter().find(|c| c["id"] == card.as_str()).unwrap().clone();
+    assert_eq!(filed["from"], loner.as_str(), "the card names its writer as the dev's tab can reach it");
+
+    let bare = send(&sb, &loner, "planner", "hi").unwrap_err();
+    assert!(bare.contains("no agent `planner` in this tab") && bare.contains("`<team>/<name>`"), "{bare}");
+    let no_team = send(&sb, &loner, "nope/planner", "hi").unwrap_err();
+    assert_eq!(no_team, "no team `nope` is running (there are: squad)");
+    let no_member = send(&sb, &loner, "squad/gate", "hi").unwrap_err();
+    assert!(no_member.starts_with("team `squad` has no agent `gate` (there are: "), "{no_member}");
+
+    // Between two teams' tabs: the header is `<team>/<name>`, and that
+    // exact string, sent back, reaches the sender.
+    sb.call(Request::TeamStart { title: None, team: "gate".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
+    let reviewer = pane_of(&sb, "reviewer");
+    for pane in [&dev, &reviewer] {
+        sb.wait_for("its session", LONG, || sb.events("hooked", pane).into_iter().next());
+    }
+    send(&sb, &dev, "gate/reviewer", "please check the chart").unwrap();
+    let got = sb.wait_for("the message, to the reviewer", LONG, || {
+        sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.ends_with("please check the chart")))
+    });
+    let from = header_from(got["text"].as_str().unwrap()).to_string();
+    assert_eq!(from, "squad/dev", "{got}");
+    send(&sb, &reviewer, &from, "looks good").unwrap();
+    let back = sb.wait_for("the reply, to the dev", LONG, || {
+        sb.events("message", &dev).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.ends_with("looks good")))
+    });
+    assert_eq!(header_from(back["text"].as_str().unwrap()), "gate/reviewer", "{back}");
+
+    // A second squad: `squad/<name>` could mean either tab, so it is
+    // refused, and a squad member signs with its pane id instead.
+    let again = start_squad(&sb);
+    let twice = send(&sb, &loner, "squad/planner", "hi").unwrap_err();
+    assert!(
+        twice.contains("team `squad` is running in more than one tab") && twice.contains(&squad_tab) && twice.contains(&again),
+        "{twice}"
+    );
+    send(&sb, &dev, "gate/reviewer", "one more look").unwrap();
+    let got = sb.wait_for("the second message, to the reviewer", LONG, || {
+        sb.events("message", &reviewer).into_iter().find(|m| m["text"].as_str().is_some_and(|t| t.ends_with("one more look")))
+    });
+    assert_eq!(header_from(got["text"].as_str().unwrap()), dev, "{got}");
+}
+
 /// A message sent the moment an agent is started — `mira agent new` then
 /// `mira agent send`, as a lead does — waits for the agent to be running.
 /// Typed at once, it went to the pane's shell, still to type the agent's
@@ -126,6 +244,9 @@ fn a_message_sent_before_its_agent_is_up_waits_for_it() {
         task: None,
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -157,6 +278,9 @@ fn an_agent_showing_a_menu_is_not_typed_into() {
         task: None,
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -211,6 +335,9 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
         task: None,
         target: None,
         pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
     })["paneId"]
         .as_str()
         .unwrap()
@@ -218,15 +345,22 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
     sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
     sb.wait_for("the welcome", LONG, || sb.screen(&pane).filter(|s| s.contains("Press any key")));
 
+    // Untimed first: before its 10 s wait for an input box, a send or a
+    // clear also waits until the app has seen the agent's process running
+    // (`handoff::wait_started`), which comes with the next poll, up to 2 s
+    // and a process scan later. The hook above does not need that poll, so
+    // timing the first call counted that wait too: 12.17 s on a slow
+    // runner. Once one call has been through it, the next waits only for
+    // the input box.
+    let clear = |force| sb.request(Request::AgentClear { name: Some(pane.clone()), pane_id: Some(first.clone()), force });
+    let refused = clear(false).unwrap_err();
+    assert!(refused.contains("no input box"), "{refused}");
     let asked = std::time::Instant::now();
     let refused = send(&sb, &first, &pane, "hello").unwrap_err();
     let took = asked.elapsed();
     assert!(refused.contains("no input box"), "{refused}");
     // The wait is 10 s, and no read of the screen outlives it.
     assert!(took >= Duration::from_secs(10) && took < Duration::from_secs(12), "refused after {took:?}");
-    let clear = |force| sb.request(Request::AgentClear { name: Some(pane.clone()), pane_id: Some(first.clone()), force });
-    let refused = clear(false).unwrap_err();
-    assert!(refused.contains("no input box"), "{refused}");
     assert_eq!(sb.events("message", &pane).len(), 0, "nothing reached it");
 
     // Forced, it goes through — and, as a key would, dismisses the welcome.
@@ -245,4 +379,48 @@ fn an_agent_with_no_input_box_is_not_typed_into() {
     // Its input box up, a message goes in unforced.
     send(&sb, &first, &pane, "now for real").unwrap();
     sb.wait_for("the message", LONG, || sb.events("message", &pane).into_iter().find(|m| m["text"] == "now for real"));
+}
+
+/// A team of a Pi and an OpenCode member hand each other work by name,
+/// each message going into the other's input box (drawn as each draws
+/// it) and arriving whole, and each clears the other with `/new`.
+#[test]
+fn pi_and_opencode_members_send_to_each_other_and_clear() {
+    e2e!();
+    let mut sb = Sandbox::new("piocsend");
+    sb.write(".mirador/roles/builder.md", "---\nharness: pi\n---\nYou build.\n");
+    sb.write(".mirador/roles/helper.md", "---\nharness: opencode\n---\nYou help.\n");
+    sb.write(
+        ".mirador/teams/duo.md",
+        "---\nmembers:\n  - role: builder\n    lead: true\n  - role: helper\n---\nShip small.\n",
+    );
+    sb.launch();
+    let first = sb.first_pane();
+    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    let builder = sb.wait_for("the builder", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
+    let helper = sb.wait_for("the helper", LONG, || sb.member("helper").and_then(|m| m["pane"].as_str().map(String::from)));
+    // Listed before their terminals start: a send then is refused.
+    sb.nth_start(&builder, 1);
+    sb.nth_start(&helper, 1);
+    let got = |pane: &str| -> Vec<String> {
+        sb.events("message", pane).iter().map(|m| m["text"].as_str().unwrap_or_default().to_string()).collect()
+    };
+    let ok = |from: &str, args: &[&str]| {
+        let (code, out, err) = sb.mira(Some(from), args);
+        assert_eq!(code, 0, "{args:?}: {out}{err}");
+    };
+
+    ok(&builder, &["agent", "send", "helper", "check the build"]);
+    sb.wait_for("the helper's echo", LONG, || sb.screen(&helper).filter(|s| s.contains("got: [message from builder")));
+    ok(&helper, &["agent", "send", "builder", "it is green"]);
+    sb.wait_for("the builder's echo", LONG, || sb.screen(&builder).filter(|s| s.contains("got: [message from helper")));
+    // One message each, its header and its text together.
+    sb.wait_for("both messages", LONG, || (got(&helper).len() == 1 && got(&builder).len() == 1).then_some(()));
+    assert_eq!(got(&helper), ["[message from builder, via mira agent send]\ncheck the build"]);
+    assert_eq!(got(&builder), ["[message from helper, via mira agent send]\nit is green"]);
+
+    ok(&builder, &["agent", "clear", "helper"]);
+    ok(&helper, &["agent", "clear", "builder"]);
+    sb.wait_for("each cleared", LONG, || (got(&helper).len() == 2 && got(&builder).len() == 2).then_some(()));
+    assert_eq!((got(&helper)[1].as_str(), got(&builder)[1].as_str()), ("/new", "/new"));
 }

@@ -4,6 +4,8 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 
 export type SplitDir = "row" | "column";
 export type Direction = "left" | "right" | "up" | "down";
+/** A ready-made arrangement of a tab's panes (cmux-protocol's `Preset`). */
+export type Preset = "side-by-side" | "stacked" | "grid" | "main-stack";
 
 export type Node =
   | { type: "leaf"; paneId: string }
@@ -100,6 +102,8 @@ export interface CardRect extends BoardRect {
 export interface TeamRun {
   name: string;
   members: { name: string; role: string; pane: string; lead: boolean }[];
+  /** Where it runs, for a team started on a remote computer. */
+  remote: { host: string; dir: string } | null;
 }
 
 /** A team definition (`cmux_protocol::AgentTeam`). */
@@ -333,6 +337,8 @@ export interface AgentInfo {
   sinceMs: number | null;
   cwd: string | null;
   branch: string | null;
+  /** The ssh host it runs on, for an agent on a remote computer. */
+  remoteHost: string | null;
 }
 
 /** How far an agent is through its task list (`cmux_protocol::TaskProgress`). */
@@ -403,6 +409,9 @@ export interface AccountUsage {
   email: string | null;
   /** What else the login says: "API key in env, declined". */
   note: string | null;
+  /** Where it sends when not to its maker's own API: the provider's name
+   *  and host, `Azure OpenAI · llm.example:4000`, or either alone. */
+  provider: string | null;
   /** The most used first; empty for Claude Code, which keeps none on disk. */
   limits: LimitWindow[];
   /** Unix millis of what the limits were read from. */
@@ -410,7 +419,7 @@ export interface AccountUsage {
   /** Why a plan shows no limits, and how to get them. */
   limitsNote: string | null;
   /** No limits until the integration wraps Claude Code's status line:
-   *  setting it up (the user's click) would show them. Never on Windows. */
+   *  setting it up (the user's click) would show them. */
   limitsSetup: boolean;
   fiveHours: TokenTotals;
   sevenDays: TokenTotals;
@@ -658,9 +667,12 @@ export interface WorkspaceSnapshot {
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
+  computersPanes: ComputersPaneInfo[];
   agents: AgentInfo[];
   view: View;
   camera: Camera;
+  /** Cameras set from outside since launch: what the board's saves say they have seen. */
+  cameraSets: number;
 }
 
 export interface NotificationDto {
@@ -739,7 +751,18 @@ export interface ResolvedConfig {
   editorOpensIn: OpensIn;
   diffOpensIn: OpensIn;
   graphOpensIn: OpensIn;
+  /** The sidebar's width in pixels: mirador.json's or the default, 248. */
+  sidebarWidth: number;
+  /** The width of Focus's rail in pixels, or null for the default, about
+   *  a third of the wall. */
+  focusRailWidth: number | null;
+  focusRailPosition: RailPosition;
 }
+
+/** Where Focus shows the wall's other agents and tools: the rail on the
+ *  right, tabs in the header of the one shown large, or a row of tabs
+ *  under it (`cmux_protocol::RailPosition`). */
+export type RailPosition = "right" | "top" | "bottom";
 
 /** A sidebar agent's click: its tab's wall on it, or its pane alone. */
 export type AgentClick = "wall" | "pane";
@@ -769,7 +792,7 @@ export const getConfig = () => invoke<ResolvedConfig>("get_config");
 /** Whether to offer the Claude Code integration (decided in Rust). */
 export const claudeIntegrationOffer = () =>
   invoke<boolean>("claude_integration_offer");
-/** `mira` on PATH, then the hooks and `/mira-diff`. Lines of what was done. */
+/** `mira` on PATH, then the hooks and the skills. Lines of what was done. */
 export const setupClaudeIntegration = () =>
   invoke<string[]>("setup_claude_integration");
 /** "Not now": the offer is not made again. */
@@ -796,6 +819,18 @@ export const focusPane = (paneId: string) =>
   invoke<void>("focus_pane", { paneId });
 export const focusDirection = (direction: Direction) =>
   invoke<void>("focus_direction", { direction });
+/**
+ * Swaps the pane with its neighbor in `direction`; the focus goes with it.
+ * This and the three below answer whether the tab changed.
+ */
+export const swapPane = (paneId: string, direction: Direction) =>
+  invoke<boolean>("swap_pane", { paneId, direction });
+export const rotatePanes = (tabId: string, forward: boolean) =>
+  invoke<boolean>("rotate_panes", { tabId, forward });
+export const equalizePanes = (tabId: string) =>
+  invoke<boolean>("equalize_panes", { tabId });
+export const applyLayout = (tabId: string, preset: Preset) =>
+  invoke<boolean>("apply_layout", { tabId, preset });
 export const setView = (view: View) => invoke<void>("set_view", { view });
 /**
  * Saved with the session; sends no snapshot back. With the board's size on
@@ -804,7 +839,8 @@ export const setView = (view: View) => invoke<void>("set_view", { view });
 export const setCamera = (
   camera: Camera,
   viewport: { width: number; height: number },
-) => invoke<void>("set_camera", { ...camera, ...viewport });
+  seen: number,
+) => invoke<void>("set_camera", { ...camera, ...viewport, seen });
 /** The camera showing the whole board in a viewport of this size. */
 export const boardFit = (width: number, height: number) =>
   invoke<Camera>("board_fit", { width, height });
@@ -867,10 +903,20 @@ export const setDiffSpec = (paneId: string, spec: string) =>
 /** Newest first: one release, or every release after `since`. */
 export const whatsNew = (version: string, since: string | null) =>
   invoke<ReleaseNotes[]>("whats_new", { version, since });
-/** Omit `version` for the running build; pass one to preview an update's. */
 /** Raw image bytes, fetched and cached by the backend — never by the page. */
 export const releaseImage = (url: string) =>
   invoke<ArrayBuffer>("release_image", { url });
+/**
+ * Saves a pasted image for `paneId` and answers the path to type: on the
+ * pane's remote for an SSH pane. The bytes go raw, not as a JSON array of
+ * numbers; a raw body carries nothing else, so the pane goes in a header.
+ */
+export const pasteImage = (paneId: string, bytes: ArrayBuffer) =>
+  invoke<string>("paste_image", bytes, { headers: { "mirador-pane": paneId } });
+/** The paths to type for files dropped on `paneId`: theirs, or on an SSH pane, the copies sent to its remote. */
+export const sendFiles = (paneId: string, paths: string[]) =>
+  invoke<string[]>("send_files", { paneId, paths });
+/** Omit `version` for the running build; pass one to preview an update's. */
 export const openWhatsNew = (
   version: string | null = null,
   since: string | null = null,
@@ -897,12 +943,15 @@ export const roleHint = (r: AgentRole): string =>
         .filter(Boolean)
         .join(" · ");
 
-/** Starts a team in a tab of its own; `task` goes to its lead. */
+/** Starts a team in a tab of its own; `task` goes to its lead. With
+ *  `onRemote`, every member runs on the remote `paneId` is on (the Where
+ *  step's choice; Rust reads the remote from that pane). */
 export const startTeam = (
   team: string,
   task: string | null,
   paneId: string | null,
-) => invoke<string>("start_team", { team, task, paneId });
+  onRemote = false,
+) => invoke<string>("start_team", { team, task, paneId, onRemote });
 
 /** What a team tells its members, in estimated tokens, and the least that
  *  costs per turn (`cmux_protocol::TeamWeight`). A lower bound: the
@@ -994,6 +1043,11 @@ export interface UsagePaneInfo {
   paneId: string;
 }
 
+/** The computers pane: at most one, showing the saved computers. */
+export interface ComputersPaneInfo {
+  paneId: string;
+}
+
 /** The settings pane: at most one, showing mirador.json's settings. */
 export interface SettingsPaneInfo {
   paneId: string;
@@ -1041,6 +1095,9 @@ export const settingsView = () => invoke<SettingRow[]>("settings_view");
 /** Sets `key` in mirador.json, or removes it with null. */
 export const setConfigValue = (key: string, value: unknown) =>
   invoke<void>("set_config_value", { key, value });
+/** Zooms every terminal `steps` whole points, or back to the default with
+ *  0 (`fontSize`). Resolves to the new size. */
+export const zoomTerminals = (steps: number) => invoke<number>("zoom_terminals", { steps });
 
 /** An agent-editor pane, and the directory whose files it edits. */
 export interface AgentEditorPaneInfo {
@@ -1177,7 +1234,26 @@ export const openAgent = (
   paneId: string | null,
   tab: boolean,
   harness: Harness | null = null,
-) => invoke<string>("open_agent", { role, task, paneId, tab, harness });
+  onRemote = false,
+) => invoke<string>("open_agent", { role, task, paneId, tab, harness, onRemote });
+
+/** Where something started from a remote pane could run instead of here:
+ *  the pane's remote, named by the saved computer there, else its host. */
+export interface StartWhere {
+  label: string;
+  host: string;
+  dir: string;
+}
+/** Whether a role, a plain harness or a team started from `paneId` could
+ *  run on that pane's remote, and where; null when it can only run here
+ *  (a local pane, Codex, a role the remote refuses, a role joining its
+ *  tab's team). `start_where`. */
+export const startWhere = (
+  paneId: string | null,
+  role: string | null,
+  harness: Harness | null,
+  team: string | null,
+) => invoke<StartWhere | null>("start_where", { paneId, role, harness, team });
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });
@@ -1214,9 +1290,43 @@ export const listWorktrees = (paneId: string) =>
   invoke<Worktree[]>("list_worktrees", { paneId });
 export const setDiffWorktree = (paneId: string, worktree: string) =>
   invoke<void>("set_diff_worktree", { paneId, worktree });
-export const openSsh = (paneId: string | null, tab: boolean, host: string) =>
-  invoke<string>("open_ssh", { paneId, tab, host });
+/** An SSH pane on `host`: a split of `paneId`, or a tab; its shell starts in
+ *  `dir` there when given (a saved computer's), else in the home. */
+export const openSsh = (paneId: string | null, tab: boolean, host: string, dir: string | null = null) =>
+  invoke<string>("open_ssh", { paneId, tab, host, dir });
 export const sshHosts = () => invoke<string[]>("ssh_hosts");
+
+/** A computer agents can work on: an ssh host and the directory there. */
+export interface Computer {
+  name: string;
+  host: string;
+  dir: string;
+}
+/** The computers mirador.json lists, or why it cannot be read. */
+export const listComputers = () => invoke<Computer[]>("list_computers");
+/** Shows the computers pane, or opens one beside `paneId` or in a tab. */
+export const openComputers = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_computers", { paneId, tab });
+/** Changes the computer `original`; refused as `addComputer` is, or for a taken name. */
+export const updateComputer = (original: string, name: string, host: string, dir: string) =>
+  invoke<Computer>("update_computer", { original, name, host, dir });
+export const removeComputer = (name: string) => invoke<void>("remove_computer", { name });
+/** What an agent's start on `host`, in `dir` there, would meet. */
+export interface ComputerCheck {
+  /** `uname -s` and `-m` there: "Linux x86_64". */
+  system: string;
+  dirFound: boolean;
+  claudeFound: boolean;
+  /** Why agents cannot run there, in one line; null when they can. */
+  agents: string | null;
+}
+/** Tests a host and a directory, saved or not; rejects with ssh's message
+ *  when it is not reached, or after 30s. */
+export const testComputer = (host: string, dir: string) =>
+  invoke<ComputerCheck>("test_computer", { host, dir });
+/** Adds one; refused for a taken or unsafe name, or an empty host or dir. */
+export const addComputer = (name: string, host: string, dir: string) =>
+  invoke<Computer>("add_computer", { name, host, dir });
 export const setBrowserBounds = (
   paneId: string,
   x: number,

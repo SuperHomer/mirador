@@ -11,8 +11,10 @@ import {
   splitPane,
 } from "../bindings";
 import { useBoardStore } from "../state/boardStore";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
+import { startHere } from "../agents/startHere";
 import { opensInTab } from "../state/configStore";
+import { useTeamOf } from "../agents/NewMenu";
 
 /** The menu's width, to line its right edge up with the "+". */
 const WIDTH = 220;
@@ -42,6 +44,7 @@ export function FrameMenu({
 }) {
   const [agents, setAgents] = useState(false);
   const [roles, setRoles] = useState<AgentRole[]>([]);
+  const team = useTeamOf(pane);
   const ref = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -91,7 +94,14 @@ export function FrameMenu({
 
   const run = (create: () => Promise<unknown>) => () => {
     onClose();
-    create().catch((e) => console.error(`mirador: ${e}`));
+    create().catch((e) => reportFailure("Open", e));
+  };
+  /** An agent: here, or after the palette's Where step from a remote pane. */
+  const agent = (role: string | null, label: string) => () => {
+    onClose();
+    startHere(pane, { role, harness: role ? null : "claude" }, label, (remote) =>
+      openAgent(role, null, pane, false, null, remote !== null),
+    );
   };
 
   return createPortal(
@@ -107,19 +117,21 @@ export function FrameMenu({
       {agents ? (
         <>
           <button onClick={() => setAgents(false)}>‹ Back</button>
-          <button onClick={run(() => openAgent(null, null, pane, false))}>
+          <button onClick={agent(null, "Start Claude Code")}>
             <span>Claude</span>
-            <span className="frame-menu-hint">default model</span>
+            <span className="frame-menu-hint">{team ? "default model · not a member" : "default model"}</span>
           </button>
           {roles.map((r) => (
             <button
               key={r.name}
               disabled={!!r.problem}
               title={r.problem ?? r.description ?? undefined}
-              onClick={run(() => openAgent(r.name, null, pane, false))}
+              onClick={agent(r.name, `Start ${r.name}`)}
             >
               <span>{r.name}</span>
-              <span className="frame-menu-hint">{roleHint(r)}</span>
+              <span className="frame-menu-hint">
+                {team && !r.problem ? `${roleHint(r)} · joins ${team}` : roleHint(r)}
+              </span>
             </button>
           ))}
         </>

@@ -6,6 +6,12 @@ import {
   closeTab,
   splitPane,
   focusDirection,
+  swapPane,
+  rotatePanes,
+  equalizePanes,
+  applyLayout,
+  type Direction,
+  type Preset,
   setActiveTab,
   openBrowser,
   openDiff,
@@ -17,19 +23,23 @@ import {
   openAgentEditor,
   openSettings,
   openUsage,
+  openComputers,
   openWhatsNew,
   zoomPane,
   setView,
   installUpdate,
   quitEndingSessions,
+  zoomTerminals,
 } from "../bindings";
 import { useWorkspaceStore, activeTab } from "../state/workspaceStore";
 import { useUpdateStore } from "../state/updateStore";
-import { useUiStore } from "../state/uiStore";
+import { reportFailure, useUiStore } from "../state/uiStore";
+import { startHere } from "../agents/startHere";
 import { useClaudeStore } from "../state/claudeStore";
-import { getTerminal, terminalWithFocus } from "../terminal/registry";
+import { getTerminal, isLent, paneWithFocus, terminalWithFocus } from "../terminal/registry";
 import { arrangeBoard, fitBoard } from "../state/boardStore";
 import { opensInTab } from "../state/configStore";
+import { pasteFromClipboard } from "../terminal/pasteImage";
 
 /** The palette's groups: what an action is about. */
 export type ActionGroup = "agents" | "git" | "pane" | "view" | "app" | "tabs";
@@ -49,6 +59,62 @@ function focusedPane(): string | undefined {
   return activeTab(snapshot)?.focusedPane;
 }
 
+/**
+ * The pane a pane action — close, split, zoom, show activity — acts on:
+ * the tab's focused pane, except on the agent wall. There, clicking into
+ * an agent of the active tab's wall or picking one for Focus leaves the
+ * tab's focused pane where it was (`mark_pane_read`), so it can be another
+ * agent than the one being typed into: the one whose terminal the wall
+ * borrowed and that holds the keyboard. (On the board, clicking into a
+ * tile of another tab's wall does move it: `focusPane` makes that tab the
+ * active one and the tile's agent its focused pane, so the two agree.)
+ *
+ * Only there. Everywhere else the keyboard says nothing: only terminals
+ * take DOM focus, so a diff, graph or browser pane the tab focused leaves
+ * the last terminal holding it, and whether a tab switched away from
+ * blurs its terminal is up to the engine (WebView2 does). Asked there,
+ * the DOM can name a pane that is not the one shown as focused, or one in
+ * a tab nobody is looking at.
+ */
+function actionPane(): string | undefined {
+  const tab = activeTab(useWorkspaceStore.getState().snapshot);
+  const typed = paneWithFocus();
+  const onWall =
+    !!tab?.wall &&
+    !!typed &&
+    isLent(typed) &&
+    tab.wallPages.some((page) => page.includes(typed));
+  return onWall ? typed : tab?.focusedPane;
+}
+
+function activeTabId(): string | undefined {
+  return useWorkspaceStore.getState().snapshot?.activeTab;
+}
+
+function swapAction(direction: Direction, title: string): ActionDef {
+  return {
+    id: `swap_${direction}`,
+    title: `Pane: Swap ${title}`,
+    group: "pane",
+    run: () => {
+      const pane = actionPane();
+      if (pane) void swapPane(pane, direction);
+    },
+  };
+}
+
+function layoutAction(id: string, title: string, preset: Preset): ActionDef {
+  return {
+    id,
+    title: `Layout: ${title}`,
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void applyLayout(tab, preset);
+    },
+  };
+}
+
 /** Moves `offset` tabs along the sidebar's order, wrapping around. */
 function cycleTab(offset: number) {
   const { snapshot } = useWorkspaceStore.getState();
@@ -59,13 +125,13 @@ function cycleTab(offset: number) {
 }
 
 export const actions: ActionDef[] = [
-  { id: "new_tab", title: "Tab: New", group: "tabs", run: () => void newTab() },
+  { id: "new_tab", title: "Tab: New", group: "tabs", run: () => void newTab().catch((e) => reportFailure("New tab", e)) },
   {
     id: "close_pane",
     title: "Pane: Close",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void closePane(pane);
     },
   },
@@ -83,8 +149,8 @@ export const actions: ActionDef[] = [
     title: "Pane: Split Right…",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
-      if (pane) void splitPane(pane, "row");
+      const pane = actionPane();
+      if (pane) void splitPane(pane, "row").catch((e) => reportFailure("Split right", e));
     },
   },
   {
@@ -92,8 +158,8 @@ export const actions: ActionDef[] = [
     title: "Pane: Split Down…",
     group: "pane",
     run: () => {
-      const pane = focusedPane();
-      if (pane) void splitPane(pane, "column");
+      const pane = actionPane();
+      if (pane) void splitPane(pane, "column").catch((e) => reportFailure("Split down", e));
     },
   },
   {
@@ -120,6 +186,41 @@ export const actions: ActionDef[] = [
     group: "pane",
     run: () => void focusDirection("down"),
   },
+  swapAction("left", "Left"),
+  swapAction("right", "Right"),
+  swapAction("up", "Up"),
+  swapAction("down", "Down"),
+  {
+    id: "rotate_forward",
+    title: "Pane: Rotate Forward",
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void rotatePanes(tab, true);
+    },
+  },
+  {
+    id: "rotate_back",
+    title: "Pane: Rotate Back",
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void rotatePanes(tab, false);
+    },
+  },
+  {
+    id: "layout_even",
+    title: "Layout: Even Sizes",
+    group: "pane",
+    run: () => {
+      const tab = activeTabId();
+      if (tab) void equalizePanes(tab);
+    },
+  },
+  layoutAction("layout_side_by_side", "Side by Side", "side-by-side"),
+  layoutAction("layout_stacked", "Stacked", "stacked"),
+  layoutAction("layout_grid", "Grid", "grid"),
+  layoutAction("layout_main_stack", "Main and Stack", "main-stack"),
   { id: "next_tab", title: "Tab: Next", group: "tabs", run: () => cycleTab(1) },
   { id: "prev_tab", title: "Tab: Previous", group: "tabs", run: () => cycleTab(-1) },
   {
@@ -166,13 +267,7 @@ export const actions: ActionDef[] = [
       const term =
         terminalWithFocus() ?? (pane ? getTerminal(pane) : undefined);
       if (!term) return;
-      void navigator.clipboard.readText().then((text) => {
-        // Through xterm, not straight to the PTY: it applies bracketed
-        // paste (a multi-line paste must not run line by line) and newline
-        // normalization, and its input path keeps the paste in order with
-        // typing.
-        if (text) term.paste(text);
-      });
+      void pasteFromClipboard(term, paneWithFocus() ?? pane);
     },
   },
   {
@@ -218,7 +313,7 @@ export const actions: ActionDef[] = [
     // The focused agent's task progress and its subagents, in a drawer:
     // the whole of what its status bar sums up.
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       const agent = useWorkspaceStore
         .getState()
         .snapshot?.agents.find((a) => a.paneId === pane);
@@ -245,6 +340,26 @@ export const actions: ActionDef[] = [
       if (useWorkspaceStore.getState().snapshot?.view === "board") fitBoard();
     },
   },
+  // Zoom: the terminals' text, kept in mirador.json as fontSize. Ctrl +
+  // wheel over a terminal does the same (useZoomWheel).
+  {
+    id: "terminal_zoom_in",
+    title: "View: Zoom Terminals In",
+    group: "view",
+    run: () => void zoomTerminals(1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_out",
+    title: "View: Zoom Terminals Out",
+    group: "view",
+    run: () => void zoomTerminals(-1).catch(zoomFailed),
+  },
+  {
+    id: "terminal_zoom_reset",
+    title: "View: Reset Terminal Zoom",
+    group: "view",
+    run: () => void zoomTerminals(0).catch(zoomFailed),
+  },
   {
     id: "board_arrange",
     title: "View: Arrange Frames",
@@ -260,7 +375,7 @@ export const actions: ActionDef[] = [
     group: "pane",
     // The focused pane alone, filling its tab — or the whole tab again.
     run: () => {
-      const pane = focusedPane();
+      const pane = actionPane();
       if (pane) void zoomPane(pane);
     },
   },
@@ -270,13 +385,18 @@ export const actions: ActionDef[] = [
     group: "agents",
     hint: "Claude Code",
     // Beside the focused pane, in the tab you are working in.
-    run: () => void openAgent(null, null, focusedPane() ?? null, false),
+    run: () => {
+      const pane = focusedPane() ?? null;
+      startHere(pane, { harness: "claude" }, "Start Claude Code", (remote) =>
+        openAgent(null, null, pane, false, null, remote !== null),
+      );
+    },
   },
   {
     id: "setup_claude_integration",
     title: "App: Set Up Claude Code Integration",
     group: "app",
-    // Hooks that light up tabs, /mira-diff, and mira on PATH. The answer
+    // Hooks that light up tabs, the skills, and mira on PATH. The answer
     // shows at the foot of the sidebar, where the first-launch offer was.
     run: () => void useClaudeStore.getState().run(),
   },
@@ -360,6 +480,21 @@ export const actions: ActionDef[] = [
     },
   },
   {
+    id: "computers",
+    title: "Pane: Computers",
+    group: "pane",
+    hint: "add, edit and test them",
+    run: () => openComputersPane(false),
+  },
+  {
+    id: "add_computer",
+    // "Remote" so typing it finds this: the palette matches titles only.
+    title: "Pane: Add a Remote Computer",
+    group: "pane",
+    hint: "an SSH host and a directory there",
+    run: () => openComputersPane(true),
+  },
+  {
     id: "new_browser_pane",
     title: "Pane: New Browser Pane",
     group: "pane",
@@ -369,6 +504,22 @@ export const actions: ActionDef[] = [
     },
   },
 ];
+
+/** mirador.json's computers: the one pane, wherever it is, or a new one
+ *  where the editor would open, as Settings and Usage do; on a new draft
+ *  when `draft`. */
+export function openComputersPane(draft: boolean) {
+  if (draft) useUiStore.getState().setComputerDraft(true);
+  // No pane to take the draft: it must not wait for the next one to open.
+  openComputers(focusedPane() ?? null, opensInTab("editor")).catch(() =>
+    useUiStore.getState().setComputerDraft(false),
+  );
+}
+
+/** A zoom that could not be written: mirador.json does not parse. */
+function zoomFailed(err: unknown) {
+  console.warn(`mirador: zoom not saved: ${err}`);
+}
 
 export function runAction(id: string): boolean {
   const def = actions.find((a) => a.id === id);

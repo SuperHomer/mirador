@@ -10,6 +10,7 @@ mod handoff;
 mod intel;
 mod notify;
 mod runs;
+mod send_files;
 mod server;
 mod settings;
 mod tasks;
@@ -155,10 +156,14 @@ pub fn run() {
                 .cloned()
         });
         // A pane whose Codex the poller saw on a conversation resumes it as
-        // a Codex, with its role; any other is resumed as Claude Code.
-        let codex = m.agent_session.as_deref().is_some_and(|s| s.starts_with("codex:"));
-        let resumes = if codex { cmux_protocol::Harness::Codex } else { cmux_protocol::Harness::Claude };
-        if let Some(r) = role.as_ref().filter(|r| !codex && r.harness != resumes) {
+        // a Codex, with its role; one started on a Pi's or an OpenCode's
+        // conversation as that; any other is resumed as Claude Code.
+        let resumes = m.agent_session.as_deref().map_or(cmux_protocol::Harness::Claude, cmux_core::agents::session_harness);
+        let codex = resumes == cmux_protocol::Harness::Codex;
+        // Its own launch line for a harness that keeps nothing of it in a
+        // conversation: Codex, Pi, OpenCode.
+        let relaunched = resumes != cmux_protocol::Harness::Claude;
+        if let Some(r) = role.as_ref().filter(|r| !relaunched && r.harness != resumes) {
             other_harness.insert(id.clone(), r.harness);
         }
         let role = role.filter(|r| r.harness == resumes);
@@ -178,27 +183,28 @@ pub fn run() {
         // prompt, unlike limits, holds nothing back.
         let prompt = m.agent_prompt.as_deref().filter(|f| std::path::Path::new(f).is_file());
         let quoted_prompt = prompt.map(cmux_core::pty::shell::quote_arg);
-        // A Codex's flags are the line that would start it fresh, built as
-        // a launch builds it, with no task.
-        let codex_launch = codex.then(|| {
-            let socket = crate::commands::codex_socket(role.as_ref(), m.cwd.as_deref());
-            let notify = crate::commands::codex_notify(role.as_ref());
+        // A Codex's, a Pi's or an OpenCode's flags are the line that would
+        // start it fresh, built as a launch builds it, with no task.
+        let launch = relaunched.then(|| {
+            let socket = codex.then(|| crate::commands::codex_socket(role.as_ref(), m.cwd.as_deref())).flatten();
+            let notify = codex.then(|| crate::commands::codex_notify(role.as_ref())).flatten();
             cmux_core::agents::launch_command(
                 role.as_ref(),
-                cmux_protocol::Harness::Codex,
+                resumes,
                 None,
                 prompt.map(std::path::Path::new),
                 None,
                 None,
                 socket.as_ref().map(|(base, socket)| (base.as_str(), socket.as_path())),
                 notify.as_deref(),
+                None,
                 cmux_core::pty::shell::quote_arg,
             )
         });
-        if codex {
-            // A Codex agent from the start, as a launch marks one: on
-            // Windows no process table ever says so.
-            m.agent_harness = Some(cmux_protocol::Harness::Codex);
+        if relaunched {
+            // That harness's agent from the start, as a launch marks one:
+            // on Windows no process table ever says so.
+            m.agent_harness = Some(resumes);
         }
         let restored = cmux_core::agents::restore_pane(
             m.command.as_deref(),
@@ -209,7 +215,7 @@ pub fn run() {
                 effort: quoted_effort.as_deref(),
                 settings: quoted_settings.as_deref(),
                 prompt: quoted_prompt.as_deref(),
-                codex: codex_launch.as_deref(),
+                launch: launch.as_deref(),
             },
             cmux_core::agents::AUTO_RESUME,
         );
@@ -357,6 +363,12 @@ pub fn run() {
             whatsnew::announce_on_launch(app.handle().clone());
             // Off the startup path: it reads (and may write) ~/.claude.
             std::thread::spawn(commands::repair_claude_hooks);
+            // Pastes are for the moment they are pasted in; a day later
+            // they are clutter, and maybe private clutter.
+            std::thread::spawn(|| {
+                let day = std::time::Duration::from_secs(24 * 60 * 60);
+                cmux_core::paste::prune(&cmux_core::paste::local_dir(), day, std::time::SystemTime::now());
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -375,7 +387,13 @@ pub fn run() {
             commands::close_pane,
             commands::focus_pane,
             commands::focus_direction,
+            commands::paste_image,
+            commands::send_files,
             commands::set_split_ratios,
+            commands::swap_pane,
+            commands::rotate_panes,
+            commands::equalize_panes,
+            commands::apply_layout,
             commands::set_view,
             commands::set_camera,
             commands::set_card_rect,
@@ -411,6 +429,13 @@ pub fn run() {
             settings::open_settings,
             settings::settings_view,
             settings::set_config_value,
+            settings::zoom_terminals,
+            settings::open_computers,
+            settings::list_computers,
+            settings::add_computer,
+            settings::update_computer,
+            settings::remove_computer,
+            settings::test_computer,
             teams::start_team,
             teams::list_teams,
             teams::team_cost,
@@ -439,6 +464,7 @@ pub fn run() {
             whatsnew::release_image,
             whatsnew::open_whats_new,
             commands::open_ssh,
+            commands::start_where,
             commands::ssh_hosts,
             commands::set_browser_bounds,
             commands::browser_screenshot,

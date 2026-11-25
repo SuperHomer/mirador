@@ -98,13 +98,27 @@ body,
 
 /* ---------- Sidebar ---------- */
 
+/* 248px is the default; mirador.json's sidebarWidth, or a drag of the
+   edge, sets it inline (useDragWidth). */
 .sidebar {
+  position: relative;
   width: 248px;
   flex-shrink: 0;
   background: var(--bg-alt);
   border-right: 1px solid var(--surface);
   display: flex;
   flex-direction: column;
+}
+
+/* The sidebar's handle straddles its border: half over the sidebar,
+   half over the pane beside it, above the split dividers. */
+.sidebar > .width-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 7px;
+  z-index: 11;
 }
 
 .sidebar-tabs {
@@ -458,6 +472,46 @@ body,
   color: var(--text);
 }
 
+/* + New tab, between the tab list and Usage: a quiet row in the tab rows'
+   rhythm, its "+" in their index column and its label in line with their
+   titles. It draws no border: the line under it is Usage's top border, or
+   the footer's when there is no Usage. */
+.sidebar-new-tab {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 6px 6px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-new-tab:hover {
+  background: var(--tint-hover);
+  color: var(--text);
+}
+
+.sidebar-new-tab-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* The shortcut, at the right, is what gives way in a narrow sidebar. */
+.sidebar-new-tab .sidebar-accel {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Each account's usage, pinned above the footer. */
 .usage-section {
   flex-shrink: 0;
@@ -679,10 +733,32 @@ body,
 
 /* ---------- Split layout ---------- */
 
+/* Beside the sidebar: the error bar, when there is one, then the panes. */
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* What the person asked for that failed (ErrorBar): the editor's error
+   bar, as a row of the window's. */
+.app-error {
+  border-bottom: 1px solid var(--surface);
+  background: var(--bg-alt);
+}
+
+.app-error span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .tabs-host {
   flex: 1;
   position: relative;
   min-width: 0;
+  min-height: 0;
 }
 
 .tab-layer,
@@ -1391,6 +1467,30 @@ body,
 }
 
 .divider:hover::after {
+  background: var(--accent);
+}
+
+/* A handle that sets a width kept in mirador.json (useDragWidth): the
+   dividers' look, a line down its middle on hover and while dragged. */
+.width-handle {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.width-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 1px);
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.width-handle:hover::after,
+.width-handle.dragging::after {
   background: var(--accent);
 }
 
@@ -3541,13 +3641,16 @@ button.inbox-update:hover {
   overflow: hidden;
 }
 
-/* Focus (18a): one agent large, the rest down a rail by status. */
+/* Focus (18a): one agent large, the rest down a rail by status. The
+   middle column, where the gap was, is the rail's width handle; a width
+   set in mirador.json (focusRailWidth) or by a drag replaces these
+   columns inline (railColumns in FocusLayout.tsx). */
 .focus-layout {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 6px minmax(240px, 32%);
+  gap: 0;
   padding: 6px;
 }
 
@@ -3694,6 +3797,133 @@ button.inbox-update:hover {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* Focus with the rest of the wall as tabs (focusRailPosition top or
+   bottom): a column, the large tile taking what a row of tabs leaves.
+   Top puts the tabs in the tile's own header, so there is a row only
+   when nothing is shown large. */
+.focus-layout.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.focus-layout.stacked > .focus-tile,
+.focus-layout.stacked > .focus-none {
+  flex: 1;
+  min-height: 0;
+}
+
+/* One row, never wrapped: what does not fit scrolls sideways (a wheel
+   turned over it too, FocusRibbon). Positioned, so a tab's offsetLeft is
+   its place in the row. */
+.focus-ribbon {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.ribbon-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 260px;
+  padding: 4px 10px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--subtext);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ribbon-tab:hover {
+  background: var(--bg-alt);
+}
+
+.ribbon-tab.needsYou {
+  border-color: var(--status-needs-you);
+  background: var(--tint-needs-you-head);
+}
+
+/* The one shown large: after needsYou, so its accent wins the border. */
+.ribbon-tab.selected {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--text);
+  cursor: default;
+}
+
+.ribbon-name {
+  min-width: 0;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ribbon-empty {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Top: in the large tile's header line, after its name and status. The
+   tabs take what they need before the task does, and scroll sideways
+   when the line runs out. Drawn as tabs: rounded on top, standing on a
+   baseline of their own, darker than the header like the terminal under
+   it; a bar along the bottom says hover, or that the agent needs you. */
+.focus-ribbon.head {
+  flex: 0 1 auto;
+  align-self: stretch;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: 6px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--overlay);
+  /* No scrollbar in a header line: it would sit on the tabs. The wheel
+     still scrolls the row (FocusRibbon). */
+  scrollbar-width: none;
+}
+
+.focus-ribbon.head .ribbon-tab {
+  padding: 3px 12px 3px;
+  border: 1px solid var(--overlay);
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  background: var(--bg);
+  box-shadow: inset 0 -2px 0 transparent;
+}
+
+.focus-ribbon.head .ribbon-tab:hover {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* The header of an agent that needs you is already tinted: its tab
+   takes the stronger row tint, and the bar. */
+.focus-ribbon.head .ribbon-tab.needsYou {
+  border-color: var(--status-needs-you);
+  background: var(--tint-needs-you-row);
+  box-shadow: inset 0 -2px 0 var(--status-needs-you);
+}
+
+/* Bottom: centered. Auto margins on the ends rather than
+   justify-content: center, which would push the first tabs out of reach
+   of the scroll once the row overflows. */
+.focus-ribbon.bottom > :first-child {
+  margin-left: auto;
+}
+
+.focus-ribbon.bottom > :last-child {
+  margin-right: auto;
 }
 
 .rail-section {
@@ -5785,6 +6015,89 @@ button.tb-line-row:hover {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* The computers pane's form (src/computers): the inspector's fields in a
+   column, then its test and the test's answer. */
+.computer-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 480px;
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+
+.computer-hint {
+  color: var(--subtext);
+  font-size: 11px;
+}
+
+.inspector-field input.computer-dir {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.computer-new {
+  color: var(--accent);
+}
+
+.computer-test {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.computer-test button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.computer-test button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.computer-check {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--surface);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  font-size: 12px;
+}
+
+.computer-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.computer-check-mark {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.computer-check-row.ok .computer-check-mark {
+  color: var(--status-idle);
+}
+
+.computer-check-row.warn {
+  color: var(--warn);
+}
+
+.computer-check-row.error {
+  color: var(--danger);
 }
 
 /* Team page (17a): members, fields, then the charter filling the rest. */

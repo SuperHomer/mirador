@@ -14,6 +14,11 @@ interface Entry {
   home: HTMLElement;
   /** The element the terminal is lent to, if it is. */
   borrower: HTMLElement | null;
+  /** Lent with `fit: false`: the borrower keeps it at the size it has. */
+  keepsSize: boolean;
+  /** The pane's own container is on screen (`setPaneShown`): only then is
+   *  a terminal given back sized to it. */
+  shown: boolean;
   /** Output arrived since the last save. */
   dirty: boolean;
 }
@@ -45,6 +50,7 @@ export function registerTerminal(
   serialize: SerializeAddon,
   fit: FitAddon,
   home: HTMLElement,
+  shown: boolean,
 ) {
   const entry: Entry = {
     term,
@@ -52,6 +58,8 @@ export function registerTerminal(
     fit,
     home,
     borrower: null,
+    keepsSize: false,
+    shown,
     dirty: false,
   };
   term.onWriteParsed(() => {
@@ -100,8 +108,12 @@ export function isLentTo(paneId: string, host: HTMLElement): boolean {
  * `fit: false` lends it at the size it has: a wall's mini tile scales the
  * terminal down to fit instead. Focus moves between agents often, and
  * resizing the PTY each time would reflow the agent's screen into a
- * thumbnail's few columns and back. Giving it back still fits it to its
- * own pane, where it is drawn at full size again.
+ * thumbnail's few columns and back. Giving it back fits it to its own pane
+ * only while that pane is on screen. Under the wall it is not: fitting
+ * there sized the PTY to a split nobody saw, so an agent shown large and
+ * then moved to the rail came back at its pane's width, three columns for
+ * a much-split pane, and redrew once more for nothing. Its pane fits it
+ * when it shows (`setPaneShown`).
  */
 export function lendTerminal(
   paneId: string,
@@ -112,6 +124,7 @@ export function lendTerminal(
   const element = entry?.term.element;
   if (!entry || !element || entry.borrower) return null;
   entry.borrower = host;
+  entry.keepsSize = !fit;
   host.appendChild(element);
   if (fit) entry.fit.fit();
   changed(paneId);
@@ -119,11 +132,26 @@ export function lendTerminal(
     // The pane may have closed, or remounted with a new terminal, since.
     if (terminals.get(paneId) !== entry || entry.borrower !== host) return;
     entry.borrower = null;
+    entry.keepsSize = false;
     const el = entry.term.element;
     if (el) entry.home.appendChild(el);
-    entry.fit.fit();
+    if (entry.shown) entry.fit.fit();
     changed(paneId);
   };
+}
+
+/**
+ * Whether the pane's own container is on screen — not under its tab's
+ * wall, not behind a zoomed pane, its tab active. Shown again with its
+ * terminal at home, the terminal is fitted to it now: a give-back while it
+ * was hidden left it at the size it had elsewhere, and a hidden pane is
+ * moved off screen by a transform, so no resize will come to fit it.
+ */
+export function setPaneShown(paneId: string, shown: boolean) {
+  const entry = terminals.get(paneId);
+  if (!entry || entry.shown === shown) return;
+  entry.shown = shown;
+  if (shown && !entry.borrower) entry.fit.fit();
 }
 
 /**
@@ -135,15 +163,22 @@ export function reclaimTerminal(paneId: string) {
   const entry = terminals.get(paneId);
   if (!entry?.borrower) return;
   entry.borrower = null;
+  entry.keepsSize = false;
   const el = entry.term.element;
   if (el) entry.home.appendChild(el);
   entry.fit.fit();
   changed(paneId);
 }
 
-/** Refits the pane's terminal to wherever it is drawn now. */
+/**
+ * Refits the pane's terminal to wherever it is drawn now, unless it is
+ * lent to a tile that keeps its size (`fit: false`): fitted to that tile,
+ * it would take the tile's box, which is the terminal itself less its
+ * scrollbar, and lose two columns each time.
+ */
 export function fitTerminal(paneId: string) {
-  terminals.get(paneId)?.fit.fit();
+  const entry = terminals.get(paneId);
+  if (entry && !entry.keepsSize) entry.fit.fit();
 }
 
 /**
@@ -153,9 +188,29 @@ export function fitTerminal(paneId: string) {
  */
 export function terminalWithFocus(): Terminal | undefined {
   const active = document.activeElement;
+  return active ? terminalAt(active) : undefined;
+}
+
+/**
+ * The pane whose terminal holds keyboard focus, wherever it is drawn —
+ * the pane `terminalWithFocus` belongs to. On the agent wall, pane
+ * actions act on it rather than on the tab's focused pane, for the same
+ * reason copy and paste look here first; elsewhere they do not ask it
+ * (see `actionPane`).
+ */
+export function paneWithFocus(): string | undefined {
+  const active = document.activeElement;
   if (!active) return undefined;
+  for (const [pane, { term }] of terminals) {
+    if (term.element?.contains(active)) return pane;
+  }
+  return undefined;
+}
+
+/** The terminal drawn where `el` is, wherever that is: its pane or a wall tile. */
+export function terminalAt(el: Element): Terminal | undefined {
   for (const { term } of terminals.values()) {
-    if (term.element?.contains(active)) return term;
+    if (term.element?.contains(el)) return term;
   }
   return undefined;
 }
@@ -184,13 +239,24 @@ export function saveAllScrollbacks(maxLines = 10_000) {
 
 /**
  * The last `lines` lines of content (default: one screenful), as plain
- * text. Content ends at the cursor row — rows below it are unused padding.
+ * text. Content ends at the cursor row or the screen's last non-blank row,
+ * whichever is lower. A shell's cursor is on its last line, and the blank
+ * rows below are padding; but a full-screen TUI (Pi, OpenCode) parks its
+ * cursor in its input box, and draws the rest of the box and a footer
+ * below it — rows a read ending at the cursor dropped, so the screen check
+ * found no input box and refused every message to it.
  */
 export function readScreenText(paneId: string, lines?: number | null): string {
   const term = terminals.get(paneId)?.term;
   if (!term) return "";
   const buf = term.buffer.active;
-  const lastLine = buf.baseY + buf.cursorY;
+  let lastLine = buf.baseY + buf.cursorY;
+  for (let i = buf.baseY + term.rows - 1; i > lastLine; i--) {
+    if (buf.getLine(i)?.translateToString(true).trim()) {
+      lastLine = i;
+      break;
+    }
+  }
   const count = lines && lines > 0 ? lines : term.rows;
   const out: string[] = [];
   for (let i = Math.max(0, lastLine + 1 - count); i <= lastLine; i++) {

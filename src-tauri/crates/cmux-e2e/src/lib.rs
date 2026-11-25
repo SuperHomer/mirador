@@ -234,6 +234,8 @@ pub struct Sandbox {
     /// The tail of every credential a live sandbox was given: no file
     /// holding one is left behind.
     secrets: Vec<String>,
+    /// The sandbox's own sshd, once [`Self::sshd`] started it.
+    sshd: Option<Child>,
 }
 
 impl Sandbox {
@@ -372,8 +374,12 @@ impl Sandbox {
             serde_json::json!({ "persistSessions": false, "defaultCwd": project }).to_string(),
         )
         .unwrap();
+        // Live runs bring the real claude and codex only: nothing live runs
+        // Pi or OpenCode yet.
         #[cfg(unix)]
-        for name in ["claude", "codex"] {
+        let names: &[&str] = if live { &["claude", "codex"] } else { &["claude", "codex", "pi", "opencode"] };
+        #[cfg(unix)]
+        for &name in names {
             let agent = if live {
                 on_path(name).unwrap_or_else(|| panic!("no `{name}` on the PATH"))
             } else {
@@ -394,6 +400,7 @@ impl Sandbox {
             env: Vec::new(),
             live,
             secrets: Vec::new(),
+            sshd: None,
         }
     }
 
@@ -663,6 +670,122 @@ impl Sandbox {
             .find(|m| m["name"] == name)
     }
 
+    /// Starts an sshd of the sandbox's own, on a free local port, and adds a
+    /// host `box` to the sandbox home's `~/.ssh/config` that reaches it with
+    /// a key of its own: a remote computer, which is this one. A login
+    /// there looks like the sandbox — its home, its `bin`, `mira` in it,
+    /// first on the PATH, its agents' log — through sshd's `SetEnv`, which
+    /// overrides what sshd took from the passwd entry. Not its config
+    /// directory: a remote has no discovery file of the app's, so a `mira`
+    /// there finds the app only through what it is given. And a runtime
+    /// directory of its own ([`Sandbox::remote_holders`]): the app's holders
+    /// and the remote's must not be one set, or ending the app's would end
+    /// the remote's and hide whether anything ended those. sshd runs as the person running the tests, so it needs no
+    /// root: a high port, a host key it owns, no PAM.
+    pub fn sshd(&mut self) {
+        assert!(self.sshd.is_none(), "sshd already running");
+        let dir = self.root.join("sshd");
+        let ssh = self.home.join(".ssh");
+        for d in [&dir, &ssh] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for key in [dir.join("host_key"), ssh.join("id_ed25519")] {
+            let made = Command::new("ssh-keygen").args(["-q", "-N", "", "-t", "ed25519", "-f"]).arg(&key).status();
+            assert!(made.is_ok_and(|s| s.success()), "ssh-keygen {}", key.display());
+        }
+        std::fs::copy(ssh.join("id_ed25519.pub"), ssh.join("authorized_keys")).unwrap();
+        std::fs::create_dir_all(self.remote_runtime()).unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let path = format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.root.join("bin").display());
+        let set_env: String = [
+            ("HOME", self.home.display().to_string()),
+            ("XDG_RUNTIME_DIR", self.remote_runtime().display().to_string()),
+            ("PATH", path),
+            ("E2E_AGENT_LOG", self.agent_log.display().to_string()),
+        ]
+        .iter()
+        .map(|(k, v)| format!(" \"{k}={v}\""))
+        .collect();
+        let sshd_config = [
+            "ListenAddress 127.0.0.1".to_string(),
+            format!("HostKey {}", dir.join("host_key").display()),
+            format!("AuthorizedKeysFile {}", ssh.join("authorized_keys").display()),
+            "PasswordAuthentication no".into(),
+            "KbdInteractiveAuthentication no".into(),
+            "UsePAM no".into(),
+            "StrictModes no".into(),
+            "PidFile none".into(),
+            "LogLevel VERBOSE".into(),
+            format!("SetEnv{set_env}"),
+        ];
+        std::fs::write(dir.join("sshd_config"), sshd_config.join("\n") + "\n").unwrap();
+        let host = [
+            "Host box".to_string(),
+            "  HostName 127.0.0.1".into(),
+            format!("  Port {port}"),
+            format!("  IdentityFile {}", ssh.join("id_ed25519").display()),
+            "  IdentitiesOnly yes".into(),
+            "  StrictHostKeyChecking no".into(),
+            format!("  UserKnownHostsFile {}", ssh.join("known_hosts").display()),
+            "  LogLevel ERROR".into(),
+        ];
+        std::fs::write(ssh.join("config"), host.join("\n") + "\n").unwrap();
+        // ssh reads ~/.ssh/config from the passwd entry's home, not $HOME:
+        // without `-F` it would read the person's own, and know no `box`.
+        // The ControlPath is the app's own, under the sandbox's short
+        // runtime directory.
+        let wrapper = self.root.join("bin/ssh");
+        std::fs::write(&wrapper, "#!/bin/sh\nexec /usr/bin/ssh -F \"$HOME/.ssh/config\" \"$@\"\n").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&wrapper, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(self.bin("mira"), self.root.join("bin/mira")).unwrap();
+        // A login over ssh runs the system's profile, whose path_helper puts
+        // the system's directories first: the sandbox's `bin` goes first
+        // again, from the profile the login shell reads next — zsh's (this
+        // Mac's passwd shell), bash's (CI's runner), which reads only the
+        // first of .bash_profile, .bash_login and .profile, or sh's.
+        let path = format!("export PATH=\"{}:$PATH\"\n", self.root.join("bin").display());
+        for profile in [".zprofile", ".bash_profile", ".profile"] {
+            std::fs::write(self.home.join(profile), &path).unwrap();
+        }
+        let log = std::fs::File::create(self.root.join("sshd.log")).unwrap();
+        let child = Command::new("/usr/sbin/sshd")
+            .args(["-D", "-e", "-p", &port.to_string(), "-f"])
+            .arg(dir.join("sshd_config"))
+            .stdin(Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .expect("start sshd");
+        self.sshd = Some(child);
+        self.wait_for("sshd to listen", Duration::from_secs(15), || {
+            std::net::TcpStream::connect(("127.0.0.1", port)).ok().map(|_| ())
+        });
+    }
+
+    /// `box`'s runtime directory: short, inside the sandbox's own.
+    fn remote_runtime(&self) -> PathBuf {
+        self.runtime.join("box")
+    }
+
+    /// Where `box` keeps its holders: an agent there runs under one.
+    pub fn remote_holders(&self) -> PathBuf {
+        self.remote_runtime().join("mirador").join("holders")
+    }
+
+    /// Puts the debug `mira` where a remote keeps the `mira` of `version`
+    /// (`ssh::ensure_mira`), as if fetched already: no test fetches one.
+    /// Gives its path.
+    pub fn place_remote_mira(&self, version: &str) -> PathBuf {
+        let dir = self.home.join(".mirador/bin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("mira-{version}"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(self.bin("mira"), &path).unwrap();
+        path
+    }
+
     /// How many times this sandbox has been launched.
     pub fn launches(&self) -> u32 {
         self.launches
@@ -672,7 +795,31 @@ impl Sandbox {
 impl Drop for Sandbox {
     fn drop(&mut self) {
         self.quit();
+        // An agent on the remote runs under a holder there, which a quit
+        // ends only when asked to and able to. Those left are ended here,
+        // each waited for until it reports its child gone: a holder left
+        // alone keeps its agent for a day.
+        cmux_core::hold::end_all_in(&self.remote_holders(), Duration::from_secs(10));
         self.wait_for_agents();
+        // After the app: its ssh panes have hung up by now. But the app asks
+        // for ControlPersist, so the connection's master outlives them for
+        // half an hour, and killing sshd's listener never reaches the
+        // session it serves (`sshd-session`): tell the master to go first,
+        // which ends the session, through the wrapper so its config is the
+        // one it was started with, at the app's ControlPath
+        // (`<XDG_RUNTIME_DIR>/mirador/ssh/cm-%C`). No master, no harm.
+        if let Some(mut sshd) = self.sshd.take() {
+            let control = format!("ControlPath={}/mirador/ssh/cm-%C", self.runtime.display());
+            let _ = Command::new(self.root.join("bin/ssh"))
+                .args(["-o", &control, "-O", "exit", "box"])
+                .env("HOME", &self.home)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = sshd.kill();
+            let _ = sshd.wait();
+        }
         let _ = std::fs::remove_dir_all(&self.runtime);
         // A failed test leaves its directory for a look — but not the
         // logins in it; a passing one leaves nothing.
@@ -684,9 +831,9 @@ impl Drop for Sandbox {
     }
 }
 
-/// Which of `pids` are `claude` or `codex`, by `ps`'s name for them —
-/// not `lsof`'s, which names Claude Code by its versioned binary
-/// (`2.1.302`).
+/// Which of `pids` are agents — `claude`, `codex`, Pi or OpenCode — by
+/// `ps`'s name for them, not `lsof`'s, which names Claude Code by its
+/// versioned binary (`2.1.302`).
 fn agents_among(pids: &[String]) -> Vec<String> {
     if pids.is_empty() {
         return Vec::new();
@@ -700,7 +847,9 @@ fn agents_among(pids: &[String]) -> Vec<String> {
             let mut words = line.split_whitespace();
             let pid = words.next()?;
             let name = Path::new(words.next()?).file_name()?.to_str()?;
-            matches!(name, "claude" | "codex").then(|| pid.to_string())
+            // Pi runs as `node`; an OpenCode role's private server is an
+            // `opencode` too, some 300 MB a test must not leave behind.
+            matches!(name, "claude" | "codex" | "pi" | "opencode" | "node").then(|| pid.to_string())
         })
         .collect()
 }

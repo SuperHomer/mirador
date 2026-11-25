@@ -222,6 +222,24 @@ A release binary embeds `dist` and needs no server, but it embeds whatever
 `dist` was on disk at build time — rebuild the frontend first or you are
 testing a stale bundle.
 
+`tests/local_model.rs` runs the real `pi` and `opencode` for free: the
+debug app, as the ordinary e2e, with each agent on Qwen 3.5 0.8B under
+`llama-server` (started on a free port per test, its log in the sandbox).
+They need no login, but `pi`, `opencode`, `llama-server`, a `node` of
+22.19 or later and the model (`MIRA_E2E_MODEL`, by default
+`~/models/Qwen3.5-0.8B-Q8_0.gguf`), and skip without them or without
+`MIRA_E2E_LOCAL=1`. A run takes about a minute. So that a 0.8B model
+answers rather than wanders, the server runs with thinking off and the
+sandbox turns both agents' tools off. OpenCode is given the local
+provider alone (`enabled_providers`), in the sandbox's `XDG_CONFIG_HOME`,
+which it reads rather than `~/.config`; a test refuses to start unless
+`opencode models` lists `local/qwen` and nothing else, so no prompt can
+reach OpenCode's own hosted models.
+
+```bash
+cd src-tauri && MIRA_E2E=1 MIRA_E2E_LOCAL=1 cargo test -p cmux-e2e --test local_model -- --test-threads=1
+```
+
 **Automated tooling cannot see the UI.** The app draws in the host webview,
 which no DOM tooling reaches — browser automation only gets at browser panes'
 *child* webviews — and screen capture needs a macOS screen-recording grant
@@ -299,6 +317,24 @@ inconsistency reviewers will notice.
   the process working directory the poller reads, so on Windows the two
   disagree forever. Mirador injects a shell-integration script to get OSC 7
   out of PowerShell at all.
+- **A remote directory reaches a shell only through `ssh::remote_dir`.**
+  It makes a leading `~` the home there and keeps the rest literal, a
+  leading `-` included (`cd -` is `$OLDPWD`, even after `--`). An agent's
+  start and the computer test both go through it, so the test never says
+  found where the start's `cd` fails. A new place that hands a remote
+  directory to a shell goes through it too, never through plain quoting.
+- **A start on a remote from the app is decided in Rust, from the pane.**
+  `start_where` says whether a start from a pane has a remote to offer;
+  the person's `open_agent` and `start_team` then take only `on_remote`
+  and read the host and directory again from the pane given
+  (`remote_of_source`). Never a host from the page, and never the
+  focused pane in its place: the pane may close while the palette asks,
+  leaving focus on another host. The socket's arms call the `_from`
+  functions with `--host`/`--dir`, or `--on`'s (`server::remote_of`),
+  and ask nothing; the page never passes a host. The page's half: every
+  start in the app goes through `startHere` (`src/agents/startHere.ts`).
+  A new menu that calls `openAgent` or `startTeam` directly starts here
+  from a remote pane without asking, and nothing fails to say so.
 
 ## Security boundaries
 
@@ -365,7 +401,14 @@ never guesses the reader's OS. Check the rendered page, not the bundle
 
 **Releases** go straight to `main` as a `Release vX.Y.Z` commit touching four
 files — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
-and the lockfile. Then a *draft* release with its notes, then the tag:
+and the lockfile. Before it, run `npm run check:prices`: the team cost
+estimates come from a hand-copied table in `cmux-core/src/pricing.rs`, and
+nothing else notices when Anthropic ships a model or moves a price — a role
+on a new model just shows no cost, and a moved price shows a wrong one. It
+fetches Anthropic's pricing page and fails on any difference; fix the
+table, set `PRICES_CHECKED` to the day, and commit that before the release
+commit. It is not in CI on purpose: a docs page changing shape should not
+block a release build. Then a *draft* release with its notes, then the tag:
 
 ```bash
 gh release create vX.Y.Z --draft --title "vX.Y.Z — …" --notes-file notes.md

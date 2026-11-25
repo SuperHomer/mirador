@@ -20,9 +20,10 @@
 //! `mira agent clear` types an agent's own new-conversation command under
 //! the first two rules; a working agent takes it once its turn is over.
 //!
-//! A name is looked up in the sender's tab only — its teammates — by
-//! team member name, then session name, then role. A pane id reaches any
-//! pane.
+//! A name is looked up in the sender's tab — its teammates — by team
+//! member name, then session name, then role. `<team>/<name>` looks it up
+//! the same way in the tab running that team instead. A pane id reaches
+//! any pane.
 
 use cmux_protocol::AgentStatus;
 
@@ -41,7 +42,10 @@ pub struct Candidate {
 /// first, then a session's, then a role's — the first kind that matches
 /// at all, which must match one pane. Two reviewers are `reviewer-1` and
 /// `reviewer-2`, never "reviewer".
-pub fn resolve(name: &str, candidates: &[Candidate]) -> Result<String, String> {
+/// `team` is the running team whose tab the candidates are, when the name
+/// came as `<team>/<name>`; none for the sender's own tab. It changes only
+/// what a miss says.
+pub fn resolve(name: &str, candidates: &[Candidate], team: Option<&str>) -> Result<String, String> {
     let name = name.trim();
     let kinds: [fn(&Candidate) -> Option<&String>; 3] = [|c| c.member.as_ref(), |c| c.session.as_ref(), |c| c.role.as_ref()];
     for kind in kinds {
@@ -56,10 +60,10 @@ pub fn resolve(name: &str, candidates: &[Candidate]) -> Result<String, String> {
         }
     }
     let known: Vec<String> = candidates.iter().map(label).collect();
-    Err(if known.is_empty() {
-        format!("no agent `{name}` in this tab — there are none")
-    } else {
-        format!("no agent `{name}` in this tab (there are: {})", known.join(", "))
+    let known = if known.is_empty() { " — there are none".to_string() } else { format!(" (there are: {})", known.join(", ")) };
+    Err(match team {
+        Some(team) => format!("team `{team}` has no agent `{name}`{known}"),
+        None => format!("no agent `{name}` in this tab{known}; `<team>/<name>` reaches another tab's team"),
     })
 }
 
@@ -151,23 +155,98 @@ pub fn keystrokes(message: &str, from: Option<&str>) -> Result<(Vec<u8>, Vec<u8>
 /// How long to wait between what is typed and its Enter, so the Enter
 /// comes on its own read and submits rather than joining the text.
 ///
+/// Pi (1.3.0) and OpenCode (2.0.31) need none: in a PTY, each submitted a
+/// bracketed paste as one message with the Enter in the same write, 0 ms
+/// after it, or 120 ms after a 3000-character paste. They get the default.
+///
 /// Codex needs longer. Where it gets no bracketed paste (Windows' console
-/// input gives it none), plain characters arriving 8 ms apart or less
+/// input gives it none), plain characters handled 8 ms apart or less
 /// (`PASTE_BURST_CHAR_INTERVAL`) are a paste burst, and an Enter during
 /// one, or within 120 ms of its last character
 /// (`PASTE_ENTER_SUPPRESS_WINDOW`), is a newline in the input box. On
 /// Windows a burst ends only after 60 ms with nothing typed
 /// (`PASTE_BURST_ACTIVE_IDLE_TIMEOUT`), all in codex-rs
-/// `tui/src/bottom_pane/paste_burst.rs`. That is 180 ms after the text at
-/// the least; ConPTY's own delay in delivering it comes on top, so 400 ms
-/// leaves it more than the whole window again. The same holds for `/new`,
-/// four plain characters in one write.
+/// `tui/src/bottom_pane/paste_burst.rs`. Those times are when Codex
+/// handles each key, not when it arrived, so for a long message the gap
+/// must count from the burst's flush, not from the write: the app waits
+/// for the flush on Codex's screen first, and 400 ms from there leaves
+/// more than the whole 180 ms window again. `/new`, four plain characters
+/// in one write, is short enough for 400 ms from the write.
 pub fn enter_delay(harness: Option<cmux_protocol::Harness>) -> std::time::Duration {
     use std::time::Duration;
     match harness {
         Some(cmux_protocol::Harness::Codex) => Duration::from_millis(400),
         _ => Duration::from_millis(120),
     }
+}
+
+/// How long the app gives Codex to show a paste of `chars` characters
+/// before its Enter goes anyway ([`PasteWatch`] says why it waits at all).
+/// Measured on Windows with Codex 0.167.0, a paste shows about 0.5 ms per
+/// character after the write (5075 characters took some 2.5 s); 2 ms is
+/// four times that, for slower machines, on top of 5 s for the rest.
+pub fn paste_wait(chars: usize) -> std::time::Duration {
+    std::time::Duration::from_secs(5) + std::time::Duration::from_millis(2) * chars as u32
+}
+
+/// Whether a paste has landed in an agent's input box, by its screen: the
+/// screen read before the paste, then each read after it.
+///
+/// Codex on Windows gets no bracketed paste, so each character is a key
+/// event, and its paste-burst guard times them by when it handles them,
+/// not when they arrived. A long message takes it longer than any fixed
+/// gap to work through, and an Enter queued behind the text lands inside
+/// the burst and becomes a newline: the message sits unsent. Codex redraws
+/// its input box once the burst flushes — the text, or `[Pasted Content N
+/// chars]` — so an input box that changed and then held still is that
+/// flush, and [`enter_delay`] counts from there.
+///
+/// Only the input box is compared, from its line to the end of the screen.
+/// A working Codex redraws a status line above it every second (a timer, a
+/// spinner), and two reads of the whole screen could match each other, and
+/// differ from the one before, while the burst is still being worked
+/// through. A screen with no input box line is compared whole.
+#[derive(Debug, Clone)]
+pub struct PasteWatch {
+    before: String,
+    last: Option<String>,
+}
+
+impl PasteWatch {
+    pub fn new(before: String) -> Self {
+        PasteWatch { before: input_box(&before).to_string(), last: None }
+    }
+
+    /// One read of the screen: true once its input box differs from the one
+    /// before the paste and is the same as on the read before this one.
+    pub fn landed(&mut self, screen: &str) -> bool {
+        let shown = input_box(screen);
+        let still = self.last.as_deref() == Some(shown);
+        self.last = Some(shown.to_string());
+        still && shown != self.before
+    }
+}
+
+/// `screen` from its last selection line on (see [`showing`]), or all of
+/// it when it has none.
+fn input_box(screen: &str) -> &str {
+    selection_line(screen).map_or(screen, |at| &screen[at..])
+}
+
+/// Where `screen`'s last selection line starts: a glyph (Claude Code's
+/// `❯`, Codex's `›`, or the ASCII `>` some of Codex's menus draw) alone or
+/// before a space.
+fn selection_line(screen: &str) -> Option<usize> {
+    let mut found = None;
+    let mut at = 0;
+    for line in screen.split_inclusive('\n') {
+        let mut chars = line.trim().chars();
+        if matches!(chars.next(), Some('❯' | '›' | '>')) && chars.next().is_none_or(char::is_whitespace) {
+            found = Some(at);
+        }
+        at += line.len();
+    }
+    found
 }
 
 /// The line that starts `harness` on a new conversation, typed as plain
@@ -182,6 +261,11 @@ pub fn clear_line(harness: Option<cmux_protocol::Harness>) -> Result<&'static st
         // Codex's own `/clear` also wipes the terminal; `/new` is the one
         // that only starts over.
         Some(Harness::Codex) => Ok("/new"),
+        // Each starts a new session in the same process, keeping what it
+        // was started with: Pi's `--append-system-prompt`, an OpenCode
+        // role's agent (its prompt and model). Both seen on the requests
+        // they sent next.
+        Some(Harness::Pi | Harness::OpenCode) => Ok("/new"),
         Some(other) => Err(format!("{} has no new-conversation command Mirador knows", other.label())),
         None => Err("its harness is not known".into()),
     }
@@ -201,21 +285,79 @@ pub enum Showing<'a> {
     Neither,
 }
 
-/// What `screen` shows, judged by its last selection line: a glyph
-/// (Claude Code's `❯`, Codex's `›`, or the ASCII `>` some of Codex's
-/// menus draw) alone or before a space. A menu row has a number, a dot
-/// and a space after it (`❯ 1. Yes`); any other is the input box.
+/// What `screen` shows, judged the way `harness` draws: Pi and OpenCode
+/// by their own input boxes and menus ([`pi_showing`],
+/// [`opencode_showing`]), any other by its selection glyph ([`showing`]).
+pub fn showing_in(screen: &str, harness: Option<cmux_protocol::Harness>) -> Showing<'_> {
+    match harness {
+        Some(cmux_protocol::Harness::Pi) => pi_showing(screen),
+        Some(cmux_protocol::Harness::OpenCode) => opencode_showing(screen),
+        _ => showing(screen),
+    }
+}
+
+/// Pi (1.3.0) has no selection glyph on its input box: the box is what is
+/// between its last two rules (lines of `─`, the upper one reading `── ⠹
+/// Working ──` while it works), with its footer — the directory, the
+/// tokens and the model — below. Its menus are drawn between two rules too
+/// (its project-trust question), their selected row marked `→ `, and with
+/// nothing below the last rule; or in the box's own place, its pickers —
+/// a model's, a setting's, a login's with `→ `, `/resume`'s sessions with
+/// `› `. The commands listed while `/` is typed show under the box, not
+/// in it, so they are no menu here.
+fn pi_showing(screen: &str) -> Showing<'_> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let is_rule = |l: &str| {
+        let l = l.trim();
+        l.starts_with("──") && l.ends_with('─')
+    };
+    let rules: Vec<usize> = (0..lines.len()).filter(|&i| is_rule(lines[i])).collect();
+    let [.., top, bottom] = rules[..] else { return Showing::Neither };
+    if let Some(row) = lines[top + 1..bottom].iter().map(|l| l.trim()).find(|l| l.starts_with("→ ") || l.starts_with("› ")) {
+        return Showing::Choice(row);
+    }
+    if lines[bottom + 1..].iter().any(|l| !l.trim().is_empty()) {
+        Showing::Composer
+    } else {
+        Showing::Neither
+    }
+}
+
+/// OpenCode (2.0.31) draws its input box with a bar down its left (`┃`),
+/// the agent and model on its last line (`┃  Build · Qwen Local`), and a
+/// bottom edge of `╹▀▀▀…`. A permission it asks for takes the box's place:
+/// `△ Permission required`, then `Allow once   Always allow   Reject` with
+/// `⇆ select  enter confirm` beside it. Its other dialogs — the command
+/// palette, `/models`, `/sessions`, `/themes` — are drawn over the box,
+/// which still shows behind them, so they are looked for first: each has
+/// a title row ending in `esc` (`Commands … esc`), which neither the box
+/// nor a working one (`esc interrupt`, mid-line) has.
+fn opencode_showing(screen: &str) -> Showing<'_> {
+    if let Some(row) = screen.lines().map(str::trim).find(|l| l.ends_with(" esc")) {
+        return Showing::Choice(row);
+    }
+    if let Some(row) = screen.lines().map(str::trim).find(|l| l.contains("enter confirm")) {
+        return Showing::Choice(row);
+    }
+    if screen.lines().any(|l| l.trim().starts_with("╹▀")) {
+        Showing::Composer
+    } else {
+        Showing::Neither
+    }
+}
+
+/// What `screen` shows, judged by its last selection line
+/// ([`selection_line`]). A menu row has a number, a dot and a space after
+/// the glyph (`❯ 1. Yes`); any other is the input box.
 pub fn showing(screen: &str) -> Showing<'_> {
     // The last such line, not any: while the input box is up its line
     // (`❯ `, `› Ask Codex…`) is the last, below past messages echoed as
     // `› 1. do X`; a dialog takes its place, and then its cursor is the
     // last.
-    let Some(line) = screen.lines().map(str::trim).rev().find(|l| {
-        let mut chars = l.chars();
-        matches!(chars.next(), Some('❯' | '›' | '>')) && chars.next().is_none_or(char::is_whitespace)
-    }) else {
+    let Some(at) = selection_line(screen) else {
         return Showing::Neither;
     };
+    let line = screen[at..].lines().next().unwrap_or_default().trim();
     let mut rest = line.chars();
     rest.next();
     let rest = rest.as_str().trim_start();
@@ -289,17 +431,29 @@ mod tests {
             c("p3", Some("reviewer-2"), Some("reviewer-2"), Some("reviewer")),
             c("p4", None, Some("Fix the flaky test"), None),
         ];
-        assert_eq!(resolve("reviewer-2", &tab), Ok("p3".into()));
-        assert_eq!(resolve(" planner ", &tab), Ok("p1".into()));
-        assert_eq!(resolve("Fix the flaky test", &tab), Ok("p4".into()));
-        let two = resolve("reviewer", &tab).unwrap_err();
+        assert_eq!(resolve("reviewer-2", &tab, None), Ok("p3".into()));
+        assert_eq!(resolve(" planner ", &tab, None), Ok("p1".into()));
+        assert_eq!(resolve("Fix the flaky test", &tab, None), Ok("p4".into()));
+        let two = resolve("reviewer", &tab, None).unwrap_err();
         assert!(two.contains("more than one") && two.contains("reviewer-1, reviewer-2"), "{two}");
-        let none = resolve("gate", &tab).unwrap_err();
+        let none = resolve("gate", &tab, None).unwrap_err();
         assert!(none.contains("no agent `gate`") && none.contains("planner"), "{none}");
-        assert!(resolve("x", &[]).unwrap_err().contains("there are none"));
+        assert!(resolve("x", &[], None).unwrap_err().contains("there are none"));
         // A member's name wins over another agent's role of the same word.
         let mixed = [c("a", Some("dev"), None, Some("x")), c("b", None, None, Some("dev"))];
-        assert_eq!(resolve("dev", &mixed), Ok("a".into()));
+        assert_eq!(resolve("dev", &mixed, None), Ok("a".into()));
+    }
+
+    /// A miss in the sender's tab points at the form that reaches another
+    /// tab's team; a miss in a named team's tab says which team.
+    #[test]
+    fn a_miss_says_where_it_looked() {
+        let tab = [c("p1", Some("planner"), None, Some("planner"))];
+        let here = resolve("lead", &tab, None).unwrap_err();
+        assert_eq!(here, "no agent `lead` in this tab (there are: planner); `<team>/<name>` reaches another tab's team");
+        let there = resolve("lead", &tab, Some("omakase")).unwrap_err();
+        assert_eq!(there, "team `omakase` has no agent `lead` (there are: planner)");
+        assert_eq!(resolve("lead", &[], Some("omakase")).unwrap_err(), "team `omakase` has no agent `lead` — there are none");
     }
 
     #[test]
@@ -356,10 +510,65 @@ mod tests {
     }
 
     #[test]
+    fn a_screen_that_never_changes_is_no_paste() {
+        let mut watch = PasteWatch::new("› ".into());
+        assert!((0..5).all(|_| !watch.landed("› ")));
+    }
+
+    #[test]
+    fn a_changed_screen_lands_on_its_second_read() {
+        let mut watch = PasteWatch::new("› ".into());
+        assert!(!watch.landed("› [Pasted Content 1059 chars]"), "not on its first");
+        assert!(watch.landed("› [Pasted Content 1059 chars]"));
+    }
+
+    #[test]
+    fn a_screen_still_changing_is_waited_for() {
+        let mut watch = PasteWatch::new("› ".into());
+        for screen in ["› h", "› he", "› hel", "› hell", "› hello"] {
+            assert!(!watch.landed(screen), "{screen}");
+        }
+    }
+
+    #[test]
+    fn a_screen_back_to_where_it_was_has_not_landed() {
+        let mut watch = PasteWatch::new("› ".into());
+        assert!(!watch.landed("› hello"));
+        assert!(!watch.landed("› "));
+        assert!(!watch.landed("› "), "still and unchanged is no paste");
+    }
+
+    #[test]
+    fn a_status_line_ticking_above_the_input_box_is_no_paste() {
+        let screen = |secs: u32| format!("• Working ({secs}s • esc to interrupt)\n\n› \n\n  100% context left\n");
+        let mut watch = PasteWatch::new(screen(2));
+        assert!((3..8).all(|secs| !watch.landed(&screen(secs))));
+    }
+
+    #[test]
+    fn a_paste_lands_under_a_ticking_status_line() {
+        let screen = |secs: u32, input: &str| format!("• Working ({secs}s • esc to interrupt)\n\n› {input}\n");
+        let mut watch = PasteWatch::new(screen(2, ""));
+        assert!(!watch.landed(&screen(3, "")));
+        assert!(!watch.landed(&screen(4, "")));
+        assert!(!watch.landed(&screen(5, "[Pasted Content 1700 chars]")), "not on its first");
+        assert!(watch.landed(&screen(6, "[Pasted Content 1700 chars]")));
+    }
+
+    #[test]
+    fn a_paste_waits_longer_the_longer_it_is() {
+        use std::time::Duration;
+        assert_eq!(paste_wait(0), Duration::from_secs(5));
+        assert_eq!(paste_wait(5000), Duration::from_secs(15));
+    }
+
+    #[test]
     fn clears_only_a_harness_it_knows() {
         use cmux_protocol::Harness;
         assert_eq!(clear_line(Some(Harness::Claude)), Ok("/clear"));
         assert_eq!(clear_line(Some(Harness::Codex)), Ok("/new"));
+        assert_eq!(clear_line(Some(Harness::Pi)), Ok("/new"));
+        assert_eq!(clear_line(Some(Harness::OpenCode)), Ok("/new"));
         let aider = clear_line(Some(Harness::Aider)).unwrap_err();
         assert!(aider.contains("Aider"), "{aider}");
         assert!(clear_line(None).is_err());
@@ -600,6 +809,207 @@ mod tests {
 ──────────────────────────────────────────────────────────────────────────────────────────── planner ─
 ❯
 ";
+
+    // Pi 1.3.0 and OpenCode 2.0.31, each driven in a PTY 110 columns wide
+    // with a local model; blank runs and the directory shortened.
+    const PI_IDLE: &str = "\
+ I've received your request. Please provide the actual command or instruction you'd like me to process.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/app
+↑1.7k ↓223 1.5%/128k (auto)                                                                               qwen
+";
+
+    const PI_WORKING: &str = "\
+ [message from planner, via mira agent send]
+ Reply with only the word PELICAN.
+ Second line: ignore it.
+── ⠹ Working ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/app
+1.2%/128k (auto)                                                                                          qwen
+";
+
+    /// Pi with `/new` typed: the commands it matches listed under the box.
+    const PI_TYPING_A_COMMAND: &str = "\
+ Error: 500: {\"message\":\"recorder\"}
+── ⠇ Retrying (2/3) in 2s... (escape to cancel) ──────────────────────────────────────────────────────────────
+/new
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+→ new         Start a new session
+~/work/app
+1.2%/128k (auto)                                                                                (rec) recmodel
+";
+
+    const PI_TRUST: &str = "\
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Trust project folder?
+ ~/work/app
+
+ This allows pi to load .pi settings and resources, install missing project packages, and execute project
+ extensions.
+
+ → Trust
+   Trust parent folder
+ (~/work)
+   Trust (this session only)
+   Do not trust
+   Do not trust (this session only)
+
+ ↑↓ navigate  enter select  escape/ctrl+c cancel
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+";
+
+    const OPENCODE_IDLE: &str = "\
+                                           /update to install v2.3.2
+
+                  ┃
+                  ┃  Ask anything… \"Fix broken tests\"
+                  ┃
+                  ┃  Build · Qwen Local
+                  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                  ~/work/app  shift+tab agents  ctrl+p commands
+";
+
+    const OPENCODE_WORKING: &str = "\
+ ⠧ New session                   +
+  ┃
+  ┃  [message from planner, via mira agent send]
+  ┃  Reply with only the word PELICAN.
+  ┃  Second line: ignore it.
+  ┃
+  ┃  Build · Qwen Local
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ⬝⬝⬝⬝⬝⬝⬝⬝ esc interrupt                                                  shift+tab agents  ctrl+p commands
+";
+
+    const OPENCODE_PERMISSION: &str = "\
+  ┃
+  ┃  Use your bash tool to run the command: ls
+  ┃
+
+     + Thought · 1.4s
+
+  ┃
+  ┃  ⠼ ls
+  ┃
+
+  ┃
+  ┃  △ Permission required
+  ┃
+  ┃  $ ls
+  ┃
+  ┃
+  ┃   Allow once   Always allow   Reject                       ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃
+";
+
+    // Dialogs over or in place of the box, captured by the step's reviewer
+    // on the same versions, trimmed the same way.
+    const PI_RESUME: &str = "\
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Resume Session (Current Folder)                            ◉ Current Folder | ○ All  Name: All  Sort: Threaded
+tab scope · re:<pattern> regex · \"phrase\" exact
+ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rename
+>
+› dev                                                                                                    3 43m
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/app
+0.0%/128k (auto)                                                                                          qwen
+";
+
+    const OPENCODE_PALETTE: &str = "\
+                             Commands                                         esc
+                             Search
+                             Suggested
+                             Switch session                              ctrl+x l
+                             Switch model                                ctrl+x m
+                             Connect an integration
+                             Open settings
+                  ┃
+                  ┃  Ask     Session
+                  ┃          Switch session                              ctrl+x l
+                  ┃  Dev     New session                                 ctrl+x n
+                  ╹▀▀▀▀▀▀    Clear session                                           ▀▀▀▀▀▀▀▀
+";
+
+    const OPENCODE_MODELS: &str = "\
+                             Select model                                     esc
+                             Search
+                             Tidepool Alpha Free                             Free
+                  ┃  Dev     Beam Free                                       Free
+                  ╹▀▀▀▀▀▀    MiMo-V2.6-Flash Free                            Free    ▀▀▀▀▀▀▀▀
+";
+
+    const OPENCODE_SESSIONS: &str = "\
+               Sessions for proj                                                            esc
+               Search
+               Today
+               New session - 2026-11-19T13:40:41.609Z
+               delete ctrl+d  rename ctrl+r                                 all projects ctrl+a
+                  ┃
+                  ┃  Ask anything… \"Fix a TODO in the codebase\"
+                  ┃
+                  ┃  Dev · qwen Local
+                  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+";
+
+    const OPENCODE_THEMES: &str = "\
+                             Themes                                           esc
+                             Search
+                  ┃
+                  ┃  Dev · qwen Local
+                  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+";
+
+    /// Pi and OpenCode, by what each draws: the input box, idle or
+    /// working, is somewhere to type; Pi's trust question and OpenCode's
+    /// permission are menus a message would answer; neither's banner or
+    /// a shell is either.
+    #[test]
+    fn sees_pi_and_opencode_as_they_draw() {
+        use cmux_protocol::Harness::{OpenCode, Pi};
+        use Showing::{Choice, Composer, Neither};
+        assert_eq!(showing_in(PI_IDLE, Some(Pi)), Composer);
+        assert_eq!(showing_in(PI_WORKING, Some(Pi)), Composer);
+        assert_eq!(showing_in(PI_TYPING_A_COMMAND, Some(Pi)), Composer);
+        assert_eq!(showing_in(PI_TRUST, Some(Pi)), Choice("→ Trust"));
+        assert_eq!(
+            showing_in(PI_RESUME, Some(Pi)),
+            Choice("› dev                                                                                                    3 43m")
+        );
+        assert_eq!(showing_in(OPENCODE_IDLE, Some(OpenCode)), Composer);
+        assert_eq!(showing_in(OPENCODE_WORKING, Some(OpenCode)), Composer);
+        assert_eq!(
+            showing_in(OPENCODE_PERMISSION, Some(OpenCode)),
+            Choice("┃   Allow once   Always allow   Reject                       ctrl+f fullscreen  ⇆ select  enter confirm")
+        );
+        // Its dialogs, though the box still shows behind them.
+        for (screen, title) in [
+            (OPENCODE_PALETTE, "Commands"),
+            (OPENCODE_MODELS, "Select model"),
+            (OPENCODE_SESSIONS, "Sessions for proj"),
+            (OPENCODE_THEMES, "Themes"),
+        ] {
+            let Choice(row) = showing_in(screen, Some(OpenCode)) else { panic!("{title}: not a choice") };
+            assert!(row.starts_with(title) && row.ends_with(" esc"), "{row}");
+        }
+        // OpenCode's banner before its box is drawn; Pi's header alone.
+        let banner: String = OPENCODE_IDLE.lines().take(2).map(|l| format!("{l}\n")).collect();
+        assert_eq!(showing_in(&banner, Some(OpenCode)), Neither);
+        assert_eq!(showing_in(" ▀▀█  v1.3.0\n █▀ █ escape interrupt\n", Some(Pi)), Neither);
+        let shell = "yoanmarti@mac app % pi\n";
+        assert_eq!((showing_in(shell, Some(Pi)), showing_in(shell, Some(OpenCode))), (Neither, Neither));
+        // Their screens are not judged by another's glyphs, nor theirs
+        // by Claude Code's: `→ Trust` is no Claude Code menu.
+        assert_eq!(showing_in(CLAUDE_DIALOG, Some(cmux_protocol::Harness::Claude)), Choice("❯ 1. Yes"));
+        assert_eq!(showing(PI_TRUST), Neither);
+    }
 
     #[test]
     fn sees_a_menu_the_agent_is_showing() {

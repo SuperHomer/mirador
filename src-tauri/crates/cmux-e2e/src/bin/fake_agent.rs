@@ -21,8 +21,8 @@
 //!   leaves it up with no hook: a dialog like Codex's update prompt.
 //!
 //! Ready for a message, either draws its input box as the real ones do,
-//! `❯ ` as `claude` and `› ` as `codex` — Mirador waits for one before it
-//! types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
+//! `❯ ` as `claude` and `› ` as `codex`, Pi's and OpenCode's boxes as
+//! `pi` and `opencode` — Mirador waits for one before it types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
 //! with no input box until its first input, which only dismisses it: as
 //! Codex's logo waits for a key before its login menu.
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
@@ -40,6 +40,11 @@
 //! Mirador on Windows. Started with a `-c notify=[…]`, it runs that
 //! program after each turn with Codex's JSON appended, the turn's thread
 //! in it.
+//!
+//! As `pi` or `opencode` it is a `codex` with no rollout and no notify
+//! of its own: it logs how it was started (with `OPENCODE_CONFIG_CONTENT`,
+//! where an OpenCode role's model and prompt are), and echoes each
+//! message.
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
@@ -193,12 +198,39 @@ fn timestamp() -> String {
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{sec:02}.{milli:03}Z")
 }
 
-/// Runs `mira claude-hook <event>` with `payload`, as Claude Code's hooks
-/// do; whether it succeeded.
+/// The settings file it was started with (`--settings`), read once.
+static SETTINGS: std::sync::OnceLock<Option<serde_json::Value>> = std::sync::OnceLock::new();
+
+/// Runs the hook for `event` (`session-start`, …) with `payload`, as
+/// Claude Code does: through `sh`, the command its `--settings` names for
+/// that event — what Mirador gives an agent on a remote — else `mira
+/// claude-hook <event>` (`E2E_MIRA`), as the hooks a person sets up here
+/// call. Whether it succeeded.
 fn hook(event: &str, payload: serde_json::Value) -> bool {
-    let Ok(mira) = std::env::var("E2E_MIRA") else { return false };
-    std::process::Command::new(mira)
-        .args(["claude-hook", event])
+    let name = match event {
+        "session-start" => "SessionStart",
+        "prompt-submit" => "UserPromptSubmit",
+        "stop" => "Stop",
+        "notification" => "Notification",
+        _ => "",
+    };
+    let named = SETTINGS.get().and_then(Option::as_ref).and_then(|s| {
+        s["hooks"][name].as_array()?.iter().find_map(|m| m["hooks"][0]["command"].as_str().map(String::from))
+    });
+    let mut command = match named {
+        Some(line) => {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", &line]);
+            c
+        }
+        None => {
+            let Ok(mira) = std::env::var("E2E_MIRA") else { return false };
+            let mut c = std::process::Command::new(mira);
+            c.args(["claude-hook", event]);
+            c
+        }
+    };
+    command
         .env_remove("CLAUDE_JOB_DIR")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
@@ -213,11 +245,18 @@ fn hook(event: &str, payload: serde_json::Value) -> bool {
 fn main() {
     let mut args = std::env::args();
     let argv0 = args.next().unwrap_or_default();
+    // The name without its extension: `claude.exe` on Windows is claude.
     let kind = std::path::Path::new(&argv0)
-        .file_name()
+        .file_stem()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let args: Vec<String> = args.collect();
+    let _ = SETTINGS.set(
+        args.iter()
+            .position(|a| a == "--settings")
+            .and_then(|i| std::fs::read_to_string(args.get(i + 1)?).ok())
+            .and_then(|t| serde_json::from_str(&t).ok()),
+    );
     let pid = std::process::id();
     let pane = std::env::var("MIRA_PANE").ok();
     let has = |a: &str| args.iter().any(|x| x == a);
@@ -255,6 +294,9 @@ fn main() {
         "args": args,
         "pane": pane,
         "cwd": std::env::current_dir().ok(),
+        "socket": std::env::var("MIRA_SOCKET").ok(),
+        // What an OpenCode role is given its model and prompt in.
+        "opencodeConfig": std::env::var("OPENCODE_CONFIG_CONTENT").ok(),
     }));
 
     let claude = kind == "claude";
@@ -285,8 +327,18 @@ fn main() {
     );
 
     println!("fake {kind} ready");
+    // Each as the real one draws it, for Mirador's screen checks
+    // (`handoff::showing_in`): Pi's box between two rules over its footer,
+    // OpenCode's ending in its `╹▀` edge — and, as the real ones leave it,
+    // the cursor back up inside the box (`ESC [ n A`), with rows drawn
+    // below it that a screen read must still see.
     let input_box = || {
-        print!("{} ", if claude { '❯' } else { '›' });
+        let rule = "─".repeat(40);
+        match kind.as_str() {
+            "pi" => print!("{rule}\n\n{rule}\n~/proj\n0.0%/128k (auto)    fake\n\x1b[4A\r"),
+            "opencode" => print!("  ┃\n  ┃  Build · Fake\n  ╹{}\n\x1b[3A\r  ┃  ", "▀".repeat(40)),
+            _ => print!("{} ", if claude { '❯' } else { '›' }),
+        }
         let _ = std::io::stdout().flush();
     };
     let mut welcome = std::env::var("E2E_WELCOME").is_ok_and(|v| v == "1");

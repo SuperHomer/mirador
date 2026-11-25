@@ -13,6 +13,12 @@ pub struct Discovery {
     pub pid: u32,
 }
 
+/// The app's socket, named outright: what `mira` uses, before any
+/// discovery file, where it runs on a remote computer that has none and
+/// reaches the app through a socket forwarded over ssh
+/// (`ssh::forward_socket`).
+pub const SOCKET_ENV: &str = "MIRA_SOCKET";
+
 pub fn discovery_path() -> PathBuf {
     crate::config::config_dir().join("socket.json")
 }

@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use cmux_core::transport::{self, Stream};
-use cmux_protocol::{Request, RequestEnvelope, ResponseEnvelope, WallView};
+use cmux_protocol::{Direction, Request, RequestEnvelope, ResponseEnvelope, WallView};
 
 use crate::{notify, AppState};
 
@@ -108,6 +108,33 @@ fn sender(state: &AppState, pane_id: Option<&str>) -> String {
     pane_id.and_then(|p| crate::handoff::sender(state, p)).unwrap_or_else(|| "you".into())
 }
 
+/// Where `agent new` and `team start` run: on `host` in `dir`, on the
+/// saved computer `on` names, or here. The app's own config names the
+/// computers, read now: a `mira` on a remote has no mirador.json.
+fn remote_of(host: Option<String>, dir: Option<String>, on: Option<String>) -> Result<Option<(String, String)>, String> {
+    match (host, dir, on) {
+        (None, None, None) => Ok(None),
+        (Some(host), Some(dir), None) => Ok(Some((host, dir))),
+        (None, None, Some(on)) => {
+            let computer = cmux_core::config::computer_named(&crate::settings::saved_config()?, &on)?;
+            Ok(Some((computer.host, computer.dir)))
+        }
+        (_, _, Some(_)) => Err("a saved computer stands for a host and a directory: give it, or them, not both".into()),
+        _ => Err("a host and a directory there go together: give both, or neither".into()),
+    }
+}
+
+/// The tab a tab-wide request is about: `tab_id`, else the tab holding
+/// `pane_id` (the pane `mira` ran in), else the active tab.
+fn layout_tab(state: &AppState, tab_id: Option<String>, pane_id: Option<String>) -> Result<String, String> {
+    let ws = state.workspace.lock().unwrap();
+    match (tab_id, pane_id) {
+        (Some(tab), _) => ws.tabs.iter().any(|t| t.id == tab).then_some(tab.clone()).ok_or(format!("no tab {tab}")),
+        (None, Some(pane)) => ws.tab_of_pane(&pane).map(|t| t.id.clone()).ok_or(format!("no pane {pane}")),
+        (None, None) => Ok(ws.tabs[ws.active].id.clone()),
+    }
+}
+
 fn focused_pane(state: &AppState) -> String {
     state.workspace.lock().unwrap().focused_pane()
 }
@@ -164,6 +191,44 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 crate::commands::zoom_pane(app.clone(), app.state(), pane.clone(), zoom)?;
             Ok(json!({ "paneId": pane, "zoomed": zoomed }))
         }
+        Request::SwapPane { pane_id, direction } => {
+            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            if state.workspace.lock().unwrap().tab_of_pane(&pane).is_none() {
+                return Err(format!("no pane {pane}"));
+            }
+            if !crate::commands::swap_pane(app.clone(), app.state(), pane.clone(), direction) {
+                let side = match direction {
+                    Direction::Left => "on its left",
+                    Direction::Right => "on its right",
+                    Direction::Up => "above it",
+                    Direction::Down => "below it",
+                };
+                return Err(format!("{pane} has no pane {side} to swap with"));
+            }
+            Ok(Value::Null)
+        }
+        Request::RotatePanes { tab_id, pane_id, back } => {
+            let tab = layout_tab(&state, tab_id, pane_id)?;
+            if !crate::commands::rotate_panes(app.clone(), app.state(), tab.clone(), !back) {
+                return Err(format!("tab {tab} has one pane: there is nothing to rotate"));
+            }
+            Ok(Value::Null)
+        }
+        Request::EqualizePanes { tab_id, pane_id } => {
+            let tab = layout_tab(&state, tab_id, pane_id)?;
+            if !crate::commands::equalize_panes(app.clone(), app.state(), tab.clone()) {
+                return Err(format!("the panes of tab {tab} are already even"));
+            }
+            Ok(Value::Null)
+        }
+        Request::ApplyLayout { tab_id, pane_id, preset } => {
+            let tab = layout_tab(&state, tab_id, pane_id)?;
+            if !crate::commands::apply_layout(app.clone(), app.state(), tab.clone(), preset) {
+                let name = serde_json::to_value(preset).map_err(|e| e.to_string())?;
+                return Err(format!("tab {tab} is already laid out {}", name.as_str().unwrap_or_default()));
+            }
+            Ok(Value::Null)
+        }
         Request::View { view } => {
             if let Some(view) = view {
                 crate::commands::set_view(app.clone(), app.state(), view);
@@ -172,7 +237,18 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "view": view }))
         }
         Request::SetCamera { x, y, zoom, width, height } => {
-            crate::commands::set_camera(app.state(), x, y, zoom, width, height)?;
+            crate::commands::set_camera(app.state(), x, y, zoom, width, height, None)?;
+            // The board saves where it looks a moment after it moves, and
+            // that save would land over this one. Told, it shows this
+            // camera and drops the save; one it sent before it was told
+            // carries the count from before and is dropped here. Not done
+            // for the board's own set_camera: the echo would cancel its
+            // next move.
+            let (camera, sets) = {
+                let ws = state.workspace.lock().unwrap();
+                (ws.camera, ws.camera_sets)
+            };
+            let _ = app.emit("camera-set", json!({ "camera": camera, "sets": sets }));
             Ok(Value::Null)
         }
         Request::SetCardRect { pane_id, x, y, w, h } => {
@@ -188,6 +264,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             state.pty.write(&pane, data.as_bytes())?;
             Ok(Value::Null)
         }
+        Request::SendFile { pane_id, paths } => {
+            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            let typed = crate::send_files::files(&state, &pane, paths)?;
+            // Typed by the pane's terminal, as a drop is: xterm brackets
+            // the paste only when the program asked for that.
+            let text = typed.iter().map(|p| cmux_core::paste::quote_path(p)).collect::<Vec<_>>().join(" ") + " ";
+            app.emit("paste-into-pane", json!({ "paneId": pane, "text": text })).map_err(|e| e.to_string())?;
+            Ok(json!({ "paneId": pane, "paths": typed }))
+        }
         Request::ReadScreen { pane_id, lines } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             let text = read_screen(app, &pane, lines, Duration::from_secs(5))?;
@@ -199,10 +284,11 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             title,
             body,
             job,
+            kind,
         } => {
             let pane =
                 resolve_pane(&state, pane_id, tty, job).unwrap_or_else(|| focused_pane(&state));
-            notify::handle_notification(app, &pane, title, body);
+            notify::handle_notification(app, &pane, title, body, kind);
             Ok(json!({ "paneId": pane }))
         }
         Request::Quit { end_sessions } => {
@@ -322,7 +408,11 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             task,
             target,
             pane_id,
+            host,
+            dir,
+            on,
         } => {
+            let remote = remote_of(host, dir, on)?;
             let from = sender(&state, pane_id.as_deref());
             let pane_id = crate::commands::open_agent_from(
                 app.clone(),
@@ -336,6 +426,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 harness,
                 title,
                 from,
+                remote,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }
@@ -366,6 +457,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::settings::open_settings(app.clone(), app.state(), pane_id, tab)?;
             Ok(json!({ "paneId": pane }))
         }
+        Request::ComputerOpen { pane_id, target } => {
+            let tab = match target.as_deref() {
+                Some("tab") => true,
+                Some("split") => false,
+                _ => state.config.lock().unwrap().editor_opens_in == cmux_protocol::OpensIn::Tab,
+            };
+            let pane = crate::settings::open_computers(app.clone(), app.state(), pane_id, tab)?;
+            Ok(json!({ "paneId": pane }))
+        }
         Request::AgentSend { to, message, pane_id, force, card, title } => {
             let pane = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
             Ok(json!({ "paneId": pane }))
@@ -378,9 +478,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::TeamStart { team, task, pane_id, title } => {
+        Request::TeamStart { team, task, pane_id, title, host, dir, on } => {
+            let remote = remote_of(host, dir, on)?;
             let from = sender(&state, pane_id.as_deref());
-            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from)?;
+            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from, remote)?;
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),
@@ -392,7 +493,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::TaskMove { card, column, pane_id } => {
             let by = sender(&state, pane_id.as_deref());
-            crate::tasks::move_card(app, &card, column, by)?;
+            crate::tasks::move_card(app, &card, column, by, pane_id)?;
             Ok(Value::Null)
         }
         Request::AgentTrail { name, pane_id, turns } => {
@@ -406,8 +507,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::AgentHistory { name, all, pane_id, card } => {
             Ok(json!({ "history": crate::tasks::history(&state, name, all, pane_id, card)? }))
         }
-        Request::TeamAdd { role, name, pane_id } => {
-            let pane = crate::teams::team_add(app.clone(), app.state(), role, name, pane_id)?;
+        Request::TeamAdd { role, name, task, pane_id, title } => {
+            let from = sender(&state, pane_id.as_deref());
+            let pane = crate::teams::team_add_from(app.clone(), app.state(), role, name, task, pane_id, title, from)?;
             Ok(json!({ "paneId": pane }))
         }
         Request::TeamRestart { members, pane_id } => {
@@ -629,17 +731,59 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             crate::browser::wait(app, &pane, &until, Duration::from_secs(timeout_secs.unwrap_or(10)))?;
             Ok(Value::Null)
         }
-        Request::SshOpen { host, target } => {
-            let pane_id = crate::commands::open_ssh(
-                app.clone(),
-                app.state(),
-                None,
-                target.as_deref() == Some("tab"),
-                host,
-            )?;
+        Request::SshOpen { host, target, dir, on } => {
+            // A saved computer opens as the palette's "SSH to a Computer"
+            // does: a tab of its own, its shell in the computer's directory.
+            let (host, dir, tab) = match (host, dir, on) {
+                (Some(host), dir, None) => (host, dir, target.as_deref() == Some("tab")),
+                (None, None, Some(on)) => {
+                    let computer = cmux_core::config::computer_named(&crate::settings::saved_config()?, &on)?;
+                    (computer.host, Some(computer.dir), true)
+                }
+                (_, _, Some(_)) => return Err("a saved computer stands for a host and a directory: give it, or them, not both".into()),
+                (None, _, None) => return Err("ssh open needs a host, or a saved computer's name".into()),
+            };
+            let pane_id = crate::commands::open_ssh(app.clone(), app.state(), None, tab, host, dir)?;
             Ok(json!({ "paneId": pane_id }))
         }
         Request::SshHosts => Ok(json!({ "hosts": cmux_core::ssh::config_hosts() })),
+        Request::ComputerList => Ok(json!({ "computers": cmux_core::config::computers_in(&crate::settings::saved_config()?) })),
+        Request::ComputerAdd { name, host, dir } => {
+            Ok(json!({ "computer": cmux_core::config::settings::add_computer(&name, &host, &dir)? }))
+        }
+        Request::ComputerUpdate { name, new_name, host, dir } => {
+            let saved = cmux_core::config::computer_named(&crate::settings::saved_config()?, &name)?;
+            let computer = cmux_core::config::settings::update_computer(
+                &name,
+                new_name.as_deref().unwrap_or(&saved.name),
+                host.as_deref().unwrap_or(&saved.host),
+                dir.as_deref().unwrap_or(&saved.dir),
+            )?;
+            Ok(json!({ "computer": computer }))
+        }
+        Request::ComputerRemove { name } => {
+            cmux_core::config::settings::remove_computer(&name)?;
+            Ok(Value::Null)
+        }
+        // Up to ssh::CHECK_TIMEOUT: on this connection's own thread, and
+        // holding nothing of the app's, so no other request waits on it.
+        Request::ComputerTest { name, host, dir } => {
+            let (host, dir) = match (name, host, dir) {
+                (Some(name), None, None) => {
+                    let computer = cmux_core::config::computer_named(&crate::settings::saved_config()?, &name)?;
+                    (computer.host, computer.dir)
+                }
+                (None, Some(host), Some(dir)) => (host, dir),
+                _ => return Err("a computer to test is a saved one's name, or a host and a directory there: one, not both".into()),
+            };
+            #[cfg(windows)]
+            return {
+                let _ = (host, dir);
+                Err("testing a computer is not done on Windows yet".into())
+            };
+            #[cfg(not(windows))]
+            Ok(json!({ "check": cmux_core::ssh::check_computer(&host, &dir, env!("CARGO_PKG_VERSION"))? }))
+        }
         Request::SshForward {
             pane_id,
             port,
@@ -649,6 +793,31 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             cmux_core::ssh::forward(&host, port, cancel)?;
             Ok(json!({ "paneId": pane, "port": port, "cancelled": cancel }))
         }
+        #[cfg(not(windows))]
+        Request::SshForwardApp { pane_id } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            let socket = cmux_core::ssh::forward_socket(&host, &cmux_core::ipc::default_socket_path())?;
+            Ok(json!({ "paneId": pane, "socket": socket }))
+        }
+        // A named pipe cannot be forwarded: Windows needs another way.
+        #[cfg(windows)]
+        Request::SshForwardApp { .. } => Err("forwarding the app over ssh is not done on Windows yet".into()),
+        #[cfg(not(windows))]
+        Request::SshMira { pane_id } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            let mira = cmux_core::ssh::ensure_mira(&host, env!("CARGO_PKG_VERSION"))?;
+            Ok(json!({ "paneId": pane, "mira": mira }))
+        }
+        #[cfg(windows)]
+        Request::SshMira { .. } => Err("a remote's mira is not done on Windows yet".into()),
+        #[cfg(not(windows))]
+        Request::SshPut { pane_id, path, text } => {
+            let (pane, host) = resolve_remote_pane(&state, pane_id)?;
+            cmux_core::ssh::put_file(&host, &path, text.as_bytes())?;
+            Ok(json!({ "paneId": pane, "path": path }))
+        }
+        #[cfg(windows)]
+        Request::SshPut { .. } => Err("sending a file over ssh is not done on Windows yet".into()),
     }
 }
 
@@ -699,6 +868,13 @@ fn resolve_pane(
             .iter()
             .any(|t| cmux_core::layout::contains(&t.root, id))
     });
+    // A remote agent's hook runs on another computer: its tty and job are
+    // that computer's, which this process table cannot see — a tty there
+    // could even share a name with a pane's here. The pane it was told
+    // decides, as on Windows.
+    if let Some(id) = claimed.as_ref().filter(|id| state.meta.lock().unwrap().get(*id).is_some_and(|m| m.remote_host.is_some())) {
+        return Some(id.clone());
+    }
     let procs = if tty.is_some() || job.is_some() {
         cmux_core::agents::process_table()
     } else {

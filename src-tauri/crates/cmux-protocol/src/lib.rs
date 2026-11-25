@@ -22,6 +22,20 @@ pub enum Direction {
     Down,
 }
 
+/// A ready-made arrangement of a tab's panes (`cmux_core::layout::preset`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Preset {
+    /// Side by side in one row.
+    SideBySide,
+    /// Stacked in one column.
+    Stacked,
+    /// A grid of ceil(sqrt(n)) columns, the last row possibly short.
+    Grid,
+    /// The first pane large on the left, the rest stacked on the right.
+    MainStack,
+}
+
 /// The split tree of one tab. Ratios are normalized to sum to 1.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase")]
@@ -266,6 +280,9 @@ pub struct WorkspaceSnapshot {
     /// Usage panes: at most one, showing each harness's account.
     #[serde(default)]
     pub usage_panes: Vec<UsagePane>,
+    /// Computers panes: at most one, showing the saved computers.
+    #[serde(default)]
+    pub computers_panes: Vec<ComputersPane>,
     /// Every pane running a Claude Code agent, for the wall to draw.
     #[serde(default)]
     pub agents: Vec<AgentInfo>,
@@ -273,6 +290,10 @@ pub struct WorkspaceSnapshot {
     pub view: View,
     #[serde(default)]
     pub camera: Camera,
+    /// How many cameras were set from outside since launch (`SetCamera`):
+    /// what the board's own saves say they have seen.
+    #[serde(default)]
+    pub camera_sets: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -290,6 +311,17 @@ pub struct DiffPane {
     pub repo: String,
     /// What is being diffed: "worktree", "staged", or a revspec.
     pub spec: String,
+}
+
+/// Where an agent or a team started from a remote pane could run instead
+/// of here, for the person to choose: the pane's remote, named by the
+/// saved computer there (else its host), and the directory there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartWhere {
+    pub label: String,
+    pub host: String,
+    pub dir: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -335,14 +367,52 @@ pub enum Request {
         #[serde(default)]
         zoom: Option<bool>,
     },
+    /// Swaps a pane (the focused one without `pane_id`) with its neighbor
+    /// in `direction`; refused when it has none there.
+    SwapPane {
+        #[serde(default)]
+        pane_id: Option<String>,
+        direction: Direction,
+    },
+    /// Moves every pane of a tab one place along its pane order, or back
+    /// one with `back`; refused for a tab of one pane. The tab is `tab_id`,
+    /// else the one holding `pane_id` (the asking pane), else the active
+    /// one — as for the two below.
+    RotatePanes {
+        #[serde(default)]
+        tab_id: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        back: bool,
+    },
+    /// Gives every pane of a tab an equal share of its split; refused when
+    /// they already have one.
+    EqualizePanes {
+        #[serde(default)]
+        tab_id: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Lays a tab's panes out afresh as `preset`, in their order; refused
+    /// when they already are.
+    ApplyLayout {
+        #[serde(default)]
+        tab_id: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        preset: Preset,
+    },
     /// Shows the workspace as `view`; without it, only answers which view
     /// is shown.
     View {
         #[serde(default)]
         view: Option<View>,
     },
-    /// Where the board is looked at. Saved, never broadcast: the board
-    /// that moved it already shows it.
+    /// Where the board is looked at. Saved, and told to the board, which
+    /// shows it and drops any save of its own still pending (it would
+    /// land over this one). The board's own saves are never broadcast:
+    /// it shows them already.
     SetCamera {
         x: f64,
         y: f64,
@@ -376,6 +446,14 @@ pub enum Request {
         pane_id: Option<String>,
         data: String,
     },
+    /// Types the paths of `paths` (absolute, on this computer) into a pane,
+    /// as dropping them on it does: in an SSH pane, the paths of copies
+    /// sent to its remote first. Answers the paths typed.
+    SendFile {
+        #[serde(default)]
+        pane_id: Option<String>,
+        paths: Vec<String>,
+    },
     ReadScreen {
         #[serde(default)]
         pane_id: Option<String>,
@@ -397,6 +475,11 @@ pub enum Request {
         /// its tty and inherited pane id are the daemon's, not a pane's.
         #[serde(default)]
         job: Option<String>,
+        /// What a hook's notification is about, so a team can keep the
+        /// ones the person wants; absent for a plain one (an OSC 9,
+        /// `mira notify`, a run).
+        #[serde(default)]
+        kind: Option<NotifyKind>,
     },
     /// Quits the app. With `end_sessions`, every terminal session is ended
     /// first, held ones included; without it, held sessions keep running
@@ -463,6 +546,16 @@ pub enum Request {
         /// starts in; the focused pane when absent.
         #[serde(default)]
         pane_id: Option<String>,
+        /// An ssh host to run it on instead, in `dir` there. Both or
+        /// neither; Claude Code only, for now.
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+        /// A saved computer's name, standing for its host and dir, which
+        /// the app looks up in its own config. Not with `host` or `dir`.
+        #[serde(default)]
+        on: Option<String>,
     },
     /// Every agent pane and what it is doing.
     AgentList,
@@ -556,6 +649,16 @@ pub enum Request {
         /// The title of the task's card, instead of one made from `task`.
         #[serde(default)]
         title: Option<String>,
+        /// An ssh host to run every member on instead, in `dir` there.
+        /// Both or neither.
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+        /// A saved computer's name, standing for its host and dir, which
+        /// the app looks up in its own config. Not with `host` or `dir`.
+        #[serde(default)]
+        on: Option<String>,
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,
@@ -566,8 +669,8 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
-    /// Writes a card in `pane_id`'s tab, for the agent `to` (as
-    /// `AgentSend` finds it) or nobody yet. Answers its id.
+    /// Writes a card for the agent `to` (as `AgentSend` finds it), on its
+    /// tab's board, or for nobody yet, on `pane_id`'s tab's. Answers its id.
     TaskAdd {
         title: String,
         #[serde(default)]
@@ -619,12 +722,18 @@ pub enum Request {
         pane_id: Option<String>,
     },
     /// Adds a member to the team of `pane_id`'s tab, beside the others.
+    /// `task` is its first message.
     TeamAdd {
         role: String,
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
+        task: Option<String>,
+        #[serde(default)]
         pane_id: Option<String>,
+        /// The title of the task's card, instead of one made from `task`.
+        #[serde(default)]
+        title: Option<String>,
     },
     /// Starts again the members of `pane_id`'s team whose agent has exited
     /// or whose pane was closed — `members` by name, or all of them.
@@ -805,15 +914,65 @@ pub enum Request {
         #[serde(default)]
         timeout_secs: Option<u64>,
     },
-    /// Opens a remote (SSH) pane running `ssh -tt <host>`.
+    /// Opens a remote (SSH) pane running `ssh -tt <host>`, or a tab on
+    /// the saved computer `on`.
     SshOpen {
         /// ssh host spec (alias, or full destination with options).
-        host: String,
+        #[serde(default)]
+        host: Option<String>,
         #[serde(default)]
         target: Option<String>,
+        /// The directory there its shell starts in; the home without one.
+        #[serde(default)]
+        dir: Option<String>,
+        /// A saved computer's name, standing for its host and dir, which
+        /// the app looks up in its own config: a tab of its own there, as
+        /// the palette opens one. Not with `host` or `dir`.
+        #[serde(default)]
+        on: Option<String>,
     },
     /// Host aliases from ~/.ssh/config.
     SshHosts,
+    /// The saved computers (`computers` in mirador.json), as the app
+    /// lists them: `computers`.
+    ComputerList,
+    /// Saves a computer: a name for an ssh host and the directory there
+    /// where the work is. Answers the computer saved (`computer`).
+    ComputerAdd { name: String, host: String, dir: String },
+    /// Changes the saved computer `name`: each of `new_name`, `host` and
+    /// `dir` given replaces its own. Answers the computer (`computer`).
+    ComputerUpdate {
+        name: String,
+        #[serde(default)]
+        new_name: Option<String>,
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+    },
+    /// Removes the saved computer `name`.
+    ComputerRemove { name: String },
+    /// Shows the computers pane, or opens one: a split of `pane_id`, or a
+    /// tab with `target` "tab"; without a target, where `editorOpensIn`
+    /// says.
+    ComputerOpen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// Tests a computer for agents, as an agent's start there would meet
+    /// it: a saved one by `name`, or `host` and `dir` before saving one,
+    /// never both. Answers a [`ComputerCheck`] (`check`), or ssh's error
+    /// when the computer was not reached.
+    ComputerTest {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        host: Option<String>,
+        #[serde(default)]
+        dir: Option<String>,
+    },
     /// Forward (or cancel) `localhost:<port>` → remote's `localhost:<port>`
     /// over a remote pane's ControlMaster.
     SshForward {
@@ -822,6 +981,30 @@ pub enum Request {
         port: u16,
         #[serde(default)]
         cancel: bool,
+    },
+    /// Forwards this app's socket to a remote pane's host, over its
+    /// ControlMaster: a `mira` there reaches the app with `MIRA_SOCKET`
+    /// set to the path it answers (`socket`).
+    SshForwardApp {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// The `mira` of this app's version on a remote pane's host, fetched
+    /// there from its release the first time: its path (`mira`). A socket
+    /// request with no CLI verb, for the e2e and by hand: starting an agent
+    /// on a remote calls `ssh::ensure_mira` directly.
+    SshMira {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Writes `text` to `path` on a remote pane's host, exactly, owner-only.
+    /// A socket request with no CLI verb, for the e2e and by hand: starting
+    /// an agent on a remote calls `ssh::put_file` directly.
+    SshPut {
+        #[serde(default)]
+        pane_id: Option<String>,
+        path: String,
+        text: String,
     },
     /// Opens a commit-graph pane (split of the source pane, or a new tab),
     /// for the repository the calling pane sits in.
@@ -932,6 +1115,20 @@ pub enum AgentStatus {
     Idle,
 }
 
+/// What an agent's notification is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotifyKind {
+    /// Blocked on the human: a permission prompt, a question.
+    NeedsYou,
+    /// Its turn ended on an error.
+    Failed,
+    /// Its turn ended.
+    TurnEnded,
+    /// It has been idle a while (or another notice that changes nothing).
+    Reminder,
+}
+
 /// A pane running a coding agent: Claude Code, or another [`Harness`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -986,6 +1183,9 @@ pub struct AgentInfo {
     pub since_ms: Option<u64>,
     pub cwd: Option<String>,
     pub branch: Option<String>,
+    /// The ssh host it runs on, for an agent on a remote computer.
+    #[serde(default)]
+    pub remote_host: Option<String>,
 }
 
 /// How far an agent is through the task list it keeps (`TaskCreate` /
@@ -1294,6 +1494,31 @@ fn one() -> u32 {
 pub struct TeamRun {
     pub name: String,
     pub members: Vec<TeamSeat>,
+    /// Where it runs, for a team started on a remote computer.
+    #[serde(default)]
+    pub remote: Option<TeamRemote>,
+}
+
+/// The ssh host a team runs on, and its directory there.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamRemote {
+    pub host: String,
+    pub dir: String,
+}
+
+/// What testing a computer found there, changing nothing on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerCheck {
+    /// Its system and machine, as `uname -s` and `-m` say: `Linux x86_64`.
+    pub system: String,
+    /// Whether an agent started there would find its directory.
+    pub dir_found: bool,
+    /// Whether `claude` is on the PATH an agent there gets.
+    pub claude_found: bool,
+    /// Why agents cannot run there, in one line; none when they can.
+    pub agents: Option<String>,
 }
 
 /// A member of a running team: its name, its role, and its pane — which
@@ -1354,6 +1579,8 @@ pub struct TeamInfo {
     pub tab_id: String,
     pub name: String,
     pub members: Vec<TeamMemberInfo>,
+    /// The ssh host it runs on, for a team on a remote computer.
+    pub remote_host: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1877,6 +2104,24 @@ pub struct ResolvedConfig {
     pub editor_opens_in: OpensIn,
     pub diff_opens_in: OpensIn,
     pub graph_opens_in: OpensIn,
+    /// The sidebar's width in pixels: mirador.json's, in range, or 248.
+    pub sidebar_width: u32,
+    /// The width of Focus's rail in pixels, or `None` for the layout's
+    /// default, about a third of the wall.
+    pub focus_rail_width: Option<u32>,
+    pub focus_rail_position: RailPosition,
+}
+
+/// Where Focus shows the wall's agents and tools other than the one it
+/// shows large: down a rail on the right, as tabs in that one's header,
+/// or as a row of tabs under it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RailPosition {
+    #[default]
+    Right,
+    Top,
+    Bottom,
 }
 
 /// Where a pane the app opens goes: in a new tab, or split beside the
@@ -2062,6 +2307,13 @@ pub struct UsagePane {
     pub pane_id: String,
 }
 
+/// A pane showing the computers saved in mirador.json.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputersPane {
+    pub pane_id: String,
+}
+
 /// A pane showing a commit graph, and the repository it reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2205,6 +2457,11 @@ pub struct AccountUsage {
     /// What else the login says: "API key in env, declined".
     #[serde(default)]
     pub note: Option<String>,
+    /// Where the harness sends its requests when not to its maker's own
+    /// API: the provider's name and host, `Azure OpenAI · llm.example:4000`,
+    /// or either alone. None for its default API.
+    #[serde(default)]
+    pub provider: Option<String>,
     /// The plan's windows, the most used first. Claude Code's come from
     /// its status line (`mira claude-statusline`) or a refused request.
     pub limits: Vec<LimitWindow>,
@@ -2216,7 +2473,7 @@ pub struct AccountUsage {
     #[serde(default)]
     pub limits_note: Option<String>,
     /// A plan with no limits whose status line is not our wrapper yet:
-    /// setting the integration up would show them. Never on Windows.
+    /// setting the integration up would show them.
     #[serde(default)]
     pub limits_setup: bool,
     /// What it used in the last five hours and the last seven days: the

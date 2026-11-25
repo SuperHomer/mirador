@@ -18,6 +18,7 @@ import {
   startTeam,
 } from "../bindings";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { startHere } from "./startHere";
 import { MemberInspector } from "./MemberInspector";
 import { RolePage } from "./RolePage";
 import { roleFieldsOf } from "./RoleForm";
@@ -457,15 +458,19 @@ export const AgentEditor = memo(function AgentEditor({
     const fail = (e: unknown) => setStatus(String(e));
     const snapshot = useWorkspaceStore.getState().snapshot;
     if (sel.kind === "role") {
-      openAgent(sel.name, null, paneId, false)
-        .then(() => setStatus(`Started ${sel.name}`))
-        .catch(fail);
+      startHere(paneId, { role: sel.name }, `Start ${sel.name}`, (remote) =>
+        openAgent(sel.name, null, paneId, false, null, remote !== null)
+          .then(() => setStatus(`Started ${sel.name}${remote ? ` · on ${remote.label}` : ""}`))
+          .catch(fail),
+      );
     } else if (sel.kind === "team") {
       const runs = teamRuns(snapshot, (team) => team === sel.name);
       if (runs.length === 0) {
-        startTeam(sel.name, null, paneId)
-          .then(() => setStatus(`Started team ${sel.name}`))
-          .catch(fail);
+        startHere(paneId, { team: sel.name }, `Start team ${sel.name}`, (remote) =>
+          startTeam(sel.name, null, paneId, remote !== null)
+            .then(() => setStatus(`Started team ${sel.name}${remote ? ` · on ${remote.label}` : ""}`))
+            .catch(fail),
+        );
       } else {
         setConfirm({ runs, keep: runs.flatMap((r) => r.running) });
       }

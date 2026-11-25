@@ -5,13 +5,14 @@
 
 pub mod ghostty;
 pub mod settings;
+pub mod zoom;
 pub mod ui;
 pub mod wezterm;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, ResolvedColors, ResolvedConfig, UiColors};
+use cmux_protocol::{AgentClick, AgentRole, CustomCommand, OpensIn, RailPosition, ResolvedColors, ResolvedConfig, UiColors};
 use serde::{Deserialize, Serialize};
 
 /// Partial theme extracted from an import source; `None` fields fall back.
@@ -59,6 +60,11 @@ pub struct Config {
     /// the next launch. On unless set to `false`; read when a pane opens,
     /// so changing it applies to new panes.
     pub persist_sessions: Option<bool>,
+    /// Windows only: the ConPTY panes run under, "auto" (the default: the
+    /// first conpty.dll Windows finds, PATH included, else the system's),
+    /// "system", or the absolute path of a folder holding conpty.dll and
+    /// OpenConsole.exe. See `pty::conpty`.
+    pub conpty: Option<String>,
     /// How many agents a page of the wall's Grid layout holds: 4, 6 or 9.
     /// Anything else is 4.
     pub agents_per_tab: Option<u32>,
@@ -76,13 +82,60 @@ pub struct Config {
     pub editor_opens_in: Option<String>,
     pub diff_opens_in: Option<String>,
     pub graph_opens_in: Option<String>,
+    /// The sidebar's width in pixels, set by dragging its edge or by hand:
+    /// [`SIDEBAR_WIDTH`], a value outside it brought in. Unset → 248.
+    pub sidebar_width: Option<u32>,
+    /// The width of Focus's rail, the column beside the agent shown large,
+    /// in pixels: [`FOCUS_RAIL_WIDTH`], as `sidebar_width`. Unset → about
+    /// a third of the wall, which a fixed width cannot say.
+    pub focus_rail_width: Option<u32>,
+    /// Where Focus shows the wall's other agents and tools: "right" (the
+    /// rail, the default), "top" (tabs in the header of the one shown
+    /// large) or "bottom" (a row of tabs under it). Anything else is
+    /// "right". A string for the same reason as `agent_click`.
+    pub focus_rail_position: Option<String>,
     pub keybindings: HashMap<String, String>,
     pub custom_commands: Vec<CustomCommand>,
     /// Named ways to start a Claude Code agent, each with its own model
     /// and system prompt: the palette's *New Agent* entries, `mira agent
     /// new <role>`.
     pub agent_roles: Vec<AgentRole>,
+    /// Computers agents can work on over SSH, added, changed and removed
+    /// from the Computers pane or `mira computer` (`settings`).
+    pub computers: Vec<Computer>,
 }
+
+/// A computer agents can work on: an ssh host — an alias from
+/// ~/.ssh/config, or a destination as `ssh` takes it — and the directory
+/// on it where the work is. `name` is what the palette and the `--on` of
+/// `mira agent new` and `mira team start` call it. Every field defaults,
+/// as `AgentRole`'s do, so a hand-edited entry missing one is dropped by
+/// [`computers_in`] rather than failing the whole file, and every other
+/// setting with it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Computer {
+    pub name: String,
+    pub host: String,
+    pub dir: String,
+}
+
+/// The sidebar's width in pixels unless `sidebarWidth` sets one.
+pub const SIDEBAR_WIDTH_DEFAULT: u32 = 248;
+
+/// What `sidebarWidth` takes, in pixels. Narrower cuts the tab rows to
+/// nothing, wider leaves a small window little else. The drag stays inside
+/// it too (`SIDEBAR_WIDTH` in `src/layout/useDragWidth.ts`), and a write
+/// outside it is refused (`settings::set_config_value`).
+pub const SIDEBAR_WIDTH: std::ops::RangeInclusive<u32> = 160..=600;
+
+/// What `focusRailWidth` takes, in pixels: down to 150, a rail of names
+/// and status marks beside an agent given nearly the whole wall, and up
+/// to more than a wide screen needs. Unset, the rail keeps its own 240
+/// (styles.css, `.focus-layout`); set, it may go narrower. The layout
+/// also leaves the agent shown large its own least width, however wide
+/// the rail is set.
+pub const FOCUS_RAIL_WIDTH: std::ops::RangeInclusive<u32> = 150..=1600;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -108,6 +161,27 @@ pub fn config_dir() -> PathBuf {
                     .join(".config")
             })
             .join("mirador")
+    }
+}
+
+/// Where Mirador keeps its own sockets: the session holders' and the SSH
+/// ControlMaster's. Under `$XDG_RUNTIME_DIR` when it is set, so a sandbox
+/// instance with its own runtime dir can never see — let alone attach —
+/// the real app's; otherwise `~/.mirador`. Not the config or the data
+/// directory: a Unix socket path must fit in 104 bytes, and those can be
+/// long (`~/Library/Application Support/Mirador` alone puts a holder's at
+/// ~100). Not the temp directory either: it is swept of files untouched
+/// for days, which would cut a long-lived session off from its socket.
+#[cfg(unix)]
+pub fn runtime_dir() -> PathBuf {
+    runtime_dir_from(std::env::var("XDG_RUNTIME_DIR").ok(), std::env::var("HOME").ok())
+}
+
+#[cfg(unix)]
+fn runtime_dir_from(xdg_runtime_dir: Option<String>, home: Option<String>) -> PathBuf {
+    match xdg_runtime_dir {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir).join("mirador"),
+        _ => PathBuf::from(home.unwrap_or_else(|| ".".into())).join(".mirador"),
     }
 }
 
@@ -230,6 +304,10 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+alt+right", "focus_right"),
     ("mod+alt+up", "focus_up"),
     ("mod+alt+down", "focus_down"),
+    ("mod+alt+shift+left", "swap_left"),
+    ("mod+alt+shift+right", "swap_right"),
+    ("mod+alt+shift+up", "swap_up"),
+    ("mod+alt+shift+down", "swap_down"),
     ("mod+b", "toggle_sidebar"),
     ("mod+k", "command_palette"),
     ("mod+i", "notifications"),
@@ -246,6 +324,12 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("mod+9", "tab_9"),
     ("mod+shift+o", "toggle_board"),
     ("mod+0", "board_fit"),
+    // The terminals' zoom, as every Mac app's text zoom. Cmd+0, its usual
+    // reset, is the board's; the reset is in the palette.
+    ("mod+=", "terminal_zoom_in"),
+    ("mod+plus", "terminal_zoom_in"),
+    ("mod+shift+plus", "terminal_zoom_in"),
+    ("mod+minus", "terminal_zoom_out"),
 ];
 
 /// Windows/Linux: plain Ctrl belongs to the program in the pane — Ctrl+C
@@ -259,6 +343,11 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
 /// and would steal character input from anyone typing @ or [ with it. The
 /// pairs macOS spells with Shift therefore take a second letter here
 /// (split down is Ctrl+Shift+E) rather than a second modifier.
+///
+/// Zoom is the exception, on Windows Terminal's keys: plain Ctrl with the
+/// equals, plus, minus and zero keys zooms the terminals (plus being the
+/// numpad's, or Shift and whichever key makes it on the layout). They type
+/// nothing a shell needs.
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+shift+t", "new_tab"),
@@ -272,6 +361,10 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("ctrl+alt+right", "focus_right"),
     ("ctrl+alt+up", "focus_up"),
     ("ctrl+alt+down", "focus_down"),
+    ("ctrl+alt+shift+left", "swap_left"),
+    ("ctrl+alt+shift+right", "swap_right"),
+    ("ctrl+alt+shift+up", "swap_up"),
+    ("ctrl+alt+shift+down", "swap_down"),
     ("ctrl+shift+b", "toggle_sidebar"),
     ("ctrl+shift+k", "command_palette"),
     ("ctrl+shift+i", "notifications"),
@@ -290,6 +383,11 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str)] = &[
     ("alt+9", "tab_9"),
     ("ctrl+shift+o", "toggle_board"),
     ("ctrl+shift+0", "board_fit"),
+    ("ctrl+=", "terminal_zoom_in"),
+    ("ctrl+plus", "terminal_zoom_in"),
+    ("ctrl+shift+plus", "terminal_zoom_in"),
+    ("ctrl+minus", "terminal_zoom_out"),
+    ("ctrl+0", "terminal_zoom_reset"),
 ];
 
 pub fn default_keybindings() -> HashMap<String, String> {
@@ -496,7 +594,11 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
             .or(imported.font_family)
             .unwrap_or_else(|| default_font_family().into()),
         // Outside 6–72 a terminal is unreadable or a few cells wide.
-        font_size: cfg.font_size.or(imported.font_size).unwrap_or(13.0).clamp(6.0, 72.0),
+        font_size: cfg
+            .font_size
+            .or(imported.font_size)
+            .unwrap_or(13.0)
+            .clamp(zoom::FONT_SIZE_MIN, zoom::FONT_SIZE_MAX),
         scrollback: cfg.scrollback.unwrap_or(10_000),
         mac_option_is_meta: cfg.mac_option_is_meta.unwrap_or(false),
         colors,
@@ -515,6 +617,19 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         editor_opens_in: opens_in(cfg.editor_opens_in.as_deref(), OpensIn::Tab),
         diff_opens_in: opens_in(cfg.diff_opens_in.as_deref(), OpensIn::Split),
         graph_opens_in: opens_in(cfg.graph_opens_in.as_deref(), OpensIn::Split),
+        // A hand-edited width out of range is brought into it, as fontSize
+        // is, rather than ignored: the nearest width is what was meant.
+        sidebar_width: cfg
+            .sidebar_width
+            .map_or(SIDEBAR_WIDTH_DEFAULT, |w| w.clamp(*SIDEBAR_WIDTH.start(), *SIDEBAR_WIDTH.end())),
+        focus_rail_width: cfg
+            .focus_rail_width
+            .map(|w| w.clamp(*FOCUS_RAIL_WIDTH.start(), *FOCUS_RAIL_WIDTH.end())),
+        focus_rail_position: match cfg.focus_rail_position.as_deref() {
+            Some("top") => RailPosition::Top,
+            Some("bottom") => RailPosition::Bottom,
+            _ => RailPosition::Right,
+        },
     }
 }
 
@@ -549,6 +664,47 @@ fn agent_roles_in(cfg: &Config) -> Vec<AgentRole> {
         });
     }
     roles
+}
+
+/// The usable computers: a name `roles::is_name` takes and no earlier one
+/// has, and a host and a directory, each trimmed. The rest are dropped,
+/// as unusable roles are, so a name means one computer everywhere.
+pub fn computers_in(cfg: &Config) -> Vec<Computer> {
+    let mut computers: Vec<Computer> = Vec::new();
+    for c in &cfg.computers {
+        let c = Computer { name: c.name.trim().into(), host: c.host.trim().into(), dir: c.dir.trim().into() };
+        if !crate::roles::is_name(&c.name) || c.host.is_empty() || c.dir.is_empty() || computers.iter().any(|k| k.name == c.name) {
+            continue;
+        }
+        computers.push(c);
+    }
+    computers
+}
+
+/// The name of the saved computer a remote pane on `host`, in `dir`, is
+/// on, to say where something would start: the one saved with that host
+/// and that directory. None otherwise, and the host says it then: with
+/// two computers on one host, a host alone could name the wrong one.
+pub fn computer_label(cfg: &Config, host: &str, dir: &str) -> Option<String> {
+    let host = host.trim();
+    computers_in(cfg).into_iter().find(|c| c.host == host && c.dir == dir).map(|c| c.name)
+}
+
+/// The usable computer called `name`, as `--on <name>` picks one. It goes
+/// through [`computers_in`], so an entry the Computers pane would not list
+/// is not found here either.
+pub fn computer_named(cfg: &Config, name: &str) -> Result<Computer, String> {
+    let name = name.trim();
+    let computers = computers_in(cfg);
+    if let Some(c) = computers.iter().find(|c| c.name == name) {
+        return Ok(c.clone());
+    }
+    let known: Vec<&str> = computers.iter().map(|c| c.name.as_str()).collect();
+    Err(if known.is_empty() {
+        format!("no computer `{name}` — there are none; add one with `mira computer add` or in the Computers pane")
+    } else {
+        format!("no computer `{name}` (there are: {})", known.join(", "))
+    })
 }
 
 /// The usable `agentRoles`, read from the config on disk now. Only part
@@ -630,6 +786,76 @@ pub(crate) fn normalize_color(raw: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A computer missing a field, or one that cannot be used, is dropped;
+    /// the file still loads, and every other setting with it.
+    #[test]
+    fn a_bad_computer_is_dropped_not_the_whole_file() {
+        let text = r#"{
+            "fontSize": 15,
+            "computers": [
+                { "name": " box ", "host": "devbox", "dir": "~/work" },
+                { "name": "nodir", "host": "devbox" },
+                { "name": "box", "host": "other", "dir": "~/x" },
+                { "name": "my box", "host": "devbox", "dir": "~/w" }
+            ]
+        }"#;
+        let cfg: Config = serde_json::from_str(text).expect("the file still parses");
+        assert_eq!(cfg.font_size, Some(15.0));
+        assert_eq!(computers_in(&cfg), vec![Computer { name: "box".into(), host: "devbox".into(), dir: "~/work".into() }]);
+    }
+
+    /// A name finds the usable computer it means, trimmed as the saved one
+    /// is; an entry `computers_in` drops is not found, and the error names
+    /// the ones there are.
+    #[test]
+    fn a_computer_is_found_by_its_name() {
+        let cfg: Config = serde_json::from_str(
+            r#"{ "computers": [
+                { "name": "box", "host": "devbox", "dir": "~/work" },
+                { "name": "gpu", "host": "gpu.lan", "dir": "/srv" },
+                { "name": "nodir", "host": "devbox" }
+            ] }"#,
+        )
+        .unwrap();
+        let gpu = Computer { name: "gpu".into(), host: "gpu.lan".into(), dir: "/srv".into() };
+        assert_eq!(computer_named(&cfg, "gpu"), Ok(gpu.clone()));
+        assert_eq!(computer_named(&cfg, " gpu "), Ok(gpu));
+        assert_eq!(computer_named(&cfg, "nodir"), Err("no computer `nodir` (there are: box, gpu)".into()));
+        assert_eq!(computer_named(&cfg, "lab"), Err("no computer `lab` (there are: box, gpu)".into()));
+    }
+
+    #[test]
+    fn a_remote_is_named_by_the_computer_saved_there() {
+        let cfg: Config = serde_json::from_str(
+            r#"{ "computers": [
+                { "name": "box", "host": "devbox", "dir": "~" },
+                { "name": "box-work", "host": "devbox", "dir": "~/work" },
+                { "name": "gpu", "host": "gpu.lan", "dir": "/srv" }
+            ] }"#,
+        )
+        .unwrap();
+        assert_eq!(computer_label(&cfg, "devbox", "~/work").as_deref(), Some("box-work"), "host and directory");
+        assert_eq!(computer_label(&cfg, "devbox", "~").as_deref(), Some("box"));
+        assert_eq!(computer_label(&cfg, "gpu.lan", "/srv").as_deref(), Some("gpu"));
+        assert_eq!(computer_label(&cfg, "devbox", "/elsewhere"), None, "the host alone could name the wrong one");
+        assert_eq!(computer_label(&cfg, "lab", "~"), None, "no computer saved there: the host says it");
+    }
+
+    #[test]
+    fn with_no_computers_the_error_says_how_to_add_one() {
+        let err = computer_named(&Config::default(), "box").unwrap_err();
+        assert_eq!(err, "no computer `box` — there are none; add one with `mira computer add` or in the Computers pane");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_runtime_dir_is_the_xdg_one_else_under_home() {
+        let dir = |xdg: Option<&str>, home: Option<&str>| runtime_dir_from(xdg.map(String::from), home.map(String::from));
+        assert_eq!(dir(Some("/run/user/501"), Some("/home/a")), PathBuf::from("/run/user/501/mirador"));
+        assert_eq!(dir(None, Some("/home/a")), PathBuf::from("/home/a/.mirador"));
+        assert_eq!(dir(Some(""), Some("/home/a")), PathBuf::from("/home/a/.mirador"), "an empty one is unset");
+    }
 
     #[test]
     fn tilde_expands_against_home() {
@@ -724,6 +950,34 @@ mod tests {
     }
 
     #[test]
+    fn widths_are_the_default_or_kept_to_their_range() {
+        let resolved = |json: &str| resolve(&serde_json::from_str(json).unwrap());
+        assert_eq!(resolved("{}").sidebar_width, 248);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 320 }"#).sidebar_width, 320);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 20 }"#).sidebar_width, 160);
+        assert_eq!(resolved(r#"{ "sidebarWidth": 5000 }"#).sidebar_width, 600);
+        // Unset, the rail is the layout's own default, not a width.
+        assert_eq!(resolved("{}").focus_rail_width, None);
+        assert_eq!(resolved(r#"{ "focusRailWidth": 520 }"#).focus_rail_width, Some(520));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 150 }"#).focus_rail_width, Some(150));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 1 }"#).focus_rail_width, Some(150));
+        assert_eq!(resolved(r#"{ "focusRailWidth": 99999 }"#).focus_rail_width, Some(1600));
+    }
+
+    #[test]
+    fn the_rail_is_on_the_right_unless_set_to_top_or_bottom() {
+        let position = |json: &str| resolve(&serde_json::from_str(json).unwrap()).focus_rail_position;
+        assert_eq!(position("{}"), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "right" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "top" }"#), RailPosition::Top);
+        assert_eq!(position(r#"{ "focusRailPosition": "bottom" }"#), RailPosition::Bottom);
+        // A value it does not know is the default, not a failed file.
+        assert_eq!(position(r#"{ "focusRailPosition": "off" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "left" }"#), RailPosition::Right);
+        assert_eq!(position(r#"{ "focusRailPosition": "Top" }"#), RailPosition::Right);
+    }
+
+    #[test]
     fn agents_per_tab_is_4_6_or_9() {
         let per_tab = |json: &str| resolve(&serde_json::from_str(json).unwrap()).agents_per_tab;
         assert_eq!(per_tab(r#"{ "agentsPerTab": 6 }"#), 6);
@@ -800,6 +1054,25 @@ mod tests {
         assert_eq!(resolved.colors.background, "#000000");
         assert_eq!(resolved.keybindings["mod+t"], "split_right");
         assert!(!resolved.keybindings.contains_key("mod+w"));
+    }
+
+    /// A config written before the swaps had keys — the starter file lists
+    /// the defaults of its day — still gets them: defaults are merged under
+    /// whatever the file binds, never replaced by it.
+    #[test]
+    fn a_config_from_before_the_swaps_gets_their_keys() {
+        let old: HashMap<String, String> = default_keybindings()
+            .into_iter()
+            .filter(|(_, action)| !action.starts_with("swap_"))
+            .collect();
+        let resolved = resolve(&Config {
+            keybindings: old,
+            ..Default::default()
+        });
+        for d in ["left", "right", "up", "down"] {
+            let action = format!("swap_{d}");
+            assert!(resolved.keybindings.values().any(|a| *a == action), "{action}");
+        }
     }
 
     #[test]

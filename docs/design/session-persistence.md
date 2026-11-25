@@ -220,6 +220,34 @@ Three things differ from unix:
   attached client answers like any terminal; with nobody attached, the
   holder answers itself, or an unattached holder's shell would never start.
 
+## Holders on a remote
+
+An agent Mirador starts on a remote computer runs under the same holder,
+there: the remote's own `mira`, of this app's version, started over the
+ssh connection with `mira __hold-start`, which returns once the holder
+answers. Its socket is in the remote's runtime directory, as here. The
+pane is then nothing but `ssh -tt <host> '<mira>' attach '<pane>'`.
+`mira attach` is a holder client for a terminal: raw mode, the replay,
+then output; keys, resizes and a detach going back. So a dropped
+connection is only a detach to the holder, and the agent keeps running.
+
+- **Reattach** is the pane running that ssh again. When ssh itself fails
+  (exit 255: the connection lost), the pane does it by itself, backing
+  off from 2s to 30s. Any other exit is the attach's: the agent's own
+  code, or 1 when there is no session.
+- **What ends it:** closing its pane or its tab runs
+  `mira __hold-end --pane <id>` there, which sends `Kill` and waits for
+  `Exited`, as *Quit and end all sessions* does here. That quit ends the
+  remote holders too, each from a thread of its own, bounded by the
+  same patience. A plain quit leaves them, and the pane reattaches on a
+  keypress after the restart.
+- **One viewer at a time**, the newest, as here: a person running
+  `mira attach <pane>` on the remote takes it from the pane, which then
+  waits for a key.
+- **systemd:** the runtime directory, `/run/user/<uid>`, goes with the
+  last login session there, and with `KillUserProcesses=yes` so does
+  the holder, unless lingering is on (`loginctl enable-linger`).
+
 ## Build order
 
 Each step is a PR that leaves `main` releasable.

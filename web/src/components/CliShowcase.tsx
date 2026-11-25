@@ -14,10 +14,17 @@ const COMMANDS = [
   'mira agent trail worker',
   'mira diff main...HEAD',
   'mira view board',
+  'mira layout grid',
   'mira browser open localhost:3000',
   'mira browser text main',
   'mira browser console --errors',
   'mira ssh open prod-box',
+  'mira ssh open prod --tab --dir /srv/app',
+  'mira ssh open --on prod',
+  'mira computer test prod',
+  'mira team start squad --host prod --dir /srv/app',
+  'mira team start squad --on prod',
+  'mira send-file shot.png',
   'mira notify "build green"',
   'mira hooks setup',
   'mira completions zsh',
@@ -68,10 +75,17 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent trail <span style={{ color: "var(--mauve)" }}>worker</span><span style={{ color: "var(--muted)" }}>    # what it ran</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira view <span style={{ color: "var(--sapphire)" }}>board</span><span style={{ color: "var(--muted)" }}>          # every pane at once</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira layout <span style={{ color: "var(--sapphire)" }}>grid</span><span style={{ color: "var(--muted)" }}>         # rearrange a tab's panes</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser open <span style={{ color: "var(--green)" }}>localhost:3000</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser text <span style={{ color: "var(--sapphire)" }}>main</span><span style={{ color: "var(--muted)" }}>      # what it says</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser console --errors<span style={{ color: "var(--muted)" }}> # what broke</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira ssh open <span style={{ color: "var(--mauve)" }}>prod-box</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira ssh open <span style={{ color: "var(--mauve)" }}>prod</span> --tab --dir <span style={{ color: "var(--sapphire)" }}>/srv/app</span><span style={{ color: "var(--muted)" }}> # its splits there too</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira ssh open --on <span style={{ color: "var(--mauve)" }}>prod</span><span style={{ color: "var(--muted)" }}>       # a saved computer's tab</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira computer test <span style={{ color: "var(--mauve)" }}>prod</span><span style={{ color: "var(--muted)" }}>    # can agents run there?</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> --host <span style={{ color: "var(--mauve)" }}>prod</span> --dir <span style={{ color: "var(--sapphire)" }}>/srv/app</span><span style={{ color: "var(--muted)" }}> # agents there</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira team start <span style={{ color: "var(--mauve)" }}>squad</span> --on <span style={{ color: "var(--mauve)" }}>prod</span><span style={{ color: "var(--muted)" }}>    # on a saved computer</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira send-file <span style={{ color: "var(--green)" }}>shot.png</span><span style={{ color: "var(--muted)" }}>    # its path, or an SSH pane's copy</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira notify <span style={{ color: "var(--green)" }}>"build green"</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira hooks setup<span style={{ color: "var(--muted)" }}>           # Claude Code</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira completions <span style={{ color: "var(--sapphire)" }}>zsh</span><span style={{ color: "var(--muted)" }}>       # Tab-complete mira</span></div>

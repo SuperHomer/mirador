@@ -20,10 +20,12 @@ import {
   atFullSize,
   fitBoard,
   flyToCard,
+  knowCameraSets,
   panToCard,
   takesPointer,
   useBoardStore,
 } from "../state/boardStore";
+import { reportFailure } from "../state/uiStore";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 4;
@@ -186,6 +188,8 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     return snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane ?? null;
   });
   const lastPointerDown = useRef(0);
+  /** The pane focused when a camera was set from outside, until focus next moves. */
+  const focusAtAdopt = useRef<string | null>(null);
   // The percentage being typed, while the zoom is being typed.
   const [zoomDraft, setZoomDraft] = useState<string | null>(null);
   // Escape leaves by blurring too; this tells that blur not to apply.
@@ -201,7 +205,10 @@ export function BoardHost({ board, children }: { board: boolean; children: React
   // in it. A click on a card focuses what is under the pointer already,
   // and must not move the board under it.
   useEffect(() => {
-    if (!board || !focused) return;
+    // Focused before a camera was set from outside: that camera wins.
+    const settled = focused === focusAtAdopt.current;
+    focusAtAdopt.current = null;
+    if (!board || !focused || settled) return;
     if (performance.now() - lastPointerDown.current < 500) return;
     bringIntoView(focused);
   }, [board, focused]);
@@ -214,9 +221,22 @@ export function BoardHost({ board, children }: { board: boolean; children: React
     return () => void unlisten.then((fn) => fn());
   }, [board]);
 
+  // A camera set through the socket: shown, and not saved over, nor
+  // moved off by bringing in a card focused before it was set.
+  useEffect(() => {
+    const unlisten = listen<{ camera: Camera; sets: number }>("camera-set", (e) => {
+      const snap = useWorkspaceStore.getState().snapshot;
+      focusAtAdopt.current = snap?.tabs.find((t) => t.id === snap.activeTab)?.focusedPane ?? null;
+      useBoardStore.getState().adopt(e.payload.camera, e.payload.sets);
+    });
+    return () => void unlisten.then((fn) => fn());
+  }, []);
+
   // The saved camera, once; from then on the board owns it.
   useEffect(() => {
-    const saved = useWorkspaceStore.getState().snapshot?.camera;
+    const snap = useWorkspaceStore.getState().snapshot;
+    if (snap) knowCameraSets(snap.cameraSets);
+    const saved = snap?.camera;
     if (saved && !useBoardStore.getState().camera) useBoardStore.getState().moveTo(saved);
   }, []);
 
@@ -479,7 +499,7 @@ export function BoardHost({ board, children }: { board: boolean; children: React
             </button>
             <button
               title="A new tab, its frame where you are looking"
-              onClick={() => void newTab()}
+              onClick={() => void newTab().catch((e) => reportFailure("New frame", e))}
             >
               New frame
             </button>

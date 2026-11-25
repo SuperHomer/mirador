@@ -5,10 +5,13 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { createTerminal, attachRenderer, applyConfig } from "./xtermFactory";
+import { listenForImagePaste } from "./pasteImage";
 import {
+  fitTerminal,
   isLent,
   reclaimTerminal,
   registerTerminal,
+  setPaneShown,
   unregisterTerminal,
   watchTerminal,
 } from "./registry";
@@ -48,6 +51,14 @@ const WEBGL_RELEASE_DELAY_MS = 30_000;
  * pan across the board would hold one per terminal it passed.
  */
 const BOARD_WEBGL_RELEASE_DELAY_MS = 1_000;
+
+/**
+ * A remote agent's reconnects: the first wait, the longest, and how long
+ * one must hold before the next loss starts over from the first.
+ */
+const RETRY_FIRST_MS = 2_000;
+const RETRY_MAX_MS = 30_000;
+const RETRY_HELD_MS = 60_000;
 
 /**
  * Moves a background pane's terminal out of the viewport. Tabs stack with
@@ -102,11 +113,13 @@ export const TerminalPane = memo(function TerminalPane({
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<ReturnType<typeof createTerminal> | null>(null);
   const config = useConfigStore((s) => s.config);
-  const fitRef = useRef<FitAddon | null>(null);
   const webglRef = useRef<WebglAddon | null>(null);
   // Lent to the agent wall: drawn there while this pane is under it, so it
   // keeps its renderer as if it were on screen.
   const [lent, setLent] = useState(false);
+  // For the registration below, which runs once per pane id.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   useEffect(() => {
     setLent(isLent(paneId));
@@ -118,14 +131,16 @@ export const TerminalPane = memo(function TerminalPane({
     if (visible && lent) reclaimTerminal(paneId);
   }, [visible, lent, paneId]);
 
-  // Hot-reloaded config applies to the live terminal without recreating it.
+  // Hot-reloaded config applies to the live terminal without recreating it,
+  // refitted to a new font wherever it is drawn, unless a rail's thumbnail
+  // keeps its size (`fitTerminal`). Given back, its pane fits it when shown.
   useEffect(() => {
     const term = termRef.current;
     if (term && config) {
       applyConfig(term, config);
-      fitRef.current?.fit();
+      fitTerminal(paneId);
     }
-  }, [config]);
+  }, [config, paneId]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -140,17 +155,24 @@ export const TerminalPane = memo(function TerminalPane({
     // dropped while it holds — there is nothing to write to.
     let exited = true;
     let attaching = false;
-    let pendingAck = 0;
+    // A remote agent's pane reattaches by itself when ssh loses the
+    // connection: after `retryDelay`, doubled each time a reconnect is
+    // lost again soon, and back to the shortest once one has held. Not
+    // "once an attach succeeds": ssh starts, and the attach succeeds,
+    // even when it then fails to connect.
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryDelay = RETRY_FIRST_MS;
+    let attachedAt = 0;
 
     const term = createTerminal(cfg);
     termRef.current = term;
     const serialize = new SerializeAddon();
     term.loadAddon(serialize);
     const fit = new FitAddon();
-    fitRef.current = fit;
     term.loadAddon(fit);
     term.open(container);
-    registerTerminal(paneId, term, serialize, fit, container);
+    registerTerminal(paneId, term, serialize, fit, container, visibleRef.current);
+    const stopImagePaste = listenForImagePaste(term, paneId);
     // The renderer is the visibility effect's job.
     fit.fit();
 
@@ -161,9 +183,18 @@ export const TerminalPane = memo(function TerminalPane({
      * dropped channel tells the webview to unregister the callback for good.
      * Reusing that object would send the next spawn's output into a void: the
      * process runs, the pane stays frozen.
+     *
+     * Each channel acks its own output, whatever the attach is doing. Rust
+     * counts the bytes it hands a channel and starts over at zero for a new
+     * one, so what a channel delivered is that channel's to ack: output that
+     * arrives before its attach resolves (a holder's replay, a first prompt)
+     * included. Dropped instead, it stays counted in Rust for good, and past
+     * 512 KB of such debt the pane freezes the next time it pauses.
      */
     const newChannel = () => {
       const channel = new Channel<PtyData>();
+      // Delivered and drawn, not yet acked.
+      let pendingAck = 0;
       channel.onmessage = (data) => {
         const size =
           data instanceof ArrayBuffer
@@ -174,7 +205,8 @@ export const TerminalPane = memo(function TerminalPane({
         const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
         term.write(bytes, () => {
           pendingAck += size;
-          if (pendingAck >= ACK_THRESHOLD && !exited) {
+          // After an exit too: Rust ignores a pane it no longer has.
+          if (pendingAck >= ACK_THRESHOLD) {
             void ackPty(paneId, pendingAck);
             pendingAck = 0;
           }
@@ -189,6 +221,7 @@ export const TerminalPane = memo(function TerminalPane({
       // lose to "pane already running".
       if (attaching) return;
       attaching = true;
+      clearTimeout(retryTimer);
       try {
         // Previous session's scrollback, once per pane per app run.
         if (!restoredScrollback.has(paneId)) {
@@ -226,7 +259,7 @@ export const TerminalPane = memo(function TerminalPane({
         // Not before: until the PTY exists, every keystroke written to it is
         // silently dropped.
         exited = false;
-        pendingAck = 0;
+        attachedAt = Date.now();
         // Resizes while attaching were dropped (no PTY to take them), and
         // the layout often settles in exactly that window — right after a
         // split. A shell left at the old width redraws its line for a
@@ -303,6 +336,7 @@ export const TerminalPane = memo(function TerminalPane({
       exit_code: number | null;
       is_command: boolean;
       is_remote: boolean;
+      reconnects: boolean;
     }>(
       "pane-exit",
       (event) => {
@@ -312,25 +346,43 @@ export const TerminalPane = memo(function TerminalPane({
         // mouse tracking left armed the dead pane can't even be selected.
         term.write(IDLE_MODE_RESET);
         const code = event.payload.exit_code;
+        // For a remote agent, 255 is ssh's own failure, the connection
+        // lost; the agent runs on under its holder there. Any other code
+        // is the attach's: the agent's own exit, or 1 when the session is
+        // gone, which it has just said.
+        const lost = event.payload.reconnects
+          ? code === 255
+          : event.payload.is_remote;
         const status =
           code === null
             ? "exited"
-            : event.payload.is_remote
+            : lost
               ? "disconnected"
               : code === 0
                 ? "done ✓"
                 : `exit ${code}`;
         const color =
-          event.payload.is_remote || code === null
+          lost || code === null
             ? "\x1b[2m"
             : code === 0
               ? "\x1b[32m"
               : "\x1b[31m";
-        const hint = event.payload.is_remote
-          ? "press any key to reconnect"
-          : event.payload.is_command
-            ? "press any key to rerun"
-            : "press any key to start a new shell";
+        let wait = 0;
+        if (event.payload.reconnects && lost) {
+          if (Date.now() - attachedAt > RETRY_HELD_MS) {
+            retryDelay = RETRY_FIRST_MS;
+          }
+          wait = retryDelay;
+          retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+          retryTimer = setTimeout(() => void attach(true), wait);
+        }
+        const hint = wait
+          ? `reconnecting in ${wait / 1000}s (press any key to retry now)`
+          : event.payload.is_remote
+            ? "press any key to reconnect"
+            : event.payload.is_command
+              ? "press any key to rerun"
+              : "press any key to start a new shell";
         term.writeln(
           `\r\n${color}[${status}]\x1b[0m \x1b[2m— ${hint}\x1b[0m`,
         );
@@ -352,15 +404,24 @@ export const TerminalPane = memo(function TerminalPane({
 
     return () => {
       disposed = true;
+      clearTimeout(retryTimer);
       observer.disconnect();
       unlisten?.();
       termRef.current = null;
       webglRef.current = null;
+      stopImagePaste();
       unregisterTerminal(paneId, term);
       // The PTY itself belongs to the Rust tree; unmount only drops the view.
       term.dispose();
     };
   }, [paneId]);
+
+  // Tells the registry whether this pane is on screen: a terminal the wall
+  // gives back is sized to it only then, and once it shows again. After the
+  // registration above, which React runs first.
+  useEffect(() => {
+    setPaneShown(paneId, visible);
+  }, [visible, paneId]);
 
   // On the board every terminal counts as visible, and a browser allows
   // ~16 WebGL contexts. So there a terminal renders with WebGL only while

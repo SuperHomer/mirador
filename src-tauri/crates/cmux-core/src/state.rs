@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use cmux_protocol::{
-    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, SplitDir, TabSnapshot, TaskLayout,
+    BoardPoint, BoardRect, Camera, CardRect, Direction, Node, Preset, SplitDir, TabSnapshot, TaskLayout,
     View, WallMode, WallView, WorkspaceSnapshot,
 };
 
@@ -109,8 +109,29 @@ pub struct PaneMeta {
     /// Usage pane: each harness's account and what it used, read from the
     /// harnesses' own files, so at most one such pane is open.
     pub usage: bool,
+    /// Computers pane: the computers saved in mirador.json, one global
+    /// file, so at most one such pane is open.
+    pub computers: bool,
     /// Remote pane: the ssh host spec its PTY connects to (`ssh -tt <spec>`).
     pub remote_host: Option<String>,
+    /// Remote agent pane: the command line its `ssh -tt` runs on
+    /// `remote_host` instead of a login shell there, attaching to the
+    /// agent's holder there (`mira attach <pane>`).
+    pub remote_command: Option<String>,
+    /// Remote pane: the directory it works in on `remote_host`, the one it
+    /// was opened in there. A shell's `ssh -tt` starts there
+    /// (`ssh::shell_in`); an agent's pane runs `remote_command`, and this
+    /// is where a shell split from it starts when its shell's own is not
+    /// known.
+    pub remote_dir: Option<String>,
+    /// Remote pane: the directory its shell last reported there with OSC
+    /// 7, which bash and zsh do not by default. Never saved: a restored
+    /// pane's shell is a new one.
+    pub remote_cwd: Option<String>,
+    /// Remote pane: the pid of its shell there, which its start prints
+    /// (`ssh::shell_in`), so a split can ask the remote where it is. Never
+    /// saved; a reconnect prints it again.
+    pub remote_shell_pid: Option<u32>,
     /// Diff pane: the repository root its diff is taken in. Paired with
     /// `diff_spec` — both set, or neither.
     pub diff_repo: Option<String>,
@@ -136,16 +157,73 @@ impl PaneMeta {
         self.agent_harness.is_some() || self.claude_marked()
     }
 
-    /// What it runs. A `codex:` session is a Codex's; otherwise the
+    /// Where a shell split from this pane runs, when it is a remote pane, a
+    /// shell or an agent: on its remote host, in the directory its shell
+    /// last reported there (OSC 7), else the one it was opened in, else
+    /// the home there. A split first asks the remote where the shell is
+    /// ([`Self::remote_shell_to_ask`]) and uses that instead when it
+    /// answers. None for a local pane.
+    pub fn split_remote(&self) -> Option<(String, Option<String>)> {
+        Some((self.remote_host.clone()?, self.remote_cwd.clone().or_else(|| self.remote_dir.clone())))
+    }
+
+    /// The host and pid of the remote shell a split should ask the
+    /// directory of: a remote shell pane whose start printed its pid, and
+    /// whose shell has not reported its directory itself, which costs
+    /// nothing to use. Not an agent's pane, whose directory is its agent's.
+    pub fn remote_shell_to_ask(&self) -> Option<(String, u32)> {
+        if self.remote_cwd.is_some() || self.remote_command.is_some() {
+            return None;
+        }
+        Some((self.remote_host.clone()?, self.remote_shell_pid?))
+    }
+
+    /// Forgets the remote shell the pane ran, once its process has ended:
+    /// the pane stays, and so does the connection's master for a while, so
+    /// a split of it would otherwise ask about a pid that may be another
+    /// process's by then.
+    pub fn forget_remote_shell(&mut self) {
+        self.remote_cwd = None;
+        self.remote_shell_pid = None;
+    }
+
+    /// Takes a directory the pane's shell reported with OSC 7, and says
+    /// whether the pane's saved state changed. A local shell's is the
+    /// pane's `cwd`, and latches it (`cwd_from_shell`). A remote shell's is
+    /// a path on another computer: never the `cwd`, which is this
+    /// computer's, only where its splits start (`remote_cwd`).
+    pub fn observe_shell_cwd(&mut self, path: String) -> bool {
+        if self.remote_host.is_some() {
+            self.remote_cwd = Some(path);
+            return false;
+        }
+        // From here on the poller leaves this pane's cwd alone, even
+        // between prompts.
+        self.cwd_from_shell = true;
+        if self.cwd.as_deref() == Some(path.as_str()) {
+            return false;
+        }
+        self.cwd = Some(path);
+        true
+    }
+
+    /// Where an agent or a team started from this pane runs when the person
+    /// picks its remote: the pane's host, in the directory it was opened in
+    /// there, or the home (`~`) with none known. None for a local pane.
+    pub fn start_remote(&self) -> Option<(String, String)> {
+        Some((self.remote_host.clone()?, self.remote_dir.clone().unwrap_or_else(|| "~".into())))
+    }
+
+    /// What it runs. A `codex:` session is a Codex's, a `pi:` or an
+    /// `opencode:` one a Pi's or an OpenCode's; otherwise the
     /// session, role and launch mark are Claude Code's, so an agent known
     /// only by them is a Claude Code one.
     pub fn harness(&self) -> Option<cmux_protocol::Harness> {
-        self.agent_harness.or_else(|| {
-            if self.agent_session.as_deref().is_some_and(|s| s.starts_with("codex:")) {
-                Some(cmux_protocol::Harness::Codex)
-            } else {
-                self.claude_marked().then_some(cmux_protocol::Harness::Claude)
-            }
+        use cmux_protocol::Harness;
+        self.agent_harness.or_else(|| match self.agent_session.as_deref().map(crate::agents::session_harness) {
+            // Its record says: a Codex's thread, a Pi's or an OpenCode's id.
+            Some(h @ (Harness::Codex | Harness::Pi | Harness::OpenCode)) => Some(h),
+            _ => self.claude_marked().then_some(Harness::Claude),
         })
     }
 
@@ -390,6 +468,8 @@ pub struct Workspace {
     /// the camera, where the board is being looked at. Not saved — unknown
     /// until the app has drawn the board.
     pub viewport: Option<(f64, f64)>,
+    /// Cameras set from outside since launch ([`Self::set_camera`]).
+    pub camera_sets: u64,
 }
 
 impl Default for Workspace {
@@ -401,6 +481,7 @@ impl Default for Workspace {
             view: View::default(),
             camera: Camera::default(),
             viewport: None,
+            camera_sets: 0,
         }
     }
 }
@@ -444,12 +525,20 @@ impl Workspace {
     /// Creates a tab (with one fresh pane) after the active one and
     /// activates it. Returns (tab_id, pane_id).
     pub fn new_tab(&mut self) -> (String, String) {
-        let (tab, pane) = Tab::new();
+        let pane = new_id();
+        (self.new_tab_with(pane.clone()), pane)
+    }
+
+    /// [`Self::new_tab`], its pane's id chosen beforehand
+    /// ([`Self::fresh_pane_ids`]): for a pane whose agent's files are sent
+    /// before it opens. Returns the tab id.
+    pub fn new_tab_with(&mut self, pane: String) -> String {
+        let tab = Tab::with_root(Node::Leaf { pane_id: pane });
         let id = tab.id.clone();
         self.active = (self.active + 1).min(self.tabs.len());
         self.tabs.insert(self.active, tab);
         self.place_frame(&id);
-        (id, pane)
+        id
     }
 
     /// Opens a team's tab after the active one, its panes laid out as
@@ -563,8 +652,14 @@ impl Workspace {
 
     /// Splits the pane, focusing the new pane. Returns its id.
     pub fn split_pane(&mut self, pane: &str, dir: SplitDir) -> Option<String> {
+        self.split_pane_as(pane, dir, new_id())
+    }
+
+    /// [`Self::split_pane`], the new pane's id chosen beforehand
+    /// ([`Self::fresh_pane_ids`]): for a pane whose agent's files are sent
+    /// before it opens.
+    pub fn split_pane_as(&mut self, pane: &str, dir: SplitDir, new_pane: String) -> Option<String> {
         let tab = self.tab_of_pane_mut(pane)?;
-        let new_pane = new_id();
         if layout::split(&mut tab.root, pane, dir, &new_pane) {
             tab.focused = new_pane.clone();
             tab.zoomed = None;
@@ -719,6 +814,58 @@ impl Workspace {
         }
     }
 
+    /// Swaps `pane` with its neighbor in `direction`; false when it has
+    /// none there. Focus stays on the pane, wherever it went.
+    pub fn swap_pane(&mut self, pane: &str, direction: Direction) -> bool {
+        let Some(tab) = self.tab_of_pane_mut(pane) else {
+            return false;
+        };
+        let Some(other) = layout::neighbor(&tab.root, pane, direction) else {
+            return false;
+        };
+        layout::swap(&mut tab.root, pane, &other);
+        tab.zoomed = None;
+        true
+    }
+
+    /// Moves every pane of the tab one place along its pane order,
+    /// wrapping; false when nothing moved (one pane, or no such tab).
+    pub fn rotate_panes(&mut self, tab_id: &str, forward: bool) -> bool {
+        self.rearrange(tab_id, |root| layout::rotate(root, forward))
+    }
+
+    /// Gives every pane of the tab an equal share of its split; false when
+    /// they already had one.
+    pub fn equalize_panes(&mut self, tab_id: &str) -> bool {
+        self.rearrange(tab_id, layout::equalize)
+    }
+
+    /// Lays the tab's panes out afresh as `preset`, in their current order;
+    /// false when they already were.
+    pub fn apply_layout(&mut self, tab_id: &str, preset: Preset) -> bool {
+        self.rearrange(tab_id, |root| {
+            if let Some(fresh) = layout::preset(&layout::pane_ids(root), preset) {
+                *root = fresh;
+            }
+        })
+    }
+
+    /// Changes a tab's split tree, keeping its panes and its focus. A tab
+    /// rearranged is asked for whole, so a zoom is let go — as a split
+    /// lets it go — but only when the tree did change.
+    fn rearrange(&mut self, tab_id: &str, change: impl FnOnce(&mut Node)) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) else {
+            return false;
+        };
+        let before = tab.root.clone();
+        change(&mut tab.root);
+        if tab.root == before {
+            return false;
+        }
+        tab.zoomed = None;
+        true
+    }
+
     /// Shows the workspace as tabs or as the board. False when it already was.
     pub fn set_view(&mut self, view: View) -> bool {
         std::mem::replace(&mut self.view, view) != view
@@ -866,10 +1013,30 @@ impl Workspace {
             agent_editor_panes: Vec::new(),
             settings_panes: Vec::new(),
             usage_panes: Vec::new(),
+            computers_panes: Vec::new(),
             agents: Vec::new(),
             view: self.view,
             camera: self.camera,
+            camera_sets: self.camera_sets,
         }
+    }
+
+    /// Sets where the board is looked at. `seen` is the board's own save,
+    /// with how many cameras set from outside it had been told of; `None`
+    /// is one set from outside, which counts. A board save made before the
+    /// latest outside camera is dropped (false): it was sent before the
+    /// board knew of it, and would land over it.
+    pub fn set_camera(&mut self, camera: Camera, viewport: Option<(f64, f64)>, seen: Option<u64>) -> bool {
+        match seen {
+            Some(seen) if seen < self.camera_sets => return false,
+            Some(_) => {}
+            None => self.camera_sets += 1,
+        }
+        self.camera = camera;
+        if let Some(viewport) = viewport {
+            self.viewport = Some(viewport);
+        }
+        true
     }
 }
 
@@ -896,6 +1063,8 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
         "Settings".to_string()
     } else if m.usage {
         "Usage".to_string()
+    } else if m.computers {
+        "Computers".to_string()
     } else if let Some(version) = &m.whats_new {
         format!("What's new in {version}")
     } else if let Some(url) = &m.browser_url {
@@ -1078,6 +1247,21 @@ mod tests {
         assert_eq!(m.agent_session, None);
     }
 
+    /// A restored pane's harness comes from its record before anything is
+    /// seen running: a Pi's or an OpenCode's id says which it was.
+    #[test]
+    fn a_pi_or_opencode_record_names_its_harness() {
+        use cmux_protocol::Harness;
+        let of = |record: &str| PaneMeta { agent_session: Some(record.into()), ..Default::default() }.harness();
+        assert_eq!(of("pi:a1"), Some(Harness::Pi));
+        assert_eq!(of("opencode:ses_a1"), Some(Harness::OpenCode));
+        assert_eq!(of("codex:t1"), Some(Harness::Codex));
+        assert_eq!(of("claude-fg:s1"), Some(Harness::Claude));
+        // Seen running wins over the record.
+        let seen = PaneMeta { agent_harness: Some(Harness::Codex), agent_session: Some("pi:a1".into()), ..Default::default() };
+        assert_eq!(seen.harness(), Some(Harness::Codex));
+    }
+
     #[test]
     fn another_harness_replaces_the_claude_session() {
         use cmux_protocol::Harness;
@@ -1179,6 +1363,81 @@ mod tests {
         assert!(ws.unzoom(&claude));
         assert_eq!(zoomed(&ws), None);
         assert!(!ws.unzoom(&claude), "nothing to let go of");
+    }
+
+    /// [a | [b over c]], the tab's id with it.
+    fn three_panes() -> (Workspace, String, [String; 3]) {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let b = ws.split_pane(&a, SplitDir::Row).unwrap();
+        let c = ws.split_pane(&b, SplitDir::Column).unwrap();
+        let tab = ws.tabs[0].id.clone();
+        (ws, tab, [a, b, c])
+    }
+
+    #[test]
+    fn a_swapped_pane_keeps_the_focus_in_its_new_place() {
+        let (mut ws, _, [a, b, c]) = three_panes();
+        ws.focus_pane(&c);
+        ws.zoom_pane(&c);
+        assert!(ws.swap_pane(&c, Direction::Up));
+        assert_eq!(layout::pane_ids(&ws.tabs[0].root), vec![a.clone(), c.clone(), b]);
+        assert_eq!(ws.focused_pane(), c);
+        assert_eq!(ws.tabs[0].zoomed, None, "the tab is shown whole again");
+        assert_eq!(layout::neighbor(&ws.tabs[0].root, &c, Direction::Left), Some(a));
+    }
+
+    #[test]
+    fn a_swap_with_no_neighbor_on_that_side_changes_nothing() {
+        let (mut ws, _, [a, ..]) = three_panes();
+        ws.zoom_pane(&a);
+        let before = ws.tabs[0].root.clone();
+        assert!(!ws.swap_pane(&a, Direction::Left));
+        assert!(!ws.swap_pane("no-such-pane", Direction::Right));
+        assert_eq!(ws.tabs[0].root, before);
+        assert_eq!(ws.tabs[0].zoomed, Some(a), "a swap that did nothing keeps the zoom");
+    }
+
+    #[test]
+    fn rotating_a_tab_moves_its_panes_and_keeps_the_focus() {
+        let (mut ws, tab, [a, b, c]) = three_panes();
+        ws.focus_pane(&a);
+        ws.zoom_pane(&a);
+        assert!(ws.rotate_panes(&tab, true));
+        assert_eq!(layout::pane_ids(&ws.tabs[0].root), vec![c.clone(), a.clone(), b.clone()]);
+        assert_eq!(ws.focused_pane(), a);
+        assert_eq!(ws.tabs[0].zoomed, None);
+        assert!(ws.rotate_panes(&tab, false));
+        assert_eq!(layout::pane_ids(&ws.tabs[0].root), vec![a, b, c]);
+
+        let (lone, _) = ws.new_tab();
+        assert!(!ws.rotate_panes(&lone, true), "one pane has nowhere to go");
+        assert!(!ws.rotate_panes("no-such-tab", true));
+    }
+
+    #[test]
+    fn evening_a_tab_out_twice_changes_it_once() {
+        let (mut ws, tab, [a, ..]) = three_panes();
+        ws.set_split_ratios(&tab, &[], vec![0.8, 0.2]);
+        ws.zoom_pane(&a);
+        assert!(ws.equalize_panes(&tab));
+        assert_eq!(ws.tabs[0].zoomed, None);
+        assert!(!ws.equalize_panes(&tab), "already even");
+    }
+
+    #[test]
+    fn a_layout_keeps_the_tabs_panes_their_order_and_its_focus() {
+        let (mut ws, tab, [a, b, c]) = three_panes();
+        ws.focus_pane(&b);
+        ws.zoom_pane(&b);
+        assert!(ws.apply_layout(&tab, Preset::SideBySide));
+        let root = &ws.tabs[0].root;
+        assert_eq!(layout::pane_ids(root), vec![a, b.clone(), c]);
+        assert!(matches!(root, Node::Split { dir: SplitDir::Row, children, .. } if children.len() == 3));
+        assert_eq!(ws.focused_pane(), b);
+        assert_eq!(ws.tabs[0].zoomed, None);
+        assert!(!ws.apply_layout(&tab, Preset::SideBySide), "already laid out so");
+        assert!(!ws.apply_layout("no-such-tab", Preset::Grid));
     }
 
     #[test]
@@ -1339,7 +1598,7 @@ mod tests {
         // goes right of every other.
         ws.new_tab();
         let panes = Workspace::fresh_pane_ids(2);
-        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![] };
+        let team = cmux_protocol::TeamRun { name: "t".into(), members: vec![], remote: None };
         ws.new_team_tab(crate::teams::layout(&panes, None), team, "t");
         ws.adopt_pane("orphan");
         assert_board_consistent(&ws);
@@ -1378,6 +1637,30 @@ mod tests {
         assert_eq!(tab.frame, BoardPoint { x: right.x + right.w + board::FRAME_GAP, y: 0.0 });
     }
 
+    /// A pane split under an id chosen beforehand opens under that id.
+    #[test]
+    fn a_split_can_take_its_id_from_the_caller() {
+        let mut ws = Workspace::default();
+        let a = ws.focused_pane();
+        let id = Workspace::fresh_pane_ids(1).remove(0);
+        assert_eq!(ws.split_pane_as(&a, SplitDir::Row, id.clone()), Some(id.clone()));
+        assert!(layout::contains(&ws.tabs[0].root, &id));
+        assert_eq!(ws.focused_pane(), id);
+        assert!(ws.tabs[0].cards.contains_key(&id), "it has a card, as any split does");
+    }
+
+    /// A tab opened under a pane id chosen beforehand opens with that pane,
+    /// and becomes the active one.
+    #[test]
+    fn a_new_tab_can_take_its_pane_id_from_the_caller() {
+        let mut ws = Workspace::default();
+        let id = Workspace::fresh_pane_ids(1).remove(0);
+        let tab = ws.new_tab_with(id.clone());
+        assert_eq!(ws.tabs[ws.active].id, tab);
+        assert_eq!(layout::pane_ids(&ws.tabs[ws.active].root), vec![id.clone()]);
+        assert_eq!(ws.focused_pane(), id);
+    }
+
     #[test]
     fn a_split_adds_a_card_in_its_frame_and_moves_none() {
         let mut ws = Workspace::default();
@@ -1409,6 +1692,84 @@ mod tests {
         ws.close_tab(&id);
         assert_eq!(ws.tabs[0].frame, BoardPoint { x: 700.0, y: -40.0 });
         assert_board_consistent(&ws);
+    }
+
+    #[test]
+    fn a_split_of_a_remote_pane_is_on_its_remote_in_its_directory() {
+        let local = PaneMeta { cwd: Some("/home/me".into()), ..Default::default() };
+        assert_eq!(local.split_remote(), None, "a local pane splits here");
+        let shell = PaneMeta { remote_host: Some("box".into()), remote_dir: Some("~/work".into()), ..Default::default() };
+        assert_eq!(shell.split_remote(), Some(("box".into(), Some("~/work".into()))));
+        let agent = PaneMeta { remote_command: Some("'/m' attach p1".into()), ..shell.clone() };
+        assert_eq!(agent.split_remote(), Some(("box".into(), Some("~/work".into()))), "a shell in the agent's directory");
+        let home = PaneMeta { remote_host: Some("-p 2222 me@box".into()), ..Default::default() };
+        assert_eq!(home.split_remote(), Some(("-p 2222 me@box".into(), None)), "the home there");
+    }
+
+    /// A remote shell's live directory: what it reported (OSC 7) wins, and
+    /// is not asked for; without it the remote is asked about its pid, and
+    /// with neither the split is where the pane was opened. An agent's pane
+    /// is never asked about.
+    #[test]
+    fn a_split_of_a_remote_shell_follows_where_it_has_gone() {
+        let opened = PaneMeta { remote_host: Some("box".into()), remote_dir: Some("~/work".into()), ..Default::default() };
+        assert_eq!(opened.remote_shell_to_ask(), None, "no pid printed: nothing to ask");
+        let with_pid = PaneMeta { remote_shell_pid: Some(42), ..opened.clone() };
+        assert_eq!(with_pid.remote_shell_to_ask(), Some(("box".into(), 42)));
+        assert_eq!(with_pid.split_remote(), Some(("box".into(), Some("~/work".into()))), "the asking is the split's");
+        let reported = PaneMeta { remote_cwd: Some("/srv/app".into()), ..with_pid.clone() };
+        assert_eq!(reported.remote_shell_to_ask(), None, "OSC 7 is free; asking is not");
+        assert_eq!(reported.split_remote(), Some(("box".into(), Some("/srv/app".into()))));
+        assert_eq!(reported.start_remote(), Some(("box".into(), "~/work".into())), "an agent starts where the pane was opened");
+        let agent = PaneMeta { remote_command: Some("'/m' attach p1".into()), ..with_pid };
+        assert_eq!(agent.remote_shell_to_ask(), None);
+        assert_eq!(PaneMeta { remote_shell_pid: Some(42), ..Default::default() }.remote_shell_to_ask(), None, "a local pane");
+        let mut ended = reported;
+        ended.forget_remote_shell();
+        assert_eq!((ended.remote_shell_to_ask(), ended.split_remote()), (None, Some(("box".into(), Some("~/work".into())))), "its shell gone: where it was opened");
+    }
+
+    /// OSC 7 from a local shell is the pane's cwd, and latches it; from a
+    /// remote shell it is a path over there, kept apart from the cwd.
+    #[test]
+    fn a_remote_shells_osc7_is_not_the_panes_cwd() {
+        let mut local = PaneMeta::default();
+        assert!(local.observe_shell_cwd("/repo".into()));
+        assert!(!local.observe_shell_cwd("/repo".into()), "unchanged");
+        assert_eq!((local.cwd.as_deref(), local.cwd_from_shell, local.remote_cwd), (Some("/repo"), true, None));
+
+        let mut remote = PaneMeta { cwd: Some("/Users/me".into()), remote_host: Some("box".into()), ..Default::default() };
+        assert!(!remote.observe_shell_cwd("/srv/app".into()), "nothing saved changed");
+        assert_eq!(remote.cwd.as_deref(), Some("/Users/me"));
+        assert!(!remote.cwd_from_shell, "the poller still reads this computer's");
+        assert_eq!(remote.remote_cwd.as_deref(), Some("/srv/app"));
+    }
+
+    #[test]
+    fn an_agent_from_a_remote_pane_starts_in_its_directory_or_the_home() {
+        assert_eq!(PaneMeta::default().start_remote(), None, "a local pane: no remote to offer");
+        let shell = PaneMeta { remote_host: Some("box".into()), remote_dir: Some("~/work".into()), ..Default::default() };
+        assert_eq!(shell.start_remote(), Some(("box".into(), "~/work".into())));
+        let home = PaneMeta { remote_host: Some("box".into()), ..Default::default() };
+        assert_eq!(home.start_remote(), Some(("box".into(), "~".into())), "the home with no directory");
+    }
+
+    /// A camera set from outside is the last word over a save the board
+    /// sent before it heard of it; the board's next save, made after,
+    /// counts again.
+    #[test]
+    fn a_board_save_from_before_an_outside_camera_is_dropped() {
+        let mut ws = Workspace::default();
+        let outside = Camera { x: -20000.0, y: -20000.0, zoom: 1.0 };
+        let board = Camera { x: 2500.0, y: 42.0, zoom: 1.0 };
+        assert!(ws.set_camera(board, None, Some(0)), "nothing set from outside yet");
+        assert!(ws.set_camera(outside, Some((1000.0, 800.0)), None));
+        assert_eq!((ws.camera_sets, ws.viewport), (1, Some((1000.0, 800.0))));
+        assert!(!ws.set_camera(board, Some((1.0, 1.0)), Some(0)), "sent before the board knew");
+        assert_eq!((ws.camera, ws.viewport), (outside, Some((1000.0, 800.0))), "untouched");
+        assert!(ws.set_camera(board, None, Some(1)));
+        assert_eq!(ws.camera, board);
+        assert_eq!(ws.snapshot(&HashMap::new()).camera_sets, 1);
     }
 
     #[test]
@@ -1575,6 +1936,7 @@ mod tests {
         let title = |m: PaneMeta| ws.active_tab().resolved_title(&HashMap::from([(pane.clone(), m)]));
         assert_eq!(title(PaneMeta { settings: true, ..Default::default() }), "Settings");
         assert_eq!(title(PaneMeta { usage: true, ..Default::default() }), "Usage");
+        assert_eq!(title(PaneMeta { computers: true, ..Default::default() }), "Computers");
         assert_eq!(title(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
         assert_eq!(title(PaneMeta::default()), "shell");
         assert_eq!(ws.active_tab().resolved_title(&HashMap::new()), "shell");

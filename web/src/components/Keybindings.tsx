@@ -9,11 +9,15 @@ const KEYS: [string, string, string][] = [
   ["Board / tabs view", "⌘⇧O", "Ctrl+Shift+O"],
   ["Board: show everything", "⌘0", "Ctrl+Shift+0"],
   ["Focus pane by direction", "⌘⌥arrows", "Ctrl+Alt+arrows"],
+  ["Swap pane with its neighbor", "⌘⌥⇧arrows", "Ctrl+Alt+Shift+arrows"],
   ["Jump to tab", "⌘1…9", "Alt+1…9"],
   ["Command palette", "⌘K", "Ctrl+Shift+K"],
   ["Inbox", "⌘I", "Ctrl+Shift+I"],
   ["Toggle sidebar", "⌘B", "Ctrl+Shift+B"],
   ["Copy / paste", "⌘C · ⌘V", "Ctrl+Shift+C · Ctrl+Shift+V"],
+  // Plain Ctrl on purpose, as in Windows Terminal: these type nothing a
+  // shell needs.
+  ["Zoom terminals in / out", "⌘= · ⌘-", "Ctrl+= · Ctrl+-"],
 ];
 
 // minmax(0,…) so a long combo shrinks its column instead of overflowing.
