@@ -23,6 +23,9 @@ fn zsh_completes_the_public_commands_only() {
         assert!(script.contains(&format!("'{command}:")), "names `{command}`");
     }
     assert!(!script.contains("__hold"), "the session holder is Mirador's own");
+    // completions() rebuilds the CLI without its hidden subcommands, so an
+    // attribute of `Cli` can drop out of that copy unseen.
+    assert!(script.contains("--version"), "the copy keeps the CLI's version");
 }
 
 #[test]
