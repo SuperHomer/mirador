@@ -467,8 +467,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentSend { to, message, pane_id, force, card, title } => {
-            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
-            Ok(json!({ "paneId": pane }))
+            let (pane, queued) = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
+            Ok(match queued {
+                Some(q) => json!({ "paneId": pane, "queued": { "id": q.id, "ahead": q.ahead, "why": q.why } }),
+                None => json!({ "paneId": pane }),
+            })
+        }
+        Request::AgentQueued { message_id: id } => {
+            let (ahead, delivered) = crate::handoff::queued(&state, id);
+            Ok(json!({ "ahead": ahead, "deliveredMs": delivered }))
         }
         Request::AgentClear { name, pane_id, force } => {
             let pane = crate::handoff::clear(app, name.as_deref(), pane_id, force)?;

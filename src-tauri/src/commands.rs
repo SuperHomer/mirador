@@ -2729,7 +2729,9 @@ pub async fn load_scrollback(state: State<'_, AppState>, pane_id: String) -> Res
 #[tauri::command]
 pub async fn write_pty(app: AppHandle, pane_id: String, data: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    state.typed_at.lock().unwrap().insert(pane_id.clone(), std::time::Instant::now());
+    if cmux_core::handoff::is_typing(&data) {
+        state.typed_at.lock().unwrap().insert(pane_id.clone(), std::time::Instant::now());
+    }
     let mut hold = state.key_hold.lock().unwrap();
     if hold.keep(&pane_id, data.as_bytes()) {
         return Ok(());

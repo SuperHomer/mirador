@@ -184,7 +184,14 @@ pub fn find(state: &AppState, name: &str, caller: Option<String>) -> Result<Stri
 /// Types `message` into `to`'s terminal, said to be from the caller when
 /// the caller is an agent, and logs it on `card` — a card written by hand
 /// — when given one, else on a card of its own titled `title` (or from the
-/// message). Returns the recipient's pane.
+/// message). Returns the recipient's pane, and whether the message was
+/// queued instead (`Queued`).
+///
+/// Unless `force`, a message waits in the pane's queue, to be typed by
+/// [`deliver`], when the person is in the way there — a draft in the input
+/// box, or keys typed within `cmux_core::handoff::TYPING_QUIET` — or other
+/// messages already wait for it: pasted then, it would be merged into the
+/// person's draft and sent with it (#244).
 pub fn send(
     app: &tauri::AppHandle,
     to: &str,
@@ -193,7 +200,7 @@ pub fn send(
     force: bool,
     card: Option<String>,
     title: Option<String>,
-) -> Result<String, String> {
+) -> Result<(String, Option<Queued>), String> {
     use tauri::Manager;
     let state = &*app.state::<AppState>();
     let card = card.map(|id| crate::tasks::written(state, &id).map(|c| c.id)).transpose()?;
@@ -235,24 +242,167 @@ pub fn send(
     let to_tab = state.workspace.lock().unwrap().tab_of_pane(&pane).map(|t| t.id.clone());
     let from = caller.as_deref().and_then(|c| sender_in(state, c, to_tab.as_deref()));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
+    if !force {
+        let (draft, typed) = person_in(app, state, &pane, harness);
+        let mut queues = state.queued.lock().unwrap();
+        let ahead = queues.get(&pane).map_or(0, |q| q.len());
+        if let Some(why) = cmux_core::handoff::queue_reason(draft, typed, ahead) {
+            let id = state.next_queued.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let queued = Queued { id, ahead, why };
+            let message = Message { id, message: message.to_string(), from, card, title, paste, enter };
+            let queue = queues.entry(pane.clone()).or_default();
+            queue.push_back(message);
+            // One deliverer a pane, for as long as its queue is not empty:
+            // it removes the queue, under this lock, when it ends.
+            if queue.len() == 1 {
+                let (app, pane) = (app.clone(), pane.clone());
+                std::thread::spawn(move || deliver(app, pane));
+            }
+            return Ok((pane, Some(queued)));
+        }
+    }
+    type_message(app, state, &pane, harness, &paste, &enter)?;
+    let from = from.unwrap_or_else(|| "you".into());
+    crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card, title);
+    Ok((pane, None))
+}
+
+/// A message `send` queued: its id, how many were ahead of it, and why it
+/// waits.
+pub struct Queued {
+    pub id: u64,
+    pub ahead: usize,
+    pub why: String,
+}
+
+/// A message waiting in a pane's queue, with what `send` logs it with.
+pub struct Message {
+    id: u64,
+    message: String,
+    from: Option<String>,
+    card: Option<String>,
+    title: Option<String>,
+    paste: Vec<u8>,
+    enter: Vec<u8>,
+}
+
+/// Whether the person is in `pane`'s way: a draft in its agent's input
+/// box (`cmux_core::handoff::has_draft`, by the cursor), and keys typed
+/// into it within `TYPING_QUIET`. A screen that cannot be read has no
+/// draft, as `screen_refusal` counts it ready.
+fn person_in(app: &tauri::AppHandle, state: &AppState, pane: &str, harness: Option<cmux_protocol::Harness>) -> (bool, bool) {
+    let draft = crate::server::read_screen_at(app, pane, None, std::time::Duration::from_secs(2))
+        .ok()
+        .and_then(|(screen, cursor)| Some(cmux_core::handoff::has_draft(&screen, cursor?, harness)))
+        .unwrap_or(false);
+    (draft, typed_lately(state, pane))
+}
+
+/// Whether the person typed into `pane` within `TYPING_QUIET`.
+fn typed_lately(state: &AppState, pane: &str) -> bool {
+    state.typed_at.lock().unwrap().get(pane).is_some_and(|t| t.elapsed() < cmux_core::handoff::TYPING_QUIET)
+}
+
+/// Types the messages queued for `pane`, oldest first, each once the
+/// agent is ready for it and the person is not in the way: about every
+/// 500 ms it looks, and types the head of the queue when the agent is
+/// neither working nor waiting on a person, its screen shows its input
+/// box, empty, and nothing was typed there within `TYPING_QUIET`. Not
+/// while it works: the person's own prompt, just sent, is that turn, and a
+/// message typed into it would not be a prompt of its own — nor would
+/// `send --wait` tell its turn from theirs. One message a look, so the
+/// next waits for the box to be empty again. Ends with the queue: emptied,
+/// or dropped once the pane is closed or runs no agent. No lock is held
+/// across a read or a sleep.
+fn deliver(app: tauri::AppHandle, pane: String) {
+    use cmux_protocol::AgentStatus;
+    use tauri::Manager;
+    let state = &*app.state::<AppState>();
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let open = state.workspace.lock().unwrap().all_pane_ids().contains(&pane);
+        let agent = state.meta.lock().unwrap().get(&pane).filter(|m| m.is_agent()).map(|m| (m.status(), m.harness()));
+        let Some((status, harness)) = agent.filter(|_| open) else {
+            state.queued.lock().unwrap().remove(&pane);
+            return;
+        };
+        if matches!(status, Some(AgentStatus::Working | AgentStatus::NeedsYou)) || !state.pty.is_running(&pane) {
+            continue;
+        }
+        let Ok((screen, cursor)) = crate::server::read_screen_at(&app, &pane, None, std::time::Duration::from_secs(2)) else {
+            continue;
+        };
+        if cmux_core::handoff::showing_in(&screen, harness) != cmux_core::handoff::Showing::Composer {
+            continue;
+        }
+        let draft = cursor.is_some_and(|at| cmux_core::handoff::has_draft(&screen, at, harness));
+        if draft || typed_lately(state, &pane) {
+            continue;
+        }
+        let head = {
+            let queues = state.queued.lock().unwrap();
+            queues.get(&pane).and_then(|q| q.front()).map(|m| (m.id, m.paste.clone(), m.enter.clone()))
+        };
+        let Some((id, paste, enter)) = head else { return };
+        if type_message(&app, state, &pane, harness, &paste, &enter).is_err() {
+            continue;
+        }
+        state.delivered.lock().unwrap().insert(id, crate::runs::now_ms());
+        let (message, emptied) = {
+            let mut queues = state.queued.lock().unwrap();
+            let Some(queue) = queues.get_mut(&pane) else { return };
+            let message = queue.pop_front();
+            let emptied = queue.is_empty();
+            if emptied {
+                queues.remove(&pane);
+            }
+            (message, emptied)
+        };
+        if let Some(m) = message {
+            let from = m.from.unwrap_or_else(|| "you".into());
+            crate::tasks::given(&app, cmux_protocol::TaskSource::AgentSend, from, &pane, &m.message, m.card, m.title);
+        }
+        if emptied {
+            return;
+        }
+    }
+}
+
+/// Where a message `send` queued is: still queued, `ahead` of it; typed,
+/// at `delivered` (ms since the epoch); or neither — dropped with its
+/// pane's queue.
+pub fn queued(state: &AppState, id: u64) -> (Option<usize>, Option<u64>) {
+    let ahead = state.queued.lock().unwrap().values().find_map(|q| q.iter().position(|m| m.id == id));
+    (ahead, state.delivered.lock().unwrap().get(&id).copied())
+}
+
+/// Types a message into `pane`: `paste`, then `enter` on a write of its
+/// own once the paste has landed, the person's keys held in between
+/// (`Typing`).
+fn type_message(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    pane: &str,
+    harness: Option<cmux_protocol::Harness>,
+    paste: &[u8],
+    enter: &[u8],
+) -> Result<(), String> {
     let before = (harness == Some(cmux_protocol::Harness::Codex))
-        .then(|| crate::server::read_screen(app, &pane, None, std::time::Duration::from_secs(2)).ok())
+        .then(|| crate::server::read_screen(app, pane, None, std::time::Duration::from_secs(2)).ok())
         .flatten();
-    let typing = Typing::start(state, &pane);
-    state.pty.write(&pane, &paste)?;
+    let typing = Typing::start(state, pane);
+    state.pty.write(pane, paste)?;
     if let Some(before) = before {
         // Characters, not bytes: Codex handles one key per character.
-        let chars = std::str::from_utf8(&paste).map_or(paste.len(), |s| s.chars().count());
-        wait_pasted(app, &pane, before, chars);
+        let chars = std::str::from_utf8(paste).map_or(paste.len(), |s| s.chars().count());
+        wait_pasted(app, pane, before, chars);
     }
     // Enter on its own read: a TUI that gets it with the paste can take it
     // as part of the paste and leave the message unsent.
     std::thread::sleep(cmux_core::handoff::enter_delay(harness));
-    state.pty.write(&pane, &enter)?;
+    state.pty.write(pane, enter)?;
     drop(typing);
-    let from = from.unwrap_or_else(|| "you".into());
-    crate::tasks::given(app, cmux_protocol::TaskSource::AgentSend, from, &pane, message, card, title);
-    Ok(pane)
+    Ok(())
 }
 
 /// Holds the person's keystrokes to `pane` while a message is typed into
@@ -340,6 +490,10 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
     if !force {
         if let Some(why) = screen_refusal(app, pane, harness) {
             return Err(("needs you", format!("it {why}, or clear with --force")));
+        }
+        let (draft, typed) = person_in(app, state, pane, harness);
+        if let Some(why) = cmux_core::handoff::person_busy(draft, typed) {
+            return Err(("needs you", format!("{why}, or clear with --force")));
         }
     }
     let line = cmux_core::handoff::clear_line(harness).map_err(|e| ("no harness", e))?;

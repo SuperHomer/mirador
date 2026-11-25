@@ -1055,11 +1055,26 @@ fn run(cli: Cli) -> Result<(), String> {
                     card,
                     title,
                 })?;
-                if !wait || !resp.ok {
+                let queued = resp.data.as_ref().map(|d| d["queued"].clone()).filter(|q| q.is_object());
+                if !resp.ok || (!wait && (cli.json || queued.is_none())) {
                     return render(resp, cli.json, false, None);
                 }
+                if let Some(q) = &queued {
+                    println!("queued for {to}: {}", q["why"].as_str().unwrap_or_default());
+                }
+                if !wait {
+                    return Ok(());
+                }
                 let pane = resp.data.as_ref().and_then(|d| d["paneId"].as_str()).unwrap_or_default().to_string();
-                return agent_wait(&to, &pane, started, timeout);
+                let Some(id) = queued.and_then(|q| q["id"].as_u64()) else {
+                    return agent_wait(&to, &pane, started, timeout);
+                };
+                // Its turn is the one it starts once typed, not the one the
+                // person's own prompt starts meanwhile.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
+                let delivered = wait_delivered(&to, id, deadline, timeout)?;
+                let left = deadline.saturating_duration_since(std::time::Instant::now()).as_secs();
+                return agent_wait(&to, &pane, delivered, left);
             }
             AgentAction::Clear { name, pane, force } => Request::AgentClear {
                 name: name.or(pane),
@@ -1754,6 +1769,29 @@ fn now_ms() -> u64 {
 /// Polls `pane`'s agent until it has worked and stopped since `started`,
 /// then exits with what happened: 0 idle, 2 needs a person, 3 exited, 124
 /// timed out.
+/// Waits for a message `agent send` queued for `name` to be typed, and
+/// says when (ms since the epoch). Exits as `agent_wait` does: 3 when it
+/// was dropped with its pane's queue — the pane closed, or its agent
+/// gone — and 124, saying it is still queued, at `deadline`.
+fn wait_delivered(name: &str, id: u64, deadline: std::time::Instant, timeout: u64) -> Result<u64, String> {
+    loop {
+        let resp = send_request(Request::AgentQueued { message_id: id })?;
+        let data = resp.data.unwrap_or_default();
+        if let Some(at) = data["deliveredMs"].as_u64() {
+            return Ok(at);
+        }
+        if data["ahead"].is_null() {
+            eprintln!("{name} is gone: the message was dropped before it went in");
+            std::process::exit(3);
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!("{name}: the message is still queued after {timeout}s, not delivered");
+            std::process::exit(124);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
 fn agent_wait(name: &str, pane: &str, started: u64, timeout: u64) -> Result<(), String> {
     use cmux_core::handoff::{Wait, WaitEnd};
     let mut wait = Wait { started_ms: started, seen_working: false };

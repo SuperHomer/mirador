@@ -401,6 +401,100 @@ pub fn has_draft(screen: &str, cursor: (usize, usize), harness: Option<cmux_prot
     cursor != (row, glyph + 2)
 }
 
+/// How long after the person last typed into a pane a message waits
+/// before it is typed there: one typed in between would land in their
+/// draft, which they may be about to send.
+pub const TYPING_QUIET: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Why the person is in the way of something typed into their agent's
+/// pane: a draft in its input box ([`has_draft`]), or keys typed within
+/// [`TYPING_QUIET`]. `None` when neither.
+pub fn person_busy(draft: bool, typed_recently: bool) -> Option<&'static str> {
+    if draft {
+        Some("the person has a draft in its pane")
+    } else if typed_recently {
+        Some("the person is typing in its pane")
+    } else {
+        None
+    }
+}
+
+/// Why a message is queued for its pane rather than typed now, as `mira
+/// agent send` says it: the person is busy there ([`person_busy`]), or
+/// `ahead` messages are queued before it, which keeps their order. `None`
+/// types it now.
+pub fn queue_reason(draft: bool, typed_recently: bool, ahead: usize) -> Option<String> {
+    let behind = match ahead {
+        0 => String::new(),
+        1 => "; 1 message is ahead of it".to_string(),
+        n => format!("; {n} messages are ahead of it"),
+    };
+    match person_busy(draft, typed_recently) {
+        Some(why) if draft => Some(format!("{why}; it goes in once that is sent or cleared{behind}")),
+        Some(why) => Some(format!("{why}; it goes in once they stop and its input box is empty{behind}")),
+        None if ahead > 0 => Some(behind.trim_start_matches("; ").to_string()),
+        None => None,
+    }
+}
+
+/// Whether `data`, written to a pane from its terminal, was typed by the
+/// person — not only what the terminal sends of its own accord. xterm's
+/// `onData` carries both: focus reports (`ESC[I`, `ESC[O`), mouse reports
+/// (`ESC[<0;10;5M`, the older `ESC[M` and three bytes) and replies to a
+/// program's queries (the cursor's position `ESC[5;1R`, device attributes
+/// `ESC[?1;2c`, a mode's `ESC[?2004;1$y`, a window's size `ESC[8;24;80t`,
+/// a status `ESC[0n`, OSC and DCS answers). Writes are coalesced, so one
+/// may hold both; it is typing if anything but those is in it. An arrow or
+/// a Backspace is typing: it edits a draft.
+pub fn is_typing(data: &str) -> bool {
+    let b = data.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != 0x1b {
+            return true;
+        }
+        match b.get(i + 1) {
+            Some(b'[') => {
+                let start = i + 2;
+                let mut end = start;
+                while end < b.len() && (0x20..=0x3f).contains(&b[end]) {
+                    end += 1;
+                }
+                let Some(&last) = b.get(end) else { return true };
+                let params = &b[start..end];
+                let report = match last {
+                    b'I' | b'O' => params.is_empty(),
+                    b'M' if params.is_empty() => {
+                        // X10 mouse: three bytes of its own follow.
+                        end += 3;
+                        true
+                    }
+                    b'M' | b'm' => params.first() == Some(&b'<'),
+                    b'R' | b't' | b'n' => true,
+                    b'c' => matches!(params.first(), Some(b'?' | b'>')),
+                    b'y' => params.ends_with(b"$"),
+                    _ => false,
+                };
+                if !report {
+                    return true;
+                }
+                i = end + 1;
+            }
+            Some(b']' | b'P') => {
+                // Up to its BEL or its string terminator, ESC \.
+                let rest = &b[i + 2..];
+                let bel = rest.iter().position(|&c| c == 0x07).map(|at| at + 1);
+                let st = rest.windows(2).position(|w| w == b"\x1b\\").map(|at| at + 2);
+                let Some(len) = [bel, st].into_iter().flatten().min() else { return true };
+                i += 2 + len;
+            }
+            // Alt with a key, SS3's arrows and F1–F4, a lone Escape.
+            _ => return true,
+        }
+    }
+    false
+}
+
 /// The person's keystrokes held back from panes a handoff is typing into.
 /// A message is a paste and, a moment later, an Enter; a key the person
 /// presses in between would land inside the message and be sent with it
@@ -1145,6 +1239,55 @@ ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rena
         let screen = "• ok\n\n  › Ask Codex to do anything\n";
         assert!(!has_draft(screen, (2, 4), Some(Codex)));
         assert!(has_draft(screen, (2, 2), Some(Codex)));
+    }
+
+    #[test]
+    fn tells_typing_from_what_the_terminal_reports() {
+        for typed in ["a", "pa", "\r", "\x7f", "\x1b[A", "\x1b[1;5C", "\x1b[3~", "\x1bOP", "\x1b", "\x1bb", "\x1b[200~hi\x1b[201~"] {
+            assert!(is_typing(typed), "{typed:?} is typing");
+        }
+        for report in [
+            "",
+            "\x1b[I",
+            "\x1b[O",
+            "\x1b[<0;10;5M",
+            "\x1b[<0;10;5m",
+            "\x1b[M !!",
+            "\x1b[5;1R",
+            "\x1b[?1;2c",
+            "\x1b[>0;276;0c",
+            "\x1b[?2004;1$y",
+            "\x1b[8;24;80t",
+            "\x1b[0n",
+            "\x1b]11;rgb:0000/0000/0000\x07",
+            "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+            "\x1bP1$r0m\x1b\\",
+        ] {
+            assert!(!is_typing(report), "{report:?} is no typing");
+        }
+        // Coalesced: a focus report and a key in one write is typing; two
+        // reports are not.
+        assert!(is_typing("\x1b[Ix"));
+        assert!(!is_typing("\x1b[I\x1b[<35;3;4M"));
+        // Cut short, it may be anything: typing.
+        assert!(is_typing("\x1b[<0;10"));
+        assert!(is_typing("\x1b]11;rgb"));
+    }
+
+    #[test]
+    fn queues_behind_a_person_or_another_message() {
+        assert_eq!(queue_reason(false, false, 0), None);
+        assert_eq!(
+            queue_reason(true, true, 0).as_deref(),
+            Some("the person has a draft in its pane; it goes in once that is sent or cleared")
+        );
+        assert_eq!(
+            queue_reason(false, true, 2).as_deref(),
+            Some("the person is typing in its pane; it goes in once they stop and its input box is empty; 2 messages are ahead of it")
+        );
+        assert_eq!(queue_reason(false, false, 1).as_deref(), Some("1 message is ahead of it"));
+        assert_eq!(person_busy(false, false), None);
+        assert_eq!(person_busy(false, true), Some("the person is typing in its pane"));
     }
 
     #[test]

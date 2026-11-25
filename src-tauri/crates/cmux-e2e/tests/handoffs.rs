@@ -424,3 +424,137 @@ fn pi_and_opencode_members_send_to_each_other_and_clear() {
     sb.wait_for("each cleared", LONG, || (got(&helper).len() == 2 && got(&builder).len() == 2).then_some(()));
     assert_eq!((got(&helper)[1].as_str(), got(&builder)[1].as_str()), ("/new", "/new"));
 }
+
+/// A message for an agent whose input box holds the person's draft waits
+/// for it (#244): pasted into it, the two went out as one prompt, the
+/// person's half-typed answer read as their whole one. Once the person
+/// sends the draft, the message goes in as a prompt of its own. An empty
+/// box — its placeholder showing, which reads as text — takes a message at
+/// once, and `--force` still types into a draft. Proves the cursor's way
+/// through xterm too: the draft is seen by where it is.
+#[test]
+fn a_message_waits_for_the_persons_draft() {
+    e2e!();
+    let mut sb = Sandbox::new("senddraft");
+    sb.set_env("E2E_TURN_MS", "1500");
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
+    sb.wait_for_screen(&pane, "its placeholder", LONG, |s| s.contains("❯ Try \"fake\""));
+    let texts = || -> Vec<String> {
+        sb.events("message", &pane).iter().map(|m| m["text"].as_str().unwrap_or_default().to_string()).collect()
+    };
+
+    // The person has typed `pa`, not sent it.
+    sb.type_into(&pane, "pa");
+    sb.wait_for_screen(&pane, "the draft", LONG, |s| s.contains("❯ pa"));
+    let sent = send(&sb, &first, &pane, "hello queued").unwrap();
+    let why = sent["queued"]["why"].as_str().unwrap_or_default();
+    assert!(why.starts_with("the person has a draft in its pane"), "{sent}");
+    let id = sent["queued"]["id"].as_u64().unwrap();
+    // A second waits behind it, whatever the box shows by then.
+    let behind = send(&sb, &first, &pane, "hello second").unwrap();
+    assert_eq!(behind["queued"]["ahead"], 1, "{behind}");
+    let at = sb.call(Request::AgentQueued { message_id: id });
+    assert_eq!((at["ahead"].as_u64(), at["deliveredMs"].as_u64()), (Some(0), None), "{at}");
+    assert!(texts().is_empty(), "nothing was sent: {:?}", texts());
+
+    // The person sends it: theirs alone, then each message on its own.
+    sb.type_into(&pane, "\r");
+    let got = sb.wait_for("the draft, then both messages", LONG, || Some(texts()).filter(|t| t.len() >= 3));
+    assert_eq!(got, ["pa", "hello queued", "hello second"]);
+    assert!(sb.call(Request::AgentQueued { message_id: id })["deliveredMs"].as_u64().is_some());
+
+    // An empty box, its placeholder up: at once.
+    sb.wait_for("the turns to end", LONG, || (sb.events("turn-done", &pane).len() == 3).then_some(()));
+    sb.wait_for_screen(&pane, "its placeholder again", LONG, |s| s.lines().last().is_some_and(|l| l.contains("❯ Try")));
+    let now = send(&sb, &first, &pane, "hello now").unwrap();
+    assert!(now.get("queued").is_none(), "{now}");
+    sb.wait_for("the message", LONG, || texts().contains(&"hello now".to_string()).then_some(()));
+
+    // Forced, into a draft: typed now, sent with it, as before.
+    sb.wait_for("its turn to end", LONG, || (sb.events("turn-done", &pane).len() == 4).then_some(()));
+    sb.type_into(&pane, "pa");
+    sb.wait_for_screen(&pane, "the draft", LONG, |s| s.lines().last().is_some_and(|l| l.contains("❯ pa")));
+    sb.request(Request::AgentSend {
+        title: None,
+        to: pane.clone(),
+        message: "forced".into(),
+        pane_id: Some(first.clone()),
+        force: true,
+        card: None,
+    })
+    .unwrap();
+    let merged = sb.wait_for("the forced message", LONG, || texts().into_iter().find(|t| t.contains("forced")));
+    assert!(merged.starts_with("pa"), "{merged:?}");
+}
+
+/// `send --wait` on a queued message waits for it to go in, then for the
+/// turn it starts — not for the turn the person's own prompt starts
+/// first — and a wait that runs out first says it is still queued.
+#[test]
+fn a_queued_messages_wait_is_for_its_own_turn() {
+    e2e!();
+    let mut sb = Sandbox::new("senddraftwait");
+    sb.set_env("E2E_TURN_MS", "1500");
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
+    sb.wait_for_screen(&pane, "its placeholder", LONG, |s| s.contains("❯ Try \"fake\""));
+    sb.type_into(&pane, "pa");
+    sb.wait_for_screen(&pane, "the draft", LONG, |s| s.contains("❯ pa"));
+
+    let early = send(&sb, &first, &pane, "early").unwrap()["queued"]["id"].as_u64().expect("queued");
+    let (code, out, err) = sb.mira(Some(&first), &["agent", "send", &pane, "--wait", "--timeout", "2", "middle"]);
+    assert_eq!(code, 124, "{out}{err}");
+    assert!(out.contains(&format!("queued for {pane}: the person has a draft in its pane")), "{out}");
+    assert!(err.contains("still queued after 2s, not delivered"), "{err}");
+
+    let waiter = {
+        let mira = sb.mira_command(Some(&first), &["agent", "send", &pane, "--wait", "--timeout", "40", "later"]);
+        std::thread::spawn(move || {
+            let mut mira = mira;
+            mira.output().map(|o| (o.status.code(), String::from_utf8_lossy(&o.stderr).into_owned()))
+        })
+    };
+    // Ids go up one a message: `later` is two after `early`.
+    sb.wait_for("the send to be queued", LONG, || {
+        (sb.call(Request::AgentQueued { message_id: early + 2 })["ahead"] == 2).then_some(())
+    });
+    sb.type_into(&pane, "\r");
+    let (code, err) = waiter.join().unwrap().unwrap();
+    assert_eq!(code, Some(0), "{err}");
+    // Every turn — the draft's, then each message's — done when the wait
+    // ends: neither the draft's nor an earlier message's ended it.
+    let texts: Vec<String> = sb.events("message", &pane).iter().map(|m| m["text"].as_str().unwrap_or_default().to_string()).collect();
+    assert_eq!(texts, ["pa", "early", "middle", "later"]);
+    assert_eq!(sb.events("turn-done", &pane).len(), 4, "the wait ended on the last message's turn");
+}

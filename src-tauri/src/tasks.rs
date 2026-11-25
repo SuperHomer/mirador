@@ -246,7 +246,8 @@ fn send_card(app: &AppHandle, card: &TaskCard, pane: &str) -> Result<String, Str
         Some(more) => format!("{}\n\n{more}", card.title),
         None => card.title.clone(),
     };
-    let pane = crate::handoff::send(app, pane, &text, None, false, Some(card.id.clone()), None)?;
+    // Queued behind a draft in the agent's box, it is still the card's turn.
+    let (pane, _) = crate::handoff::send(app, pane, &text, None, false, Some(card.id.clone()), None)?;
     record(app, TaskEventKind::Moved { card: card.id.clone(), column: TaskColumn::Doing, by: "you".into() });
     Ok(pane)
 }

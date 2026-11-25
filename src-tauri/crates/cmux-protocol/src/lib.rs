@@ -603,7 +603,8 @@ pub enum Request {
     /// `to` is a teammate's name in the caller's tab (`pane_id`'s) — a team
     /// member's, a session's, a role's — or any pane's id. Refused for a
     /// pane running no agent, and for one waiting on a person unless
-    /// `force`.
+    /// `force`. Queued, unless `force`, while the person has a draft in
+    /// its input box or is typing there: the answer's `queued` says so.
     AgentSend {
         to: String,
         message: String,
@@ -631,6 +632,10 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
+    /// Where a message `AgentSend` queued is, by the `queued.id` it answered with:
+    /// `ahead` of it while still queued, `deliveredMs` once typed, neither
+    /// once dropped with its pane.
+    AgentQueued { message_id: u64 },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {
         name: String,

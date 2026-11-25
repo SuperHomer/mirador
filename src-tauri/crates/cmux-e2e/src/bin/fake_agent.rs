@@ -22,7 +22,12 @@
 //!
 //! Ready for a message, either draws its input box as the real ones do,
 //! `❯ ` as `claude` and `› ` as `codex`, Pi's and OpenCode's boxes as
-//! `pi` and `opencode` — Mirador waits for one before it types. With `E2E_WELCOME=1` it starts on a welcome screen instead,
+//! `pi` and `opencode` — Mirador waits for one before it types. `claude`'s
+//! carries a dim placeholder with the cursor before it, as Claude Code's
+//! does. Its terminal echoes what is typed and holds it until Enter, so a
+//! draft shows after the glyph with the cursor after it — over the
+//! placeholder, which the real one would clear — and a message pasted
+//! into it is sent with it, as the real ones did (#244). With `E2E_WELCOME=1` it starts on a welcome screen instead,
 //! with no input box until its first input, which only dismisses it: as
 //! Codex's logo waits for a key before its login menu.
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
@@ -48,6 +53,10 @@
 
 use std::io::{BufRead, Write};
 use std::time::Duration;
+
+/// What `claude` shows in its empty input box, as Claude Code's
+/// `Try "how does styles.css work?"`.
+const PLACEHOLDER: &str = "Try \"fake\"";
 
 /// Appends `event` as one line. One `write_all` of the whole line: the
 /// team's agents start at once and share the file, and `writeln!` may write
@@ -337,7 +346,10 @@ fn main() {
         match kind.as_str() {
             "pi" => print!("{rule}\n\n{rule}\n~/proj\n0.0%/128k (auto)    fake\n\x1b[4A\r"),
             "opencode" => print!("  ┃\n  ┃  Build · Fake\n  ╹{}\n\x1b[3A\r  ┃  ", "▀".repeat(40)),
-            _ => print!("{} ", if claude { '❯' } else { '›' }),
+            // Claude Code's placeholder, dim after `❯ `, the cursor back
+            // at its start: an empty box whose text is not empty.
+            _ if claude => print!("❯ \x1b[2m{PLACEHOLDER}\x1b[22m\x1b[{}D", PLACEHOLDER.len()),
+            _ => print!("› "),
         }
         let _ = std::io::stdout().flush();
     };
