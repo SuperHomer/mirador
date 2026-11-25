@@ -472,12 +472,20 @@ fn a_message_waits_for_the_persons_draft() {
     let at = sb.call(Request::AgentQueued { message_id: id });
     assert_eq!((at["ahead"].as_u64(), at["deliveredMs"].as_u64()), (Some(0), None), "{at}");
     assert!(texts().is_empty(), "nothing was sent: {:?}", texts());
+    // The snapshot the app draws from says how many wait, for its pane to
+    // show: `2 messages waiting`.
+    let waiting = || {
+        let snapshot = sb.snapshot();
+        snapshot["agents"].as_array()?.iter().find(|a| a["paneId"] == pane.as_str())?["queued"].as_u64()
+    };
+    assert_eq!(waiting(), Some(2));
 
     // The person sends it: theirs alone, then each message on its own.
     sb.type_into(&pane, "\r");
     let got = sb.wait_for("the draft, then both messages", LONG, || Some(texts()).filter(|t| t.len() >= 3));
     assert_eq!(got, ["pa", "hello queued", "hello second"]);
     assert!(sb.call(Request::AgentQueued { message_id: id })["deliveredMs"].as_u64().is_some());
+    sb.wait_for("none waiting", LONG, || (waiting() == Some(0)).then_some(()));
 
     // An empty box, its placeholder up: at once.
     sb.wait_for("the turns to end", LONG, || (sb.events("turn-done", &pane).len() == 3).then_some(()));

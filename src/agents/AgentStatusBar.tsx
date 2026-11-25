@@ -37,6 +37,7 @@ export function AgentStatusBar({
   const pct = window ? Math.min(100, Math.round((used / window) * 100)) : null;
   const end = agent.status === "working" ? now : (session?.lastMs ?? null);
   const subagents = agent.harness === "claude" && agent.hasActivity;
+  const waiting = <QueuedLabel count={agent.queued} />;
   const pill = subagents && (
     <button
       className={`agent-bar-subagents${sheetOpen ? " open" : ""}`}
@@ -57,6 +58,7 @@ export function AgentStatusBar({
             <span className="agent-bar-pct">{pct}%</span>
           </>
         )}
+        {waiting}
         {pill}
       </div>
     );
@@ -99,7 +101,24 @@ export function AgentStatusBar({
           </>
         )
       )}
+      {waiting}
       {pill}
     </div>
+  );
+}
+
+/**
+ * Messages `mira agent send` holds back from an agent while the person has
+ * a draft in its input box: nothing while none wait.
+ */
+export function QueuedLabel({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="queued-label"
+      title="Messages from other agents. They go in once your draft is sent or cleared."
+    >
+      {count === 1 ? "1 message waiting" : `${count} messages waiting`}
+    </span>
   );
 }

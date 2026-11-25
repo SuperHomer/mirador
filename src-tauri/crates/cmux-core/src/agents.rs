@@ -1856,6 +1856,7 @@ mod tests {
             cwd: None,
             branch: None,
             remote_host: None,
+            queued: 0,
         }
     }
 

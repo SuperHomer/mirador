@@ -339,6 +339,8 @@ export interface AgentInfo {
   branch: string | null;
   /** The ssh host it runs on, for an agent on a remote computer. */
   remoteHost: string | null;
+  /** Messages `mira agent send` queued for it behind the person's draft. */
+  queued: number;
 }
 
 /** How far an agent is through its task list (`cmux_protocol::TaskProgress`). */

@@ -693,7 +693,8 @@ working nor waiting on a person, its input box is up and empty, and the
 person has not typed there for 2 s — one message a look, so each is a
 prompt of its own. A queued message waits until it goes in or its pane is
 closed or stops running an agent; it is held in memory, not across a
-quit. While a message is being typed, keys the person presses in that
+quit; while any wait, the agent's bar (and its card on the board) shows
+`2 messages waiting`, and `agent list` gives the count as `queued`. While a message is being typed, keys the person presses in that
 pane are held and typed after its Enter. `--force` types at once, into a
 draft too. `--wait` on a queued message first waits for it to go in, then
 for the turn it starts; if the timeout runs out first it says the message

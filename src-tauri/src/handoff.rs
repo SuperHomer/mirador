@@ -258,6 +258,9 @@ pub fn send(
                 let (app, pane) = (app.clone(), pane.clone());
                 std::thread::spawn(move || deliver(app, pane));
             }
+            drop(queues);
+            // Its pane shows how many wait (`AgentInfo::queued`).
+            crate::commands::broadcast_workspace(app);
             return Ok((pane, Some(queued)));
         }
     }
@@ -301,7 +304,10 @@ fn person_in(app: &tauri::AppHandle, state: &AppState, pane: &str, harness: Opti
 /// on where Claude Code and Codex park their cursor: should one park it
 /// elsewhere, every box would read as a draft and no message would ever
 /// go in. Never typed into, a pane has no person's draft, whatever its
-/// cursor says.
+/// cursor says. The limit of that: `typed_at` is in memory, so after a
+/// relaunch a draft typed before the quit, its pane's process kept
+/// (`persistSessions`), is not seen, and a message would be merged into
+/// it — until the person types there again.
 fn draft(state: &AppState, pane: &str, screen: &str, cursor: Option<(usize, usize)>, harness: Option<cmux_protocol::Harness>) -> bool {
     let typed_in = state.typed_at.lock().unwrap().contains_key(pane);
     typed_in && cursor.is_some_and(|at| cmux_core::handoff::has_draft(screen, at, harness))
@@ -334,6 +340,7 @@ fn deliver(app: tauri::AppHandle, pane: String) {
         let agent = state.meta.lock().unwrap().get(&pane).filter(|m| m.is_agent()).map(|m| (m.status(), m.harness()));
         let Some((status, harness)) = agent.filter(|_| open) else {
             state.queued.lock().unwrap().remove(&pane);
+            crate::commands::broadcast_workspace(&app);
             return;
         };
         if matches!(status, Some(AgentStatus::Working | AgentStatus::NeedsYou)) || !state.pty.is_running(&pane) {
@@ -367,6 +374,7 @@ fn deliver(app: tauri::AppHandle, pane: String) {
             }
             (message, emptied)
         };
+        crate::commands::broadcast_workspace(&app);
         if let Some(m) = message {
             let from = m.from.unwrap_or_else(|| "you".into());
             crate::tasks::given(&app, cmux_protocol::TaskSource::AgentSend, from, &pane, &m.message, m.card, m.title);

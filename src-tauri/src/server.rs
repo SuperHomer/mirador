@@ -271,6 +271,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::SendFile { pane_id, paths } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             let typed = crate::send_files::files(&state, &pane, paths)?;
+            // Typing into the pane, as `SendInput` is.
+            state.typed_at.lock().unwrap().insert(pane.clone(), std::time::Instant::now());
             // Typed by the pane's terminal, as a drop is: xterm brackets
             // the paste only when the program asked for that.
             let text = typed.iter().map(|p| cmux_core::paste::quote_path(p)).collect::<Vec<_>>().join(" ") + " ";

@@ -4371,6 +4371,17 @@ button.inbox-update:hover {
   white-space: nowrap;
 }
 
+/* Messages held back from an agent behind the person's draft. Shown in
+   its bar and its card's header; never shrunk, beside a title that is. */
+.queued-label {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--status-needs-you);
+  box-shadow: inset 0 0 0 1px var(--status-needs-you);
+  white-space: nowrap;
+}
+
 .agent-bar-subagents {
   margin-left: auto;
   padding: 1px 9px;

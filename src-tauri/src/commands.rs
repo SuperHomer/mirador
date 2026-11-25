@@ -186,6 +186,8 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
         .filter(|(_, file)| matches!(file, TrailFile::Codex(_)))
         .map(|(pane, _)| pane.clone())
         .collect();
+    let queued: std::collections::HashMap<String, u32> =
+        state.queued.lock().unwrap().iter().map(|(pane, q)| (pane.clone(), q.len() as u32)).collect();
     let meta = state.meta.lock().unwrap();
     panes
         .into_iter()
@@ -211,6 +213,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 cwd: m.cwd.clone(),
                 branch: m.branch.clone(),
                 remote_host: m.remote_host.clone(),
+                queued: queued.get(&pane).copied().unwrap_or(0),
                 pane_id: pane,
             })
         })

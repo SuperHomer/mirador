@@ -32,6 +32,7 @@ import { SettingsPane } from "../settings/SettingsPane";
 import { UsagePane } from "../usage/UsagePane";
 import { ComputersPane } from "../computers/ComputersPane";
 import { AgentWall } from "../agents/AgentWall";
+import { QueuedLabel } from "../agents/AgentStatusBar";
 
 // Mirrors `cmux_core::board`, which has the last word when a card is
 // dropped: a card stays inside its frame, below its label, and big enough
@@ -503,6 +504,7 @@ function CardHeader({
     >
       {status && <span className="card-dot" />}
       <span className="card-title">{agent?.name ?? card.title}</span>
+      {agent && <QueuedLabel count={agent.queued} />}
       <button
         className="card-close"
         title="Close this pane"

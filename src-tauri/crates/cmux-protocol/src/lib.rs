@@ -1194,6 +1194,10 @@ pub struct AgentInfo {
     /// The ssh host it runs on, for an agent on a remote computer.
     #[serde(default)]
     pub remote_host: Option<String>,
+    /// Messages `agent send` queued for it, waiting for the person's draft
+    /// in its input box to be sent or cleared.
+    #[serde(default)]
+    pub queued: u32,
 }
 
 /// How far an agent is through the task list it keeps (`TaskCreate` /
