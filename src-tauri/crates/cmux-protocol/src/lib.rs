@@ -441,6 +441,9 @@ pub enum Request {
         x: f64,
         y: f64,
     },
+    /// Types `data` into a pane, as the person's keys are: it counts as
+    /// typing there (`handoff::send` queues behind a draft only in a pane
+    /// someone typed into, and waits for typing to stop).
     SendInput {
         #[serde(default)]
         pane_id: Option<String>,

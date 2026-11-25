@@ -501,6 +501,32 @@ fn a_message_waits_for_the_persons_draft() {
     .unwrap();
     let merged = sb.wait_for("the forced message", LONG, || texts().into_iter().find(|t| t.contains("forced")));
     assert!(merged.starts_with("pa"), "{merged:?}");
+
+    // What reads as a draft in a pane no one ever typed into is none: a
+    // message goes in at once.
+    let other = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("its session", LONG, || sb.events("hooked", &other).into_iter().next());
+    sb.wait_for_screen(&other, "its placeholder", LONG, |s| s.contains("❯ Try \"fake\""));
+    send(&sb, &first, &other, "leave a !draft").unwrap();
+    sb.wait_for_screen(&other, "text in its box", LONG, |s| s.lines().last().is_some_and(|l| l.contains("❯ leftover")));
+    let at_once = send(&sb, &first, &other, "hello anyway").unwrap();
+    assert!(at_once.get("queued").is_none(), "{at_once}");
+    sb.wait_for("the message", LONG, || {
+        sb.events("message", &other).into_iter().find(|m| m["text"] == "hello anyway")
+    });
 }
 
 /// `send --wait` on a queued message waits for it to go in, then for the

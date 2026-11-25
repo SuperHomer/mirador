@@ -13,6 +13,8 @@
 //!   session-start` (`E2E_MIRA`) — resuming `--resume`'s, or a new one —
 //!   and reads its terminal. A bracketed paste is one message; a message
 //!   is a turn: `prompt-submit`, a moment's work (`E2E_TURN_MS`), `stop`.
+//!   A message containing `!draft` leaves `leftover` in its input box
+//!   after its turn, the cursor after it, as a box no one typed into.
 //!   A message containing `!ask` raises a permission prompt instead (a
 //!   `permission_prompt` notification) and leaves it up. `/exit` exits.
 //!   `!size` (as either) prints its terminal's size, `stty size`'s rows and
@@ -444,6 +446,11 @@ fn main() {
         hook("stop", serde_json::json!({ "session_id": session }));
         log(serde_json::json!({ "event": "turn-done", "pid": pid, "pane": pane }));
         input_box();
+        if message.contains("!draft") {
+            // Text in its box, the cursor after it, that no one typed.
+            print!("leftover");
+            let _ = std::io::stdout().flush();
+        }
     }
     log(serde_json::json!({ "event": "exit", "pid": pid, "pane": pane }));
 }

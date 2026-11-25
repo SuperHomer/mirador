@@ -287,15 +287,24 @@ pub struct Message {
 }
 
 /// Whether the person is in `pane`'s way: a draft in its agent's input
-/// box (`cmux_core::handoff::has_draft`, by the cursor), and keys typed
-/// into it within `TYPING_QUIET`. A screen that cannot be read has no
-/// draft, as `screen_refusal` counts it ready.
+/// box (`draft`), and keys typed into it within `TYPING_QUIET`. A screen
+/// that cannot be read has no draft, as `screen_refusal` counts it ready.
 fn person_in(app: &tauri::AppHandle, state: &AppState, pane: &str, harness: Option<cmux_protocol::Harness>) -> (bool, bool) {
     let draft = crate::server::read_screen_at(app, pane, None, std::time::Duration::from_secs(2))
-        .ok()
-        .and_then(|(screen, cursor)| Some(cmux_core::handoff::has_draft(&screen, cursor?, harness)))
-        .unwrap_or(false);
+        .is_ok_and(|(screen, cursor)| draft(state, pane, &screen, cursor, harness));
     (draft, typed_lately(state, pane))
+}
+
+/// Whether `screen` shows a person's draft in `pane`'s input box
+/// (`cmux_core::handoff::has_draft`, by the cursor) — only in a pane
+/// someone has typed into. A draft comes from typing, and the check rests
+/// on where Claude Code and Codex park their cursor: should one park it
+/// elsewhere, every box would read as a draft and no message would ever
+/// go in. Never typed into, a pane has no person's draft, whatever its
+/// cursor says.
+fn draft(state: &AppState, pane: &str, screen: &str, cursor: Option<(usize, usize)>, harness: Option<cmux_protocol::Harness>) -> bool {
+    let typed_in = state.typed_at.lock().unwrap().contains_key(pane);
+    typed_in && cursor.is_some_and(|at| cmux_core::handoff::has_draft(screen, at, harness))
 }
 
 /// Whether the person typed into `pane` within `TYPING_QUIET`.
@@ -318,6 +327,7 @@ fn deliver(app: tauri::AppHandle, pane: String) {
     use cmux_protocol::AgentStatus;
     use tauri::Manager;
     let state = &*app.state::<AppState>();
+    let _dropped_on_panic = DropQueueOnPanic { state, pane: &pane };
     loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let open = state.workspace.lock().unwrap().all_pane_ids().contains(&pane);
@@ -335,8 +345,7 @@ fn deliver(app: tauri::AppHandle, pane: String) {
         if cmux_core::handoff::showing_in(&screen, harness) != cmux_core::handoff::Showing::Composer {
             continue;
         }
-        let draft = cursor.is_some_and(|at| cmux_core::handoff::has_draft(&screen, at, harness));
-        if draft || typed_lately(state, &pane) {
+        if draft(state, &pane, &screen, cursor, harness) || typed_lately(state, &pane) {
             continue;
         }
         let head = {
@@ -368,6 +377,25 @@ fn deliver(app: tauri::AppHandle, pane: String) {
     }
 }
 
+/// Drops `pane`'s queue if its deliverer panics. Left behind, a queue no
+/// deliverer works would hold every later message for the pane, since a
+/// send spawns one only for a queue it starts; dropped, `send --wait`
+/// says so as for a closed pane, and the next send starts afresh. Only on
+/// a panic: a deliverer that ends normally has removed its queue itself,
+/// and by the time this ran a new send could own a new one.
+struct DropQueueOnPanic<'a> {
+    state: &'a AppState,
+    pane: &'a str,
+}
+
+impl Drop for DropQueueOnPanic<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.state.queued.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(self.pane);
+        }
+    }
+}
+
 /// Where a message `send` queued is: still queued, `ahead` of it; typed,
 /// at `delivered` (ms since the epoch); or neither — dropped with its
 /// pane's queue.
@@ -387,10 +415,12 @@ fn type_message(
     paste: &[u8],
     enter: &[u8],
 ) -> Result<(), String> {
+    // Held from before the screen is read: Codex's read can take seconds,
+    // and a key pressed then would land under the paste.
+    let typing = Typing::start(state, pane);
     let before = (harness == Some(cmux_protocol::Harness::Codex))
         .then(|| crate::server::read_screen(app, pane, None, std::time::Duration::from_secs(2)).ok())
         .flatten();
-    let typing = Typing::start(state, pane);
     state.pty.write(pane, paste)?;
     if let Some(before) = before {
         // Characters, not bytes: Codex handles one key per character.

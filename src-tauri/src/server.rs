@@ -262,6 +262,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::SendInput { pane_id, data } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             state.pty.write(&pane, data.as_bytes())?;
+            // Deliberate typing into the pane, as the person's keys are.
+            if cmux_core::handoff::is_typing(&data) {
+                state.typed_at.lock().unwrap().insert(pane, std::time::Instant::now());
+            }
             Ok(Value::Null)
         }
         Request::SendFile { pane_id, paths } => {
