@@ -956,6 +956,7 @@ mira view board                # every tab on one board
 mira view tabs                 # back to tabs
 mira quit                      # with persistSessions, terminals keep running
 mira quit --end-sessions       # ...or end every one of them first
+mira completions zsh           # a completion script: zsh, bash, fish, powershell, elvish
 ```
 
 `rotate`, `equalize` and `layout` act on `--tab <tab>`, else the tab

@@ -242,6 +242,26 @@ cannot reliably tell where your input line starts or where the cursor sits
 within it, so anything it drew would be guesswork — and it would fight a
 shell that already does the job properly.
 
+**Completing `mira` itself:** `mira completions <shell>` prints a
+completion script (zsh, bash, fish, powershell or elvish). Mirador's own
+zsh panes load it at the first prompt, from the `mira` on your PATH,
+when your `.zshrc` runs `compinit` — Mirador doesn't turn on a
+completion system you didn't. Outside Mirador, load it from your shell's
+startup file:
+
+```bash
+source <(mira completions zsh)     # ~/.zshrc, after compinit
+eval "$(mira completions bash)"    # ~/.bashrc; macOS's bash 3.2 can't source <(…)
+mira completions fish | source     # ~/.config/fish/config.fish
+```
+
+Mirador's PowerShell panes load it themselves, from the `mira` on your
+PATH. Elsewhere, add this to your `$PROFILE`:
+
+```powershell
+mira completions powershell | Out-String | Invoke-Expression
+```
+
 ## Releasing
 
 Releases are signed for the in-app updater with a minisign keypair that is

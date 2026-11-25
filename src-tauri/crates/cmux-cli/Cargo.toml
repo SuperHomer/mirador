@@ -13,6 +13,7 @@ path = "src/main.rs"
 cmux-core = { path = "../cmux-core" }
 cmux-protocol = { path = "../cmux-protocol" }
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 serde_json.workspace = true
 # Decodes `browser screenshot`'s PNG; already in the tree.
 base64 = "0.22"

@@ -134,8 +134,12 @@ pub fn interactive(cwd: Option<&str>) -> CommandBuilder {
         return cmd;
     }
     match kind {
-        // Login shell so the user's profile (PATH, prompt) loads.
-        Kind::Posix => cmd.arg("-l"),
+        Kind::Posix => {
+            // Login shell so the user's profile (PATH, prompt) loads.
+            cmd.arg("-l");
+            #[cfg(unix)]
+            integrate_zsh(&mut cmd, &crate::config::config_dir().join("zsh"));
+        }
         Kind::Cmd => {}
         Kind::PowerShell => {
             cmd.arg("-NoLogo");
@@ -379,6 +383,47 @@ pub fn run_command(command: &str, cwd: Option<&str>) -> CommandBuilder {
     cmd
 }
 
+/// Has a zsh read Mirador's `.zshenv`, written to `dir`, before the
+/// person's own startup files: it loads `mira`'s completions at the first
+/// prompt, then gets out of the way. Those files are not ours to edit, and
+/// ZDOTDIR is the only hook zsh gives before them — the one Ghostty and
+/// VS Code use too. The `.zshenv` restores ZDOTDIR first thing, from
+/// MIRADOR_ZDOTDIR when the person had one. Any other shell, or a `dir`
+/// that can't be written, is left as it was.
+#[cfg(unix)]
+fn integrate_zsh(cmd: &mut CommandBuilder, dir: &Path) {
+    const SCRIPT: &str = include_str!("shell-integration.zsh");
+    let is_zsh = cmd.get_argv().first().is_some_and(|program| stem(&program.to_string_lossy()) == "zsh");
+    if !is_zsh || std::fs::create_dir_all(dir).and_then(|()| write_whole(&dir.join(".zshenv"), SCRIPT)).is_err() {
+        return;
+    }
+    match cmd.get_env("ZDOTDIR").map(|theirs| theirs.to_owned()) {
+        Some(theirs) => cmd.env("MIRADOR_ZDOTDIR", theirs),
+        None => cmd.env_remove("MIRADOR_ZDOTDIR"),
+    }
+    cmd.env("ZDOTDIR", dir);
+}
+
+/// Writes `text` to `path` the way a shell starting meanwhile can read: a
+/// whole file under another name, renamed over the old one. Each pane's
+/// spawn rewrites its script, and an in-place write truncates it first: a
+/// zsh starting a moment earlier — a restore, a team starting — read an
+/// empty `.zshenv`, kept Mirador's ZDOTDIR and skipped the person's
+/// `.zshrc`. The name is this process's and this write's own, as panes
+/// spawn from several threads at once.
+fn write_whole(path: &Path, text: &str) -> std::io::Result<()> {
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut name = path.file_name().unwrap_or_default().to_owned();
+    name.push(format!(".{}.{n}", std::process::id()));
+    let temp = path.with_file_name(name);
+    let written = std::fs::write(&temp, text).and_then(|()| std::fs::rename(&temp, path));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written
+}
+
 /// Writes (refreshing on every launch) the PowerShell prompt hook and
 /// returns its path. `None` if it can't be written — the pane still opens,
 /// it just won't report its cwd.
@@ -387,7 +432,12 @@ fn shell_integration_script() -> Option<String> {
     const SCRIPT: &str = include_str!("shell-integration.ps1");
     let path = crate::config::config_dir().join("shell-integration.ps1");
     let _ = std::fs::create_dir_all(crate::config::config_dir());
-    std::fs::write(&path, SCRIPT).ok()?;
+    // Two spawns at once both rename onto this file, and Windows can refuse
+    // the second rename (access denied) while the first one's file is in
+    // place: that file is the same script, as good as ours.
+    if write_whole(&path, SCRIPT).is_err() && !path.is_file() {
+        return None;
+    }
     Some(path.to_string_lossy().into_owned())
 }
 
@@ -456,6 +506,76 @@ mod tests {
         }
         for shell in ["/opt/homebrew/bin/nu", r"C:\Program Files\PowerShell\7\pwsh.exe", r"C:\Windows\System32\cmd.exe", "/usr/local/bin/xonsh", ""] {
             assert!(!substitutes(shell), "{shell}");
+        }
+    }
+
+    /// A fresh directory for one test's `.zshenv`.
+    #[cfg(unix)]
+    fn zsh_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mirador-zsh-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// A shell command with none of this process's ZDOTDIR, whatever pane
+    /// the tests run in.
+    #[cfg(unix)]
+    fn shell(program: &str) -> CommandBuilder {
+        let mut cmd = CommandBuilder::new(program);
+        cmd.env_remove("ZDOTDIR");
+        cmd.env_remove("MIRADOR_ZDOTDIR");
+        cmd
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_reads_mirador_s_zshenv_first() {
+        let dir = zsh_dir("plain");
+        let mut cmd = shell("/bin/zsh");
+        integrate_zsh(&mut cmd, &dir);
+        assert_eq!(cmd.get_env("ZDOTDIR"), Some(dir.as_os_str()));
+        assert_eq!(cmd.get_env("MIRADOR_ZDOTDIR"), None, "there was no ZDOTDIR to restore");
+        let zshenv = std::fs::read_to_string(dir.join(".zshenv")).unwrap();
+        assert!(zshenv.contains("mira completions zsh"), "{zshenv}");
+    }
+
+    /// Written whole and renamed into place: a rewrite leaves the one
+    /// file, never a temporary one beside it.
+    #[cfg(unix)]
+    #[test]
+    fn the_zshenv_is_replaced_whole() {
+        let dir = zsh_dir("whole");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".zshenv"), "stale").unwrap();
+        for _ in 0..2 {
+            integrate_zsh(&mut shell("/bin/zsh"), &dir);
+        }
+        let files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(files, [".zshenv"]);
+        assert_eq!(std::fs::read_to_string(dir.join(".zshenv")).unwrap(), include_str!("shell-integration.zsh"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_persons_own_zdotdir_is_kept_to_restore() {
+        let dir = zsh_dir("theirs");
+        let theirs = std::env::temp_dir().join("their-zdotdir");
+        let mut cmd = shell("/opt/homebrew/bin/zsh");
+        cmd.env("ZDOTDIR", &theirs);
+        integrate_zsh(&mut cmd, &dir);
+        assert_eq!(cmd.get_env("ZDOTDIR"), Some(dir.as_os_str()));
+        assert_eq!(cmd.get_env("MIRADOR_ZDOTDIR"), Some(theirs.as_os_str()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn other_shells_are_left_alone() {
+        for program in ["/bin/bash", "/opt/homebrew/bin/fish", "/bin/sh"] {
+            let dir = zsh_dir("other");
+            let mut cmd = shell(program);
+            integrate_zsh(&mut cmd, &dir);
+            assert_eq!(cmd.get_env("ZDOTDIR"), None, "{program}");
+            assert!(!dir.exists(), "{program} has nothing written for it");
         }
     }
 
