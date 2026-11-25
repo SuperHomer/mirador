@@ -40,8 +40,10 @@ function collectPaneIds(node: Node): string[] {
   return node.children.flatMap(collectPaneIds);
 }
 
-const resolveScreenRead = (requestId: number, text: string) =>
-  invoke<void>("resolve_screen_read", { requestId, text });
+const resolveScreenRead = (
+  requestId: number,
+  read: { text: string; cursor: [number, number] | null },
+) => invoke<void>("resolve_screen_read", { requestId, ...read });
 
 export default function App() {
   const snapshot = useWorkspaceStore((s) => s.snapshot);

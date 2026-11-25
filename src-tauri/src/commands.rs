@@ -533,11 +533,17 @@ pub fn mark_all_notifications_read(app: AppHandle, state: State<'_, AppState>) {
     }
 }
 
-/// Frontend answers a `read-screen-request` round-trip from the socket.
+/// Frontend answers a `read-screen-request` round-trip from the socket:
+/// the text, and the cursor as (row, column) in it when its row is there.
 #[tauri::command]
-pub fn resolve_screen_read(state: State<'_, AppState>, request_id: u64, text: String) {
+pub fn resolve_screen_read(
+    state: State<'_, AppState>,
+    request_id: u64,
+    text: String,
+    cursor: Option<(usize, usize)>,
+) {
     if let Some(tx) = state.screen_requests.lock().unwrap().remove(&request_id) {
-        let _ = tx.send(text);
+        let _ = tx.send((text, cursor));
     }
 }
 

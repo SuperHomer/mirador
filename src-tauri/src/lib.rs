@@ -27,6 +27,10 @@ use cmux_core::state::{PaneMeta, Workspace};
 use cmux_protocol::{NotificationDto, ResolvedConfig, RunRecord};
 use tauri::Manager;
 
+/// A pane's screen as text, and the cursor in it as (row, column) when its
+/// row is among the text's lines (`server::read_screen_at`).
+pub type ScreenRead = (String, Option<(usize, usize)>);
+
 pub struct AppState {
     pub pty: PtyManager,
     pub workspace: Mutex<Workspace>,
@@ -35,7 +39,7 @@ pub struct AppState {
     pub notifications: Mutex<Vec<NotificationDto>>,
     pub window_focused: AtomicBool,
     /// Pending read-screen round-trips to the webview.
-    pub screen_requests: Mutex<HashMap<u64, std::sync::mpsc::Sender<String>>>,
+    pub screen_requests: Mutex<HashMap<u64, std::sync::mpsc::Sender<ScreenRead>>>,
     pub next_screen_request: AtomicU64,
     /// Command-pane run history (agent audit log).
     pub run_history: Mutex<Vec<RunRecord>>,

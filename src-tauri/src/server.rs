@@ -945,6 +945,18 @@ fn parse_bridge_result(pane: &str, raw: &str) -> Result<Value, String> {
 /// Round-trips to the webview: the frontend serializes the pane's buffer
 /// and resolves the pending request, or the read gives up after `timeout`.
 pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>, timeout: Duration) -> Result<String, String> {
+    read_screen_at(app, pane_id, lines, timeout).map(|(text, _)| text)
+}
+
+/// [`read_screen`], with the terminal's cursor as (row, column) from 0, the
+/// row indexing the text's lines — `None` when its row is not among them
+/// (above a read of a few `lines`, or on a blank line trimmed off the end).
+pub(crate) fn read_screen_at(
+    app: &AppHandle,
+    pane_id: &str,
+    lines: Option<u32>,
+    timeout: Duration,
+) -> Result<crate::ScreenRead, String> {
     let state = app.state::<AppState>();
     // The webview's terminal buffer outlives the PTY, so exited command
     // panes and idle restored panes are still readable — that's exactly
@@ -958,7 +970,7 @@ pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>, ti
     if !known {
         return Err(format!("no pane {pane_id}"));
     }
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let (tx, rx) = std::sync::mpsc::channel();
     let request_id = state.next_screen_request.fetch_add(1, Ordering::Relaxed);
     state.screen_requests.lock().unwrap().insert(request_id, tx);
 
