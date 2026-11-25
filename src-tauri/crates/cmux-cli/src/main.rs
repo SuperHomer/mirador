@@ -851,15 +851,28 @@ enum BrowserAction {
 /// the holder and the hook handlers are Mirador's to run, not a person's.
 /// It is written from a buffer because clap_complete panics on a failed
 /// write, which a closed pipe (`| head`) is.
+///
+/// It runs on a thread of its own with a large stack: building the whole
+/// CLI twice and generating from it overflows Windows' 1 MB main-thread
+/// stack in a debug build (macOS and Linux give 8 MB), and PowerShell
+/// panes run this on every start.
 fn completions(shell: clap_complete::Shell) -> Result<(), String> {
-    let cli = Cli::command();
-    let mut public = clap::Command::new("mira")
-        .about(cli.get_about().cloned().unwrap_or_default())
-        .version(cli.get_version().map(|_| env!("CARGO_PKG_VERSION")))
-        .args(cli.get_arguments().cloned())
-        .subcommands(cli.get_subcommands().filter(|c| !c.is_hide_set()).cloned());
-    let mut script = Vec::new();
-    clap_complete::generate(shell, &mut public, "mira", &mut script);
+    let script = std::thread::Builder::new()
+        .stack_size(16 << 20)
+        .spawn(move || {
+            let cli = Cli::command();
+            let mut public = clap::Command::new("mira")
+                .about(cli.get_about().cloned().unwrap_or_default())
+                .version(cli.get_version().map(|_| env!("CARGO_PKG_VERSION")))
+                .args(cli.get_arguments().cloned())
+                .subcommands(cli.get_subcommands().filter(|c| !c.is_hide_set()).cloned());
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut public, "mira", &mut script);
+            script
+        })
+        .map_err(|e| e.to_string())?
+        .join()
+        .map_err(|_| "generating the completion script failed".to_string())?;
     std::io::stdout().write_all(&script).map_err(|e| e.to_string())
 }
 
