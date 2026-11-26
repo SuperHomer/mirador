@@ -116,7 +116,7 @@ export function QueuedLabel({ count }: { count: number }) {
   return (
     <span
       className="queued-label"
-      title="Messages from agents, typed in one at a time once your draft is sent or cleared and the agent is free"
+      title="Messages from agents, typed in one at a time once the input box is empty and the agent is free (for Codex, once its turn ends)"
     >
       {count === 1 ? "1 message waiting" : `${count} messages waiting`}
     </span>

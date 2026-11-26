@@ -610,7 +610,8 @@ pub enum Request {
     /// member's, a session's, a role's — or any pane's id. Refused for a
     /// pane running no agent, and for one waiting on a person unless
     /// `force`. Queued, unless `force`, while the person has a draft in
-    /// its input box or is typing there: the answer's `queued` says so.
+    /// its input box or is typing there, or a Codex agent is at work on a
+    /// turn: the answer's `queued` says so.
     AgentSend {
         to: String,
         message: String,
@@ -1197,8 +1198,9 @@ pub struct AgentInfo {
     /// The ssh host it runs on, for an agent on a remote computer.
     #[serde(default)]
     pub remote_host: Option<String>,
-    /// Messages `agent send` queued for it, waiting for the person's draft
-    /// in its input box to be sent or cleared.
+    /// Messages `agent send` queued for it, waiting for a Codex agent's
+    /// turn to end or for the person's draft in its input box to be sent
+    /// or cleared.
     #[serde(default)]
     pub queued: u32,
 }
