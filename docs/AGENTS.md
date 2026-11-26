@@ -679,6 +679,28 @@ footer, OpenCode's ending in its `╹▀` edge — then refuses: without one,
 the message could dismiss a welcome screen and its Enter pick from the
 menu that follows.
 
+A message is never typed into the person's draft. Unless `--force`, a
+message for a Claude Code or Codex agent whose input box holds something
+typed and not sent — seen by where the terminal's cursor is, after the
+glyph or past it, and by whether what follows it is drawn dim, since an
+empty box shows a dim placeholder — or whose pane
+the person typed into in the last 2 s, is **queued** instead, and so is
+any message for a pane that already has some queued, to keep their order.
+`send` answers at once: `queued for lead: the person has a draft in its
+pane; it goes in once that is sent or cleared` (with `--json`, a `queued`
+object: its `id`, how many are `ahead`, and `why`). The app then looks
+about every half second and types the oldest once the agent is neither
+working nor waiting on a person, its input box is up and empty, and the
+person has not typed there for 2 s — one message a look, so each is a
+prompt of its own. A queued message waits until it goes in or its pane is
+closed or stops running an agent; it is held in memory, not across a
+quit; while any wait, the agent's bar (and its card on the board) shows
+`2 messages waiting`, and `agent list` gives the count as `queued`. While a message is being typed, keys the person presses in that
+pane are held and typed after its Enter. `--force` types at once, into a
+draft too. `--wait` on a queued message first waits for it to go in, then
+for the turn it starts; if the timeout runs out first it says the message
+is still queued (exit 124).
+
 `wait` polls `agent list` once a second and ends on a status that changed
 after it started, or after it saw the agent working — so a wait begun
 right after a `send` does not end on the idle from before the message. It
@@ -690,7 +712,8 @@ new-conversation command as plain keystrokes — `/clear` for Claude Code,
 `/new` for Codex, Pi and OpenCode — then Enter as a separate write; any
 other harness is refused. The process keeps running, so the role's prompt (a launch flag)
 holds. Refused as `send` is, except that it may name the caller's own
-pane. A working agent is not refused: the line queues behind its turn.
+pane, and, unless `--force`, while the person has a draft in its input box
+or typed there in the last 2 s: it is not queued. A working agent is not refused: the line queues behind its turn.
 
 ### Tasks, the board and history
 

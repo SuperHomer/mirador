@@ -27,6 +27,16 @@ use cmux_core::state::{PaneMeta, Workspace};
 use cmux_protocol::{NotificationDto, ResolvedConfig, RunRecord};
 use tauri::Manager;
 
+/// A pane's screen as the webview reads it (`server::read_screen_at`).
+pub struct ScreenRead {
+    pub text: String,
+    /// The cursor as (row, column), when its row is among the text's lines.
+    pub cursor: Option<(usize, usize)>,
+    /// The cursor's row from the cursor on, its dim cells blanked: what a
+    /// harness drew there at normal intensity (`cmux_core::handoff::has_draft`).
+    pub after_cursor: String,
+}
+
 pub struct AppState {
     pub pty: PtyManager,
     pub workspace: Mutex<Workspace>,
@@ -35,8 +45,25 @@ pub struct AppState {
     pub notifications: Mutex<Vec<NotificationDto>>,
     pub window_focused: AtomicBool,
     /// Pending read-screen round-trips to the webview.
-    pub screen_requests: Mutex<HashMap<u64, std::sync::mpsc::Sender<String>>>,
+    pub screen_requests: Mutex<HashMap<u64, std::sync::mpsc::Sender<ScreenRead>>>,
     pub next_screen_request: AtomicU64,
+    /// The person's keystrokes held from panes a handoff is typing into
+    /// (`handoff::Typing`). `write_pty` writes under this lock, so a held
+    /// key handed back cannot be overtaken by one typed after it.
+    pub key_hold: Mutex<cmux_core::handoff::KeyHold>,
+    /// When the person last typed into each pane: keys, a paste, a drop,
+    /// `mira send-input` — not what the terminal reports of its own accord
+    /// (`cmux_core::handoff::is_typing`).
+    pub typed_at: Mutex<HashMap<String, std::time::Instant>>,
+    /// Messages `mira agent send` queued, per pane, oldest first, while
+    /// the person was in the way there (`handoff::send`).
+    pub queued: Mutex<HashMap<String, std::collections::VecDeque<handoff::Message>>>,
+    pub next_queued: AtomicU64,
+    /// When each queued message was typed (ms since the epoch), for `send
+    /// --wait` to wait for the turn it started. 16 bytes a queued message,
+    /// for the app's life, and not pruned: a `--wait` may ask after its
+    /// message any time, and nothing says when the last one has.
+    pub delivered: Mutex<HashMap<u64, u64>>,
     /// Command-pane run history (agent audit log).
     pub run_history: Mutex<Vec<RunRecord>>,
     /// Raw output captured per live command pane.
@@ -309,6 +336,11 @@ pub fn run() {
             window_focused: AtomicBool::new(true),
             screen_requests: Mutex::new(HashMap::new()),
             next_screen_request: AtomicU64::new(1),
+            key_hold: Mutex::new(Default::default()),
+            typed_at: Mutex::new(HashMap::new()),
+            queued: Mutex::new(HashMap::new()),
+            next_queued: AtomicU64::new(1),
+            delivered: Mutex::new(HashMap::new()),
             run_history: Mutex::new(Vec::new()),
             run_captures: Mutex::new(HashMap::new()),
             run_waiters: Mutex::new(HashMap::new()),

@@ -245,12 +245,20 @@ export function saveAllScrollbacks(maxLines = 10_000) {
  * cursor in its input box, and draws the rest of the box and a footer
  * below it — rows a read ending at the cursor dropped, so the screen check
  * found no input box and refused every message to it.
+ *
+ * With it, the cursor as [row, column], the row indexing the lines of
+ * `text` — or null when its row is not among them. Whether an agent's
+ * input box holds a draft is told by where its cursor is.
  */
-export function readScreenText(paneId: string, lines?: number | null): string {
+export function readScreenText(
+  paneId: string,
+  lines?: number | null,
+): { text: string; cursor: [number, number] | null; afterCursor: string } {
   const term = terminals.get(paneId)?.term;
-  if (!term) return "";
+  if (!term) return { text: "", cursor: null, afterCursor: "" };
   const buf = term.buffer.active;
-  let lastLine = buf.baseY + buf.cursorY;
+  const cursorLine = buf.baseY + buf.cursorY;
+  let lastLine = cursorLine;
   for (let i = buf.baseY + term.rows - 1; i > lastLine; i--) {
     if (buf.getLine(i)?.translateToString(true).trim()) {
       lastLine = i;
@@ -258,12 +266,28 @@ export function readScreenText(paneId: string, lines?: number | null): string {
     }
   }
   const count = lines && lines > 0 ? lines : term.rows;
+  let first = Math.max(0, lastLine + 1 - count);
   const out: string[] = [];
-  for (let i = Math.max(0, lastLine + 1 - count); i <= lastLine; i++) {
+  for (let i = first; i <= lastLine; i++) {
     out.push(buf.getLine(i)?.translateToString(true) ?? "");
   }
   // Drop leading/trailing blank lines — agents care about content.
-  while (out.length > 0 && out[0] === "") out.shift();
+  while (out.length > 0 && out[0] === "") {
+    out.shift();
+    first++;
+  }
   while (out.length > 0 && out[out.length - 1] === "") out.pop();
-  return out.join("\n");
+  const row = cursorLine - first;
+  const cursor: [number, number] | null =
+    row >= 0 && row < out.length ? [row, buf.cursorX] : null;
+  // The cursor's row from the cursor on, dim cells blanked: an agent's
+  // placeholder is dim, what the person typed is not (`has_draft`).
+  let afterCursor = "";
+  const line = cursor ? buf.getLine(cursorLine) : undefined;
+  const cell = buf.getNullCell();
+  for (let x = buf.cursorX; line && x < line.length; x++) {
+    if (!line.getCell(x, cell) || cell.getWidth() === 0) continue;
+    afterCursor += cell.isDim() ? " " : cell.getChars() || " ";
+  }
+  return { text: out.join("\n"), cursor, afterCursor };
 }

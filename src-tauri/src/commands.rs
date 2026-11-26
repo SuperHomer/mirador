@@ -186,6 +186,8 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
         .filter(|(_, file)| matches!(file, TrailFile::Codex(_)))
         .map(|(pane, _)| pane.clone())
         .collect();
+    let queued: std::collections::HashMap<String, u32> =
+        state.queued.lock().unwrap().iter().map(|(pane, q)| (pane.clone(), q.len() as u32)).collect();
     let meta = state.meta.lock().unwrap();
     panes
         .into_iter()
@@ -211,6 +213,7 @@ pub fn agent_infos(state: &AppState) -> Vec<cmux_protocol::AgentInfo> {
                 cwd: m.cwd.clone(),
                 branch: m.branch.clone(),
                 remote_host: m.remote_host.clone(),
+                queued: queued.get(&pane).copied().unwrap_or(0),
                 pane_id: pane,
             })
         })
@@ -533,11 +536,18 @@ pub fn mark_all_notifications_read(app: AppHandle, state: State<'_, AppState>) {
     }
 }
 
-/// Frontend answers a `read-screen-request` round-trip from the socket.
+/// Frontend answers a `read-screen-request` round-trip from the socket:
+/// the text, and the cursor as (row, column) in it when its row is there.
 #[tauri::command]
-pub fn resolve_screen_read(state: State<'_, AppState>, request_id: u64, text: String) {
+pub fn resolve_screen_read(
+    state: State<'_, AppState>,
+    request_id: u64,
+    text: String,
+    cursor: Option<(usize, usize)>,
+    after_cursor: String,
+) {
     if let Some(tx) = state.screen_requests.lock().unwrap().remove(&request_id) {
-        let _ = tx.send(text);
+        let _ = tx.send(crate::ScreenRead { text, cursor, after_cursor });
     }
 }
 
@@ -2718,10 +2728,19 @@ pub async fn load_scrollback(state: State<'_, AppState>, pane_id: String) -> Res
 
 /// Async so keystrokes never queue behind the UI thread's other work
 /// (output delivery, snapshot emits); the frontend keeps one call in flight
-/// per pane, which preserves their order.
+/// per pane, which preserves their order. Held back while a handoff is
+/// typing a message into the pane (`handoff::Typing`).
 #[tauri::command]
 pub async fn write_pty(app: AppHandle, pane_id: String, data: String) -> Result<(), String> {
-    app.state::<AppState>().pty.write(&pane_id, data.as_bytes())
+    let state = app.state::<AppState>();
+    if cmux_core::handoff::is_typing(&data) {
+        state.typed_at.lock().unwrap().insert(pane_id.clone(), std::time::Instant::now());
+    }
+    let mut hold = state.key_hold.lock().unwrap();
+    if hold.keep(&pane_id, data.as_bytes()) {
+        return Ok(());
+    }
+    state.pty.write(&pane_id, data.as_bytes())
 }
 
 #[tauri::command]
@@ -2762,6 +2781,7 @@ pub(crate) fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[
     }
     notify::forget_panes(state, panes);
     state.trail_files.lock().unwrap().retain(|pane, _| !panes.contains(pane));
+    state.typed_at.lock().unwrap().retain(|pane, _| !panes.contains(pane));
     for pane in panes {
         crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);

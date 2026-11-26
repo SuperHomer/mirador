@@ -441,6 +441,9 @@ pub enum Request {
         x: f64,
         y: f64,
     },
+    /// Types `data` into a pane, as the person's keys are: it counts as
+    /// typing there (`handoff::send` queues behind a draft only in a pane
+    /// someone typed into, and waits for typing to stop).
     SendInput {
         #[serde(default)]
         pane_id: Option<String>,
@@ -454,6 +457,9 @@ pub enum Request {
         pane_id: Option<String>,
         paths: Vec<String>,
     },
+    /// Answers the pane's `text`, and its terminal's `cursor` as
+    /// `[row, column]` from 0 into those lines — null when its row is not
+    /// among them.
     ReadScreen {
         #[serde(default)]
         pane_id: Option<String>,
@@ -603,7 +609,8 @@ pub enum Request {
     /// `to` is a teammate's name in the caller's tab (`pane_id`'s) — a team
     /// member's, a session's, a role's — or any pane's id. Refused for a
     /// pane running no agent, and for one waiting on a person unless
-    /// `force`.
+    /// `force`. Queued, unless `force`, while the person has a draft in
+    /// its input box or is typing there: the answer's `queued` says so.
     AgentSend {
         to: String,
         message: String,
@@ -631,6 +638,10 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
+    /// Where a message `AgentSend` queued is, by the `queued.id` it answered with:
+    /// `ahead` of it while still queued, `deliveredMs` once typed, neither
+    /// once dropped with its pane.
+    AgentQueued { message_id: u64 },
     /// The pane `name` means from `pane_id`'s tab, as `AgentSend` finds it.
     AgentFind {
         name: String,
@@ -1186,6 +1197,10 @@ pub struct AgentInfo {
     /// The ssh host it runs on, for an agent on a remote computer.
     #[serde(default)]
     pub remote_host: Option<String>,
+    /// Messages `agent send` queued for it, waiting for the person's draft
+    /// in its input box to be sent or cleared.
+    #[serde(default)]
+    pub queued: u32,
 }
 
 /// How far an agent is through the task list it keeps (`TaskCreate` /

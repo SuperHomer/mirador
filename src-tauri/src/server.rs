@@ -262,11 +262,17 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         Request::SendInput { pane_id, data } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             state.pty.write(&pane, data.as_bytes())?;
+            // Deliberate typing into the pane, as the person's keys are.
+            if cmux_core::handoff::is_typing(&data) {
+                state.typed_at.lock().unwrap().insert(pane, std::time::Instant::now());
+            }
             Ok(Value::Null)
         }
         Request::SendFile { pane_id, paths } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
             let typed = crate::send_files::files(&state, &pane, paths)?;
+            // Typing into the pane, as `SendInput` is.
+            state.typed_at.lock().unwrap().insert(pane.clone(), std::time::Instant::now());
             // Typed by the pane's terminal, as a drop is: xterm brackets
             // the paste only when the program asked for that.
             let text = typed.iter().map(|p| cmux_core::paste::quote_path(p)).collect::<Vec<_>>().join(" ") + " ";
@@ -275,8 +281,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::ReadScreen { pane_id, lines } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
-            let text = read_screen(app, &pane, lines, Duration::from_secs(5))?;
-            Ok(json!({ "paneId": pane, "text": text }))
+            let read = read_screen_at(app, &pane, lines, Duration::from_secs(5))?;
+            Ok(json!({ "paneId": pane, "text": read.text, "cursor": read.cursor }))
         }
         Request::Notify {
             pane_id,
@@ -467,8 +473,15 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             Ok(json!({ "paneId": pane }))
         }
         Request::AgentSend { to, message, pane_id, force, card, title } => {
-            let pane = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
-            Ok(json!({ "paneId": pane }))
+            let (pane, queued) = crate::handoff::send(app, &to, &message, pane_id, force, card, title)?;
+            Ok(match queued {
+                Some(q) => json!({ "paneId": pane, "queued": { "id": q.id, "ahead": q.ahead, "why": q.why } }),
+                None => json!({ "paneId": pane }),
+            })
+        }
+        Request::AgentQueued { message_id: id } => {
+            let (ahead, delivered) = crate::handoff::queued(&state, id);
+            Ok(json!({ "ahead": ahead, "deliveredMs": delivered }))
         }
         Request::AgentClear { name, pane_id, force } => {
             let pane = crate::handoff::clear(app, name.as_deref(), pane_id, force)?;
@@ -945,6 +958,18 @@ fn parse_bridge_result(pane: &str, raw: &str) -> Result<Value, String> {
 /// Round-trips to the webview: the frontend serializes the pane's buffer
 /// and resolves the pending request, or the read gives up after `timeout`.
 pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>, timeout: Duration) -> Result<String, String> {
+    read_screen_at(app, pane_id, lines, timeout).map(|read| read.text)
+}
+
+/// [`read_screen`], with the terminal's cursor as (row, column) from 0, the
+/// row indexing the text's lines — `None` when its row is not among them
+/// (above a read of a few `lines`, or on a blank line trimmed off the end).
+pub(crate) fn read_screen_at(
+    app: &AppHandle,
+    pane_id: &str,
+    lines: Option<u32>,
+    timeout: Duration,
+) -> Result<crate::ScreenRead, String> {
     let state = app.state::<AppState>();
     // The webview's terminal buffer outlives the PTY, so exited command
     // panes and idle restored panes are still readable — that's exactly
@@ -958,7 +983,7 @@ pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>, ti
     if !known {
         return Err(format!("no pane {pane_id}"));
     }
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let (tx, rx) = std::sync::mpsc::channel();
     let request_id = state.next_screen_request.fetch_add(1, Ordering::Relaxed);
     state.screen_requests.lock().unwrap().insert(request_id, tx);
 
