@@ -1370,7 +1370,8 @@ pub fn dismiss_claude_integration() {
 }
 
 /// Points hooks at this `mira` again when the one they call is gone — the
-/// app was moved, or reinstalled elsewhere. Only then: a hook calling some
+/// app was moved, or reinstalled elsewhere — or names it by a verbatim
+/// `\\?\C:\…` path, which Git Bash cannot run (#174). Only then: a hook calling some
 /// other `mira` that still exists (a release build, while this is a dev
 /// one) is left alone, and so is the older form that calls `mira` by name.
 /// Repairing is not a new decision — the hooks are already ours.
