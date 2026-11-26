@@ -2757,9 +2757,16 @@ fn codex_notify(args: &[String]) {
 
 /// This binary's real path, through any symlink — `~/.local/bin/mira`
 /// resolves to the app's own copy, which is what a hook should call.
+/// Only on unix: Windows has no such link to follow, and canonicalizing
+/// there gives a verbatim `\\?\C:\…` path, which Git Bash mangles into
+/// one it cannot run, so every hook it is written into fails (#174).
 fn own_path() -> Result<std::path::PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(std::fs::canonicalize(&exe).unwrap_or(exe))
+    if cfg!(unix) {
+        Ok(std::fs::canonicalize(&exe).unwrap_or(exe))
+    } else {
+        Ok(exe)
+    }
 }
 
 /// Idempotently installs (or removes) the Mirador hooks in
@@ -3153,5 +3160,13 @@ mod tests {
         let names: Vec<_> = paths.iter().map(|p| p.file_name().unwrap().to_str().unwrap()).collect();
         assert_eq!(names, ["shot.png", "shot-2.png", "shot-3.png"]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // Runs only on Windows CI: elsewhere there is no verbatim path to avoid.
+    #[cfg(windows)]
+    #[test]
+    fn the_path_hooks_call_is_not_a_verbatim_one_bash_cannot_run() {
+        let own = own_path().unwrap();
+        assert!(!own.to_string_lossy().contains(r"\\?\"), "{}", own.display());
     }
 }
