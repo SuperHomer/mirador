@@ -294,12 +294,12 @@ pub struct Message {
 /// that cannot be read has no draft, as `screen_refusal` counts it ready.
 fn person_in(app: &tauri::AppHandle, state: &AppState, pane: &str, harness: Option<cmux_protocol::Harness>) -> (bool, bool) {
     let draft = crate::server::read_screen_at(app, pane, None, std::time::Duration::from_secs(2))
-        .is_ok_and(|(screen, cursor)| draft(state, pane, &screen, cursor, harness));
+        .is_ok_and(|read| draft(state, pane, &read, harness));
     (draft, typed_lately(state, pane))
 }
 
 /// Whether `screen` shows a person's draft in `pane`'s input box
-/// (`cmux_core::handoff::has_draft`, by the cursor) — only in a pane
+/// (`cmux_core::handoff::has_draft`, by the cursor and dimness) — only in a pane
 /// someone has typed into. A draft comes from typing, and the check rests
 /// on where Claude Code and Codex park their cursor: should one park it
 /// elsewhere, every box would read as a draft and no message would ever
@@ -308,9 +308,9 @@ fn person_in(app: &tauri::AppHandle, state: &AppState, pane: &str, harness: Opti
 /// relaunch a draft typed before the quit, its pane's process kept
 /// (`persistSessions`), is not seen, and a message would be merged into
 /// it — until the person types there again.
-fn draft(state: &AppState, pane: &str, screen: &str, cursor: Option<(usize, usize)>, harness: Option<cmux_protocol::Harness>) -> bool {
+fn draft(state: &AppState, pane: &str, read: &crate::ScreenRead, harness: Option<cmux_protocol::Harness>) -> bool {
     let typed_in = state.typed_at.lock().unwrap().contains_key(pane);
-    typed_in && cursor.is_some_and(|at| cmux_core::handoff::has_draft(screen, at, harness))
+    typed_in && read.cursor.is_some_and(|at| cmux_core::handoff::has_draft(&read.text, at, &read.after_cursor, harness))
 }
 
 /// Whether the person typed into `pane` within `TYPING_QUIET`.
@@ -346,13 +346,13 @@ fn deliver(app: tauri::AppHandle, pane: String) {
         if matches!(status, Some(AgentStatus::Working | AgentStatus::NeedsYou)) || !state.pty.is_running(&pane) {
             continue;
         }
-        let Ok((screen, cursor)) = crate::server::read_screen_at(&app, &pane, None, std::time::Duration::from_secs(2)) else {
+        let Ok(read) = crate::server::read_screen_at(&app, &pane, None, std::time::Duration::from_secs(2)) else {
             continue;
         };
-        if cmux_core::handoff::showing_in(&screen, harness) != cmux_core::handoff::Showing::Composer {
+        if cmux_core::handoff::showing_in(&read.text, harness) != cmux_core::handoff::Showing::Composer {
             continue;
         }
-        if draft(state, &pane, &screen, cursor, harness) || typed_lately(state, &pane) {
+        if draft(state, &pane, &read, harness) || typed_lately(state, &pane) {
             continue;
         }
         let head = {

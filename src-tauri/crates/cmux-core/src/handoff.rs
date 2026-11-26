@@ -372,24 +372,25 @@ pub fn showing(screen: &str) -> Showing<'_> {
 /// Whether the input box on `screen` holds something typed and not yet
 /// sent: a person's half-written prompt that a pasted message would be
 /// merged into. `cursor` is the terminal's cursor, as (row, column) from 0,
-/// the row indexing `screen`'s lines.
+/// the row indexing `screen`'s lines; `after_cursor` is its row from the
+/// cursor on, its dim cells blanked.
 ///
-/// Judged by the cursor, not the text. An empty box is not empty on
-/// screen: Claude Code draws a dim placeholder after its `❯ ` in a fresh
-/// session (`Try "how does styles.css work?"`), Codex one after its `› `
-/// (`Ask Codex to do anything`), and both read as text. But both park the
-/// cursor right after the glyph and its space while the box is empty, and
-/// after what was typed once it is not — further along the glyph's line,
-/// or on a line below it for a draft of several lines.
-///
-/// One draft this misses: one whose cursor was moved back to its start
-/// (Home, Ctrl+A) reads as empty. When the person last typed into the pane
-/// covers that in practice — they are mid-edit.
+/// Judged by the cursor and dimness, not the text. An empty box is not
+/// empty on screen: Claude Code draws a placeholder after its `❯ ` in a
+/// fresh session (`Try "how does styles.css work?"`), Codex one after its
+/// `› ` (`Ask Codex to do anything`), and both read as text. But both park
+/// the cursor right after the glyph and its space while the box is empty,
+/// and after what was typed once it is not — further along the glyph's
+/// line, or on a line below it for a draft of several lines. A draft whose
+/// cursor was moved back to its start (Home, Ctrl+A) parks it there too;
+/// what tells it from the placeholder is that both harnesses draw the
+/// placeholder dim (`ESC[2m`) and what was typed at normal intensity. So
+/// with the cursor after the glyph, anything not dim after it is a draft.
 ///
 /// Only Claude Code and Codex, whose glyph this finds the box by, are
 /// judged; any other harness, and a screen that is not showing an input
 /// box, has no draft here.
-pub fn has_draft(screen: &str, cursor: (usize, usize), harness: Option<cmux_protocol::Harness>) -> bool {
+pub fn has_draft(screen: &str, cursor: (usize, usize), after_cursor: &str, harness: Option<cmux_protocol::Harness>) -> bool {
     use cmux_protocol::Harness;
     if !matches!(harness, Some(Harness::Claude | Harness::Codex)) || showing(screen) != Showing::Composer {
         return false;
@@ -398,7 +399,7 @@ pub fn has_draft(screen: &str, cursor: (usize, usize), harness: Option<cmux_prot
     let row = screen[..at].matches('\n').count();
     let line = screen[at..].lines().next().unwrap_or_default();
     let glyph = line.chars().take_while(|c| c.is_whitespace()).count();
-    cursor != (row, glyph + 2)
+    cursor != (row, glyph + 2) || !after_cursor.trim().is_empty()
 }
 
 /// How long after the person last typed into a pane a message waits
@@ -1219,26 +1220,43 @@ ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rena
     fn sees_a_draft_by_where_the_cursor_is() {
         use cmux_protocol::Harness::{Claude, Codex};
         // Empty, placeholder or not: the cursor sits after `❯ `.
-        assert!(!has_draft(CLAUDE_FRESH, (1, 2), Some(Claude)));
-        assert!(!has_draft(CLAUDE_IDLE, (7, 2), Some(Claude)));
+        assert!(!has_draft(CLAUDE_FRESH, (1, 2), "", Some(Claude)));
+        assert!(!has_draft(CLAUDE_IDLE, (7, 2), "", Some(Claude)));
         // `pa` typed: the cursor moved past it.
         let typed = CLAUDE_IDLE.replace("❯ \n", "❯ pa\n");
-        assert!(has_draft(&typed, (7, 4), Some(Claude)));
+        assert!(has_draft(&typed, (7, 4), "", Some(Claude)));
         // A draft of two lines: the cursor is on the line below the glyph.
         let two = CLAUDE_IDLE.replace("❯ \n", "❯ no, wait\n  and also\n");
-        assert!(has_draft(&two, (8, 10), Some(Claude)));
+        assert!(has_draft(&two, (8, 10), "", Some(Claude)));
         // Codex's placeholder, its glyph on row 10, and a draft there.
-        assert!(!has_draft(CODEX_IDLE, (10, 2), Some(Codex)));
+        assert!(!has_draft(CODEX_IDLE, (10, 2), "", Some(Codex)));
         let typed = CODEX_IDLE.replace("› Ask Codex to do anything", "› pause");
-        assert!(has_draft(&typed, (10, 7), Some(Codex)));
+        assert!(has_draft(&typed, (10, 7), "", Some(Codex)));
+    }
+
+    #[test]
+    fn sees_a_draft_with_the_cursor_moved_to_its_start() {
+        use cmux_protocol::Harness::{Claude, Codex, Pi};
+        // The cursor after the glyph, only the dim placeholder after it,
+        // blanked: empty.
+        assert!(!has_draft(CLAUDE_FRESH, (1, 2), "                              ", Some(Claude)));
+        assert!(!has_draft(CODEX_IDLE, (10, 2), "                        ", Some(Codex)));
+        // `pa` typed, then Home: the cursor is back after the glyph, but
+        // what follows it is drawn at normal intensity.
+        let typed = CLAUDE_IDLE.replace("❯ \n", "❯ pa\n");
+        assert!(has_draft(&typed, (7, 2), "pa", Some(Claude)));
+        let typed = CODEX_IDLE.replace("› Ask Codex to do anything", "› pa");
+        assert!(has_draft(&typed, (10, 2), "pa   ", Some(Codex)));
+        // Not a box: what follows the cursor does not make a draft.
+        assert!(!has_draft(PI_IDLE, (0, 40), "pa", Some(Pi)));
     }
 
     #[test]
     fn finds_the_cursor_after_an_indented_glyph() {
         use cmux_protocol::Harness::Codex;
         let screen = "• ok\n\n  › Ask Codex to do anything\n";
-        assert!(!has_draft(screen, (2, 4), Some(Codex)));
-        assert!(has_draft(screen, (2, 2), Some(Codex)));
+        assert!(!has_draft(screen, (2, 4), "", Some(Codex)));
+        assert!(has_draft(screen, (2, 2), "", Some(Codex)));
     }
 
     #[test]
@@ -1326,16 +1344,16 @@ ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rena
     fn sees_no_draft_where_it_cannot_judge() {
         use cmux_protocol::Harness::{Claude, Codex, OpenCode, Pi};
         // A menu is no input box, wherever the cursor is.
-        assert!(!has_draft(CLAUDE_DIALOG, (11, 9), Some(Claude)));
-        assert!(!has_draft(CODEX_APPROVAL, (0, 0), Some(Codex)));
+        assert!(!has_draft(CLAUDE_DIALOG, (11, 9), "", Some(Claude)));
+        assert!(!has_draft(CODEX_APPROVAL, (0, 0), "", Some(Codex)));
         // Nor a screen with neither.
-        assert!(!has_draft(CODEX_WELCOME, (0, 5), Some(Codex)));
+        assert!(!has_draft(CODEX_WELCOME, (0, 5), "", Some(Codex)));
         // Pi and OpenCode draw no glyph to place the cursor against.
-        assert!(!has_draft(PI_IDLE, (0, 40), Some(Pi)));
-        assert!(!has_draft(OPENCODE_IDLE, (0, 40), Some(OpenCode)));
+        assert!(!has_draft(PI_IDLE, (0, 40), "", Some(Pi)));
+        assert!(!has_draft(OPENCODE_IDLE, (0, 40), "", Some(OpenCode)));
         // Nor a harness that is not known.
         let typed = CLAUDE_IDLE.replace("❯ \n", "❯ pa\n");
-        assert!(!has_draft(&typed, (7, 4), None));
+        assert!(!has_draft(&typed, (7, 4), "", None));
     }
 
     #[test]

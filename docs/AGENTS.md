@@ -682,7 +682,8 @@ menu that follows.
 A message is never typed into the person's draft. Unless `--force`, a
 message for a Claude Code or Codex agent whose input box holds something
 typed and not sent — seen by where the terminal's cursor is, after the
-glyph or past it, since an empty box shows a placeholder — or whose pane
+glyph or past it, and by whether what follows it is drawn dim, since an
+empty box shows a dim placeholder — or whose pane
 the person typed into in the last 2 s, is **queued** instead, and so is
 any message for a pane that already has some queued, to keep their order.
 `send` answers at once: `queued for lead: the person has a draft in its

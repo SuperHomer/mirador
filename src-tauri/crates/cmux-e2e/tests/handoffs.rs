@@ -537,6 +537,57 @@ fn a_message_waits_for_the_persons_draft() {
     });
 }
 
+/// A draft whose cursor was moved back to its start parks the cursor where
+/// an empty box does, and with the typing window over only one thing tells
+/// them apart: the placeholder is dim, the person's text is not.
+#[test]
+fn a_draft_with_the_cursor_at_its_start_is_a_draft() {
+    e2e!();
+    let mut sb = Sandbox::new("draftstart");
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew {
+        role: None,
+        harness: None,
+        title: None,
+        task: None,
+        target: None,
+        pane_id: Some(first.clone()),
+        host: None,
+        dir: None,
+        on: None,
+    })["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for("its session", LONG, || sb.events("hooked", &pane).into_iter().next());
+    sb.wait_for_screen(&pane, "its placeholder", LONG, |s| s.contains("❯ Try \"fake\""));
+    let texts = || -> Vec<String> {
+        sb.events("message", &pane).iter().map(|m| m["text"].as_str().unwrap_or_default().to_string()).collect()
+    };
+
+    // `pa`, then Ctrl+A: the cursor back right after `❯ `.
+    sb.type_into(&pane, "pa\x01");
+    let at_start = || {
+        let read = sb.call(Request::ReadScreen { pane_id: Some(pane.clone()), lines: None });
+        let text = read["text"].as_str().unwrap_or_default().to_string();
+        let row = text.lines().position(|l| l.starts_with("❯ pa"))?;
+        (read["cursor"] == serde_json::json!([row, 2])).then_some(())
+    };
+    sb.wait_for("the cursor at the draft's start", LONG, at_start);
+    // Past the typing window (`TYPING_QUIET`, 2 s), which nothing on
+    // screen marks: only the draft can hold the message now.
+    std::thread::sleep(Duration::from_millis(2500));
+    let sent = send(&sb, &first, &pane, "hello").unwrap();
+    let why = sent["queued"]["why"].as_str().unwrap_or_default();
+    assert!(why.starts_with("the person has a draft in its pane"), "{sent}");
+
+    // Ctrl+E and Enter: theirs alone, then the message.
+    sb.type_into(&pane, "\x05\r");
+    let got = sb.wait_for("the draft, then the message", LONG, || Some(texts()).filter(|t| t.len() >= 2));
+    assert_eq!(got, ["pa", "hello"]);
+}
+
 /// `send --wait` on a queued message waits for it to go in, then for the
 /// turn it starts — not for the turn the person's own prompt starts
 /// first — and a wait that runs out first says it is still queued.

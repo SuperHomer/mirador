@@ -281,8 +281,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::ReadScreen { pane_id, lines } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
-            let (text, cursor) = read_screen_at(app, &pane, lines, Duration::from_secs(5))?;
-            Ok(json!({ "paneId": pane, "text": text, "cursor": cursor }))
+            let read = read_screen_at(app, &pane, lines, Duration::from_secs(5))?;
+            Ok(json!({ "paneId": pane, "text": read.text, "cursor": read.cursor }))
         }
         Request::Notify {
             pane_id,
@@ -958,7 +958,7 @@ fn parse_bridge_result(pane: &str, raw: &str) -> Result<Value, String> {
 /// Round-trips to the webview: the frontend serializes the pane's buffer
 /// and resolves the pending request, or the read gives up after `timeout`.
 pub(crate) fn read_screen(app: &AppHandle, pane_id: &str, lines: Option<u32>, timeout: Duration) -> Result<String, String> {
-    read_screen_at(app, pane_id, lines, timeout).map(|(text, _)| text)
+    read_screen_at(app, pane_id, lines, timeout).map(|read| read.text)
 }
 
 /// [`read_screen`], with the terminal's cursor as (row, column) from 0, the

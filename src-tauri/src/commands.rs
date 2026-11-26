@@ -544,9 +544,10 @@ pub fn resolve_screen_read(
     request_id: u64,
     text: String,
     cursor: Option<(usize, usize)>,
+    after_cursor: String,
 ) {
     if let Some(tx) = state.screen_requests.lock().unwrap().remove(&request_id) {
-        let _ = tx.send((text, cursor));
+        let _ = tx.send(crate::ScreenRead { text, cursor, after_cursor });
     }
 }
 

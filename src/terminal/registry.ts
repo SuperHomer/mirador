@@ -253,9 +253,9 @@ export function saveAllScrollbacks(maxLines = 10_000) {
 export function readScreenText(
   paneId: string,
   lines?: number | null,
-): { text: string; cursor: [number, number] | null } {
+): { text: string; cursor: [number, number] | null; afterCursor: string } {
   const term = terminals.get(paneId)?.term;
-  if (!term) return { text: "", cursor: null };
+  if (!term) return { text: "", cursor: null, afterCursor: "" };
   const buf = term.buffer.active;
   const cursorLine = buf.baseY + buf.cursorY;
   let lastLine = cursorLine;
@@ -280,5 +280,14 @@ export function readScreenText(
   const row = cursorLine - first;
   const cursor: [number, number] | null =
     row >= 0 && row < out.length ? [row, buf.cursorX] : null;
-  return { text: out.join("\n"), cursor };
+  // The cursor's row from the cursor on, dim cells blanked: an agent's
+  // placeholder is dim, what the person typed is not (`has_draft`).
+  let afterCursor = "";
+  const line = cursor ? buf.getLine(cursorLine) : undefined;
+  const cell = buf.getNullCell();
+  for (let x = buf.cursorX; line && x < line.length; x++) {
+    if (!line.getCell(x, cell) || cell.getWidth() === 0) continue;
+    afterCursor += cell.isDim() ? " " : cell.getChars() || " ";
+  }
+  return { text: out.join("\n"), cursor, afterCursor };
 }

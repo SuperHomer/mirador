@@ -26,10 +26,12 @@
 //! `❯ ` as `claude` and `› ` as `codex`, Pi's and OpenCode's boxes as
 //! `pi` and `opencode` — Mirador waits for one before it types. `claude`'s
 //! carries a dim placeholder with the cursor before it, as Claude Code's
-//! does. Its terminal echoes what is typed and holds it until Enter, so a
-//! draft shows after the glyph with the cursor after it — over the
-//! placeholder, which the real one would clear — and a message pasted
-//! into it is sent with it, as the real ones did (#244). With `E2E_WELCOME=1` it starts on a welcome screen instead,
+//! does. It edits its line itself, as the real ones do: what is typed
+//! shows after the glyph at normal intensity, clearing the placeholder,
+//! with the cursor after it; Home or Ctrl+A moves the cursor to the start
+//! of the line, End or Ctrl+E back to its end, Backspace deletes before
+//! it; Enter sends the line, and a message pasted into a draft is sent
+//! with it, as the real ones did (#244). With `E2E_WELCOME=1` it starts on a welcome screen instead,
 //! with no input box until its first input, which only dismisses it: as
 //! Codex's logo waits for a key before its login menu.
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
@@ -53,12 +55,137 @@
 //! where an OpenCode role's model and prompt are), and echoes each
 //! message.
 
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::time::Duration;
 
 /// What `claude` shows in its empty input box, as Claude Code's
 /// `Try "how does styles.css work?"`.
 const PLACEHOLDER: &str = "Try \"fake\"";
+
+/// The line being typed, edited as a harness's input box edits it, its
+/// terminal out of canonical mode and echo (`stty`), so a key reaches it
+/// at once and it draws what is typed itself.
+struct LineEditor {
+    input: std::io::Bytes<std::io::StdinLock<'static>>,
+    line: Vec<char>,
+    /// Where the cursor is in `line`.
+    at: usize,
+}
+
+impl LineEditor {
+    fn new() -> Self {
+        let _ = std::process::Command::new("stty").args(["-icanon", "-echo", "min", "1"]).status();
+        LineEditor { input: std::io::Read::bytes(std::io::stdin().lock()), line: Vec::new(), at: 0 }
+    }
+
+    fn byte(&mut self) -> Option<u8> {
+        self.input.next()?.ok()
+    }
+
+    /// The next line sent with Enter, a bracketed paste's newlines in it;
+    /// `None` once the terminal is gone.
+    fn next_line(&mut self) -> Option<String> {
+        let mut pasting = false;
+        let mut utf8 = Vec::new();
+        loop {
+            let b = self.byte()?;
+            match b {
+                0x1b => match self.escape()?.as_str() {
+                    "[200~" => pasting = true,
+                    "[201~" => pasting = false,
+                    "[H" | "[1~" | "OH" => self.home(),
+                    "[F" | "[4~" | "OF" => self.end(),
+                    // Focus and mouse reports, replies, other keys.
+                    _ => {}
+                },
+                b'\n' if !pasting => {
+                    print!("\r\n");
+                    let _ = std::io::stdout().flush();
+                    self.at = 0;
+                    return Some(std::mem::take(&mut self.line).into_iter().collect());
+                }
+                0x01 if !pasting => self.home(),
+                0x05 if !pasting => self.end(),
+                0x7f | 0x08 if !pasting => self.backspace(),
+                _ => {
+                    utf8.push(b);
+                    if let Ok(text) = std::str::from_utf8(&utf8) {
+                        let text = text.to_string();
+                        utf8.clear();
+                        for c in text.chars() {
+                            self.insert(c);
+                        }
+                    } else if utf8.len() >= 4 {
+                        utf8.clear();
+                    }
+                }
+            }
+            let _ = std::io::stdout().flush();
+        }
+    }
+
+    /// What follows an ESC: a CSI up to its final byte, or SS3 and one.
+    fn escape(&mut self) -> Option<String> {
+        let mut seq = String::new();
+        match self.byte()? {
+            b'[' => {
+                seq.push('[');
+                loop {
+                    let b = self.byte()?;
+                    seq.push(b as char);
+                    if (0x40..=0x7e).contains(&b) {
+                        return Some(seq);
+                    }
+                }
+            }
+            b'O' => Some(format!("O{}", self.byte()? as char)),
+            b => Some((b as char).to_string()),
+        }
+    }
+
+    fn insert(&mut self, c: char) {
+        if self.line.is_empty() {
+            // Typing clears the placeholder.
+            print!("\x1b[K");
+        }
+        if c == '\n' {
+            print!("\r\n");
+        } else {
+            let rest: String = self.line[self.at..].iter().collect();
+            print!("{c}{rest}");
+            if !rest.is_empty() {
+                print!("\x1b[{}D", rest.chars().count());
+            }
+        }
+        self.line.insert(self.at, c);
+        self.at += 1;
+    }
+
+    fn backspace(&mut self) {
+        if self.at == 0 {
+            return;
+        }
+        self.at -= 1;
+        self.line.remove(self.at);
+        let rest: String = self.line[self.at..].iter().collect();
+        print!("\x08{rest} \x1b[{}D", rest.chars().count() + 1);
+    }
+
+    fn home(&mut self) {
+        if self.at > 0 {
+            print!("\x1b[{}D", self.at);
+            self.at = 0;
+        }
+    }
+
+    fn end(&mut self) {
+        let left = self.line.len() - self.at;
+        if left > 0 {
+            print!("\x1b[{left}C");
+            self.at = self.line.len();
+        }
+    }
+}
 
 /// Appends `event` as one line. One `write_all` of the whole line: the
 /// team's agents start at once and share the file, and `writeln!` may write
@@ -361,36 +488,14 @@ fn main() {
     } else {
         input_box();
     }
-    let mut paste: Option<Vec<String>> = None;
     let mut turns = 0;
     let mut sessions = 1;
     let mut rollout = if kind == "codex" { open_rollout(sessions) } else { None };
-    for line in std::io::stdin().lock().lines() {
-        let Ok(line) = line else { break };
-        // A bracketed paste spans lines: gather it into one message.
-        let message = if let Some(rest) = line.strip_prefix("\x1b[200~") {
-            match rest.split_once("\x1b[201~") {
-                Some((all, _)) => Some(all.to_string()),
-                None => {
-                    paste = Some(vec![rest.to_string()]);
-                    None
-                }
-            }
-        } else if let Some(lines) = paste.as_mut() {
-            match line.split_once("\x1b[201~") {
-                Some((last, _)) => {
-                    lines.push(last.to_string());
-                    Some(paste.take().unwrap().join("\n"))
-                }
-                None => {
-                    lines.push(line.clone());
-                    None
-                }
-            }
-        } else {
-            Some(line.clone())
-        };
-        let Some(message) = message.filter(|m| !m.trim().is_empty()) else { continue };
+    let mut editor = LineEditor::new();
+    while let Some(message) = editor.next_line() {
+        if message.trim().is_empty() {
+            continue;
+        }
         log(serde_json::json!({ "event": "message", "pid": pid, "pane": pane, "text": message }));
         if message.trim() == "/exit" {
             break;

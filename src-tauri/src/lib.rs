@@ -27,9 +27,15 @@ use cmux_core::state::{PaneMeta, Workspace};
 use cmux_protocol::{NotificationDto, ResolvedConfig, RunRecord};
 use tauri::Manager;
 
-/// A pane's screen as text, and the cursor in it as (row, column) when its
-/// row is among the text's lines (`server::read_screen_at`).
-pub type ScreenRead = (String, Option<(usize, usize)>);
+/// A pane's screen as the webview reads it (`server::read_screen_at`).
+pub struct ScreenRead {
+    pub text: String,
+    /// The cursor as (row, column), when its row is among the text's lines.
+    pub cursor: Option<(usize, usize)>,
+    /// The cursor's row from the cursor on, its dim cells blanked: what a
+    /// harness drew there at normal intensity (`cmux_core::handoff::has_draft`).
+    pub after_cursor: String,
+}
 
 pub struct AppState {
     pub pty: PtyManager,

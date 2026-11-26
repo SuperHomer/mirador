@@ -136,7 +136,8 @@ fn mirador_test_team_hands_off() {
 /// not. Only the fake agent had shown that. Were a real one to park it
 /// anywhere else, every box typed into would read as a draft, and messages
 /// to it would wait forever — so each case is checked here: an empty box
-/// idle, a draft, an empty box while the agent works.
+/// idle, a draft, a draft with the cursor moved to its start (told by the
+/// placeholder being dim), an empty box while the agent works.
 #[test]
 fn real_claude_shows_a_draft_by_its_cursor() {
     live!();
@@ -212,16 +213,38 @@ fn drafts_seen_in(name: &str, role: &str) {
     assert!(!prompts.is_empty(), "the message is in no transcript under {}", sb.home.display());
     assert!(prompts.iter().all(|p| !p.contains("paReply")), "sent with the draft: {prompts:?}");
 
+    // A draft with the cursor moved back to its start, where an empty
+    // box parks it: only dimness tells it from the placeholder.
+    sb.type_into(&pane, "pa\x01");
+    sb.wait_for("the cursor at the draft's start", LONG, || {
+        let read = sb.call(Request::ReadScreen { pane_id: Some(pane.clone()), lines: None });
+        let text = read["text"].as_str().unwrap_or_default().to_string();
+        let row = text.lines().position(|l| l.trim_end().ends_with(" pa"))?;
+        let glyph = text.lines().nth(row)?.chars().take_while(|c| c.is_whitespace()).count();
+        (read["cursor"] == serde_json::json!([row, glyph + 2])).then_some(())
+    });
+    quiet();
+    let sent = send("Reply with the sum of 60 and 39, digits only.");
+    let why = sent["queued"]["why"].as_str().unwrap_or_default();
+    assert!(why.starts_with("the person has a draft"), "a draft at its start not seen: {sent}; {}", look());
+    let id = sent["queued"]["id"].as_u64().unwrap();
+    sb.type_into(&pane, "\x05\x7f\x7f");
+    sb.wait_for("the message, once the draft is gone", LONG, || {
+        sb.call(Request::AgentQueued { message_id: id })["deliveredMs"].as_u64()
+    });
+    sb.wait_for_screen(&pane, "the answer after the draft at its start", AGENT, |s| answered(s, "99"));
+    let prompts = prompts_with(&sb, "the sum of 60 and 39");
+    assert!(prompts.iter().all(|p| !p.contains("paReply") && !p.contains("only.pa")), "sent with the draft: {prompts:?}");
+
     // At work, the box empty: a message is not held for a draft.
     let sent = send("Run `sleep 15` in the shell, then reply with the sum of 5 and 6, digits only.");
     assert!(sent.get("queued").is_none(), "{sent}; {}", look());
     sb.wait_for_screen(&pane, "the agent at work on its sleep", AGENT, |s| working(s) && s.contains("sleep 15"));
     let sent = send("Reply with the sum of 50 and 38, digits only.");
     assert!(sent.get("queued").is_none(), "an empty box at work read as a draft: {sent}; {}", look());
-    // Still at work after it: the send judged the box of a working agent.
-    // (Codex takes a message typed then into the turn at work, so the
-    // turn may end without its sleep.)
-    assert!(sb.screen(&pane).is_some_and(|s| working(&s)), "the turn ended before the send: {}", look());
+    // Not checked again after it: whether the turn lasts through its sleep
+    // is the model's to decide, and Codex takes a message typed then into
+    // the turn at work, which may end it at once.
     sb.wait_for_screen(&pane, "the last answer", AGENT, |s| answered(s, "88"));
 }
 

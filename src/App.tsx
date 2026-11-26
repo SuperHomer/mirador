@@ -42,7 +42,7 @@ function collectPaneIds(node: Node): string[] {
 
 const resolveScreenRead = (
   requestId: number,
-  read: { text: string; cursor: [number, number] | null },
+  read: { text: string; cursor: [number, number] | null; afterCursor: string },
 ) => invoke<void>("resolve_screen_read", { requestId, ...read });
 
 export default function App() {
