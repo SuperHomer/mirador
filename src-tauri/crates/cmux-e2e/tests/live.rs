@@ -129,3 +129,130 @@ fn mirador_test_team_hands_off() {
     });
     sb.wait_for_screen(&pane_of("claude"), "codex's reply", AGENT, |s| s.contains("[message from codex"));
 }
+
+/// A send tells the person's draft from an empty input box by the cursor
+/// alone (`cmux_core::handoff::has_draft`): Claude Code and Codex park it
+/// right after their prompt's glyph when the box is empty, placeholder or
+/// not. Only the fake agent had shown that. Were a real one to park it
+/// anywhere else, every box typed into would read as a draft, and messages
+/// to it would wait forever — so each case is checked here: an empty box
+/// idle, a draft, an empty box while the agent works.
+#[test]
+fn real_claude_shows_a_draft_by_its_cursor() {
+    live!();
+    drafts_seen_in("claude", "---\nmodel: claude-haiku-5-5\ntools:\n  allow: [\"Bash(sleep *)\"]\n---\nYou do what you are asked, briefly.\n");
+}
+
+/// [`real_claude_shows_a_draft_by_its_cursor`], for Codex.
+#[test]
+fn real_codex_shows_a_draft_by_its_cursor() {
+    live!();
+    drafts_seen_in("codex", "---\nharness: codex\nmodel: gpt-6-luna\n---\nYou do what you are asked, briefly.\n");
+}
+
+fn drafts_seen_in(name: &str, role: &str) {
+    let mut sb = Sandbox::live(&format!("draft{name}"));
+    // A role of the person's own, not the repository's: only those may
+    // allow a tool, and Claude Code must run `sleep` without asking.
+    let roles = sb.config.join("mirador/roles");
+    std::fs::create_dir_all(&roles).unwrap();
+    std::fs::write(roles.join(format!("{name}.md")), role).unwrap();
+    // A repository, where Codex asks whether to trust the folder.
+    std::process::Command::new("git").arg("init").current_dir(&sb.project).output().unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::AgentNew { role: Some(name.into()), harness: None, title: None, task: None, target: None, pane_id: Some(first.clone()), host: None, dir: None, on: None })
+        ["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.wait_for_screen(&pane, "its prompt", LONG, |s| s.contains("Haiku 5.5 · ") || s.contains("Ask Codex"));
+
+    // What a failure shows: the screen, and where its cursor is.
+    let look = || {
+        let read = sb.call(Request::ReadScreen { pane_id: Some(pane.clone()), lines: None });
+        format!("cursor {} on:\n{}", read["cursor"], read["text"].as_str().unwrap_or_default())
+    };
+    let send = |message: &str| {
+        sb.request(Request::AgentSend { title: None, to: pane.clone(), message: message.into(), pane_id: Some(first.clone()), force: false, card: None })
+            .unwrap_or_else(|e| sb.fail(&format!("send: {e}; {}", look())))
+    };
+    // Past the window in which typing alone holds a message back
+    // (`TYPING_QUIET`, 2 s): nothing on screen says it is over, so this
+    // waits on the clock.
+    let quiet = || std::thread::sleep(Duration::from_millis(2500));
+
+    // Idle, the box empty, but typed into: only the cursor can say that
+    // it holds no draft.
+    sb.type_into(&pane, "x");
+    sb.type_into(&pane, "\x7f");
+    quiet();
+    let sent = send("Reply with the sum of 20 and 22, digits only.");
+    assert!(sent.get("queued").is_none(), "an empty box read as a draft: {sent}; {}", look());
+    sb.wait_for_screen(&pane, "the first answer", AGENT, |s| answered(s, "42"));
+
+    // A draft: the message waits for it, past the typing window, and goes
+    // in on its own once the person clears it.
+    sb.type_into(&pane, "pa");
+    sb.wait_for_screen(&pane, "the draft", LONG, |s| s.lines().any(|l| l.trim_end().ends_with(" pa")));
+    quiet();
+    let sent = send("Reply with the sum of 30 and 33, digits only.");
+    let why = sent["queued"]["why"].as_str().unwrap_or_default();
+    assert!(why.starts_with("the person has a draft"), "a draft not seen: {sent}; {}", look());
+    let id = sent["queued"]["id"].as_u64().unwrap();
+    quiet();
+    let at = sb.call(Request::AgentQueued { message_id: id });
+    assert!(at["deliveredMs"].is_null(), "typed into the draft: {at}; {}", look());
+    sb.type_into(&pane, "\x7f\x7f");
+    sb.wait_for("the message, once the draft is gone", LONG, || {
+        sb.call(Request::AgentQueued { message_id: id })["deliveredMs"].as_u64()
+    });
+    sb.wait_for_screen(&pane, "the second answer", AGENT, |s| answered(s, "63"));
+    let prompts = prompts_with(&sb, "the sum of 30 and 33");
+    assert!(!prompts.is_empty(), "the message is in no transcript under {}", sb.home.display());
+    assert!(prompts.iter().all(|p| !p.contains("paReply")), "sent with the draft: {prompts:?}");
+
+    // At work, the box empty: a message is not held for a draft.
+    let sent = send("Run `sleep 15` in the shell, then reply with the sum of 5 and 6, digits only.");
+    assert!(sent.get("queued").is_none(), "{sent}; {}", look());
+    sb.wait_for_screen(&pane, "the agent at work on its sleep", AGENT, |s| working(s) && s.contains("sleep 15"));
+    let sent = send("Reply with the sum of 50 and 38, digits only.");
+    assert!(sent.get("queued").is_none(), "an empty box at work read as a draft: {sent}; {}", look());
+    // Still at work after it: the send judged the box of a working agent.
+    // (Codex takes a message typed then into the turn at work, so the
+    // turn may end without its sleep.)
+    assert!(sb.screen(&pane).is_some_and(|s| working(&s)), "the turn ended before the send: {}", look());
+    sb.wait_for_screen(&pane, "the last answer", AGENT, |s| answered(s, "88"));
+}
+
+fn working(screen: &str) -> bool {
+    screen.contains("esc to interrupt")
+}
+
+/// The agent's answer on a line of its own, its turn over.
+fn answered(screen: &str, sum: &str) -> bool {
+    !working(screen) && screen.lines().any(|l| l.trim() == sum || l.trim().ends_with(&format!(" {sum}")))
+}
+
+/// Every line of the agents' transcripts — Claude Code's under
+/// `~/.claude/projects`, Codex's under `~/.codex/sessions` — holding
+/// `text`: what was submitted to them, as they recorded it.
+fn prompts_with(sb: &Sandbox, text: &str) -> Vec<String> {
+    fn walk(dir: &std::path::Path, text: &str, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
+                walk(&path, text, out);
+            } else if path.extension().is_some_and(|e| e == "jsonl") {
+                let lines = std::fs::read_to_string(&path).unwrap_or_default();
+                out.extend(lines.lines().filter(|l| l.contains(text)).map(String::from));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for dir in [sb.home.join(".claude/projects"), sb.home.join(".codex/sessions")] {
+        walk(&dir, text, &mut out);
+    }
+    out
+}

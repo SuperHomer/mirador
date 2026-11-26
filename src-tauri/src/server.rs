@@ -281,8 +281,8 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         }
         Request::ReadScreen { pane_id, lines } => {
             let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
-            let text = read_screen(app, &pane, lines, Duration::from_secs(5))?;
-            Ok(json!({ "paneId": pane, "text": text }))
+            let (text, cursor) = read_screen_at(app, &pane, lines, Duration::from_secs(5))?;
+            Ok(json!({ "paneId": pane, "text": text, "cursor": cursor }))
         }
         Request::Notify {
             pane_id,

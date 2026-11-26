@@ -457,6 +457,9 @@ pub enum Request {
         pane_id: Option<String>,
         paths: Vec<String>,
     },
+    /// Answers the pane's `text`, and its terminal's `cursor` as
+    /// `[row, column]` from 0 into those lines — null when its row is not
+    /// among them.
     ReadScreen {
         #[serde(default)]
         pane_id: Option<String>,
