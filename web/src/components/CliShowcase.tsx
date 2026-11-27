@@ -10,6 +10,7 @@ const COMMANDS = [
   'mira team clear',
   'mira team cost squad',
   'mira usage',
+  'mira gpu',
   'mira agent board',
   'mira recap',
   'mira next',
@@ -77,6 +78,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team clear<span style={{ color: "var(--muted)" }}>            # a fresh start, lead last</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team cost <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>       # what it costs to start, and a turn</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira usage<span style={{ color: "var(--muted)" }}>                 # your plans, limits and tokens</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira gpu<span style={{ color: "var(--muted)" }}>                   # this computer's GPUs</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent board<span style={{ color: "var(--muted)" }}>           # who is doing what</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira recap<span style={{ color: "var(--muted)" }}>                 # what got done while you were away</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira next<span style={{ color: "var(--muted)" }}>                  # what to pick up next</span></div>
