@@ -2034,6 +2034,8 @@ pub struct RoleFields {
     pub harness: Harness,
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// Codex's `--profile`: only a Codex role keeps one.
+    pub profile: Option<String>,
     pub way: Option<String>,
     pub description: Option<String>,
     /// `tools.deny`: the permission rules it may not use.

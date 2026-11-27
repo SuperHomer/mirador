@@ -1239,6 +1239,8 @@ export interface RoleFields {
   harness: Harness;
   model: string | null;
   effort: string | null;
+  /** Codex's `--profile`; only a Codex role keeps one. */
+  profile: string | null;
   way: string | null;
   description: string | null;
   /** `tools.deny`. */
