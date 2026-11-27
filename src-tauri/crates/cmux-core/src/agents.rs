@@ -760,21 +760,32 @@ pub fn codex_user_notify(config: Option<&str>, profile: Option<&str>) -> Option<
 /// notify — after `--`. Theirs already being ours (a resumed Codex, a
 /// config someone copied a launch into) is unwrapped, not nested.
 pub fn codex_notify_argv(mira: &std::path::Path, theirs: Option<Vec<String>>) -> Vec<String> {
-    let mut theirs = theirs.unwrap_or_default();
-    let ours = |argv: &[String]| {
-        argv.len() >= 2
-            && argv[1] == "codex-notify"
-            && std::path::Path::new(&argv[0]).file_stem().is_some_and(|s| s == "mira")
-    };
-    while ours(&theirs) {
-        theirs = theirs.iter().skip(2).skip_while(|a| *a == "--").cloned().collect();
-    }
+    let theirs = theirs.map(|t| codex_notify_inner(&t).unwrap_or(t)).unwrap_or_default();
     let mut argv = vec![mira.to_string_lossy().into_owned(), "codex-notify".into()];
     if !theirs.is_empty() {
         argv.push("--".into());
         argv.extend(theirs);
     }
     argv
+}
+
+/// The person's own notify inside one of ours ([`codex_notify_argv`]), at
+/// any path and however deeply wrapped: empty for none. None when `argv`
+/// is not ours.
+pub fn codex_notify_inner(argv: &[String]) -> Option<Vec<String>> {
+    let ours = |argv: &[String]| {
+        argv.len() >= 2
+            && argv[1] == "codex-notify"
+            && std::path::Path::new(&argv[0]).file_stem().is_some_and(|s| s == "mira")
+    };
+    if !ours(argv) {
+        return None;
+    }
+    let mut theirs = argv.to_vec();
+    while ours(&theirs) {
+        theirs = theirs.iter().skip(2).skip_while(|a| *a == "--").cloned().collect();
+    }
+    Some(theirs)
 }
 
 /// What `mira codex-notify` was given: the person's notify after an

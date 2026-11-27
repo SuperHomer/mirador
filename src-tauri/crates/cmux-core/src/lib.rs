@@ -10,6 +10,7 @@ pub mod browser_url;
 pub mod builtin;
 pub mod checkpoints;
 pub mod claude_integration;
+pub mod codex_integration;
 pub mod codex_trail;
 pub mod config;
 pub mod cwd;

@@ -266,7 +266,9 @@ enum Command {
     /// Install or remove the Claude Code integration: the hooks that light
     /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
     /// teaches Claude this CLI, and a wrapper in front of your status line
-    /// that keeps your plan's limits, your own status line still shown.
+    /// that keeps your plan's limits, your own status line still shown;
+    /// and, where Codex is installed, a notify in its config.toml that
+    /// reports its turns, your own notify still run.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -3004,7 +3006,8 @@ fn own_path() -> Result<std::path::PathBuf, String> {
 }
 
 /// Idempotently installs (or removes) the Mirador hooks in
-/// ~/.claude/settings.json and the `/mira-diff` and `mira` skills beside them.
+/// ~/.claude/settings.json and the `/mira-diff` and `mira` skills beside
+/// them, then Mirador's notify in Codex's config.toml.
 fn hooks(action: &str) -> Result<(), String> {
     use cmux_core::claude_integration::{self, Action};
     let action = match action {
@@ -3012,7 +3015,11 @@ fn hooks(action: &str) -> Result<(), String> {
         "remove" => Action::Remove,
         other => return Err(format!("unknown hooks action `{other}` (setup|remove)")),
     };
-    for line in claude_integration::hooks(action, &own_path()?)? {
+    let mira = own_path()?;
+    for line in claude_integration::hooks(action, &mira)? {
+        println!("{line}");
+    }
+    for line in cmux_core::codex_integration::notify(action, &mira)? {
         println!("{line}");
     }
     if action == Action::Setup {
