@@ -435,6 +435,7 @@ pub fn run() {
             commands::send_files,
             commands::set_split_ratios,
             commands::swap_pane,
+            commands::move_pane,
             commands::rotate_panes,
             commands::equalize_panes,
             commands::apply_layout,

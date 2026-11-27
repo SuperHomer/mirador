@@ -31,6 +31,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "send_files",
     "set_split_ratios",
     "swap_pane",
+    "move_pane",
     "rotate_panes",
     "equalize_panes",
     "apply_layout",

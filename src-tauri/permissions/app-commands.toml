@@ -26,6 +26,7 @@ permissions = [
   "allow-send-files",
   "allow-set-split-ratios",
   "allow-swap-pane",
+  "allow-move-pane",
   "allow-rotate-panes",
   "allow-equalize-panes",
   "allow-apply-layout",

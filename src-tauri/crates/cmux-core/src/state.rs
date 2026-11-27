@@ -658,11 +658,16 @@ impl Workspace {
         true
     }
 
+    /// Moves the tab to place `to` (from 0) in the tab order, the last place
+    /// past the end. False when there is no such tab or it was there already.
     pub fn move_tab(&mut self, tab_id: &str, to: usize) -> bool {
         let Some(from) = self.tabs.iter().position(|t| t.id == tab_id) else {
             return false;
         };
         let to = to.min(self.tabs.len() - 1);
+        if to == from {
+            return false;
+        }
         let active_id = self.tabs[self.active].id.clone();
         let tab = self.tabs.remove(from);
         self.tabs.insert(to, tab);
@@ -846,6 +851,33 @@ impl Workspace {
         layout::swap(&mut tab.root, pane, &other);
         tab.zoomed = None;
         true
+    }
+
+    /// Moves `pane` onto `target`, a pane of the same tab: in its place,
+    /// swapping the two, when `side` is none, or docked beside it on `side`.
+    /// The moved pane takes the focus. False when the panes are the same,
+    /// in different tabs, or nothing changed. The tab keeps its panes, so
+    /// its board cards stay as they are.
+    pub fn move_pane(&mut self, pane: &str, target: &str, side: Option<Direction>) -> bool {
+        let Some(tab) = self.tab_of_pane(pane) else {
+            return false;
+        };
+        if !layout::contains(&tab.root, target) {
+            return false;
+        }
+        let tab_id = tab.id.clone();
+        let moved = self.rearrange(&tab_id, |root| match side {
+            None => {
+                layout::swap(root, pane, target);
+            }
+            Some(side) => {
+                layout::dock(root, pane, target, side);
+            }
+        });
+        if moved {
+            self.focus_pane(pane);
+        }
+        moved
     }
 
     /// Moves every pane of the tab one place along its pane order,
@@ -1433,6 +1465,64 @@ mod tests {
         assert!(!ws.swap_pane("no-such-pane", Direction::Right));
         assert_eq!(ws.tabs[0].root, before);
         assert_eq!(ws.tabs[0].zoomed, Some(a), "a swap that did nothing keeps the zoom");
+    }
+
+    #[test]
+    fn a_pane_moved_onto_another_swaps_with_it_and_takes_the_focus() {
+        let (mut ws, _, [a, b, c]) = three_panes();
+        ws.focus_pane(&b);
+        ws.zoom_pane(&b);
+        assert!(ws.move_pane(&a, &c, None));
+        assert_eq!(layout::pane_ids(&ws.tabs[0].root), vec![c, b, a.clone()]);
+        assert_eq!(ws.focused_pane(), a);
+        assert_eq!(ws.tabs[0].zoomed, None);
+    }
+
+    #[test]
+    fn a_pane_docked_beside_another_leaves_its_old_split() {
+        let (mut ws, _, [a, b, c]) = three_panes();
+        assert!(ws.move_pane(&c, &a, Some(Direction::Left)));
+        let root = &ws.tabs[0].root;
+        assert_eq!(layout::pane_ids(root), vec![c.clone(), a, b]);
+        match root {
+            Node::Split { dir, children, .. } => {
+                assert_eq!(*dir, SplitDir::Row);
+                assert_eq!(children.len(), 3, "b's column collapsed into the row");
+            }
+            _ => panic!("expected split"),
+        }
+        assert_eq!(ws.focused_pane(), c);
+        assert_eq!(ws.tabs[0].cards.len(), 3, "every pane keeps its card");
+    }
+
+    #[test]
+    fn a_move_across_tabs_onto_itself_or_to_no_change_does_nothing() {
+        let (mut ws, _, [a, b, _]) = three_panes();
+        let (_, other) = ws.new_tab();
+        ws.focus_pane(&b);
+        ws.zoom_pane(&b);
+        let before = ws.tabs[0].root.clone();
+        assert!(!ws.move_pane(&a, &other, None), "another tab");
+        assert!(!ws.move_pane(&a, &other, Some(Direction::Left)), "another tab");
+        assert!(!ws.move_pane(&a, &a, Some(Direction::Left)));
+        assert!(!ws.move_pane(&a, "no-such-pane", None));
+        assert!(!ws.move_pane("no-such-pane", &a, None));
+        assert!(!ws.move_pane(&other, &other, None), "a lone pane");
+        assert_eq!(ws.tabs[0].root, before);
+        assert_eq!(ws.tabs[0].zoomed, Some(b), "a move that did nothing keeps the zoom");
+    }
+
+    #[test]
+    fn a_moved_tab_keeps_the_active_one_and_a_move_in_place_is_none() {
+        let mut ws = Workspace::default();
+        let first = ws.tabs[0].id.clone();
+        let (second, _) = ws.new_tab();
+        assert!(ws.move_tab(&first, 9), "past the end goes last");
+        assert_eq!(ws.tabs.iter().map(|t| t.id.clone()).collect::<Vec<_>>(), vec![second.clone(), first.clone()]);
+        assert_eq!(ws.tabs[ws.active].id, second);
+        assert!(!ws.move_tab(&first, 1), "already there");
+        assert!(!ws.move_tab(&first, 5), "already last");
+        assert!(!ws.move_tab("no-such-tab", 0));
     }
 
     #[test]
