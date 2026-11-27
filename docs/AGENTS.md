@@ -26,8 +26,9 @@ nesting (tmux, ssh). Use `--socket` to target the app directly instead.
 ## 2. Claude Code hooks (recommended)
 
 ```bash
-mira hooks setup      # idempotent; edits ~/.claude/settings.json
-mira hooks remove     # uninstall
+mira hooks setup      # idempotent; edits ~/.claude/settings.json, and
+                      # Codex's, Pi's and OpenCode's config when installed
+mira hooks remove     # uninstall, each put back
 ```
 
 Mirador offers this on first launch when it finds `~/.claude` (once — "Not
@@ -113,6 +114,29 @@ Mirador brings each agent pane back as the shell it was, with `claude
 and `/exit` leaves you at a prompt. A session you exited before quitting is
 forgotten, so it does not come back. On Windows, which cannot yet see Claude
 exit, the pane waits for a keypress instead.
+
+**Codex, Pi and OpenCode.** Setup also wires each of these that is
+installed — its directory exists; none is created — so a turn's end
+lights its tab and its session is recorded, all through `mira agent-hook`
+(nothing outside a Mirador pane). `mira hooks remove` takes each out.
+The app's first-launch offer and its repair do Claude Code only.
+
+- **Codex**: a top-level `notify` in `$CODEX_HOME/config.toml`
+  (`~/.codex`), `mira codex-notify`, which runs yours after it; remove
+  puts yours back. The file is edited in place, comments and order kept,
+  and one that does not parse is left alone. Codex's notify fires only
+  when a turn ends, so a Codex is never working or needs-you, only idle.
+  Every Codex Mirador starts gets the same notify on its command line.
+- **Pi**: an extension, `extensions/mira.ts` in `$PI_CODING_AGENT_DIR`
+  (`~/.pi/agent`): session start, work, and the turn's end
+  (`agent_settled`). Pi asks no permissions, so it never needs you.
+- **OpenCode**: a plugin, `plugins/mira/` in `$XDG_CONFIG_HOME/opencode`
+  (`~/.config/opencode`): work, the turn's end, a permission asked. Every
+  OpenCode on a server hears every session, so each reports only the one
+  its screen shows (and, once it reported work for one, that one's end).
+
+Like the skills, these files carry a marker, and a file of your own is
+left alone.
 
 ## 3. Run commands the human can watch (and interrupt)
 
@@ -795,9 +819,11 @@ logs a turn done for each `task_complete` in it, and for each
 starts at the rollout's end when it first sees it, so a session's
 history is never logged again, and reads a newer one after it (`/new`)
 from its start. Codex (0.163) writes no approval request to its rollout,
-so a Codex waiting on a person is never needs-you; and it still has no status
-for `agent list` or `agent wait`. **Every other harness has neither, so
-its turns are not logged.** An agent's exit is logged when its pane or
+so a Codex waiting on a person is never needs-you. Its status, idle once
+a turn ends, comes from its notify (section 2). Pi and OpenCode, once
+`mira hooks setup` installs their extension and plugin, report as Claude
+Code does and their turns are logged the same way. **Every other harness
+has neither, so its turns are not logged.** An agent's exit is logged when its pane or
 tab is closed, and on macOS and Linux when its process is gone from the
 pane.
 

@@ -266,10 +266,12 @@ enum Command {
     /// Install or remove the Claude Code integration: the hooks that light
     /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
     /// teaches Claude this CLI, and a wrapper in front of your status line
-    /// that keeps your plan's limits, your own status line still shown;
-    /// and, where Codex, Pi or OpenCode is installed, a notify in Codex's
-    /// config.toml (your own notify still run), a Pi extension and an
-    /// OpenCode plugin, which report their turns.
+    /// that keeps your plan's limits, your own status line still shown.
+    /// And for each of Codex, Pi and OpenCode that is installed, what
+    /// lights its tab when a turn ends: Codex, a notify in
+    /// ~/.codex/config.toml (your own still runs); Pi, an extension at
+    /// ~/.pi/agent/extensions/mira.ts; OpenCode, a plugin in
+    /// ~/.config/opencode/plugins/mira/. `remove` puts each back.
     Hooks {
         /// "setup" or "remove"
         action: String,

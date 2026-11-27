@@ -116,6 +116,13 @@ downloads, the feature tour and the keybinding reference.
   line with). Mirador offers to set it up on first launch when it finds
   Claude Code (or: palette → *Set Up Claude Code Integration*, or
   `mira install && mira hooks setup`)
+- **Codex, Pi and OpenCode**: `mira hooks setup` also lights their tabs
+  when a turn ends, for each one installed — a `notify` in
+  `~/.codex/config.toml` (yours still runs), an extension at
+  `~/.pi/agent/extensions/mira.ts`, a plugin in
+  `~/.config/opencode/plugins/mira/` — and `mira hooks remove` puts each
+  back. Codex says only when a turn ends, never that it waits on you; Pi
+  asks no permissions. The first-launch offer sets up Claude Code only
 - **Updates**: checks on launch and offers an in-app install; payloads are
   signed, so a tampered release cannot install even though the app carries
   no Apple signature. After one lands, a **What's New** pane opens itself
@@ -139,7 +146,7 @@ by hand instead (the CLI ships inside the app):
 
 ```bash
 /Applications/Mirador.app/Contents/MacOS/mira install   # → ~/.local/bin/mira
-mira hooks setup                                        # Claude Code integration
+mira hooks setup                                        # Claude Code, Codex, Pi, OpenCode
 ```
 
 Release builds are signed with a Developer ID and notarized by Apple, so
@@ -169,7 +176,7 @@ terminal afterwards) and installs the hooks:
 
 ```powershell
 & "$env:LOCALAPPDATA\Mirador\mira.exe" install
-mira hooks setup        # Claude Code integration
+mira hooks setup        # Claude Code, Codex, Pi, OpenCode
 ```
 
 **PowerShell or Git Bash?** Either — panes are ConPTY sessions, so any
@@ -771,8 +778,10 @@ pane. It refuses a pane running no agent, where the message would run as a
 shell command, and an agent waiting on you (a permission prompt), where it
 would answer the prompt — `--force` overrides that one. `agent wait` exits 0
 once the agent has worked and stopped, 2 if it stopped to ask you something,
-3 if it exited, 124 on `--timeout`; it needs Claude Code's hooks (`mira
-hooks setup`) to see an agent stop.
+3 if it exited, 124 on `--timeout`. It sees an agent stop through its
+hooks: Claude Code's, Pi's and OpenCode's from `mira hooks setup`, and a
+Codex's through the `notify` every Codex Mirador starts is given (setup
+puts it in Codex's config for one you start yourself).
 
 `team restart` types a member's command back into its pane when its shell
 is idle — never into a shell running something else, which it reports as
