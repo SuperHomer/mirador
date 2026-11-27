@@ -760,6 +760,11 @@ glyph or past it, and by whether what follows it is drawn dim, since an
 empty box shows a dim placeholder — or whose pane
 the person typed into in the last 2 s, is **queued** instead, and so is
 any message for a pane that already has some queued, to keep their order.
+A message for a **Codex agent at work on a turn** — its screen showing
+`• Working (… esc to interrupt)` over its input box — is queued too, to go
+in once the turn ends: Codex takes a message entered mid-turn as a steer,
+and may drop what it was doing. Any other agent at work takes a message at
+once, as before: Claude Code reads it at its next tool call.
 `send` answers at once: `queued for lead: the person has a draft in its
 pane; it goes in once that is sent or cleared` (with `--json`, a `queued`
 object: its `id`, how many are `ahead`, and `why`). The app then looks
@@ -771,7 +776,7 @@ closed or stops running an agent; it is held in memory, not across a
 quit; while any wait, the agent's bar (and its card on the board) shows
 `2 messages waiting`, and `agent list` gives the count as `queued`. While a message is being typed, keys the person presses in that
 pane are held and typed after its Enter. `--force` types at once, into a
-draft too. `--wait` on a queued message first waits for it to go in, then
+draft or a Codex agent's running turn too. `--wait` on a queued message first waits for it to go in, then
 for the turn it starts; if the timeout runs out first it says the message
 is still queued (exit 124).
 

@@ -189,9 +189,12 @@ pub fn find(state: &AppState, name: &str, caller: Option<String>) -> Result<Stri
 ///
 /// Unless `force`, a message waits in the pane's queue, to be typed by
 /// [`deliver`], when the person is in the way there — a draft in the input
-/// box, or keys typed within `cmux_core::handoff::TYPING_QUIET` — or other
-/// messages already wait for it: pasted then, it would be merged into the
-/// person's draft and sent with it (#244).
+/// box, or keys typed within `cmux_core::handoff::TYPING_QUIET` — when a
+/// Codex agent's screen shows it at work on a turn, or other messages
+/// already wait for it. Pasted into a draft, it would be merged into it
+/// and sent with it (#244); into Codex's running turn, Codex takes it as a
+/// steer and may drop what it was doing (#246). `force` types it now, into
+/// either.
 pub fn send(
     app: &tauri::AppHandle,
     to: &str,
@@ -243,10 +246,15 @@ pub fn send(
     let from = caller.as_deref().and_then(|c| sender_in(state, c, to_tab.as_deref()));
     let (paste, enter) = cmux_core::handoff::keystrokes(message, from.as_deref())?;
     if !force {
-        let (draft, typed) = person_in(app, state, &pane, harness);
+        // At work is Codex's screen alone (#246): Codex takes a message
+        // typed mid-turn as a steer. A working Claude Code still gets it
+        // now, and takes it at its next tool call; and it runs no Stop hook
+        // when the person interrupts it with Esc, so a status left at
+        // Working would hold every message to that agent.
+        let (draft, typed, at_work) = person_in(app, state, &pane, harness);
         let mut queues = state.queued.lock().unwrap();
         let ahead = queues.get(&pane).map_or(0, |q| q.len());
-        if let Some(why) = cmux_core::handoff::queue_reason(draft, typed, ahead) {
+        if let Some(why) = cmux_core::handoff::queue_reason(draft, typed, at_work, ahead) {
             let id = state.next_queued.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let queued = Queued { id, ahead, why };
             let message = Message { id, message: message.to_string(), from, card, title, paste, enter };
@@ -290,12 +298,15 @@ pub struct Message {
 }
 
 /// Whether the person is in `pane`'s way: a draft in its agent's input
-/// box (`draft`), and keys typed into it within `TYPING_QUIET`. A screen
-/// that cannot be read has no draft, as `screen_refusal` counts it ready.
-fn person_in(app: &tauri::AppHandle, state: &AppState, pane: &str, harness: Option<cmux_protocol::Harness>) -> (bool, bool) {
-    let draft = crate::server::read_screen_at(app, pane, None, std::time::Duration::from_secs(2))
-        .is_ok_and(|read| draft(state, pane, &read, harness));
-    (draft, typed_lately(state, pane))
+/// box (`draft`), and keys typed into it within `TYPING_QUIET`; and, from
+/// the same read, whether its screen shows the agent at work
+/// (`cmux_core::handoff::at_work_on_screen`). A screen that cannot be read
+/// has no draft and shows no work, as `screen_refusal` counts it ready.
+fn person_in(app: &tauri::AppHandle, state: &AppState, pane: &str, harness: Option<cmux_protocol::Harness>) -> (bool, bool, bool) {
+    let read = crate::server::read_screen_at(app, pane, None, std::time::Duration::from_secs(2)).ok();
+    let draft = read.as_ref().is_some_and(|read| draft(state, pane, read, harness));
+    let at_work = read.as_ref().is_some_and(|read| cmux_core::handoff::at_work_on_screen(&read.text, harness));
+    (draft, typed_lately(state, pane), at_work)
 }
 
 /// Whether `screen` shows a person's draft in `pane`'s input box
@@ -323,9 +334,13 @@ fn typed_lately(state: &AppState, pane: &str) -> bool {
 /// 500 ms it looks, and types the head of the queue when the agent is
 /// neither working nor waiting on a person, its screen shows its input
 /// box, empty, and nothing was typed there within `TYPING_QUIET`. Not
-/// while it works: the person's own prompt, just sent, is that turn, and a
-/// message typed into it would not be a prompt of its own — nor would
-/// `send --wait` tell its turn from theirs. One message a look, so the
+/// while it works — as its hooks say, or for Codex its screen: the
+/// person's own prompt, just sent, may be that turn, and a message typed
+/// into it would not be a prompt of its own — nor would
+/// `send --wait` tell its turn from theirs. The limit of the hooks: Claude
+/// Code runs no Stop hook when the person interrupts it with Esc, so its
+/// status stays Working, and a message queued for it (behind a draft)
+/// waits until its next turn ends. One message a look, so the
 /// next waits for the box to be empty again. Ends with the queue: emptied,
 /// or dropped once the pane is closed or runs no agent. No lock is held
 /// across a read or a sleep.
@@ -349,7 +364,9 @@ fn deliver(app: tauri::AppHandle, pane: String) {
         let Ok(read) = crate::server::read_screen_at(&app, &pane, None, std::time::Duration::from_secs(2)) else {
             continue;
         };
-        if cmux_core::handoff::showing_in(&read.text, harness) != cmux_core::handoff::Showing::Composer {
+        if cmux_core::handoff::showing_in(&read.text, harness) != cmux_core::handoff::Showing::Composer
+            || cmux_core::handoff::at_work_on_screen(&read.text, harness)
+        {
             continue;
         }
         if draft(state, &pane, &read, harness) || typed_lately(state, &pane) {
@@ -529,7 +546,7 @@ pub fn clear_pane(app: &tauri::AppHandle, pane: &str, force: bool) -> Result<(),
         if let Some(why) = screen_refusal(app, pane, harness) {
             return Err(("needs you", format!("it {why}, or clear with --force")));
         }
-        let (draft, typed) = person_in(app, state, pane, harness);
+        let (draft, typed, _) = person_in(app, state, pane, harness);
         if let Some(why) = cmux_core::handoff::person_busy(draft, typed) {
             return Err(("needs you", format!("{why}, or clear with --force")));
         }

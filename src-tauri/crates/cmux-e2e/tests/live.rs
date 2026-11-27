@@ -137,7 +137,9 @@ fn mirador_test_team_hands_off() {
 /// anywhere else, every box typed into would read as a draft, and messages
 /// to it would wait forever — so each case is checked here: an empty box
 /// idle, a draft, a draft with the cursor moved to its start (told by the
-/// placeholder being dim), an empty box while the agent works.
+/// placeholder being dim), and an empty box while the agent works — where
+/// Codex's message waits for the turn instead (#246), the turn finishing
+/// first.
 #[test]
 fn real_claude_shows_a_draft_by_its_cursor() {
     live!();
@@ -236,16 +238,28 @@ fn drafts_seen_in(name: &str, role: &str) {
     let prompts = prompts_with(&sb, "the sum of 60 and 39");
     assert!(prompts.iter().all(|p| !p.contains("paReply") && !p.contains("only.pa")), "sent with the draft: {prompts:?}");
 
-    // At work, the box empty: a message is not held for a draft.
+    // At work, the box empty: never taken for a draft. Codex's message
+    // waits for the turn to end (#246): typed into it, Codex took it as a
+    // steer and dropped its sleep. Claude Code's goes in at once, to be
+    // read at its next tool call.
     let sent = send("Run `sleep 15` in the shell, then reply with the sum of 5 and 6, digits only.");
     assert!(sent.get("queued").is_none(), "{sent}; {}", look());
     sb.wait_for_screen(&pane, "the agent at work on its sleep", AGENT, |s| working(s) && s.contains("sleep 15"));
     let sent = send("Reply with the sum of 50 and 38, digits only.");
-    assert!(sent.get("queued").is_none(), "an empty box at work read as a draft: {sent}; {}", look());
-    // Not checked again after it: whether the turn lasts through its sleep
-    // is the model's to decide, and Codex takes a message typed then into
-    // the turn at work, which may end it at once.
-    sb.wait_for_screen(&pane, "the last answer", AGENT, |s| answered(s, "88"));
+    if name == "codex" {
+        let why = sent["queued"]["why"].as_str().unwrap_or_default();
+        assert_eq!(why, "it is at work; it goes in once its turn ends", "{sent}; {}", look());
+        let id = sent["queued"]["id"].as_u64().unwrap();
+        // The turn finishes what it was asked, then the message is answered.
+        sb.wait_for_screen(&pane, "both answers, in turn", AGENT, |s| {
+            let line = |sum: &str| s.lines().position(|l| l.trim() == sum || l.trim().ends_with(&format!(" {sum}")));
+            answered(s, "88") && line("11").zip(line("88")).is_some_and(|(first, then)| first < then)
+        });
+        assert!(sb.call(Request::AgentQueued { message_id: id })["deliveredMs"].as_u64().is_some());
+    } else {
+        assert!(sent.get("queued").is_none(), "an empty box at work read as a draft: {sent}; {}", look());
+        sb.wait_for_screen(&pane, "the last answer", AGENT, |s| answered(s, "88"));
+    }
 }
 
 fn working(screen: &str) -> bool {

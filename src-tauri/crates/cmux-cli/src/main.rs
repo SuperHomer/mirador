@@ -514,7 +514,9 @@ enum AgentAction {
         // options, not more message.
         #[arg(required = true)]
         message: Vec<String>,
-        /// Answer a prompt the agent is waiting on anyway.
+        /// Type it now: answer a prompt the agent is waiting on anyway,
+        /// and type into the person's draft or a Codex agent's running
+        /// turn rather than queue it.
         #[arg(long)]
         force: bool,
         /// The card the message is for, written with `task add` (its id,

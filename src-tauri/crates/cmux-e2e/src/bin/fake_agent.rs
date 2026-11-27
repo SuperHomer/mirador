@@ -43,7 +43,9 @@
 //!
 //! As `codex` it echoes each message, and holds a rollout open as Codex
 //! does (`~/.codex/sessions/YYYY/MM/DD/rollout-….jsonl`), writing each
-//! message there as a turn with one `echo` command. `/new` starts a new
+//! message there as a turn with one `echo` command, which lasts
+//! `E2E_TURN_MS`: meanwhile it shows Codex's status line, `• Working (0s •
+//! esc to interrupt)`, over its input box. `/new` starts a new
 //! rollout in the same process, as Codex's does. With
 //! `E2E_CODEX_NO_ROLLOUT=1` it holds none, as no process table can show
 //! Mirador on Windows. Started with a `-c notify=[…]`, it runs that
@@ -520,10 +522,17 @@ fn main() {
                 rollout = open_rollout(sessions);
             } else {
                 turns += 1;
+                if kind == "codex" {
+                    // As Codex at work: its status line over its input
+                    // box, which stays up for a message to steer the turn.
+                    print!("• Working (0s • esc to interrupt)\r\n\r\n");
+                    input_box();
+                }
                 if let Some(file) = rollout.as_mut() {
                     rollout_turn(file, turns, &message, turn);
                 }
                 notify(&args, sessions, turns);
+                print!("\r\n");
             }
             println!("got: {message}");
             input_box();

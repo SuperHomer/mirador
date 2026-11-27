@@ -588,6 +588,84 @@ fn a_draft_with_the_cursor_at_its_start_is_a_draft() {
     assert_eq!(got, ["pa", "hello"]);
 }
 
+/// A message for Codex at work on a turn waits for the turn to end
+/// (#246): typed into it, Codex took it as a steer and dropped what it was
+/// doing. Codex is seen at work by its screen, its status line over its
+/// input box. Claude Code at work, by its hooks, takes it at once, as
+/// before: it reads it at its next tool call. `--force` still types at
+/// once into either.
+#[test]
+fn a_message_waits_for_codexs_turn_to_end() {
+    e2e!();
+    let mut sb = Sandbox::new("sendworking");
+    sb.set_env("E2E_TURN_MS", "4000");
+    sb.launch();
+    let first = sb.first_pane();
+    for harness in [cmux_protocol::Harness::Codex, cmux_protocol::Harness::Claude] {
+        let pane = sb.call(Request::AgentNew {
+            role: None,
+            harness: Some(harness),
+            title: None,
+            task: None,
+            target: None,
+            pane_id: Some(first.clone()),
+            host: None,
+            dir: None,
+            on: None,
+        })["paneId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        sb.wait_for_screen(&pane, "its input box", LONG, |s| s.lines().last().is_some_and(|l| l.starts_with('›') || l.starts_with('❯')));
+        let texts = || -> Vec<String> {
+            sb.events("message", &pane).iter().map(|m| m["text"].as_str().unwrap_or_default().to_string()).collect()
+        };
+        let at_work = || match harness {
+            cmux_protocol::Harness::Codex => sb.screen(&pane).is_some_and(|s| s.contains("esc to interrupt")),
+            _ => {
+                let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+                agents.iter().any(|a| a["paneId"] == pane.as_str() && a["status"] == "working")
+            }
+        };
+
+        // Idle: at once. Then at work on it.
+        let now = send(&sb, &first, &pane, "a long job").unwrap();
+        assert!(now.get("queued").is_none(), "{harness:?}: {now}");
+        sb.wait_for("the agent at work", LONG, || at_work().then_some(()));
+        let sent = send(&sb, &first, &pane, "after your job").unwrap();
+        if harness == cmux_protocol::Harness::Codex {
+            let why = sent["queued"]["why"].as_str().unwrap_or_default();
+            assert_eq!(why, "it is at work; it goes in once its turn ends", "{sent}");
+            assert!(!texts().iter().any(|t| t.contains("after your job")), "typed into Codex's turn");
+            let id = sent["queued"]["id"].as_u64().unwrap();
+            let got = sb.wait_for("the job, then the message", LONG, || Some(texts()).filter(|t| t.len() >= 2));
+            assert_eq!(got.len(), 2, "{got:?}");
+            assert!(got[1].ends_with("after your job"), "{got:?}");
+            // Typed once the turn was over, by the queue.
+            assert!(sb.call(Request::AgentQueued { message_id: id })["deliveredMs"].as_u64().is_some());
+        } else {
+            // Typed at once: the fake reads it once its turn is over.
+            assert!(sent.get("queued").is_none(), "Claude Code at work: {sent}");
+            sb.wait_for("the message", LONG, || texts().iter().any(|t| t.ends_with("after your job")).then_some(()));
+        }
+
+        // Forced, at work: typed now, as before.
+        sb.wait_for("the agent at work again", LONG, || at_work().then_some(()));
+        let forced = sb
+            .request(Request::AgentSend {
+                title: None,
+                to: pane.clone(),
+                message: "forced in".into(),
+                pane_id: Some(first.clone()),
+                force: true,
+                card: None,
+            })
+            .unwrap();
+        assert!(forced.get("queued").is_none(), "{harness:?}: {forced}");
+        sb.wait_for("the forced message", LONG, || texts().iter().any(|t| t.ends_with("forced in")).then_some(()));
+    }
+}
+
 /// `send --wait` on a queued message waits for it to go in, then for the
 /// turn it starts — not for the turn the person's own prompt starts
 /// first — and a wait that runs out first says it is still queued.

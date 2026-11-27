@@ -296,6 +296,26 @@ pub fn showing_in(screen: &str, harness: Option<cmux_protocol::Harness>) -> Show
     }
 }
 
+/// Whether `screen` shows a Codex agent at work on a turn, which a
+/// message typed now would steer (#246): Codex keeps its input box up
+/// while it works, and Enter there goes into the running turn. What says
+/// it is at work is its status line, the last one above the box: `•
+/// Working (2s • esc to interrupt)`, its first words changing with what it
+/// does — the parenthesis, which a bullet of its answer saying the same
+/// words lacks. Any other harness: no. Claude Code takes a message typed
+/// mid-turn at its next tool call.
+pub fn at_work_on_screen(screen: &str, harness: Option<cmux_protocol::Harness>) -> bool {
+    if harness != Some(cmux_protocol::Harness::Codex) {
+        return false;
+    }
+    let Some(at) = selection_line(screen) else { return false };
+    screen[..at]
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(|l| l.trim_start().starts_with('•') && l.contains("esc to interrupt)"))
+}
+
 /// Pi (1.3.0) has no selection glyph on its input box: the box is what is
 /// between its last two rules (lines of `─`, the upper one reading `── ⠹
 /// Working ──` while it works), with its footer — the directory, the
@@ -421,10 +441,12 @@ pub fn person_busy(draft: bool, typed_recently: bool) -> Option<&'static str> {
 }
 
 /// Why a message is queued for its pane rather than typed now, as `mira
-/// agent send` says it: the person is busy there ([`person_busy`]), or
-/// `ahead` messages are queued before it, which keeps their order. `None`
-/// types it now.
-pub fn queue_reason(draft: bool, typed_recently: bool, ahead: usize) -> Option<String> {
+/// agent send` says it: the person is busy there ([`person_busy`]), the
+/// agent is `at_work` on a turn, which the message would land in, or
+/// `ahead` messages are queued before it, which keeps their order. The
+/// person's reason is the one given when both hold: theirs is what the
+/// sender can do something about. `None` types it now.
+pub fn queue_reason(draft: bool, typed_recently: bool, at_work: bool, ahead: usize) -> Option<String> {
     let behind = match ahead {
         0 => String::new(),
         1 => "; 1 message is ahead of it".to_string(),
@@ -433,6 +455,7 @@ pub fn queue_reason(draft: bool, typed_recently: bool, ahead: usize) -> Option<S
     match person_busy(draft, typed_recently) {
         Some(why) if draft => Some(format!("{why}; it goes in once that is sent or cleared{behind}")),
         Some(why) => Some(format!("{why}; it goes in once they stop and its input box is empty{behind}")),
+        None if at_work => Some(format!("it is at work; it goes in once its turn ends{behind}")),
         None if ahead > 0 => Some(behind.trim_start_matches("; ").to_string()),
         None => None,
     }
@@ -1294,18 +1317,46 @@ ctrl+s sort · ctrl+n named · ctrl+d delete · ctrl+p path (off) · ctrl+r rena
 
     #[test]
     fn queues_behind_a_person_or_another_message() {
-        assert_eq!(queue_reason(false, false, 0), None);
+        assert_eq!(queue_reason(false, false, false, 0), None);
         assert_eq!(
-            queue_reason(true, true, 0).as_deref(),
+            queue_reason(true, true, true, 0).as_deref(),
             Some("the person has a draft in its pane; it goes in once that is sent or cleared")
         );
         assert_eq!(
-            queue_reason(false, true, 2).as_deref(),
+            queue_reason(false, true, true, 2).as_deref(),
             Some("the person is typing in its pane; it goes in once they stop and its input box is empty; 2 messages are ahead of it")
         );
-        assert_eq!(queue_reason(false, false, 1).as_deref(), Some("1 message is ahead of it"));
+        assert_eq!(queue_reason(false, false, false, 1).as_deref(), Some("1 message is ahead of it"));
+        // At work, no one in the way: its turn.
+        assert_eq!(queue_reason(false, false, true, 0).as_deref(), Some("it is at work; it goes in once its turn ends"));
+        assert_eq!(
+            queue_reason(false, false, true, 1).as_deref(),
+            Some("it is at work; it goes in once its turn ends; 1 message is ahead of it")
+        );
         assert_eq!(person_busy(false, false), None);
         assert_eq!(person_busy(false, true), Some("the person is typing in its pane"));
+    }
+
+    #[test]
+    fn sees_codex_at_work_by_its_status_line() {
+        use cmux_protocol::Harness::{Claude, Codex};
+        assert!(at_work_on_screen(CODEX_WORKING, Some(Codex)));
+        // Its turn over, or never begun: the box alone.
+        assert!(!at_work_on_screen(CODEX_AFTER_A_TURN, Some(Codex)));
+        assert!(!at_work_on_screen(CODEX_IDLE, Some(Codex)));
+        // At work with the person's text in its box, which reads the same.
+        let typed = CODEX_WORKING.replace("› Ask Codex to do anything", "› pause");
+        assert!(at_work_on_screen(&typed, Some(Codex)));
+        // The words quoted higher up, in what it said: not its status line.
+        let quoted = CODEX_IDLE.replace("• ok", "• Working (2s • esc to interrupt)\n\n• ok");
+        assert!(!at_work_on_screen(&quoted, Some(Codex)));
+        // An answer whose last bullet names the key: its turn is over.
+        let answer = CODEX_IDLE.replace("• ok", "• Press esc to interrupt it.");
+        assert!(!at_work_on_screen(&answer, Some(Codex)));
+        // Codex only: Claude Code's hooks say when it works.
+        assert!(!at_work_on_screen(CLAUDE_WORKING, Some(Claude)));
+        assert!(!at_work_on_screen(CODEX_WORKING, Some(Claude)));
+        assert!(!at_work_on_screen(CODEX_WORKING, None));
     }
 
     #[test]
