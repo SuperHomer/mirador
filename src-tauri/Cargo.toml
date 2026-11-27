@@ -38,6 +38,13 @@ tauri-plugin-updater = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
+# The native folder dialog (`pick_folder`), called from Rust. Not
+# tauri-plugin-dialog: every plugin's script runs in every webview, browser
+# panes included, and that one replaces `alert` and `confirm` with its own
+# commands, which the ACL refuses there — every page's `alert` showed
+# nothing and its `confirm` said yes. Its own features as the plugin had
+# them: GTK on Linux, as Tauri's windows are.
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
 notify = "8"
 # Already in the tree via tauri-plugin-updater, whose `rustls-tls` supplies
 # the TLS stack through feature unification — hence only `blocking` (release

@@ -66,6 +66,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "unwatch_markdown",
     "open_agent",
     "agent_roles",
+    "pick_folder",
     "open_agent_editor",
     "agent_editor_catalog",
     "agent_editor_used_by",

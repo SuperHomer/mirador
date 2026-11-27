@@ -2806,17 +2806,48 @@ pub(crate) fn mark_launched(entry: &mut cmux_core::state::PaneMeta, launch: Laun
 
 /// The roles and ways of working `pane_id`'s directory sees (the focused
 /// pane's when absent): its repository's `.mirador`, then the user's.
+/// With `cwd`, the ones that folder sees instead.
 #[tauri::command]
-pub fn agent_roles(state: State<'_, AppState>, pane_id: Option<String>) -> cmux_protocol::RoleCatalog {
-    let pane = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
-    let cwd = state
-        .meta
-        .lock()
-        .unwrap()
-        .get(&pane)
-        .and_then(|m| m.cwd.clone())
-        .or_else(cmux_core::config::default_cwd);
+pub fn agent_roles(state: State<'_, AppState>, pane_id: Option<String>, cwd: Option<String>) -> cmux_protocol::RoleCatalog {
+    let cwd = cwd.or_else(|| {
+        let pane = pane_id.unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+        state
+            .meta
+            .lock()
+            .unwrap()
+            .get(&pane)
+            .and_then(|m| m.cwd.clone())
+            .or_else(cmux_core::config::default_cwd)
+    });
     cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new))
+}
+
+/// A folder the person picks in the system's dialog, opened at `start`
+/// when given; `None` when they cancel. The dialog is started on the main
+/// thread, as tauri-plugin-dialog did: rfd does its AppKit work when the
+/// dialog is called, not when it is awaited. The main thread only starts
+/// it — a sheet on the window — and the answer comes back over a channel
+/// this command, on a thread of its own (`async`), waits on.
+#[tauri::command(async)]
+pub fn pick_folder(app: AppHandle, start: Option<String>) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let main = app.clone();
+    app.run_on_main_thread(move || {
+        let mut dialog = rfd::AsyncFileDialog::new();
+        if let Some(start) = start.filter(|s| std::path::Path::new(s).is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        if let Some(window) = main.get_webview_window("main") {
+            dialog = dialog.set_parent(&window);
+        }
+        let picked = dialog.pick_folder();
+        tauri::async_runtime::spawn(async move {
+            let folder = picked.await.map(|f| f.path().to_string_lossy().into_owned());
+            let _ = tx.send(folder);
+        });
+    })
+    .ok()?;
+    rx.recv().ok().flatten()
 }
 
 /// Shows the tab of `pane_id` (the focused pane when absent) as its wall's

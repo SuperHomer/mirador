@@ -579,6 +579,22 @@ fn a_page_in_a_pane_gets_no_command_of_the_app() {
     assert_all_refused(&sb, &answers, &first, &panes);
 }
 
+/// A page's own dialogs stay the browser's. Every plugin's script runs in
+/// every webview, browser panes included, and the dialog plugin's once
+/// replaced `alert` and `confirm` with its own commands, which the ACL
+/// refuses there: `alert` showed nothing, and `confirm` returned a
+/// Promise, which is truthy, so every page's "Delete?" said yes.
+#[test]
+fn a_page_in_a_pane_keeps_its_own_dialogs() {
+    e2e!();
+    let (sb, first) = launched("bdialog");
+    open(&sb, &first, &page("/"));
+    for dialog in ["alert", "confirm", "prompt"] {
+        let source = browser(&sb, &first, &["eval", &format!("window.{dialog}.toString()")]);
+        assert!(source.contains("[native code]"), "{dialog} replaced: {source}");
+    }
+}
+
 /// Nor can a pane be made one of the app's own pages, which Tauri trusts
 /// as local: not by `mira`, not by the page itself, not by a redirect.
 #[test]

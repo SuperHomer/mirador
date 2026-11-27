@@ -1040,13 +1040,15 @@ export const roleHint = (r: AgentRole): string =>
 
 /** Starts a team in a tab of its own; `task` goes to its lead. With
  *  `onRemote`, every member runs on the remote `paneId` is on (the Where
- *  step's choice; Rust reads the remote from that pane). */
+ *  step's choice; Rust reads the remote from that pane). With `folder`,
+ *  the team that folder on this computer sees, working there. */
 export const startTeam = (
   team: string,
   task: string | null,
   paneId: string | null,
   onRemote = false,
-) => invoke<string>("start_team", { team, task, paneId, onRemote });
+  folder: string | null = null,
+) => invoke<string>("start_team", { team, task, paneId, onRemote, folder });
 
 /** What a team tells its members, in estimated tokens, and the least that
  *  costs per turn (`cmux_protocol::TeamWeight`). A lower bound: the
@@ -1319,9 +1321,14 @@ export const teamRestart = (members: string[], paneId: string | null) =>
 export const agentFileDelete = (paneId: string, path: string) =>
   invoke<EditorCatalog>("agent_file_delete", { paneId, path });
 
-/** The roles `paneId`'s directory sees: its repository's, then yours. */
-export const agentRoles = (paneId: string | null) =>
-  invoke<RoleCatalog>("agent_roles", { paneId });
+/** The roles `paneId`'s directory sees: its repository's, then yours.
+ *  With `cwd`, the ones that folder sees instead. */
+export const agentRoles = (paneId: string | null, cwd: string | null = null) =>
+  invoke<RoleCatalog>("agent_roles", { paneId, cwd });
+/** A folder picked in the system's dialog, opened at `start`; null when
+ *  the person cancels. */
+export const pickFolder = (start: string | null) =>
+  invoke<string | null>("pick_folder", { start });
 /** `harness`: without a role, Claude Code (default) or Codex. */
 export const openAgent = (
   role: string | null,

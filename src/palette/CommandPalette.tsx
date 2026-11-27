@@ -5,6 +5,7 @@ import {
   Computer,
   MarkdownFiles,
   agentRoles,
+  pickFolder,
   listMarkdown,
   openMarkdown,
   listComputers,
@@ -122,6 +123,17 @@ function fuzzyScore(query: string, text: string): number | null {
   return qi === q.length ? score : null;
 }
 
+/** What a team is, for its row: its members, and where it comes from. */
+const teamHint = (t: AgentTeam) =>
+  t.problem
+    ? `can't start: ${t.problem}`
+    : [
+        t.members.map((m) => (m.count > 1 ? `${m.role}×${m.count}` : m.role)).join(", "),
+        t.source === "repo" ? "repo" : t.source === "builtin" ? "built-in" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
   const close = useUiStore((s) => s.closePalette);
@@ -137,6 +149,9 @@ export function CommandPalette() {
   const [hosts, setHosts] = useState<string[]>([]);
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [teams, setTeams] = useState<AgentTeam[]>([]);
+  // The folder "In another folder…" picked, and the teams it sees: the
+  // Start Team step again, for there. Forgotten when the palette closes.
+  const [folder, setFolder] = useState<{ path: string; teams: AgentTeam[] } | null>(null);
   const [computers, setComputers] = useState<Computer[]>([]);
   const [markdown, setMarkdown] = useState<MarkdownFiles>({ root: "", files: [] });
   const [recent, setRecent] = useState<string[]>([]);
@@ -232,28 +247,36 @@ export function CommandPalette() {
       crumb: "Start Team",
       placeholder: "Search teams…",
       empty: "No matching team",
-      entries: teams.map((t) => ({
-        id: `team:${t.name}`,
-        title: t.name,
-        hint: t.problem
-          ? `can't start: ${t.problem}`
-          : [
-              t.members
-                .map((m) => (m.count > 1 ? `${m.role}×${m.count}` : m.role))
-                .join(", "),
-              t.source === "repo"
-                ? "repo"
-                : t.source === "builtin"
-                  ? "built-in"
-                  : null,
-            ]
-              .filter(Boolean)
-              .join(" · "),
-        run: () => {
-          const pane = focusedPane();
-          startHere(pane, { team: t.name }, `Start team ${t.name}`, (remote) => startTeam(t.name, null, pane, remote !== null));
+      entries: [
+        ...teams.map((t) => ({
+          id: `team:${t.name}`,
+          title: t.name,
+          hint: teamHint(t),
+          run: () => {
+            const pane = focusedPane();
+            startHere(pane, { team: t.name }, `Start team ${t.name}`, (remote) => startTeam(t.name, null, pane, remote !== null));
+          },
+        })),
+        {
+          id: "team:folder",
+          title: "In another folder…",
+          hint: "pick a folder ›",
+          // The palette is closed by now, and the system's dialog has the
+          // focus: once a folder is picked, the palette opens again on
+          // that folder's teams. A cancel leaves everything as it was.
+          run: () => {
+            const start = activeTab(useWorkspaceStore.getState().snapshot)?.cwd ?? null;
+            void pickFolder(start)
+              .then(async (path) => {
+                if (!path) return;
+                const catalog = await agentRoles(null, path);
+                setFolder({ path, teams: catalog.teams });
+                useUiStore.getState().openPalette("team-folder");
+              })
+              .catch((e) => reportFailure("Start a team in another folder", e));
+          },
         },
-      })),
+      ],
     };
     // ~/.ssh/config aliases.
     const ssh: Step = {
@@ -315,7 +338,8 @@ export function CommandPalette() {
       })),
     };
     // A step with nothing in it is not offered; "Agents: New Agent…" always
-    // has plain Claude Code, and SSH to a Computer its "Add a computer…".
+    // has plain Claude Code, Start Team its "In another folder…", and SSH
+    // to a Computer its "Add a computer…".
     const steps = [agents, teamStep, ssh, computerStep, markdownStep].filter((st) => st.entries.length > 0);
     return { entries: [...base, ...custom, ...tabEntries], steps };
   }, [customCommands, roles, teams, hosts, computers, markdown, keybindings, tabs]);
@@ -342,7 +366,36 @@ export function CommandPalette() {
       },
     ],
   }, [pending]);
-  const step = stepId === "where" ? whereStep : (steps.find((st) => st.id === stepId) ?? null);
+  // The teams of the folder picked, each started there at once: the folder
+  // is on this computer, so there is no Where to ask. Never listed at the
+  // top: only "In another folder…" opens it.
+  const folderStep = useMemo<Step | null>(() => {
+    if (!folder) return null;
+    const { path } = folder;
+    const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+    return {
+      id: "team-folder",
+      title: "Start Team",
+      hint: "",
+      group: "agents",
+      crumb: `Start Team in ${name}`,
+      placeholder: "Search teams…",
+      empty: `No team in ${name}`,
+      entries: folder.teams.map((t) => ({
+        id: `team-folder:${t.name}`,
+        title: t.name,
+        hint: teamHint(t),
+        run: () =>
+          void startTeam(t.name, null, focusedPane(), false, path).catch((e) => reportFailure(`Start team ${t.name}`, e)),
+      })),
+    };
+  }, [folder]);
+  const step =
+    stepId === "where"
+      ? whereStep
+      : stepId === "team-folder"
+        ? folderStep
+        : (steps.find((st) => st.id === stepId) ?? null);
 
   const sections = useMemo<Section[]>(() => {
     const rank = <T,>(items: T[], text: (t: T) => string) =>
@@ -433,6 +486,7 @@ export function CommandPalette() {
       // Focus after the overlay renders.
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {
+      setFolder(null);
       // Hand focus back to the focused terminal.
       const textarea = document.querySelector<HTMLTextAreaElement>(
         ".pane.focused textarea",
@@ -462,6 +516,13 @@ export function CommandPalette() {
   const back = () => {
     // Back from Where is no choice at all: the start is dropped.
     if (step?.id === "where") return close();
+    // Back from a folder's teams is back to Start Team, here.
+    if (step?.id === "team-folder") {
+      setFolder(null);
+      setStepId("team");
+      setQuery("");
+      return;
+    }
     setStepId(null);
     setQuery("");
   };
@@ -474,7 +535,8 @@ export function CommandPalette() {
     // By the id it has inside its step, so a deep entry and the same
     // entry picked in its step are one recent command.
     // Where's rows are a choice for one start, not commands to run again.
-    if (step?.id !== "where") rememberRecent(row.entry.id.replace(/^deep:/, ""));
+    // Nor are a picked folder's: the folder is gone once the palette is.
+    if (step?.id !== "where" && step?.id !== "team-folder") rememberRecent(row.entry.id.replace(/^deep:/, ""));
     close();
     row.entry.run();
   };
