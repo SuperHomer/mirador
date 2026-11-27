@@ -291,6 +291,9 @@ pub struct WorkspaceSnapshot {
     /// Markdown panes and the file each one shows.
     #[serde(default)]
     pub markdown_panes: Vec<MarkdownPane>,
+    /// File tree panes and the directory each one lists.
+    #[serde(default)]
+    pub file_tree_panes: Vec<FileTreePane>,
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
@@ -331,6 +334,9 @@ pub struct DiffPane {
     pub repo: String,
     /// What is being diffed: "worktree", "staged", or a revspec.
     pub spec: String,
+    /// The one file it shows, relative to `repo`; every file when absent.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// Where an agent or a team started from a remote pane could run instead
@@ -1103,6 +1109,19 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// Opens a file tree pane on `dir`'s repository, or on `dir` outside
+    /// one; without `dir`, on the source pane's directory's. Split of the
+    /// source pane, or a tab, where one already on that root is shown
+    /// again. `dir` is absolute: the CLI resolves it against its own
+    /// directory.
+    FileTreeOpen {
+        #[serde(default)]
+        dir: Option<String>,
+        #[serde(default)]
+        tab: bool,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Lists the checkouts of the repository the calling pane sits in, so
     /// an agent can name one for `DiffOpen`.
     DiffWorktrees {
@@ -1127,6 +1146,10 @@ pub enum Request {
         /// calling pane's, by path or branch name.
         #[serde(default)]
         worktree: Option<String>,
+        /// The one file to show: absolute (the CLI resolves it against its
+        /// own directory) or relative to the repository's root.
+        #[serde(default)]
+        path: Option<String>,
     },
 }
 
@@ -2435,6 +2458,41 @@ pub struct MarkdownPane {
 pub struct MarkdownFiles {
     pub root: String,
     pub files: Vec<String>,
+}
+
+/// A pane listing the files under `root`, an absolute directory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTreePane {
+    pub pane_id: String,
+    pub root: String,
+}
+
+/// The files under a directory: a repository's root, or the directory
+/// itself outside one. `truncated` when there were more than a tree shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTree {
+    pub root: String,
+    pub repo: bool,
+    pub nodes: Vec<FileTreeNode>,
+    pub truncated: bool,
+}
+
+/// A file or directory in a `FileTree`. `path` is relative to the tree's
+/// root and `/`-separated on every platform. `status` is git's, in the
+/// words of `DiffFile::status` ("modified", "added", "deleted", "renamed",
+/// "copied", "untracked"); a directory is "modified" when anything under
+/// it changed, and "untracked" when it is a repository of its own that
+/// git does not list into.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTreeNode {
+    pub name: String,
+    pub path: String,
+    pub dir: bool,
+    pub status: Option<String>,
+    pub children: Vec<FileTreeNode>,
 }
 
 /// One inline run inside a release note's text. Carries text, never markup:

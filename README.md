@@ -25,7 +25,8 @@ downloads, the feature tour and the keybinding reference.
   interruptible pane; `--wait` returns clean output + exit code to the caller
 - **Diff panes** (`mira diff`): GitHub-style review of uncommitted work,
   a commit, or a branch — file tree, hunks, and your terminal's own theme.
-  A header picker switches between the repository's git worktrees
+  A header picker switches between the repository's git worktrees;
+  `mira diff --path <file>` shows one file's changes alone
 - **Agent wall** (`mira agent wall`, `mod+shift+A`): a tab's splits swapped
   for its agents' live terminals in one grid — Claude Code, Codex,
   OpenCode, Pi, Gemini CLI, Amp, Aider and more, found by their process —
@@ -86,6 +87,12 @@ downloads, the feature tour and the keybinding reference.
   terminals, following the file as it changes on disk — each save shows,
   where you had scrolled to. The palette lists the repository's markdown
   files, `.gitignore`d ones left out
+- **File tree panes** (`mira tree [dir]`, *Pane: Open File Tree*): the
+  files of a pane's repository from its root — or of its directory outside
+  one — each marked with git's status, a dot on a folder with a change
+  inside, `.gitignore`d ones left out. Click a file to open it in your
+  `externalEditor`; a changed file's *diff* button opens the diff of that
+  file alone
 - **Account usage**, always in the sidebar: a row per Claude Code or
   Codex account you use, its most used limit filling up; open one for its
   plan, reset times and tokens over 5 hours and 7 days, with a cost for

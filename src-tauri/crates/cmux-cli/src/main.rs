@@ -193,8 +193,12 @@ enum Command {
         /// ("feature/login") or path. Defaults to the calling pane's.
         #[arg(long, value_name = "BRANCH|PATH")]
         worktree: Option<String>,
+        /// Show only this file's changes. A deleted file has them too, so
+        /// it need not exist.
+        #[arg(long, value_name = "FILE")]
+        path: Option<String>,
         /// List this repository's worktrees instead of opening a pane.
-        #[arg(long, conflicts_with_all = ["spec", "staged", "tab", "worktree"])]
+        #[arg(long, conflicts_with_all = ["spec", "staged", "tab", "worktree", "path"])]
         list_worktrees: bool,
     },
     /// Open the commit graph for this pane's repository.
@@ -209,6 +213,17 @@ enum Command {
         file: String,
         /// Open in a new tab instead of a split: the file's pane, if one is
         /// open, else a new tab.
+        #[arg(long)]
+        tab: bool,
+    },
+    /// Open a file tree of this pane's repository, with git's status on
+    /// each file: of its directory outside one.
+    Tree {
+        /// Another directory to show instead (its repository's root, if in
+        /// one); a relative path is taken from this directory.
+        dir: Option<String>,
+        /// Open in a new tab instead of a split: the tree's pane, if one is
+        /// open on that root, else a new tab.
         #[arg(long)]
         tab: bool,
     },
@@ -1048,6 +1063,7 @@ fn run(cli: Cli) -> Result<(), String> {
             staged,
             tab,
             worktree,
+            path,
             list_worktrees,
         } => {
             if staged && spec.is_some() {
@@ -1080,6 +1096,12 @@ fn run(cli: Cli) -> Result<(), String> {
                     target: tab.then(|| "tab".to_string()),
                     pane_id: Some(pane_id),
                     worktree,
+                    // Absolute, as for `mira md`: the app runs elsewhere
+                    // than this shell. It says whether it is in the repository.
+                    path: path
+                        .map(|p| std::path::absolute(&p).map_err(|e| format!("{p}: {e}")))
+                        .transpose()?
+                        .map(|p| p.to_string_lossy().into_owned()),
                 }
             }
         }
@@ -1110,6 +1132,21 @@ fn run(cli: Cli) -> Result<(), String> {
                 target: tab.then(|| "tab".to_string()),
                 pane_id: own_pane(),
             }
+        }
+        Command::Tree { dir, tab } => {
+            // As for `mira md`: the app runs elsewhere than this shell.
+            let dir = match dir {
+                Some(dir) => {
+                    let path = std::path::absolute(&dir).map_err(|e| format!("{dir}: {e}"))?;
+                    if !path.is_dir() {
+                        return Err(format!("no directory {dir}"));
+                    }
+                    Some(path.to_string_lossy().into_owned())
+                }
+                // The app takes the calling pane's.
+                None => None,
+            };
+            Request::FileTreeOpen { dir, tab, pane_id: own_pane() }
         }
         Command::Settings { tab, split } => Request::Settings {
             pane_id: own_pane(),

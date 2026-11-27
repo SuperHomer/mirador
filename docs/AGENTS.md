@@ -299,11 +299,12 @@ mira diff main...HEAD          # everything on this branch
 mira diff --tab                # new tab instead of a split
 mira diff --list-worktrees     # this repository's checkouts
 mira diff --worktree feature/x # review another checkout than this pane's
+mira diff --path src/main.rs   # only this file's changes
 ```
 
 A diff pane is the review surface for a turn's work: file tree on the
 left, hunks on the right, and the repository taken from the pane you ran
-it in — so no path argument. Untracked files are included in the
+it in — so no path argument for the repository. Untracked files are included in the
 uncommitted view, because a file git has never seen is still work you
 just did. Working-tree diffs re-run whenever the pane regains focus, so
 the view never lies about the current state.
@@ -314,6 +315,14 @@ name or a path and reviews that checkout instead. The diff pane also has a
 picker in its header, so a human can move between checkouts without
 reopening anything. A bare or stale (prunable) worktree is refused, since
 neither has files to diff.
+
+`--path` limits the pane to one file, with any spec: a path relative to
+where `mira` ran, or absolute, and inside the repository — the app refuses
+anything else. The file need not exist, since a deleted file has a diff
+too. Its name is taken literally, never as a pattern. A file tree pane's
+*diff* button on a changed row opens the same thing. A file renamed in
+the change shows as added: the path names the new file only, so git has
+no old one to pair it with.
 
 Because the repository comes from the calling pane, `mira diff` refuses to
 run outside one: from another terminal it has no way to tell which repo you
@@ -352,6 +361,28 @@ terminal, and outside a pane it splits the focused one.
 `mira read-screen --pane <id>` on a markdown pane prints the text it
 shows, all of it (`--lines` does not apply), so you can check what the
 human sees.
+
+```bash
+mira tree                      # this pane's repository's files, with git's status, beside your pane
+mira tree ../other --tab       # another directory's, in a tab: its tree's pane, if one is open
+```
+
+A file tree pane lists a repository's files — what git tracks or would,
+never what `.gitignore` leaves out — each marked with git's status: M
+modified, A added, D deleted, R renamed, U untracked, and a dot on a
+directory with a change under it. Outside a repository it lists the
+directory, hidden entries left out. Without a directory it takes the
+calling pane's; a directory inside a repository shows the whole
+repository, from its root. A relative path is taken from the directory
+`mira` runs in. It lists again whenever the pane regains focus. Clicking
+a file opens it in your editor (`externalEditor`); a changed file's
+*diff* opens the diff of that file alone, as `mira diff --path` does.
+With `--tab`, a pane already on that root is focused and its pane id
+printed; without it, a new split always opens. A remote pane's directory
+is not on this computer, so a tree from one needs a directory.
+`mira read-screen --pane <id>` on a file tree pane prints the rows it
+shows — each name, then its status letter — with folded directories'
+files left out, as on screen.
 
 ```bash
 mira settings                  # mirador.json's settings, where editorOpensIn says

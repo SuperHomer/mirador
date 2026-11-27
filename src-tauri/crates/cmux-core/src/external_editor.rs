@@ -1,5 +1,6 @@
-//! Opening a pane's directory in the person's own editor: mirador.json's
-//! `externalEditor`, VS Code's `code` unless set.
+//! Opening a pane's directory, or a file from a file tree pane, in the
+//! person's own editor: mirador.json's `externalEditor`, VS Code's `code`
+//! unless set.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -8,15 +9,16 @@ use std::process::Stdio;
 /// The editor when `externalEditor` is unset or blank.
 pub const DEFAULT: &str = "code";
 
-/// The program and its arguments for opening `dir`: `editor` split plainly
-/// on whitespace ("subl -n" is `subl` with `-n`), the directory last and
-/// whole, spaces and all. A program whose path has a space needs a
-/// wrapper script: there is no quoting to keep it one word.
-pub fn command_line(editor: &str, dir: &Path) -> Result<(String, Vec<OsString>), String> {
+/// The program and its arguments for opening `path`, a directory or a
+/// file: `editor` split plainly on whitespace ("subl -n" is `subl` with
+/// `-n`), the path last and whole, spaces and all. A program whose path
+/// has a space needs a wrapper script: there is no quoting to keep it one
+/// word.
+pub fn command_line(editor: &str, path: &Path) -> Result<(String, Vec<OsString>), String> {
     let mut words = editor.split_whitespace();
     let program = words.next().ok_or("externalEditor is empty: no editor to open")?;
     let mut args: Vec<OsString> = words.map(OsString::from).collect();
-    args.push(dir.as_os_str().to_owned());
+    args.push(path.as_os_str().to_owned());
     Ok((program.to_string(), args))
 }
 
@@ -39,25 +41,36 @@ pub fn find_on_path(program: &str, path: &OsStr, exts: &[&str]) -> Option<PathBu
     })
 }
 
+/// Where the editor runs for `target`: the directory itself, or a file's.
+/// Anything else is refused before an editor is looked for.
+fn working_dir(target: &Path) -> Result<&Path, String> {
+    if target.is_dir() {
+        Ok(target)
+    } else if target.is_file() {
+        target.parent().ok_or_else(|| format!("{} has no directory", target.display()))
+    } else {
+        Err(format!("{} is not here", target.display()))
+    }
+}
+
 /// What a program named without an extension may be on disk.
 #[cfg(windows)]
 const EXTS: &[&str] = &[".exe", ".cmd", ".bat", ".com"];
 #[cfg(not(windows))]
 const EXTS: &[&str] = &[""];
 
-/// Starts `editor` on `dir` and returns once it has started, not once it
-/// exits.
+/// Starts `editor` on `target`, a directory or a file, and returns once it
+/// has started, not once it exits. It runs in the directory, or in the
+/// file's.
 ///
 /// It is looked up on the user's PATH: launched from Finder, the app's own
 /// is launchd's, where neither `code` nor anything installed by Homebrew
 /// is, so the interactive shell's is used, as command panes use it. On
 /// Windows the lookup also finds `code.cmd`, which `Command` runs through
 /// `cmd.exe` itself, escaping the arguments, when given the whole path.
-pub fn open(editor: &str, dir: &Path) -> Result<(), String> {
-    if !dir.is_dir() {
-        return Err(format!("{} is not a directory here", dir.display()));
-    }
-    let (program, args) = command_line(editor, dir)?;
+pub fn open(editor: &str, target: &Path) -> Result<(), String> {
+    let dir = working_dir(target)?;
+    let (program, args) = command_line(editor, target)?;
     #[cfg(unix)]
     let path = crate::pty::shell::interactive_path().map(OsString::from);
     #[cfg(not(unix))]
@@ -130,9 +143,22 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_that_is_not_there_is_refused_before_anything_starts() {
+    fn a_path_that_is_not_there_is_refused_before_anything_starts() {
         let gone = std::env::temp_dir().join(format!("mira-editor-gone-{}", std::process::id()));
         let err = open("code", &gone).unwrap_err();
-        assert!(err.contains("not a directory"), "{err}");
+        assert!(err.contains("is not here"), "{err}");
+    }
+
+    #[test]
+    fn a_file_runs_the_editor_in_its_directory() {
+        let dir = std::env::temp_dir().join(format!("mira-editor-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("notes one.md");
+        std::fs::write(&file, "x").unwrap();
+        assert_eq!(working_dir(&file).unwrap(), dir);
+        assert_eq!(working_dir(&dir).unwrap(), dir);
+        let (_, args) = command_line("code", &file).unwrap();
+        assert_eq!(args, vec![file.into_os_string()]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -28,6 +28,8 @@ interface Props {
   paneId: string;
   repo: string;
   spec: string;
+  /** The one file it shows, relative to `repo`, or null for every file. */
+  path?: string | null;
   focused: boolean;
   /** Under its tab's wall, which draws it in a tile of its own: it loads
    *  nothing until the wall goes off, and then loads afresh. */
@@ -77,7 +79,7 @@ const STATUS_GLYPH: Record<string, string> = {
  * browser pane this is ordinary DOM in the host webview, so the keymap,
  * focus ring and theme all apply without special handling.
  */
-export function DiffPane({ paneId, repo, spec, focused, walled = false }: Props) {
+export function DiffPane({ paneId, repo, spec, path = null, focused, walled = false }: Props) {
   const [result, setResult] = useState<DiffResult | null>(null);
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +123,7 @@ export function DiffPane({ paneId, repo, spec, focused, walled = false }: Props)
     };
   }, [paneId]);
 
-  useEffect(() => (walled ? undefined : refresh()), [refresh, spec, repo, walled]);
+  useEffect(() => (walled ? undefined : refresh()), [refresh, spec, repo, path, walled]);
 
   // A working-tree diff goes stale the moment anything writes a file, and
   // the usual writer is the agent in the pane next door. Coming back to
@@ -204,6 +206,11 @@ export function DiffPane({ paneId, repo, spec, focused, walled = false }: Props)
         <span className="diff-label" title={repo}>
           {result?.label ?? spec}
         </span>
+        {path && (
+          <span className="diff-path" title={path}>
+            {path}
+          </span>
+        )}
         <span className="diff-totals">
           {totals.files} {totals.files === 1 ? "file" : "files"}
           <span className="diff-add-text"> +{totals.additions}</span>
@@ -517,7 +524,7 @@ const FileSection = memo(function FileSection({
  * pane matches the theme instead of importing GitHub's green and red. Not
  * the palette's bright green: Solarized-style palettes make it a grey.
  */
-function diffTheme(colors?: ResolvedColors): React.CSSProperties {
+export function diffTheme(colors?: ResolvedColors): React.CSSProperties {
   const add = colors?.ui.statusIdle ?? "#3fb950";
   const del = colors?.ui.danger ?? "#f85149";
   return {

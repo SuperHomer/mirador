@@ -10,6 +10,7 @@ import {
   SplitDir,
   GraphPaneInfo,
   MarkdownPaneInfo,
+  FileTreePaneInfo,
   AgentEditorPaneInfo,
   SettingsPaneInfo,
   TabSnapshot,
@@ -33,6 +34,7 @@ import { DiffPane } from "../diff/DiffPane";
 import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
 import { MarkdownPane } from "../markdown/MarkdownPane";
+import { FileTreePane } from "../filetree/FileTreePane";
 import { AgentEditor } from "../agents/AgentEditor";
 import { SettingsPane } from "../settings/SettingsPane";
 import { UsagePane } from "../usage/UsagePane";
@@ -108,6 +110,7 @@ export function SplitLayer({
   whatsNewPanes,
   graphPanes,
   markdownPanes,
+  fileTreePanes,
   agentEditorPanes,
   settingsPanes,
   usagePanes,
@@ -129,6 +132,7 @@ export function SplitLayer({
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   markdownPanes: MarkdownPaneInfo[];
+  fileTreePanes: FileTreePaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
@@ -278,6 +282,7 @@ export function SplitLayer({
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
         const markdown = markdownPanes.find((m) => m.paneId === p.paneId);
+        const fileTree = fileTreePanes.find((t) => t.paneId === p.paneId);
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
         const settings = settingsPanes.find((s) => s.paneId === p.paneId);
         const usage = usagePanes.some((u) => u.paneId === p.paneId);
@@ -357,6 +362,13 @@ export function SplitLayer({
                 />
               ) : markdown ? (
                 <MarkdownPane paneId={p.paneId} path={markdown.path} focused={focused} />
+              ) : fileTree ? (
+                <FileTreePane
+                  paneId={p.paneId}
+                  root={fileTree.root}
+                  focused={focused && !walled}
+                  walled={walled}
+                />
               ) : news ? (
                 <WhatsNewPane
                   paneId={p.paneId}
@@ -369,6 +381,7 @@ export function SplitLayer({
                   paneId={p.paneId}
                   repo={diff.repo}
                   spec={diff.spec}
+                  path={diff.path ?? null}
                   focused={focused && !walled}
                   walled={walled}
                 />

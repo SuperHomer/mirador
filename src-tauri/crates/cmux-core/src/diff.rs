@@ -24,15 +24,18 @@ pub const WORKTREE: &str = "worktree";
 /// The index against HEAD.
 pub const STAGED: &str = "staged";
 
-/// Diff of `spec` in `repo`.
-pub fn load(repo: &Path, spec: &str) -> Result<DiffResult, String> {
-    let text = run_git(repo, &git_args(spec))?;
+/// Diff of `spec` in `repo`, of the one file `path` (relative to `repo`,
+/// `/`-separated) when given.
+pub fn load(repo: &Path, spec: &str, path: Option<&str>) -> Result<DiffResult, String> {
+    let mut args = git_args(spec);
+    args.extend(pathspec(path));
+    let text = run_git(repo, &args)?;
     let mut files = parse(&text);
     // `git diff HEAD` cannot see a file git has never been told about, and
     // a new file is most of what an agent's turn produces — so the
     // worktree view synthesizes their diffs rather than hiding the work.
     if spec == WORKTREE {
-        files.extend(untracked(repo));
+        files.extend(untracked(repo, path));
     }
     Ok(DiffResult {
         repo: repo.to_string_lossy().to_string(),
@@ -79,6 +82,12 @@ fn git_args(spec: &str) -> Vec<String> {
     args.extend(common);
     args.extend(tail);
     args
+}
+
+/// `path` as a pathspec, after the `--` that ends the revisions. Literal,
+/// so a name with `*`, `?` or a leading `:` is that file and no pattern.
+fn pathspec(path: Option<&str>) -> Vec<String> {
+    path.map(|p| vec!["--".to_string(), format!(":(literal){p}")]).unwrap_or_default()
 }
 
 fn label(repo: &Path, spec: &str) -> String {
@@ -362,11 +371,10 @@ fn hunk_header(line: &str) -> Option<(u32, u32, String)> {
 }
 
 /// Files git has never been told about, as synthetic all-additions diffs.
-fn untracked(repo: &Path) -> Vec<DiffFile> {
-    let Ok(listing) = run_git(
-        repo,
-        &["ls-files", "--others", "--exclude-standard", "-z"].map(String::from),
-    ) else {
+fn untracked(repo: &Path, path: Option<&str>) -> Vec<DiffFile> {
+    let mut args = ["ls-files", "--others", "--exclude-standard", "-z"].map(String::from).to_vec();
+    args.extend(pathspec(path));
+    let Ok(listing) = run_git(repo, &args) else {
         return Vec::new();
     };
     let mut files = Vec::new();
@@ -621,7 +629,7 @@ diff --git a/a.txt b/a.txt
         std::fs::write(dir.join("src/keep.txt"), "one\nTWO\nthree\n").unwrap();
         std::fs::write(dir.join("src/fresh.txt"), "brand new\n").unwrap();
 
-        let result = load(&dir, WORKTREE).unwrap();
+        let result = load(&dir, WORKTREE, None).unwrap();
         assert_eq!(result.label, "uncommitted changes");
         let by_path = |p: &str| {
             result
@@ -638,13 +646,46 @@ diff --git a/a.txt b/a.txt
         assert_eq!(fresh.hunks[0].lines[0].content, "brand new");
 
         // Staged sees nothing until something is added.
-        assert!(load(&dir, STAGED).unwrap().files.is_empty());
+        assert!(load(&dir, STAGED, None).unwrap().files.is_empty());
 
         // A commit spec labels itself with its subject.
-        let head = load(&dir, "HEAD").unwrap();
+        let head = load(&dir, "HEAD", None).unwrap();
         assert!(head.label.ends_with("first commit"), "label: {}", head.label);
         assert_eq!(head.files.len(), 1);
         assert_eq!(head.files[0].status, "added");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One file's diff: the others changed and untracked are left out,
+    /// whichever kind the file is, and its name is no pattern.
+    #[test]
+    fn a_path_limits_the_diff_to_that_file() {
+        let dir = new_repo("path");
+        for f in ["a.txt", "b.txt", "star[ab].txt"] {
+            std::fs::write(dir.join(f), "one\n").unwrap();
+        }
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "first"]);
+        for f in ["a.txt", "b.txt", "star[ab].txt"] {
+            std::fs::write(dir.join(f), "two\n").unwrap();
+        }
+        std::fs::create_dir_all(dir.join("new dir")).unwrap();
+        std::fs::write(dir.join("new dir/fresh.txt"), "brand new\n").unwrap();
+        std::fs::write(dir.join("other.txt"), "also new\n").unwrap();
+
+        let paths = |path: &str, spec: &str| -> Vec<(String, String)> {
+            load(&dir, spec, Some(path)).unwrap().files.into_iter().map(|f| (f.path, f.status)).collect()
+        };
+        assert_eq!(paths("a.txt", WORKTREE), [("a.txt".to_string(), "modified".to_string())]);
+        assert_eq!(paths("new dir/fresh.txt", WORKTREE), [("new dir/fresh.txt".to_string(), "untracked".to_string())]);
+        // As a glob, `star[ab].txt` would be `stara.txt` too. Not `*`:
+        // Windows refuses it in a file name, and `[ ]` is as much a glob.
+        std::fs::write(dir.join("stara.txt"), "x\n").unwrap();
+        assert_eq!(paths("star[ab].txt", WORKTREE), [("star[ab].txt".to_string(), "modified".to_string())]);
+        assert!(paths("a.txt", STAGED).is_empty());
+        // The whole diff is still everything.
+        assert_eq!(load(&dir, WORKTREE, None).unwrap().files.len(), 6);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

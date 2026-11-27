@@ -60,8 +60,16 @@ pub fn tool_kind(meta: Option<&PaneMeta>) -> Option<ToolKind> {
     let Some(m) = meta else {
         return Some(ToolKind::Terminal);
     };
-    // A markdown pane is not one the wall can draw yet: it has no tile.
-    if m.agent_editor || m.settings || m.usage || m.computers || m.whats_new.is_some() || m.markdown_path.is_some() {
+    // Markdown and file tree panes are not ones the wall can draw yet:
+    // they have no tile.
+    if m.agent_editor
+        || m.settings
+        || m.usage
+        || m.computers
+        || m.whats_new.is_some()
+        || m.markdown_path.is_some()
+        || m.tree_root.is_some()
+    {
         None
     } else if m.browser_url.is_some() {
         Some(ToolKind::Browser)
@@ -244,8 +252,9 @@ mod tests {
             ("usage".to_string(), PaneMeta { usage: true, ..Default::default() }),
             ("computers".to_string(), PaneMeta { computers: true, ..Default::default() }),
             ("md".to_string(), PaneMeta { markdown_path: Some("/r/README.md".into()), ..Default::default() }),
+            ("files".to_string(), PaneMeta { tree_root: Some("/r".into()), ..Default::default() }),
         ]);
-        let panes = ids(&["editor", "shell", "settings", "news", "usage", "computers", "md"]);
+        let panes = ids(&["editor", "shell", "settings", "news", "usage", "computers", "md", "files"]);
         assert_eq!(kinds(&tools(&panes, &meta)), [("shell", ToolKind::Terminal)]);
     }
 
