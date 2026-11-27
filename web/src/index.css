@@ -454,3 +454,11 @@ button { font-family: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .cursor { animation: none; }
 }
+
+/* The FAQ's questions: the browser's disclosure triangle replaced by a
+   chevron that turns when the answer opens. */
+.faq-item summary { color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after { content: "›"; color: var(--muted); font-size: 20px; line-height: 1; transition: transform .15s; }
+.faq-item[open] summary::after { transform: rotate(90deg); }
+.faq-item summary:hover { color: var(--accent); }

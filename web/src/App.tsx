@@ -10,6 +10,7 @@ import GraphShowcase from "./components/GraphShowcase";
 import PersistShowcase from "./components/PersistShowcase";
 import CliShowcase from "./components/CliShowcase";
 import Install from "./components/Install";
+import Faq from "./components/Faq";
 import Keybindings from "./components/Keybindings";
 import Contribute from "./components/Contribute";
 import Footer from "./components/Footer";
@@ -30,6 +31,7 @@ export default function App() {
       <PersistShowcase />
       <CliShowcase />
       <Install />
+      <Faq />
       {SHOW_SHORTCUTS && <Keybindings />}
       <Contribute />
       <Footer />
