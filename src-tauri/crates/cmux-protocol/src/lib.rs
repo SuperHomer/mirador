@@ -734,6 +734,14 @@ pub enum Request {
         #[serde(default)]
         hours: Option<u64>,
     },
+    /// What is worth doing next, across every tab: cards waiting on a
+    /// person, agents whose latest turn had failures (if it ended in the
+    /// last `hours`, 24 when absent, or is still going), cards agents
+    /// wrote, and cards no one has been sent.
+    Next {
+        #[serde(default)]
+        hours: Option<u64>,
+    },
     /// Writes a card for the agent `to` (as `AgentSend` finds it), on its
     /// tab's board, or for nobody yet, on `pane_id`'s tab's. Answers its id.
     TaskAdd {
@@ -1873,6 +1881,34 @@ pub struct TaskRecap {
     pub done: Vec<TaskCard>,
     /// Cards in Needs you, newest first.
     pub waiting: Vec<TaskCard>,
+}
+
+/// Why `mira next` suggests a card: what the person can do about it, in
+/// the order it is worth doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NextKind {
+    /// An agent is stopped on a question; nothing moves until it is answered.
+    Answer,
+    /// An agent's latest turn had failed actions, which it may not have
+    /// noticed or may have stopped on.
+    Fix,
+    /// An agent wrote this card (`task add`) for work it found and did not
+    /// do: someone has to decide whether it gets done.
+    FollowUp,
+    /// A card the person wrote that no agent has been sent yet.
+    Send,
+}
+
+/// One suggestion of `mira next`: a card and why it is worth a look.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextStep {
+    pub kind: NextKind,
+    pub card: TaskCard,
+    /// For a Fix: the failed actions in the agent's latest turn; else 0.
+    #[serde(default)]
+    pub failing: u32,
 }
 
 /// Where a role or a way of working was defined. A repository's wins over

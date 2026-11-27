@@ -390,3 +390,58 @@ fn a_recap_lists_what_a_team_finished_under_its_name() {
     let (code, _, err) = sb.mira(Some(&shell), &["recap", "--hours", "0"]);
     assert!(code != 0 && err.contains("at least 1"), "{err}");
 }
+
+#[test]
+fn next_puts_an_agent_waiting_on_you_before_a_card_to_send() {
+    e2e!();
+    let mut sb = Sandbox::new("next");
+    sb.set_env("E2E_TURN_MS", "2000");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(
+        ".mirador/teams/squad.md",
+        "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n---\nShip small.\n",
+    );
+    sb.launch();
+    let shell = sb.first_pane();
+    let before = mira(&sb, &shell, &["next"]);
+    assert!(before.contains("nothing to do next"), "{before}");
+    let (code, _, err) = sb.mira(Some(&shell), &["next", "--hours", "0"]);
+    assert!(code != 0 && err.contains("at least 1"), "{err}");
+
+    // Written from the shell, by you, for nobody yet: a card to send.
+    mira(&sb, &shell, &["task", "add", "Write the docs"]);
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
+    let planner = pane_of(&sb, "planner");
+    let reviewer = pane_of(&sb, "reviewer");
+    sb.wait_for("the reviewer's session", LONG, || sb.events("hooked", &reviewer).into_iter().next());
+    mira(&sb, &planner, &["agent", "send", "reviewer", "!ask may I run the tests"]);
+    sb.wait_for("the reviewer to need you", LONG, || {
+        let board = mira(&sb, &planner, &["task", "list"]);
+        (column_of(&board, "!ask may I run the tests").as_deref() == Some("Needs you")).then_some(())
+    });
+
+    let tests = mira(&sb, &shell, &["task", "add", "--to", "squad/planner", "Write the tests"]).trim().to_string();
+
+    // From the shell's tab, not the team's: what is next is in every tab.
+    let next = mira(&sb, &shell, &["next"]);
+    let lines: Vec<&str> = next.lines().collect();
+    let answer = lines.iter().position(|l| l.starts_with("answer") && l.ends_with("!ask may I run the tests"));
+    let send = lines.iter().position(|l| l.starts_with("send") && l.ends_with("Write the docs"));
+    let (Some(answer), Some(send)) = (answer, send) else { panic!("{next}") };
+    assert!(answer < send, "an agent waiting on you comes first: {next}");
+    assert!(lines[answer].contains("squad/reviewer"), "{next}");
+    assert_eq!(lines[answer + 1].trim(), format!("mira focus {reviewer}"), "{next}");
+    assert_eq!(lines[send + 1].trim(), "mira task list --all", "{next}");
+
+    // A hint is a command that works as printed, from another tab.
+    let planned = lines.iter().position(|l| l.starts_with("send") && l.ends_with("Write the tests"));
+    let hint = lines[planned.unwrap_or_else(|| panic!("{next}")) + 1].trim();
+    assert_eq!(hint, format!("mira agent send {planner} --card {tests} \"<message>\""), "{next}");
+    let args: Vec<&str> = hint.split(' ').skip(1).collect();
+    let [rest @ .., "\"<message>\""] = args.as_slice() else { panic!("{hint}") };
+    mira(&sb, &shell, &[rest, &["Write the tests for next"]].concat());
+    let history = mira(&sb, &shell, &["agent", "history", "--card", &tests]);
+    assert!(history.contains("Write the tests for next"), "the send is logged on that card: {history}");
+}

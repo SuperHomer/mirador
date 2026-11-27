@@ -17,7 +17,10 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentStatus, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskRecap, TaskSource, TurnEnd};
+use cmux_protocol::{
+    AgentStatus, NextKind, NextStep, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskRecap, TaskSource,
+    TurnEnd,
+};
 
 use crate::session::{atomic_write, data_dir};
 
@@ -459,6 +462,58 @@ pub fn recap(events: &[TaskEvent], since_ms: u64) -> Vec<TaskRecap> {
         }
     }
     groups
+}
+
+/// What is worth doing next (`mira next`), most pressing first: agents
+/// waiting on an answer, then turns that went wrong, then work agents
+/// found, then cards nobody has been sent. `failing(pane)` is the failed
+/// actions in that agent's latest turn; it is asked once per pane.
+pub fn next(events: &[TaskEvent], since_ms: u64, failing: impl Fn(&str) -> u32) -> Vec<NextStep> {
+    let cards = cards(events);
+    let step = |kind, card: &TaskCard, failing| NextStep { kind, card: card.clone(), failing };
+    let oldest_first = |column: TaskColumn| {
+        let mut picked: Vec<&TaskCard> = cards.iter().filter(|c| c.column == column).collect();
+        picked.sort_by_key(|c| c.updated_ms);
+        picked
+    };
+
+    let mut steps: Vec<NextStep> =
+        oldest_first(TaskColumn::NeedsYou).into_iter().map(|c| step(NextKind::Answer, c, 0)).collect();
+
+    // The failures are those of the agent's latest turn, so they can only
+    // be blamed on the card that turn was about: its latest one past To do.
+    // One that is waiting on you is already there to answer.
+    let mut latest: HashMap<&str, &TaskCard> = HashMap::new();
+    for card in cards.iter().filter(|c| c.column != TaskColumn::Todo) {
+        if let Some(pane) = card.pane.as_deref() {
+            let seen = latest.entry(pane).or_insert(card);
+            // Sending a card closes the agent's last one in the same ms; the sent one is its turn.
+            let rank = |c: &TaskCard| (c.updated_ms, c.column == TaskColumn::Doing);
+            if rank(card) >= rank(seen) {
+                *seen = card;
+            }
+        }
+    }
+    let mut fixes: Vec<(&TaskCard, u32)> = latest
+        .into_iter()
+        .filter(|(_, c)| match c.column {
+            TaskColumn::Doing => true,
+            TaskColumn::Done => c.updated_ms >= since_ms,
+            _ => false,
+        })
+        .map(|(pane, c)| (c, failing(pane)))
+        .filter(|&(_, n)| n > 0)
+        .collect();
+    fixes.sort_by_key(|(c, _)| std::cmp::Reverse(c.updated_ms));
+    steps.extend(fixes.into_iter().map(|(c, n)| step(NextKind::Fix, c, n)));
+
+    for card in oldest_first(TaskColumn::Todo).into_iter().filter(|c| c.from != "you") {
+        steps.push(step(NextKind::FollowUp, card, 0));
+    }
+    for card in oldest_first(TaskColumn::Todo).into_iter().filter(|c| c.from == "you") {
+        steps.push(step(NextKind::Send, card, 0));
+    }
+    steps
 }
 
 /// A length of time as the CLI shows it: `45s`, `12m`, `3h`, `2d`.
@@ -916,6 +971,82 @@ All of it.");
         let recap = recap(&log, 0);
         let groups: Vec<_> = recap.iter().map(|g| (g.tab.as_deref(), g.team.as_deref(), ids(&g.done))).collect();
         assert_eq!(groups, [(Some("tab-1"), Some("pair"), vec!["b"]), (Some("tab-1"), Some("omakase"), vec!["a"])]);
+    }
+
+    fn kinds(steps: &[NextStep]) -> Vec<(NextKind, &str)> {
+        steps.iter().map(|s| (s.kind, s.card.id.as_str())).collect()
+    }
+
+    /// A card an agent wrote with `task add`, rather than you.
+    fn found_card(at_ms: u64, card: &str, by: &str) -> TaskEvent {
+        let mut event = written_card(at_ms, card, None, "found along the way");
+        if let TaskEventKind::Given { from, .. } = &mut event.what {
+            *from = by.into();
+        }
+        event
+    }
+
+    #[test]
+    fn next_is_answers_then_fixes_then_follow_ups_then_cards_to_send() {
+        let log = [
+            written_card(100, "mine", None, "write the docs"),
+            found_card(200, "found", "worker"),
+            given(300, "broken", TaskSource::AgentSend, "worker", "build it"),
+            given(400, "asks", TaskSource::AgentSend, "reviewer", "review it"),
+            ended(500, "reviewer", TurnEnd::NeedsYou),
+        ];
+        let steps = next(&log, 0, |pane| if pane == "pane-worker" { 2 } else { 0 });
+        assert_eq!(
+            kinds(&steps),
+            [(NextKind::Answer, "asks"), (NextKind::Fix, "broken"), (NextKind::FollowUp, "found"), (NextKind::Send, "mine")]
+        );
+        let failing: Vec<u32> = steps.iter().map(|s| s.failing).collect();
+        assert_eq!(failing, [0, 2, 0, 0], "only a fix carries the failures");
+        assert!(next(&[], 0, |_| 1).is_empty());
+    }
+
+    #[test]
+    fn the_longest_waiting_question_comes_first() {
+        let log = [
+            given(100, "first", TaskSource::AgentSend, "worker", "a"),
+            given(200, "second", TaskSource::AgentSend, "reviewer", "b"),
+            ended(300, "reviewer", TurnEnd::NeedsYou),
+            ended(400, "worker", TurnEnd::NeedsYou),
+        ];
+        assert_eq!(kinds(&next(&log, 0, |_| 0)), [(NextKind::Answer, "second"), (NextKind::Answer, "first")]);
+    }
+
+    #[test]
+    fn a_fix_is_for_a_panes_latest_turn_and_only_a_recent_one() {
+        let log = [
+            given(100, "old", TaskSource::AgentSend, "dev", "long done"),
+            ended(200, "dev", TurnEnd::Done),
+            given(300, "earlier", TaskSource::AgentSend, "worker", "step 1"),
+            ended(400, "worker", TurnEnd::Done),
+            given(500, "later", TaskSource::AgentSend, "worker", "step 2"),
+            ended(600, "worker", TurnEnd::Done),
+            given(700, "fine", TaskSource::AgentSend, "reviewer", "review"),
+        ];
+        let asked = std::cell::RefCell::new(Vec::new());
+        let steps = next(&log, 250, |pane| {
+            asked.borrow_mut().push(pane.to_string());
+            if pane == "pane-reviewer" { 0 } else { 3 }
+        });
+        assert_eq!(kinds(&steps), [(NextKind::Fix, "later")], "a done card older than since is no fix");
+        let mut asked = asked.into_inner();
+        asked.sort();
+        assert_eq!(asked, ["pane-reviewer", "pane-worker"], "each pane is asked once");
+    }
+
+    #[test]
+    fn a_card_sent_in_the_same_ms_its_agent_finished_gets_the_fix() {
+        let log = [
+            written_card(100, "mine", None, "write the docs"),
+            given(200, "a", TaskSource::AgentSend, "worker", "step 1"),
+            given(300, "mine", TaskSource::AgentSend, "worker", "write the docs"),
+            moved(300, "mine", TaskColumn::Doing),
+        ];
+        assert_eq!(kinds(&next(&log, 0, |_| 1)), [(NextKind::Fix, "mine")]);
     }
 
     #[test]

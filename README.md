@@ -51,7 +51,8 @@ downloads, the feature tour and the keybinding reference.
   move them with `mira task move`. A card's title opens its history — who
   sent what, how each turn ended and how long it took — and `mira agent
   history` prints the same in the terminal; `mira recap` sums up what every
-  tab finished in the last day and what waits on you. Kept across restarts, 30 days
+  tab finished in the last day and what waits on you, and `mira next` what
+  to pick up first. Kept across restarts, 30 days
   deep. Its **Trail** shows what each agent actually did, turn by turn:
   every command with how it ended, every file it edited, every other tool
   it called, each opening to its full input and output — read from Claude

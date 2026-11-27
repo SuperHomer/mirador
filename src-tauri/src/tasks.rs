@@ -2,7 +2,7 @@
 //! answers with. The log's format and the fold into cards are
 //! `cmux_core::tasks`'s; this is where they meet panes, tabs and teams.
 
-use cmux_protocol::{TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskRecap, TaskSource};
+use cmux_protocol::{NextStep, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskRecap, TaskSource};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::AppState;
@@ -180,6 +180,17 @@ pub fn recap(state: &AppState, hours: Option<u64>) -> Result<Vec<TaskRecap>, Str
         group.title = group.team.clone().or_else(|| tab.and_then(|t| t.title.clone()));
     }
     Ok(groups)
+}
+
+/// What to do next, in every tab, most pressing first; a failed turn
+/// counts if it ended in the last `hours` or is still going.
+pub fn next(state: &AppState, hours: Option<u64>) -> Result<Vec<NextStep>, String> {
+    let hours = hours.unwrap_or(24);
+    if hours == 0 {
+        return Err("--hours must be at least 1".into());
+    }
+    let since = crate::runs::now_ms().saturating_sub(hours.saturating_mul(3_600_000));
+    Ok(cmux_core::tasks::next(&events(state), since, |pane| failing(state, pane)))
 }
 
 /// The cards of the tab `tab`, or of every tab: every one not done, and

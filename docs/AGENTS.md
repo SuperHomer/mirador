@@ -850,6 +850,7 @@ mira task move <id> <todo|doing|needs-you|done>
 mira task done <id>                            # same as move <id> done
 mira task list [--all]                         # this tab's cards by column; every tab's
 mira recap [--hours N]                         # what every tab finished lately, and what needs you
+mira next [--hours N]                          # what to pick up next, most pressing first
 mira agent send <name> --card <id> <message…>  # the message is that card's
 mira agent history [NAME | --pane <id> | --card <id> | --all]
 mira agent board                               # this tab's wall, on its Tasks side
@@ -956,6 +957,26 @@ nothing waits on you)`. `recap` answers `{"recap": [{"tab", "team",
 "title", "done", "waiting"}]}`, the two lists of cards as `task_list`
 gives them. It reads the same log, so it knows only the turns the log
 knows: those of the harnesses above whose turns are logged.
+
+`mira next` says what to pick up, across every tab, most pressing first:
+`answer`, each card in Needs you, the longest waiting first; `fix`, an
+agent's latest card, in Doing or done within the last `--hours` (24 by
+default; `0` is refused), when that agent's latest turn had failed
+actions, as its trail counts them, the most recent first; `follow-up`, the To do cards an agent
+wrote with `task add`, oldest first, each saying who wrote it; and
+`send`, the rest of To do, oldest first. Each line has the card's kind,
+id, agent (`team/name` when it is a team's), how long ago and title — a
+fix also how many actions failed — and under it the command that acts on
+it: `mira focus <pane>` to answer, `mira agent trail <pane>` to see what
+failed, `mira agent send <pane> --card <id> "<message>"` to send a card
+that has an agent (the message is logged on that card, which stays in To
+do until it is moved), else `mira task list --all`. The hints name panes
+by id, which works from any tab, where a name works only in its own.
+Nothing to show prints `(nothing to do next: nothing waits on you,
+failed, or is in To do)`. `next` answers `{"next": [{"kind", "card",
+"failing"}]}`: `kind` is `answer`, `fix`, `followUp` or `send`, `card`
+as `task_list` gives it, `failing` the failed actions for a fix and 0
+otherwise.
 
 The log is `tasks.jsonl` in the data directory (on macOS
 `~/Library/Application Support/Mirador/`, on Linux `$XDG_DATA_HOME/mirador`
@@ -1421,7 +1442,7 @@ apply_layout browser_open browser_navigate browser_snapshot browser_click
 browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_network browser_storage
 browser_screenshot ssh_open ssh_hosts
-ssh_forward diff_open task_list task_add task_move recap agent_history agent_board
+ssh_forward diff_open task_list task_add task_move recap next agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add
 computer_update computer_remove computer_test computer_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
