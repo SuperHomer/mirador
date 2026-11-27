@@ -53,6 +53,7 @@ permissions = [
   "allow-open-markdown",
   "allow-open-file-tree",
   "allow-load-file-tree",
+  "allow-open-tree-file-in-editor",
   "allow-read-markdown",
   "allow-list-markdown",
   "allow-watch-markdown",

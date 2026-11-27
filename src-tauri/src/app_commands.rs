@@ -58,6 +58,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "open_markdown",
     "open_file_tree",
     "load_file_tree",
+    "open_tree_file_in_editor",
     "read_markdown",
     "list_markdown",
     "watch_markdown",

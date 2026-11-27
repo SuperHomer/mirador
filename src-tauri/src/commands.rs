@@ -670,6 +670,27 @@ pub async fn open_in_editor(app: AppHandle, pane_id: String) -> Result<(), Strin
     .map_err(|e| e.to_string())?
 }
 
+/// Opens a file tree pane's row in the person's editor. `path` is relative
+/// to the root the pane was opened on, read from its meta; the page names
+/// only a row, and `file_tree::resolve` refuses one outside the tree.
+/// Off the main thread, as `open_in_editor`.
+#[tauri::command]
+pub async fn open_tree_file_in_editor(app: AppHandle, pane_id: String, path: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let root = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(&pane_id).ok_or("that pane is gone")?;
+        m.tree_root.clone().ok_or("not a file tree pane")?
+    };
+    let editor = state.config.lock().unwrap().external_editor.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = cmux_core::file_tree::resolve(std::path::Path::new(&root), &path)?;
+        cmux_core::external_editor::open(&editor, &file)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The palette's actions, for the menu bar to list. The page sends them
 /// once it has mounted: the table lives beside the code each one runs.
 #[tauri::command]

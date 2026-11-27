@@ -1007,6 +1007,10 @@ export const openFileTree = (paneId: string | null, tab: boolean, dir: string | 
 /** The pane's tree, listed in Rust from the root it was opened on. */
 export const loadFileTree = (paneId: string) =>
   invoke<FileTree>("load_file_tree", { paneId });
+/** Opens a row of the tree, by its path relative to the pane's root, in
+ *  the person's editor (`externalEditor`). */
+export const openTreeFileInEditor = (paneId: string, path: string) =>
+  invoke<void>("open_tree_file_in_editor", { paneId, path });
 /** What a role's menu entry says beside its name. */
 export const roleHint = (r: AgentRole): string =>
   r.problem

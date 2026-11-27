@@ -2675,14 +2675,20 @@ button.inbox-update:hover {
   color: var(--warn);
 }
 
-/* Nothing to open yet; a file row is not a button. */
-.file-tree-file {
+/* A deleted file has nothing to open: its row is disabled, its name
+   struck through. */
+.file-tree-gone {
   cursor: default;
 }
 
-.file-tree-gone {
+.file-tree-gone .diff-tree-name {
   text-decoration: line-through;
   color: var(--muted);
+}
+
+.file-tree-gone:hover {
+  background: transparent;
+  color: var(--subtext);
 }
 
 /* ---------- Update banner ---------- */

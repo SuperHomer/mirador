@@ -63,6 +63,25 @@ pub fn list(root: &Path) -> Result<FileTree, String> {
     })
 }
 
+/// The file at `rel` under `root`, for an action on a row of the tree.
+/// `rel` comes from the page, so it is checked rather than trusted: it
+/// must be relative, with no `..` (nor anything else but names), and must
+/// still be under `root` once links are followed — a tracked symlink to
+/// `/etc` is a row, but not a way out.
+pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let path = Path::new(rel);
+    if rel.is_empty() || !path.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return Err(format!("not a path inside the tree: {rel}"));
+    }
+    let joined = root.join(path);
+    let real = joined.canonicalize().map_err(|e| format!("{rel}: {e}"))?;
+    let real_root = root.canonicalize().map_err(|e| format!("{}: {e}", root.display()))?;
+    if !real.starts_with(&real_root) {
+        return Err(format!("{rel} leads outside the tree"));
+    }
+    Ok(joined)
+}
+
 fn git_z(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = crate::proc::command("git")
         .args(args)
@@ -403,6 +422,28 @@ mod tests {
         assert_eq!(count(&tree.nodes), MAX_ENTRIES);
         // Breadth first: the top level is whole.
         assert_eq!(names(&tree.nodes), ["many", "top.txt"]);
+    }
+
+    #[test]
+    fn a_row_resolves_under_the_root_and_nowhere_else() {
+        let dir = fresh_dir("resolve");
+        let root = dir.join("root");
+        write(&root, "src/main rs.txt");
+        write(&dir, "outside.txt");
+
+        assert_eq!(resolve(&root, "src/main rs.txt").unwrap(), root.join("src/main rs.txt"));
+        assert_eq!(resolve(&root, "src").unwrap(), root.join("src"));
+        for bad in ["", "../outside.txt", "src/../../outside.txt", "./src", "src/missing.txt"] {
+            assert!(resolve(&root, bad).is_err(), "{bad:?} resolved");
+        }
+        let absolute = dir.join("outside.txt");
+        assert!(resolve(&root, &absolute.to_string_lossy()).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&absolute, root.join("link.txt")).unwrap();
+            assert!(resolve(&root, "link.txt").unwrap_err().contains("outside"));
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

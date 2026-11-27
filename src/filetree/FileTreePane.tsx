@@ -1,6 +1,14 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { FileTree, FileTreeNode, closePane, focusPane, loadFileTree } from "../bindings";
+import {
+  FileTree,
+  FileTreeNode,
+  closePane,
+  focusPane,
+  loadFileTree,
+  openTreeFileInEditor,
+} from "../bindings";
 import { useConfigStore } from "../state/configStore";
+import { reportFailure } from "../state/uiStore";
 import { diffTheme } from "../diff/DiffPane";
 
 interface Props {
@@ -92,6 +100,12 @@ export function FileTreePane({ paneId, root, focused, walled = false }: Props) {
     [],
   );
 
+  const openFile = useCallback(
+    (path: string) =>
+      void openTreeFileInEditor(paneId, path).catch((e) => reportFailure("Open in editor", e)),
+    [paneId],
+  );
+
   return (
     <div
       className={`pane diff-pane file-tree-pane${focused ? " focused" : ""}`}
@@ -127,7 +141,14 @@ export function FileTreePane({ paneId, root, focused, walled = false }: Props) {
         ) : (
           <>
             {tree.nodes.map((node) => (
-              <Row key={node.path} node={node} depth={0} open={open} onToggle={toggle} />
+              <Row
+                key={node.path}
+                node={node}
+                depth={0}
+                open={open}
+                onToggle={toggle}
+                onOpenFile={openFile}
+              />
             ))}
             {tree.truncated && (
               <div className="diff-note">
@@ -161,22 +182,30 @@ function Row({
   depth,
   open,
   onToggle,
+  onOpenFile,
 }: {
   node: FileTreeNode;
   depth: number;
   open: Set<string>;
   onToggle: (path: string) => void;
+  onOpenFile: (path: string) => void;
 }) {
   const indent = { paddingLeft: `${6 + depth * 12}px` };
   if (!node.dir) {
+    // A deleted file has nothing on disk to open.
+    const gone = node.status === "deleted";
     return (
-      <div className="diff-tree-file file-tree-file" style={indent} title={node.path}>
+      <button
+        className={`diff-tree-file${gone ? " file-tree-gone" : ""}`}
+        style={indent}
+        title={gone ? `${node.path} (deleted)` : `Open ${node.path} in your editor`}
+        disabled={gone}
+        onClick={() => onOpenFile(node.path)}
+      >
         <span className="diff-caret" />
-        <span className={`diff-tree-name${node.status === "deleted" ? " file-tree-gone" : ""}`}>
-          {node.name}
-        </span>
+        <span className="diff-tree-name">{node.name}</span>
         <Marker node={node} />
-      </div>
+      </button>
     );
   }
   const expanded = open.has(node.path);
@@ -189,7 +218,14 @@ function Row({
       </button>
       {expanded &&
         node.children.map((child) => (
-          <Row key={child.path} node={child} depth={depth + 1} open={open} onToggle={onToggle} />
+          <Row
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            open={open}
+            onToggle={onToggle}
+            onOpenFile={onOpenFile}
+          />
         ))}
     </>
   );
