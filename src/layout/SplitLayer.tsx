@@ -3,6 +3,7 @@ import {
   AgentInfo,
   BoardRect,
   CardRect,
+  Direction,
   BrowserPaneInfo,
   DiffPaneInfo,
   Node,
@@ -16,10 +17,13 @@ import {
   WhatsNewPaneInfo,
   closePane,
   focusPane,
+  movePane,
   setCardRect,
   setSplitRatios,
 } from "../bindings";
 import { boardDrag } from "./BoardHost";
+import { pressDrag } from "./pressDrag";
+import { reportFailure } from "../state/uiStore";
 import { flyToCard } from "../state/boardStore";
 import { TerminalPane } from "../terminal/TerminalPane";
 import { getTerminal, isLent } from "../terminal/registry";
@@ -56,6 +60,13 @@ interface Frac {
 interface PaneBox {
   paneId: string;
   rect: Frac;
+}
+
+/** Where a pane dragged by its grip would go: onto `target`, swapping the
+ *  two (`side` null), or docked beside it on `side`. */
+interface PaneDrop {
+  target: string;
+  side: Direction | null;
 }
 
 interface DividerBox {
@@ -217,6 +228,33 @@ export function SplitLayer({
     );
   };
 
+  // A pane in the hand by its grip, and where it would go.
+  const [paneDrag, setPaneDrag] = useState<{ paneId: string; drop: PaneDrop | null } | null>(null);
+  // Off the board, with every pane of the tab in sight and more than one.
+  const movable = !board && !zoomed && !walled && panes.length > 1;
+
+  const dragPane = (e: React.PointerEvent<HTMLElement>, paneId: string) => {
+    if (e.button !== 0) return;
+    void focusPane(paneId);
+    // From the pointer, not from what is under it: a browser page is a
+    // native view the page hears nothing from.
+    const dropAt = (ev: PointerEvent) => {
+      const r = layerRef.current?.getBoundingClientRect();
+      if (!r || r.width === 0 || r.height === 0) return null;
+      return paneDropAt(panes, tab.root, paneId, (ev.clientX - r.left) / r.width, (ev.clientY - r.top) / r.height);
+    };
+    pressDrag(e, {
+      move: (ev) => setPaneDrag({ paneId, drop: dropAt(ev) }),
+      drop: (ev) => {
+        setPaneDrag(null);
+        const drop = dropAt(ev);
+        if (drop) void movePane(paneId, drop.target, drop.side).catch((err) => reportFailure("Move pane", err));
+      },
+      cancel: () => setPaneDrag(null),
+    });
+  };
+  const dropTarget = paneDrag?.drop && panes.find((p) => p.paneId === paneDrag.drop?.target);
+
   const [menu, setMenu] = useState<{ pane: string; x: number; y: number } | null>(null);
 
   return (
@@ -246,7 +284,7 @@ export function SplitLayer({
           <div
             key={p.paneId}
             data-pane={p.paneId}
-            className={`pane-slot${card ? " card" : ""}${inHand ? " dragging" : ""}`}
+            className={`pane-slot${card ? " card" : ""}${inHand ? " dragging" : ""}${paneDrag?.paneId === p.paneId ? " dragging-pane" : ""}`}
             style={{
               ...(card
                 ? px(inHand && !held.resize ? held.rect : card)
@@ -343,6 +381,16 @@ export function SplitLayer({
                 />
               )}
             </div>
+            {movable && (
+              <div
+                className="pane-grip"
+                title="Drag onto another pane to swap with it, or to its edge to dock beside it"
+                // The press leaves the keyboard where it is: the pane's own
+                // terminal, once focusPane makes it the focused one.
+                onMouseDown={(e) => e.preventDefault()}
+                onPointerDown={(e) => dragPane(e, p.paneId)}
+              />
+            )}
             {card &&
               EDGES.map((edges) => (
                 <div
@@ -355,6 +403,9 @@ export function SplitLayer({
         );
       })}
       {held?.resize && <div className="card-ghost" style={px(held.rect)} />}
+      {dropTarget && paneDrag?.drop && (
+        <div className="pane-drop" style={frac(dropArea(dropTarget.rect, paneDrag.drop.side))} />
+      )}
       {menu && (
         <PaneMenu
           // A new right-click is a new menu, placed and measured afresh.
@@ -426,6 +477,61 @@ function walk(
     walk(child, childRect, [...path, i], overrides, panes, dividers);
     offset += r;
   });
+}
+
+/**
+ * Where a pane dragged to (fx, fy), fractions of the layer, would go: the
+ * middle of another pane swaps the two, nearer one of its edges docks it
+ * there. Null over the pane itself, off every pane, or for a dock that
+ * would leave it where it is — `cmux_core::layout::dock` refuses that one.
+ */
+function paneDropAt(panes: PaneBox[], root: Node, dragged: string, fx: number, fy: number): PaneDrop | null {
+  const over = panes.find(
+    (p) => fx >= p.rect.x && fx < p.rect.x + p.rect.w && fy >= p.rect.y && fy < p.rect.y + p.rect.h,
+  );
+  if (!over || over.paneId === dragged) return null;
+  const lx = (fx - over.rect.x) / over.rect.w;
+  const ly = (fy - over.rect.y) / over.rect.h;
+  const middle = (v: number) => v >= 0.25 && v <= 0.75;
+  if (middle(lx) && middle(ly)) return { target: over.paneId, side: null };
+  const edges: [Direction, number][] = [
+    ["left", lx],
+    ["right", 1 - lx],
+    ["up", ly],
+    ["down", 1 - ly],
+  ];
+  const side = edges.reduce((a, b) => (b[1] < a[1] ? b : a))[0];
+  const before = side === "left" || side === "up";
+  const dir: SplitDir = side === "left" || side === "right" ? "row" : "column";
+  const [first, second] = before ? [dragged, over.paneId] : [over.paneId, dragged];
+  if (adjacent(root, dir, first, second)) return null;
+  return { target: over.paneId, side };
+}
+
+/** Whether leaves `first` and `second` follow each other, in that order, in
+ *  a `dir` split — as `cmux_core::layout::adjacent` tells it. */
+function adjacent(node: Node, dir: SplitDir, first: string, second: string): boolean {
+  if (node.type === "leaf") return false;
+  const is = (n: Node, id: string) => n.type === "leaf" && n.paneId === id;
+  const next = node.children.some((c, i) => i > 0 && is(node.children[i - 1], first) && is(c, second));
+  return (node.dir === dir && next) || node.children.some((c) => adjacent(c, dir, first, second));
+}
+
+/** What a drop shows of its target: all of it for a swap, the half on
+ *  `side` for a dock. */
+function dropArea(r: Frac, side: Direction | null): Frac {
+  switch (side) {
+    case null:
+      return r;
+    case "left":
+      return { ...r, w: r.w / 2 };
+    case "right":
+      return { ...r, x: r.x + r.w / 2, w: r.w / 2 };
+    case "up":
+      return { ...r, h: r.h / 2 };
+    case "down":
+      return { ...r, y: r.y + r.h / 2, h: r.h / 2 };
+  }
 }
 
 function frac(r: Frac): React.CSSProperties {

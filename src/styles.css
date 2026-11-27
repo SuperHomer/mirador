@@ -1544,6 +1544,46 @@ body,
   z-index: 10;
 }
 
+/* A pane's handle for dragging it elsewhere in its tab, at the middle of
+   its top edge, over the divider there. */
+.pane-grip {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 36px;
+  height: 6px;
+  transform: translateX(-50%);
+  border-radius: 3px;
+  background: var(--muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 11;
+  cursor: grab;
+}
+
+.pane-slot:hover > .pane-grip {
+  opacity: 0.5;
+}
+
+.pane-slot > .pane-grip:hover {
+  opacity: 1;
+}
+
+.pane-slot.dragging-pane {
+  opacity: 0.5;
+}
+
+/* Where a dragged pane lands: the whole pane it swaps with, or the half of
+   the one it docks beside. */
+.pane-drop {
+  position: absolute;
+  z-index: 12;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  pointer-events: none;
+}
+
 .divider.row {
   cursor: col-resize;
 }
