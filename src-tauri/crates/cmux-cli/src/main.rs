@@ -267,8 +267,9 @@ enum Command {
     /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
     /// teaches Claude this CLI, and a wrapper in front of your status line
     /// that keeps your plan's limits, your own status line still shown;
-    /// and, where Codex is installed, a notify in its config.toml that
-    /// reports its turns, your own notify still run.
+    /// and, where Codex or Pi is installed, a notify in Codex's
+    /// config.toml (your own notify still run) and a Pi extension, which
+    /// report their turns.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -2944,8 +2945,14 @@ fn claude_hook(event: &str) -> Result<(), String> {
 /// and for a turn's end or a call for the person, a notification. Never
 /// fails or prints: a broken hook must not break the agent, and the app
 /// may not be running.
+///
+/// Only from a Mirador pane: unlike Claude Code's, these hooks are
+/// installed for every run (Codex's notify in its config, Pi's extension),
+/// and a `Notify` with no pane goes to the focused one, which would light
+/// the wrong tab for an agent in another terminal.
 fn agent_hook(harness: cmux_protocol::Harness, event: &str, session_id: Option<String>) {
-    let (pane, tty) = (own_pane(), own_tty());
+    let Some(pane) = own_pane() else { return };
+    let (pane, tty) = (Some(pane), own_tty());
     let _ = send_request(Request::AgentSession {
         pane_id: pane.clone(),
         tty: tty.clone(),
@@ -3007,7 +3014,7 @@ fn own_path() -> Result<std::path::PathBuf, String> {
 
 /// Idempotently installs (or removes) the Mirador hooks in
 /// ~/.claude/settings.json and the `/mira-diff` and `mira` skills beside
-/// them, then Mirador's notify in Codex's config.toml.
+/// them, then Mirador's notify in Codex's config.toml and its Pi extension.
 fn hooks(action: &str) -> Result<(), String> {
     use cmux_core::claude_integration::{self, Action};
     let action = match action {
@@ -3020,6 +3027,9 @@ fn hooks(action: &str) -> Result<(), String> {
         println!("{line}");
     }
     for line in cmux_core::codex_integration::notify(action, &mira)? {
+        println!("{line}");
+    }
+    for line in cmux_core::pi_integration::extension_setup(action, &mira)? {
         println!("{line}");
     }
     if action == Action::Setup {

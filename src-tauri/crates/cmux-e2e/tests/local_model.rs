@@ -496,3 +496,47 @@ fn pi_and_opencode_roles_remember_across_a_restart() {
         assert!(turns.iter().any(|t| t.user && t.text.contains("secret number is 4721")), "{who}: told in another conversation: {turns:?}");
     }
 }
+
+/// The `pi:` record the session file holds for a pane, once it is saved.
+fn saved_pi_session(sb: &Sandbox) -> Option<String> {
+    let file = ["Library/Application Support/Mirador", ".local/share/mirador"]
+        .iter()
+        .find_map(|d| std::fs::read_to_string(sb.home.join(d).join("session.json")).ok())?;
+    let at = file.find("\"pi:")? + "\"pi:".len();
+    Some(file[at..].split('"').next()?.to_string())
+}
+
+/// A Pi started by hand in a pane, not by Mirador, reports its session and
+/// turns through the extension `mira hooks setup` installs: its session
+/// recorded for resume, the pane idle after the turn, and the turn's end
+/// notified.
+#[test]
+fn a_pi_started_by_hand_reports_its_turns_through_the_extension() {
+    let Some(mut sb) = local("lmpihook") else { return };
+    let (code, out, err) = sb.mira(None, &["hooks", "setup"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("installed the Pi extension"), "{out}");
+    sb.launch();
+    let first = sb.first_pane();
+    let pane = sb.call(Request::SplitPane { pane_id: Some(first.clone()), dir: cmux_protocol::SplitDir::Row, command: None })
+        ["paneId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sb.type_into(&pane, "pi --model local/qwen\n");
+    // Looking at another pane, so its notification is not read on arrival.
+    sb.call(Request::FocusPane { pane_id: first.clone() });
+
+    send(&sb, &first, &pane, "Say hello.");
+    let (id, _) = wait_turn(&sb, "Pi's answer", &pane, pi_conversations, "Say hello.", |text| !text.trim().is_empty());
+    let status = |sb: &Sandbox| {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.iter().find(|a| a["paneId"] == pane.as_str()).map(|a| a["status"].clone())
+    };
+    sb.wait_for("the turn's end notified", LONG, || {
+        sb.snapshot()["unreadPanes"].as_array().unwrap().iter().any(|p| p == pane.as_str()).then_some(())
+    });
+    assert_eq!(status(&sb), Some(Value::from("idle")));
+    let saved = sb.wait_for("its session in the session file", LONG, || saved_pi_session(&sb));
+    assert_eq!(saved, id);
+}

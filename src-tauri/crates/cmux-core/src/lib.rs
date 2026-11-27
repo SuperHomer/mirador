@@ -31,6 +31,7 @@ pub mod notes;
 pub mod osc;
 pub mod paste;
 pub mod pane_origin;
+pub mod pi_integration;
 pub mod pricing;
 pub mod proc;
 pub mod pty;
