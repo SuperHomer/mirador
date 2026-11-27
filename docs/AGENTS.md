@@ -122,7 +122,7 @@ lights its tab and its session is recorded, all through `mira agent-hook`
 The app's first-launch offer and its repair do Claude Code only.
 
 - **Codex**: a top-level `notify` in `$CODEX_HOME/config.toml`
-  (`~/.codex`), `mira codex-notify`, which runs yours after it; remove
+  (`~/.codex`), `mira codex-notify`, which still runs yours; remove
   puts yours back. The file is edited in place, comments and order kept,
   and one that does not parse is left alone. Codex's notify fires only
   when a turn ends, so a Codex is never working or needs-you, only idle.
