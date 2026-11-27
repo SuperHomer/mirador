@@ -2123,6 +2123,9 @@ pub struct ResolvedConfig {
     pub editor_opens_in: OpensIn,
     pub diff_opens_in: OpensIn,
     pub graph_opens_in: OpensIn,
+    /// The command that opens a pane's directory in the person's editor:
+    /// mirador.json's `externalEditor`, else "code".
+    pub external_editor: String,
     /// The sidebar's width in pixels: mirador.json's, in range, or 248.
     pub sidebar_width: u32,
     /// The width of Focus's rail in pixels, or `None` for the layout's

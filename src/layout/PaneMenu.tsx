@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import {
   closePane,
+  editorName,
   openAgent,
+  openInEditor,
   openBrowser,
   openDiff,
   openGraph,
@@ -49,6 +51,9 @@ export function PaneMenu({
   );
 
   const accels = acceleratorsByAction(useConfigStore((s) => s.config?.keybindings));
+  const editor = editorName(useConfigStore((s) => s.config?.externalEditor));
+  // Its directory is on another computer.
+  const remote = useWorkspaceStore((s) => s.snapshot?.remotePanes.some((r) => r.paneId === pane) ?? false);
   const key = (action: string) => {
     const accel = accels.get(action);
     return accel ? formatAccel(accel) : undefined;
@@ -80,6 +85,12 @@ export function PaneMenu({
       label: "New Browser Pane",
       hint: key("new_browser_pane"),
       run: tried("Browser", () => openBrowser(pane, false, "about:blank")),
+    },
+    {
+      label: `Open in ${editor}`,
+      hint: key("open_in_editor"),
+      disabled: remote,
+      run: tried("Open in editor", () => openInEditor(pane)),
     },
     SEPARATOR,
     ...(term

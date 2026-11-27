@@ -25,6 +25,7 @@ import {
   openUsage,
   openComputers,
   openWhatsNew,
+  openInEditor,
   zoomPane,
   setView,
   installUpdate,
@@ -367,6 +368,16 @@ export const actions: ActionDef[] = [
     hint: "on the board",
     run: () => {
       if (useWorkspaceStore.getState().snapshot?.view === "board") arrangeBoard();
+    },
+  },
+  {
+    id: "open_in_editor",
+    title: "Pane: Open in Editor",
+    group: "pane",
+    hint: "its directory, in externalEditor",
+    run: () => {
+      const pane = actionPane();
+      if (pane) void openInEditor(pane).catch((e) => reportFailure("Open in editor", e));
     },
   },
   {

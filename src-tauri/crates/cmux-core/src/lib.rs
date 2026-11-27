@@ -14,6 +14,7 @@ pub mod codex_trail;
 pub mod config;
 pub mod cwd;
 pub mod diff;
+pub mod external_editor;
 pub mod git;
 pub mod handoff;
 pub mod graph;

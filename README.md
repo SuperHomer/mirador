@@ -461,6 +461,23 @@ way: `mira graph --tab` and `mira agent edit --tab` focus the graph or
 editor already open on that repository and print its pane, and open one
 only when there is none.
 
+## Opening a pane in your editor
+
+*Pane: Open in Editor*, in the palette and a pane's right-click menu, opens
+the pane's directory — the one the sidebar shows — in your own editor:
+VS Code's `code` unless `externalEditor` names another command. It may
+carry arguments, split on spaces, and the directory goes last:
+
+```jsonc
+// ~/.config/mirador/mirador.json
+{ "externalEditor": "subl -n" }
+```
+
+On macOS and Linux the command is looked up on the PATH your shell gives
+your panes, not the one the app was launched with, so an editor on yours
+is found from the Dock too; on Windows, `code` finds VS Code's `code.cmd`.
+A pane on a remote computer has no directory here, and cannot open.
+
 ## Agent roles and the agent wall
 
 A role is a named way to start an agent — Claude Code, Codex, Pi or

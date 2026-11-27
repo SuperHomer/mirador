@@ -755,6 +755,9 @@ export interface ResolvedConfig {
   editorOpensIn: OpensIn;
   diffOpensIn: OpensIn;
   graphOpensIn: OpensIn;
+  /** The command that opens a pane's directory in the person's editor:
+   *  mirador.json's `externalEditor`, else "code". */
+  externalEditor: string;
   /** The sidebar's width in pixels: mirador.json's or the default, 248. */
   sidebarWidth: number;
   /** The width of Focus's rail in pixels, or null for the default, about
@@ -1267,6 +1270,15 @@ export const startWhere = (
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });
+/** Opens the pane's directory in `externalEditor`; refused for a pane on
+ *  a remote computer, or whose directory is not known yet. */
+export const openInEditor = (paneId: string) => invoke<void>("open_in_editor", { paneId });
+/** What `externalEditor` is called in a menu: VS Code for `code`, else
+ *  its program. */
+export function editorName(command: string | undefined): string {
+  const program = command?.trim().split(/\s+/)[0] || "code";
+  return program === "code" ? "VS Code" : program;
+}
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
 /** The wall for the tab of `paneId` (the focused pane when null). */
