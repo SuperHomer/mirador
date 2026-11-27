@@ -18,6 +18,7 @@ const COMMANDS = [
   'mira browser open localhost:3000',
   'mira browser text main',
   'mira browser console --errors',
+  'mira browser network --failed',
   'mira ssh open prod-box',
   'mira ssh open prod --tab --dir /srv/app',
   'mira ssh open --on prod',

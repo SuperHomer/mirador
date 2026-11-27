@@ -66,9 +66,64 @@ fn is_loopback(host: &str) -> bool {
         || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
 }
 
+/// Whether a cookie the pane's browser holds is one it sends to a page at
+/// `scheme://host/path`, by RFC 6265's rules (§5.4): the host is the
+/// cookie's domain or under it (an IP address only exactly), the path is
+/// the cookie's or below it at a `/`, and a Secure cookie goes over https
+/// only — or to a loopback host, as browsers allow.
+///
+/// The domain arrives without its leading dot (the `cookie` crate strips
+/// it), so a host-only cookie cannot be told from a domain one: one set
+/// by `example.com` also shows on `www.example.com`'s page. wry's own
+/// `cookies_for_url` is not used: it compares domains exactly, so it
+/// finds no cookie at all for `127.0.0.1` nor a parent domain's, and it
+/// ignores the path.
+pub fn cookie_applies(domain: &str, cookie_path: &str, secure: bool, scheme: &str, host: &str, path: &str) -> bool {
+    let domain = domain.trim_start_matches('.').to_ascii_lowercase();
+    let host = host.to_ascii_lowercase();
+    let is_ip = host.starts_with('[') || host.parse::<std::net::Ipv4Addr>().is_ok();
+    let domain_matches = host == domain || (!is_ip && host.ends_with(&format!(".{domain}")));
+    let cookie_path = if cookie_path.is_empty() { "/" } else { cookie_path };
+    let path = if path.is_empty() { "/" } else { path };
+    let path_matches = path == cookie_path
+        || (path.starts_with(cookie_path) && (cookie_path.ends_with('/') || path[cookie_path.len()..].starts_with('/')));
+    let secure_allowed = !secure || scheme == "https" || is_loopback(&host);
+    domain_matches && path_matches && secure_allowed
+}
+
 #[cfg(test)]
 mod tests {
-    use super::resolve;
+    use super::{cookie_applies, resolve};
+
+    #[test]
+    fn a_cookie_goes_to_its_host_and_the_hosts_under_its_domain() {
+        assert!(cookie_applies("127.0.0.1", "/", false, "http", "127.0.0.1", "/storage"));
+        assert!(cookie_applies("example.com", "/", false, "https", "example.com", "/"));
+        assert!(cookie_applies(".example.com", "/", false, "https", "www.EXAMPLE.com", "/a"));
+        assert!(!cookie_applies("example.com", "/", false, "https", "badexample.com", "/"));
+        assert!(!cookie_applies("www.example.com", "/", false, "https", "example.com", "/"));
+        assert!(!cookie_applies("0.0.1", "/", false, "http", "127.0.0.1", "/"), "an IP has no parent domain");
+    }
+
+    #[test]
+    fn a_cookie_goes_to_its_path_and_below_it() {
+        let at = |cookie_path, path| cookie_applies("example.com", cookie_path, false, "https", "example.com", path);
+        assert!(at("/", "/anything"));
+        assert!(at("/shop", "/shop"));
+        assert!(at("/shop", "/shop/cart"));
+        assert!(at("/shop/", "/shop/cart"));
+        assert!(!at("/shop", "/shopping"));
+        assert!(!at("/shop", "/"));
+        assert!(at("", ""));
+    }
+
+    #[test]
+    fn a_secure_cookie_goes_over_https_or_to_a_loopback_host() {
+        assert!(cookie_applies("example.com", "/", true, "https", "example.com", "/"));
+        assert!(!cookie_applies("example.com", "/", true, "http", "example.com", "/"));
+        assert!(cookie_applies("localhost", "/", true, "http", "localhost", "/"));
+        assert!(cookie_applies("127.0.0.1", "/", true, "http", "127.0.0.1", "/"));
+    }
 
     #[test]
     fn a_url_with_a_scheme_loads_as_it_is() {

@@ -204,6 +204,13 @@ instead: wait with `Sandbox::wait_for` on a condition, never a fixed sleep,
 and prove a new test fails by putting the bug back once. A failing test
 keeps its sandbox (`$TMPDIR/me2e-*`) with the app's and the agents' logs.
 It cannot see the window — anything visual still needs a human.
+Nor does it isolate browser panes' cookies and storage: on macOS they live
+in WebKit's per-bundle store under the real `~/Library`, not the sandbox's
+HOME. Debug builds share `~/Library/WebKit/mirador` (and
+`~/Library/HTTPStorages/mirador.binarycookies`) — never the release app's
+`com.yoanmarti.mirador`; on Windows the store is
+`%LOCALAPPDATA%\com.yoanmarti.mirador`, which debug builds and the
+release app share alike — so give a test's cookies names of its own run.
 
 `tests/live.rs` goes further, by hand only: the release bundle, with the
 real `claude` (on `claude-haiku-5-5`) and `codex` (on `gpt-6-luna`), up to

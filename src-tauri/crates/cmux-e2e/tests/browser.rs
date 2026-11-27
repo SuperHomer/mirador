@@ -83,6 +83,138 @@ const RED: &str = r#"<!doctype html><title>Red</title>
 const BLUE: &str = r#"<!doctype html><title>Blue</title>
 <style>html, body { margin: 0; height: 100%; background: #0000ff; }</style>"#;
 
+/// A page whose requests come in on load: a GET and a POST that answer,
+/// an XHR to a page that is not there, a fetch to a port nothing listens
+/// on, and a fetch called off. What the GET answers is shown, so its
+/// own promise still works.
+fn network_page() -> String {
+    format!(
+        r#"<!doctype html><title>Network</title><p id="items"></p>
+<script>
+fetch("/api/items").then((r) => r.json()).then((j) => (document.getElementById("items").textContent = "items: " + j.items));
+fetch("/api/echo", {{ method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify({{ name: "mira" }}) }});
+const xhr = new XMLHttpRequest();
+xhr.open("GET", "/api/missing");
+xhr.send();
+fetch("http://127.0.0.1:{}/api/nowhere").catch(() => {{}});
+const stop = new AbortController();
+fetch("/slow/api/items", {{ signal: stop.signal }}).catch(() => {{}});
+stop.abort();
+</script>"#,
+        closed_port()
+    )
+}
+
+/// Writes both storage areas; its response sets the cookies.
+const STORAGE: &str = r#"<!doctype html><title>Storage</title><h1>Storage</h1>
+<script>
+localStorage.setItem("theme", "dark");
+localStorage.setItem("long", "y".repeat(3000));
+sessionStorage.setItem("draft", "hello");
+</script>"#;
+
+/// An HttpOnly cookie, which `document.cookie` never shows, a plain one
+/// that lasts, and one too long to show whole.
+/// Named for this run (`storage_cookie`); `/storage-clear` expires them.
+fn storage_cookies() -> String {
+    format!(
+        "Set-Cookie: {}=abc123; Path=/; HttpOnly; SameSite=Lax\r\n\
+         Set-Cookie: {}=dark; Path=/; Max-Age=3600\r\n\
+         Set-Cookie: {}={}; Path=/\r\n",
+        storage_cookie("sid"),
+        storage_cookie("theme"),
+        storage_cookie("big"),
+        "z".repeat(2500)
+    )
+}
+
+/// `name`, made this run's own: see `run_tag`.
+fn storage_cookie(name: &str) -> String {
+    format!("{name}_{}", run_tag())
+}
+
+fn expired_storage_cookies() -> String {
+    ["sid", "theme", "big"]
+        .map(|name| format!("Set-Cookie: {}=; Path=/; Max-Age=0\r\n", storage_cookie(name)))
+        .concat()
+}
+
+const ITEMS: &str = r#"{"items":["a","b"]}"#;
+
+/// This run's own, for the cookies a test sets. Browser panes keep
+/// cookies in WebKit's store for the app, under the real `~/Library` and
+/// not the sandbox's HOME (`~/Library/HTTPStorages/mirador.binarycookies`
+/// for the unbundled debug binary, never the release app's), so every
+/// sandbox and every run shares it. Cookies ignore ports, too: with a
+/// fixed name, one left by another run would pass for this run's.
+fn run_tag() -> &'static str {
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TAG.get_or_init(|| {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        format!("{}_{nanos}", std::process::id())
+    })
+}
+
+/// The sign-in cookie's name, this run's own (`run_tag`).
+fn sign_in_cookie() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| format!("e2e_login_{}", run_tag()))
+}
+
+const LOGIN: &str = r#"<!doctype html><title>Sign in</title>
+<form method="post" action="/login"><input id="user" name="user"><button id="sign-in">Sign in</button></form>"#;
+
+/// Asks /me who is signed in, as an app does on load.
+const ACCOUNT: &str = r#"<!doctype html><title>Account</title><p id="who"></p>
+<script>
+fetch("/me")
+  .then((r) => (r.ok ? r.text() : "signed out (" + r.status + ")"))
+  .then((t) => (document.getElementById("who").textContent = t));
+</script>"#;
+
+/// The sign-in pages: the form, its POST (a lasting HttpOnly cookie and a
+/// session one, then on to /account), /me (200 with the cookie, 401
+/// without), and /logout (both cookies expired).
+fn sign_in_answer(method: &str, path: &str, cookies: &str, posted: &[u8]) -> Option<String> {
+    let name = sign_in_cookie();
+    let page = |extra: &str, body: &str| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n{extra}Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    };
+    let user = cookies
+        .split(';')
+        .find_map(|c| c.trim().strip_prefix(&format!("{name}=")))
+        .map(String::from);
+    Some(match (method, path) {
+        ("GET", "/login") => page("", LOGIN),
+        ("POST", "/login") => {
+            let user = String::from_utf8_lossy(posted).trim_start_matches("user=").to_string();
+            format!(
+                "HTTP/1.1 303 See Other\r\nSet-Cookie: {name}={user}; Path=/; HttpOnly; Max-Age=3600\r\n\
+                 Set-Cookie: {name}_tab=1; Path=/\r\nLocation: /account\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        }
+        ("GET", "/account") => page("", ACCOUNT),
+        ("GET", "/me") => match user {
+            Some(user) => page("", &format!("signed in as {user}")),
+            None => "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+        },
+        ("GET", "/logout") => page(
+            &format!("Set-Cookie: {name}=; Path=/; Max-Age=0\r\nSet-Cookie: {name}_tab=; Path=/; Max-Age=0\r\n"),
+            "<!doctype html><title>Signed out</title><h1>Signed out</h1>",
+        ),
+        _ => return None,
+    })
+}
+
+/// A port nothing listens on: one the system gave out, then closed.
+fn closed_port() -> u16 {
+    static PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+    *PORT.get_or_init(|| TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port())
+}
+
 /// Serves the fixture pages on an ephemeral port for the life of the test
 /// process, and gives the port.
 fn serve_fixture() -> u16 {
@@ -106,9 +238,21 @@ fn serve_page(mut stream: std::net::TcpStream) {
         return;
     }
     let mut line = String::new();
+    let mut length = 0;
+    let mut cookies = String::new();
     while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                length = value.trim().parse().unwrap_or(0);
+            } else if name.eq_ignore_ascii_case("cookie") {
+                cookies = value.trim().to_string();
+            }
+        }
         line.clear();
     }
+    // Read whole, so closing the connection does not cut the answer off.
+    let mut posted = vec![0; length];
+    let _ = std::io::Read::read_exact(&mut reader, &mut posted);
     let path = request.split_whitespace().nth(1).unwrap_or("/").split('?').next().unwrap_or("/");
     // `/slow/<page>` is `<page>`, half a second late: on a fast machine a
     // navigation's new document lands before the next command, on a slow
@@ -130,10 +274,41 @@ fn serve_page(mut stream: std::net::TcpStream) {
         let _ = write!(stream, "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         return;
     }
-    if let Some(body) = implicit_form(path) {
+    let (page, content_type) = match path {
+        "/network" => (Some(network_page()), "text/html; charset=utf-8"),
+        "/api/items" => (Some(ITEMS.to_string()), "application/json"),
+        "/api/echo" => (Some(String::from_utf8_lossy(&posted).into_owned()), "application/json"),
+        "/api/big" => (Some("x".repeat(25_000)), "text/plain"),
+        _ => (implicit_form(path), "text/html; charset=utf-8"),
+    };
+    let method = request.split_whitespace().next().unwrap_or("GET");
+    if let Some(answer) = sign_in_answer(method, path, &cookies, &posted) {
+        let _ = stream.write_all(answer.as_bytes());
+        return;
+    }
+    if path == "/storage-clear" {
+        let body = "<!doctype html><title>Cleared</title><h1>Cleared</h1>";
         let _ = write!(
             stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            expired_storage_cookies(),
+            body.len()
+        );
+        return;
+    }
+    if path == "/storage" {
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n{}Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{STORAGE}",
+            storage_cookies(),
+            STORAGE.len()
+        );
+        return;
+    }
+    if let Some(body) = page {
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         return;
@@ -636,6 +811,211 @@ fn console_keeps_the_last_500_entries() {
     assert_eq!(lines.first(), Some(&"(4500 earlier entries dropped)"));
     assert_eq!(lines.len(), 501);
     assert!(lines[1].ends_with("line 4500") && lines[500].ends_with("line 4999"), "{out}");
+}
+
+/// The page's fetch and XHR requests, those that failed among them, and
+/// one URL's — while the page's own requests go on as they would.
+#[test]
+fn network_lists_the_pages_requests() {
+    e2e!();
+    let (sb, first) = launched("bnetwork");
+    open(&sb, &first, &page("/network"));
+    let out = browser_until(&sb, &first, &["network"], "every request to settle", |s| {
+        s.lines().count() == 5 && !s.contains('…')
+    });
+    let lines: Vec<&str> = out.lines().collect();
+    let nowhere = format!("http://127.0.0.1:{}/api/nowhere", closed_port());
+    for (line, (start, url)) in lines.iter().zip([
+        ("  1  GET     200  ", page("/api/items")),
+        ("  2  POST    200  ", page("/api/echo")),
+        ("  3  GET     404  ", page("/api/missing")),
+        ("  4  GET     network error  ", nowhere.clone()),
+        ("  5  GET     aborted  ", page("/slow/api/items")),
+    ]) {
+        assert!(line.starts_with(start) && line.ends_with(&format!("ms  {url}")), "{line:?} is not {start}…{url} in:\n{out}");
+    }
+    // The page got its answer, as without the capture.
+    assert_eq!(browser(&sb, &first, &["text", "#items"]).trim(), "items: a,b");
+
+    let failed = browser(&sb, &first, &["network", "--failed"]);
+    assert_eq!(failed.lines().collect::<Vec<_>>(), [lines[2], lines[3], lines[4]], "{failed}");
+    assert_eq!(browser(&sb, &first, &["network", "--url", "/api/echo"]), format!("{}\n", lines[1]));
+    assert_eq!(browser(&sb, &first, &["network", "--url", "/elsewhere"]), "(no requests)\n");
+
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "network"])).unwrap();
+    let list = raw["network"].as_array().unwrap();
+    assert_eq!((list[0]["type"].as_str(), list[0]["size"].as_u64()), (Some("fetch"), Some(ITEMS.len() as u64)), "{raw}");
+    assert_eq!((list[1]["method"].as_str(), list[1]["status"].as_u64()), (Some("POST"), Some(200)), "{raw}");
+    assert_eq!((list[2]["type"].as_str(), list[2]["status"].as_u64()), (Some("xhr"), Some(404)), "{raw}");
+    assert_eq!((list[3]["status"].as_u64(), list[3]["error"].as_str()), (Some(0), Some("network error")), "{raw}");
+    assert_eq!((list[4]["status"].as_u64(), list[4]["error"].as_str()), (Some(0), Some("aborted")), "{raw}");
+    assert!(list[0]["time"].is_string() && list[0]["duration"].is_u64(), "{raw}");
+    // Bodies and headers stay out of the list.
+    for key in ["requestBody", "responseBody", "requestHeaders", "responseHeaders", "started"] {
+        assert!(list.iter().all(|r| r.get(key).is_none()), "{key} in {raw}");
+    }
+
+    // One request in full: what was sent, and what came back as received.
+    let post = browser(&sb, &first, &["network", "2"]);
+    assert!(post.starts_with(&format!("POST {}\n200 OK · fetch · ", page("/api/echo"))), "{post}");
+    assert!(
+        post.contains("\nRequest headers\n  content-type: application/json\nRequest body\n  {\"name\":\"mira\"}\n\n"),
+        "{post}"
+    );
+    let get = browser(&sb, &first, &["network", "1"]);
+    assert!(!get.contains("Request"), "a GET sent no headers and no body:\n{get}");
+    assert!(get.contains("\nResponse headers\n") && get.contains("\n  content-type: application/json\n"), "{get}");
+    assert!(get.ends_with(&format!("Response body ({} bytes)\n  {ITEMS}\n", ITEMS.len())), "{get}");
+    let failed = browser(&sb, &first, &["network", "4"]);
+    assert_eq!(failed.lines().nth(1).map(|l| l.starts_with("network error · fetch · ")), Some(true), "{failed}");
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "network", "2"])).unwrap();
+    assert_eq!(raw["request"]["requestBody"], r#"{"name":"mira"}"#, "{raw}");
+    assert_eq!(raw["request"]["responseBody"], r#"{"name":"mira"}"#, "{raw}");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "network", "99"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("no request 99 on this page (the list starts again on each page load)"), "{err}");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "network", "2", "--failed"]);
+    assert_ne!(code, 0, "an id with a filter is refused: {err}");
+
+    // --clear prints, then empties.
+    assert_eq!(browser(&sb, &first, &["network", "--clear"]), out);
+    assert_eq!(browser(&sb, &first, &["network"]), "(no requests)\n");
+    assert_eq!(browser(&sb, &first, &["network", "--failed"]), "(no failed requests)\n");
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "network"])).unwrap();
+    assert_eq!(raw["network"], serde_json::json!([]), "--json unchanged: {raw}");
+
+    // A body past the cap is cut there, saying how much was left out;
+    // the page still gets all of it. Ids go on after a clear.
+    assert_eq!(browser(&sb, &first, &["eval", "fetch('/api/big').then((r) => r.text()).then((t) => t.length)"]).trim(), "25000");
+    let big = browser_until(&sb, &first, &["network", "6"], "the large body to be read", |s| s.contains("Response body"));
+    let kept = "x".repeat(20_000);
+    assert!(big.ends_with(&format!("Response body (25000 bytes)\n  {kept}\n  … 5000 more bytes not kept\n")), "{}", &big[..300.min(big.len())]);
+}
+
+/// What the page keeps: its cookies, HttpOnly ones included, which only
+/// the browser can tell, and both storage areas; long values cut.
+#[test]
+fn storage_shows_cookies_and_both_storage_areas() {
+    e2e!();
+    let (sb, first) = launched("bstorage");
+    let (sid, theme, big) = (storage_cookie("sid"), storage_cookie("theme"), storage_cookie("big"));
+    let _expire = VisitOnDrop(sb.mira_command(Some(&first), &["browser", "navigate", &page("/storage-clear")]));
+    open(&sb, &first, &page("/storage"));
+    // The page itself cannot see the HttpOnly one.
+    assert!(!browser(&sb, &first, &["eval", "document.cookie"]).contains(&format!("{sid}=")));
+
+    let out = browser(&sb, &first, &["storage"]);
+    let origin = page("");
+    let z = "z".repeat(2000);
+    let y = "y".repeat(1000);
+    assert!(out.starts_with(&format!("Cookies — {}\n", page("/storage"))), "{}", &out[..out.len().min(300)]);
+    assert!(out.contains(&format!("\n  {big}={z}…  127.0.0.1 /  session\n")), "{}", &out[..out.len().min(300)]);
+    assert!(out.contains(&format!("\n  {sid}=abc123  127.0.0.1 /  session  HttpOnly SameSite=Lax\n")), "{out}");
+    let theme = out
+        .lines()
+        .find(|l| l.starts_with(&format!("  {theme}=dark  127.0.0.1 /  ")))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(theme.ends_with(" UTC"), "a cookie that lasts says until when: {theme}");
+    assert!(
+        out.ends_with(&format!(
+            "localStorage — {origin}\n  long = {y}…\n  theme = dark\nsessionStorage — {origin}\n  draft = hello\n"
+        )),
+        "{}",
+        &out[out.len().saturating_sub(300)..]
+    );
+
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "storage"])).unwrap();
+    assert_eq!(raw["url"], page("/storage"), "{raw}");
+    let sid = raw["cookies"]["entries"].as_array().unwrap().iter().find(|c| c["name"] == sid.as_str()).cloned();
+    assert_eq!(sid.as_ref().map(|c| (c["httpOnly"].clone(), c["value"].clone())), Some((true.into(), "abc123".into())), "{raw}");
+    assert_eq!(raw["session"]["entries"], serde_json::json!([["draft", "hello"]]), "{raw}");
+
+    // An empty area says so; one the page may not use says why, and the
+    // rest still show.
+    browser(&sb, &first, &["eval", "sessionStorage.clear(); 0"]);
+    assert!(browser(&sb, &first, &["storage"]).ends_with(&format!("sessionStorage — {origin}\n  (none)\n")));
+    // Expired, the cookies are gone: none of this run's is left behind.
+    browser(&sb, &first, &["navigate", "/storage-clear"]);
+    browser(&sb, &first, &["wait", "--text", "Cleared"]);
+    assert!(!browser(&sb, &first, &["storage"]).contains(run_tag()));
+    browser(&sb, &first, &["navigate", "about:blank"]);
+    let blank = browser_until(&sb, &first, &["storage"], "about:blank's storage", |s| s.starts_with("Cookies — about:blank"));
+    assert!(blank.contains("Cookies — about:blank\n  (none)\nlocalStorage — null\n  (not readable: "), "{blank}");
+}
+
+/// `args` for `pane`: `mira browser <args> --pane <pane>`.
+fn on<'a>(pane: &'a str, args: &[&'a str]) -> Vec<&'a str> {
+    [args, &["--pane", pane]].concat()
+}
+
+/// Visits a page that expires a test's cookies when dropped (/logout,
+/// /storage-clear), so a failed run leaves none behind. Built before the
+/// app quits: the command finds the app through the sandbox's own files,
+/// so it reaches the relaunched one too; with no app left, the cookie
+/// stays, and its name is this run's alone.
+struct VisitOnDrop(std::process::Command);
+
+impl Drop for VisitOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.output();
+    }
+}
+
+/// Log in, then hand over: a person signs in once in a browser pane, and
+/// the sign-in holds for the agent driving it — across navigations, in a
+/// pane opened later, and after the app quits and comes back.
+#[test]
+fn a_sign_in_holds_across_pages_panes_and_a_relaunch() {
+    e2e!();
+    let name = sign_in_cookie();
+    let (mut sb, first) = launched("bsignin");
+    let pane = open(&sb, &first, &page("/account"));
+    let _sign_out = VisitOnDrop(sb.mira_command(Some(&first), &["browser", "navigate", "--pane", &pane, &page("/logout")]));
+
+    // Signed out: /me says 401, and the network log shows it.
+    browser(&sb, &first, &["wait", "--text", "signed out (401)", "--pane", &pane]);
+    let failed = browser(&sb, &first, &on(&pane, &["network", "--failed"]));
+    assert!(failed.lines().any(|l| l.contains(" 401 ") && l.ends_with(&page("/me"))), "{failed}");
+
+    // The person signs in, on a real form.
+    browser(&sb, &first, &on(&pane, &["navigate", "/login"]));
+    browser(&sb, &first, &on(&pane, &["wait", "#user"]));
+    browser(&sb, &first, &on(&pane, &["fill", "#user", "ada"]));
+    browser(&sb, &first, &on(&pane, &["click", "#sign-in"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "signed in as ada"]));
+
+    // (a) Across navigations in the pane.
+    browser(&sb, &first, &on(&pane, &["navigate", "/page2"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "Second page"]));
+    browser(&sb, &first, &on(&pane, &["navigate", "/account"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "signed in as ada"]));
+
+    // (b) In a pane opened after it.
+    let second = browser(&sb, &first, &["open", &page("/account"), "--tab"]).trim().to_string();
+    browser(&sb, &first, &["wait", "--text", "signed in as ada", "--pane", &second]);
+
+    // (c) After a quit and a relaunch: the pane comes back on its page —
+    // the one in the tab shown, which is drawn — and the lasting cookie
+    // with it. The session one does not: a session ends with the app.
+    let storage = browser(&sb, &first, &on(&second, &["storage"]));
+    assert!(storage.contains(&format!("\n  {name}_tab=1  127.0.0.1 /  session\n")), "{storage}");
+    let before = sb.panes();
+    sb.quit();
+    sb.launch();
+    assert_eq!(sb.panes(), before, "the layout comes back as it was");
+    browser_until(&sb, &first, &on(&second, &["wait", "--text", "signed in as ada"]), "the restored pane, signed in", |_| true);
+    let storage = browser(&sb, &first, &on(&second, &["storage"]));
+    let cookie = format!("  {name}=ada  127.0.0.1 /  ");
+    let line = storage.lines().find(|l| l.starts_with(&cookie)).unwrap_or_else(|| panic!("no {name} in:\n{storage}"));
+    assert!(line.ends_with(" UTC  HttpOnly"), "{line}");
+    assert!(!storage.contains(&format!("{name}_tab=")), "the session cookie outlived the app:\n{storage}");
+
+    // Signing out ends it, for every pane.
+    browser(&sb, &first, &on(&pane, &["navigate", "/logout"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "Signed out"]));
+    browser(&sb, &first, &on(&pane, &["navigate", "/account"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "signed out (401)"]));
+    assert!(!browser(&sb, &first, &on(&pane, &["storage"])).contains(name));
 }
 
 /// `wait` instead of a sleep: for an element, for text, for a spinner to

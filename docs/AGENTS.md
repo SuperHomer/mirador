@@ -154,6 +154,9 @@ mira browser wait --gone .spinner
 mira browser text main                 # what the page says (a snapshot lists
                                        # only what you can act on)
 mira browser console --errors          # what went wrong on this page
+mira browser network --failed         # which of its requests failed
+mira browser network 3                 # one of them in full: headers, bodies
+mira browser storage                   # its cookies, localStorage, sessionStorage
 mira browser eval "document.title"     # anything else, as JSON
 mira browser screenshot                # a PNG of what the pane shows; prints its path
 ```
@@ -193,6 +196,26 @@ the active tab's browser pane, else the one used last:
 - `console [--errors] [--clear]`: console output, uncaught errors,
   unhandled rejections and failed loads, oldest first, or "(no errors)" /
   "(no console output)". Exits 0 whatever it shows.
+- `network [--failed] [--url <part>] [--clear]`: the page's fetch and
+  XHR requests, oldest first, a line each: id, method, status (or why it
+  failed: `network error`, `aborted`, `timed out`), time taken and URL.
+  `--failed` keeps those with no response or a status of 400 and up,
+  `--url` those whose URL contains the part. "(no requests)" /
+  "(no failed requests)" when there are none. Exits 0 whatever it shows.
+- `network <id>`: one request from that list in full, as a browser's
+  developer tools show it: status, type, time taken, then the request's
+  and the response's headers and bodies, as sent and received. A body
+  past 20,000 characters is cut there, saying how many bytes were left
+  out. An id not on the page is an error: the list starts again on
+  each page load.
+- `storage`: what the page keeps, in three sections: the cookies the
+  browser sends to it — HttpOnly ones too, read from the browser rather
+  than `document.cookie` — each with its domain, path, expiry (or
+  `session`) and flags; then its origin's localStorage and
+  sessionStorage, sorted by key, up to 100 entries each. A cookie's value
+  past 2,000 characters is cut, a stored one's past 1,000. An area the
+  page may not use (an opaque origin, `about:blank`) says why, and the
+  others still show.
 - `eval <js>`: the result as JSON; a Promise is awaited.
 - `screenshot [--out <path>]`: a PNG of the part of the page the pane
   shows, at screen resolution, written to `--out` or else to a new file
@@ -206,6 +229,12 @@ What to know:
   pages ignore them.
 - The console log belongs to the page: a navigation or a reload starts it
   empty, so read it before moving on. It keeps the last 500 entries.
+- `network` sees what the page's own scripts ask for — `fetch` and
+  `XMLHttpRequest` — and nothing else: not the document itself, its
+  images, scripts or stylesheets, whose failures show in `console`
+  ("Failed to load <img> …"). Its log is the page's too: a navigation
+  starts an empty one. It keeps the 200 most recent requests, and each
+  body up to 20,000 characters.
 - An answer is at most 1 MB, and a command waits up to 10 s for it
   (`wait`: its `--timeout`).
 - The URL a pane reports is the last page that finished loading: a
@@ -214,6 +243,27 @@ What to know:
 - A pane opens web pages only: http, https and `about:blank`, never
   Mirador's own (`tauri://`, its dev server). The page gets **no** access
   to Mirador's commands, so a malicious page cannot drive your terminal.
+
+### Signed-in pages: log in, then hand over
+
+A page behind a sign-in needs the human once. Ask them to sign in in the
+browser pane — never type their credentials yourself — and then drive it:
+
+```bash
+mira browser open localhost:5173/login   # then ask the human to sign in there
+mira browser storage                     # is the session cookie there?
+mira browser network --failed            # a 401 says it is not, or has expired
+```
+
+Browser panes share one browser store. Cookies hold across navigations,
+in every browser pane, the ones opened later too, and across a quit and
+relaunch: a cookie with an expiry lasts until it expires, and a session
+cookie (one with none) ends with the app. localStorage lives in the same
+store, so it should hold the same way, though no test pins it.
+sessionStorage belongs to one pane and ends with it: a page that keeps
+its token there needs the sign-in done in the pane you will drive. So
+one sign-in kept in a cookie serves every pane until it expires or the
+page signs out.
 
 ## 5. Show the human what you changed
 
@@ -1267,7 +1317,8 @@ read_screen send_file notify run list_runs agent_session codex_thread agent_new
 agent_list agent_wall zoom_pane swap_pane rotate_panes equalize_panes
 apply_layout browser_open browser_navigate browser_snapshot browser_click
 browser_fill browser_type browser_press browser_text browser_eval
-browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
+browser_history browser_wait browser_console browser_network browser_storage
+browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add
 computer_update computer_remove computer_test computer_open`. Requests are

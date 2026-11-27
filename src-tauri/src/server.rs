@@ -724,6 +724,35 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             parse_bridge_result(&pane, &result)
         }
+        Request::BrowserNetwork {
+            pane_id,
+            request,
+            failed,
+            url,
+            clear,
+        } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result = crate::browser::execute(
+                app,
+                &pane,
+                json!({ "op": "network", "id": request, "failed": failed, "url": url, "clear": clear }),
+            )?;
+            parse_bridge_result(&pane, &result)
+        }
+        Request::BrowserStorage { pane_id } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result = crate::browser::execute(app, &pane, json!({ "op": "storage" }))?;
+            let mut answer = parse_bridge_result(&pane, &result)?;
+            // Each area answers on its own: cookies that cannot be read
+            // still leave the page's storage to show, and the other way.
+            let url = crate::browser::page_url(app, &pane).unwrap_or_default();
+            answer["cookies"] = match crate::browser::cookies(app, &pane, &url) {
+                Ok(cookies) => json!({ "entries": cookies }),
+                Err(error) => json!({ "error": error }),
+            };
+            answer["url"] = json!(url);
+            Ok(answer)
+        }
         Request::BrowserWait {
             pane_id,
             selector,

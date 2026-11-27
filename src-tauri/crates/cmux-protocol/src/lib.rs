@@ -924,6 +924,32 @@ pub enum Request {
         #[serde(default)]
         clear: bool,
     },
+    /// The page's fetch and XHR requests since it loaded, oldest first,
+    /// without bodies or headers: `failed` keeps those with no response or
+    /// a status of 400 and up; `url` those whose URL contains it; `clear`
+    /// empties the log after. With `request`, an id from that list, that
+    /// one request in full instead: its headers and bodies, each body its
+    /// first 20,000 characters, with how many bytes were left out. Not
+    /// named `id`, which is the envelope's own.
+    BrowserNetwork {
+        #[serde(default)]
+        pane_id: Option<String>,
+        #[serde(default)]
+        request: Option<u64>,
+        #[serde(default)]
+        failed: bool,
+        #[serde(default)]
+        url: Option<String>,
+        #[serde(default)]
+        clear: bool,
+    },
+    /// What the page keeps: the cookies the browser sends to it (HttpOnly
+    /// ones too), and its origin's localStorage and sessionStorage. Each
+    /// area is `{entries, omitted?}`, or `{error}` when it cannot be read.
+    BrowserStorage {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Waits until the page meets one condition: `selector` shown, `text`
     /// in its visible text, the loaded URL containing `url`, or `gone` no
     /// longer shown. Answers nothing when met; an error on timeout.
