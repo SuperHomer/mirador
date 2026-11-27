@@ -1220,6 +1220,8 @@ export interface HarnessChoices {
   harness: Harness;
   models: string[];
   efforts: string[];
+  /** Codex's profiles; empty for the other harnesses. */
+  profiles: string[];
 }
 
 /** The team form's fields (`cmux_protocol::TeamFields`). */

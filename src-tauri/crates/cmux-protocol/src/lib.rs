@@ -2069,6 +2069,9 @@ pub struct HarnessChoices {
     pub harness: Harness,
     pub models: Vec<String>,
     pub efforts: Vec<String>,
+    /// Codex's profiles (`codex_integration::profiles`); empty for the
+    /// other harnesses, which have none.
+    pub profiles: Vec<String>,
 }
 
 /// One part of what an agent is told, in the order it is told:

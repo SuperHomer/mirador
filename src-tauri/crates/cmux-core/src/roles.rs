@@ -487,8 +487,8 @@ pub fn set_way_fields(text: &str, fields: &WayFields) -> Result<String, String> 
 }
 
 /// What a role form offers, per harness a role can start: the models the
-/// repository's own roles and Claude Code's aliases name, and the efforts
-/// a role is checked against.
+/// repository's own roles and Claude Code's aliases name, the efforts
+/// a role is checked against, and the profiles the person's Codex has.
 pub fn role_choices() -> Vec<HarnessChoices> {
     let models: fn(Harness) -> &'static [&'static str] = |h| match h {
         // `--model` takes an alias or a full name.
@@ -506,6 +506,12 @@ pub fn role_choices() -> Vec<HarnessChoices> {
             harness,
             models: models(harness).iter().map(|m| m.to_string()).collect(),
             efforts: efforts(harness).iter().map(|e| e.to_string()).collect(),
+            profiles: match harness {
+                Harness::Codex => crate::codex_integration::codex_dir()
+                    .map(|dir| crate::codex_integration::profiles(&dir))
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            },
         })
         .collect()
 }

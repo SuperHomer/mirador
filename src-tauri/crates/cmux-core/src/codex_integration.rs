@@ -25,6 +25,30 @@ pub fn codex_dir() -> Option<PathBuf> {
         .or_else(|| crate::config::home_dir().map(|home| PathBuf::from(home).join(".codex")))
 }
 
+/// The profiles Codex has in `dir`, for a role form to offer: each
+/// `<name>.config.toml` beside `config.toml` (Codex 0.164 keeps a profile
+/// in its own file) and the `[profiles]` of `config.toml` (older Codex).
+/// Only names a role accepts (`roles::is_name`), sorted; what cannot be
+/// read is left out.
+pub fn profiles(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.strip_suffix(".config.toml").map(String::from))
+        .collect();
+    let config = std::fs::read_to_string(dir.join("config.toml")).unwrap_or_default();
+    if let Ok(table) = toml::from_str::<toml::Table>(&config) {
+        if let Some(toml::Value::Table(profiles)) = table.get("profiles") {
+            names.extend(profiles.keys().cloned());
+        }
+    }
+    names.retain(|n| crate::roles::is_name(n));
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// Sets up (or removes) Mirador's notify in Codex's config, calling `mira`
 /// at `mira`. Only where Codex is installed: its directory is never
 /// created. `Repair` (what the app does by itself) leaves Codex alone.
@@ -108,6 +132,31 @@ mod tests {
             std::fs::write(&path, text).unwrap();
         }
         path
+    }
+
+    #[test]
+    fn profiles_are_the_files_and_the_table() {
+        let dir = temp_config("profiles", Some("model = \"gpt-5\"\n[profiles.deep]\nmodel = \"o3\"\n[profiles.fast]\n"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        for file in ["fast.config.toml", "notes.txt", "-bad.config.toml", "two words.config.toml"] {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+        assert_eq!(profiles(&dir), ["deep", "fast"]);
+    }
+
+    #[test]
+    fn profiles_of_a_missing_dir_are_none() {
+        let dir = std::env::temp_dir().join(format!("mira-codex-{}-no-such-dir", std::process::id()));
+        assert_eq!(profiles(&dir), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_config_that_does_not_parse_still_lists_the_files() {
+        let dir = temp_config("profiles-bad", Some("[profiles.deep\nnot toml")).parent().unwrap().to_path_buf();
+        std::fs::write(dir.join("fast.config.toml"), "").unwrap();
+        assert_eq!(profiles(&dir), ["fast"]);
     }
 
     fn mira() -> PathBuf {
