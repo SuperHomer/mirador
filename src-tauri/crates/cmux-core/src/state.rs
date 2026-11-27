@@ -147,6 +147,8 @@ pub struct PaneMeta {
     /// Graph pane: the diff pane it opened, retargeted on the next click
     /// rather than piling up a pane per commit.
     pub graph_diff_pane: Option<String>,
+    /// Markdown pane: the absolute path of the file it shows.
+    pub markdown_path: Option<String>,
 }
 
 impl PaneMeta {
@@ -1063,6 +1065,7 @@ impl Workspace {
             diff_panes: Vec::new(),
             whats_new_panes: Vec::new(),
             graph_panes: Vec::new(),
+            markdown_panes: Vec::new(),
             agent_editor_panes: Vec::new(),
             settings_panes: Vec::new(),
             usage_panes: Vec::new(),
@@ -1126,6 +1129,8 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
         format!("Diff · {}", name(repo))
     } else if let Some(repo) = &m.graph_repo {
         format!("Graph · {}", name(repo))
+    } else if let Some(path) = &m.markdown_path {
+        name(path)
     } else if let Some(title) = m.title.as_deref().filter(|t| is_meaningful_title(t)) {
         title.to_string()
     } else if let Some(cwd) = &m.cwd {

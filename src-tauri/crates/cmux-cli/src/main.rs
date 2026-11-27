@@ -203,6 +203,15 @@ enum Command {
         #[arg(long)]
         tab: bool,
     },
+    /// Open a markdown file in a pane that follows it as it changes.
+    Md {
+        /// The file; a relative path is taken from this directory.
+        file: String,
+        /// Open in a new tab instead of a split: the file's pane, if one is
+        /// open, else a new tab.
+        #[arg(long)]
+        tab: bool,
+    },
     /// Show the settings pane, mirador.json's settings, or open it: where
     /// `editorOpensIn` says, or as --tab or --split say.
     Settings {
@@ -1087,6 +1096,19 @@ fn run(cli: Cli) -> Result<(), String> {
             Request::GraphOpen {
                 target: tab.then(|| "tab".to_string()),
                 pane_id: Some(pane_id),
+            }
+        }
+        Command::Md { file, tab } => {
+            // The app runs elsewhere than this shell, so it gets a path that
+            // does not depend on where `mira` ran.
+            let path = std::path::absolute(&file).map_err(|e| format!("{file}: {e}"))?;
+            if !path.is_file() {
+                return Err(format!("no file {file}"));
+            }
+            Request::MarkdownOpen {
+                path: path.to_string_lossy().into_owned(),
+                target: tab.then(|| "tab".to_string()),
+                pane_id: own_pane(),
             }
         }
         Command::Settings { tab, split } => Request::Settings {

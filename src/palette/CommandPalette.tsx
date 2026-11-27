@@ -3,7 +3,10 @@ import {
   AgentRole,
   AgentTeam,
   Computer,
+  MarkdownFiles,
   agentRoles,
+  listMarkdown,
+  openMarkdown,
   listComputers,
   startTeam,
   newTab,
@@ -135,6 +138,7 @@ export function CommandPalette() {
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [teams, setTeams] = useState<AgentTeam[]>([]);
   const [computers, setComputers] = useState<Computer[]>([]);
+  const [markdown, setMarkdown] = useState<MarkdownFiles>({ root: "", files: [] });
   const [recent, setRecent] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -294,11 +298,27 @@ export function CommandPalette() {
         },
       ],
     };
+    // The markdown files of the focused pane's repository (or directory),
+    // by their path in it, each opening beside that pane.
+    const markdownStep: Step = {
+      id: "markdown",
+      title: "Pane: Open Markdown File…",
+      hint: "pick a file ›",
+      group: "pane",
+      crumb: "Open Markdown File",
+      placeholder: "Search markdown files…",
+      empty: "No matching file",
+      entries: markdown.files.map((path) => ({
+        id: `markdown:${path}`,
+        title: path.startsWith(markdown.root) ? path.slice(markdown.root.length + 1) : path,
+        run: () => void openMarkdown(focusedPane(), path, false).catch((e) => reportFailure("Open markdown file", e)),
+      })),
+    };
     // A step with nothing in it is not offered; "Agents: New Agent…" always
     // has plain Claude Code, and SSH to a Computer its "Add a computer…".
-    const steps = [agents, teamStep, ssh, computerStep].filter((st) => st.entries.length > 0);
+    const steps = [agents, teamStep, ssh, computerStep, markdownStep].filter((st) => st.entries.length > 0);
     return { entries: [...base, ...custom, ...tabEntries], steps };
-  }, [customCommands, roles, teams, hosts, computers, keybindings, tabs]);
+  }, [customCommands, roles, teams, hosts, computers, markdown, keybindings, tabs]);
 
   // A start from a remote pane asks where it runs (`startHere`): this
   // computer first, then the pane's remote with its host and directory.
@@ -392,6 +412,8 @@ export function CommandPalette() {
       void listComputers().then(setComputers, () => setComputers([]));
       const pane =
         activeTab(useWorkspaceStore.getState().snapshot)?.focusedPane ?? null;
+      // A pane with no known directory, or no markdown, offers no step.
+      listMarkdown(pane).then(setMarkdown, () => setMarkdown({ root: "", files: [] }));
       agentRoles(pane)
         .then((c) => {
           setRoles(c.roles);

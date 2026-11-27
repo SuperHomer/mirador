@@ -109,6 +109,17 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    snapshot.markdown_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                m.markdown_path.as_ref().map(|p| cmux_protocol::MarkdownPane {
+                    pane_id: pane.clone(),
+                    path: p.clone(),
+                })
+            })
+            .collect()
+    };
     snapshot.agent_editor_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -1841,6 +1852,103 @@ pub fn open_graph(
     }
     emit_workspace(&app);
     Ok(new_pane)
+}
+
+/// Opens a markdown pane on `path`: split of `pane_id` (or the focused
+/// pane), or a new tab. In a tab of its own, a pane already on that file is
+/// shown again rather than a second one opened — the rule the graph and the
+/// editor follow.
+#[tauri::command]
+pub fn open_markdown(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    path: String,
+    tab: bool,
+) -> Result<String, String> {
+    let file = std::path::Path::new(&path);
+    if !file.is_absolute() {
+        return Err(format!("not an absolute path: {path}"));
+    }
+    if !file.is_file() {
+        return Err(format!("no such file: {path}"));
+    }
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+
+    if tab {
+        let shown = show_existing_pane(&app, &state, |m| {
+            m.markdown_path
+                .as_deref()
+                .is_some_and(|p| cmux_core::state::same_place(None, Some(&path), None, Some(p)))
+        });
+        if let Some(pane) = shown {
+            return Ok(pane);
+        }
+    }
+    let new_pane = if tab {
+        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        pane
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(new_pane.clone()).or_default();
+        // A split from it opens beside the file.
+        entry.cwd = file.parent().map(|d| d.to_string_lossy().into_owned());
+        entry.markdown_path = Some(path);
+    }
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// Reads the pane's file into blocks. Async so that a slow disk or a file
+/// still being written never blocks the UI thread.
+#[tauri::command]
+pub async fn read_markdown(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<Vec<cmux_protocol::NoteBlock>, String> {
+    let path = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta
+            .get(&pane_id)
+            .ok_or_else(|| format!("no pane {pane_id}"))?;
+        m.markdown_path.clone().ok_or("not a markdown pane")?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        cmux_core::notes::read_file(std::path::Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The markdown files a palette can offer from `pane_id` (or the focused
+/// pane): its repository's, or its directory's outside one.
+#[tauri::command]
+pub async fn list_markdown(
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+) -> Result<cmux_protocol::MarkdownFiles, String> {
+    let dir = {
+        let source = pane_id
+            .filter(|id| state.meta.lock().unwrap().contains_key(id))
+            .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+        let meta = state.meta.lock().unwrap();
+        meta.get(&source)
+            .and_then(|m| m.repo_root.clone().or_else(|| m.cwd.clone()))
+            .ok_or("this pane's directory is not known yet")?
+    };
+    tauri::async_runtime::spawn_blocking(move || cmux_core::notes::list_files(std::path::Path::new(&dir)))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Reads the pane's graph. Async for the same reason as `load_diff`: a

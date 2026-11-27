@@ -9,6 +9,7 @@ import {
   Node,
   SplitDir,
   GraphPaneInfo,
+  MarkdownPaneInfo,
   AgentEditorPaneInfo,
   SettingsPaneInfo,
   TabSnapshot,
@@ -31,6 +32,7 @@ import { BrowserPane } from "../browser/BrowserPane";
 import { DiffPane } from "../diff/DiffPane";
 import { WhatsNewPane } from "../whatsnew/WhatsNewPane";
 import { GraphPane } from "../graph/GraphPane";
+import { MarkdownPane } from "../markdown/MarkdownPane";
 import { AgentEditor } from "../agents/AgentEditor";
 import { SettingsPane } from "../settings/SettingsPane";
 import { UsagePane } from "../usage/UsagePane";
@@ -105,6 +107,7 @@ export function SplitLayer({
   diffPanes,
   whatsNewPanes,
   graphPanes,
+  markdownPanes,
   agentEditorPanes,
   settingsPanes,
   usagePanes,
@@ -125,6 +128,7 @@ export function SplitLayer({
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
+  markdownPanes: MarkdownPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
@@ -273,6 +277,7 @@ export function SplitLayer({
         const diff = diffPanes.find((d) => d.paneId === p.paneId);
         const news = whatsNewPanes.find((w) => w.paneId === p.paneId);
         const graph = graphPanes.find((g) => g.paneId === p.paneId);
+        const markdown = markdownPanes.find((m) => m.paneId === p.paneId);
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
         const settings = settingsPanes.find((s) => s.paneId === p.paneId);
         const usage = usagePanes.some((u) => u.paneId === p.paneId);
@@ -350,6 +355,8 @@ export function SplitLayer({
                   focused={focused && !walled}
                   walled={walled}
                 />
+              ) : markdown ? (
+                <MarkdownPane paneId={p.paneId} path={markdown.path} focused={focused} />
               ) : news ? (
                 <WhatsNewPane
                   paneId={p.paneId}

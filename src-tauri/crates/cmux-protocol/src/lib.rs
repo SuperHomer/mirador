@@ -288,6 +288,9 @@ pub struct WorkspaceSnapshot {
     /// Commit-graph panes and the repository each one reads.
     #[serde(default)]
     pub graph_panes: Vec<GraphPane>,
+    /// Markdown panes and the file each one shows.
+    #[serde(default)]
+    pub markdown_panes: Vec<MarkdownPane>,
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
@@ -1085,6 +1088,16 @@ pub enum Request {
     /// Opens a commit-graph pane (split of the source pane, or a new tab),
     /// for the repository the calling pane sits in.
     GraphOpen {
+        #[serde(default)]
+        target: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Opens a markdown pane on a file (split of the source pane, or a new
+    /// tab, where one already on that file is shown again). `path` is
+    /// absolute: the CLI resolves it against its own directory.
+    MarkdownOpen {
+        path: String,
         #[serde(default)]
         target: Option<String>,
         #[serde(default)]
@@ -2406,6 +2419,24 @@ pub struct GraphPane {
     pub repo: String,
 }
 
+/// A pane showing a local markdown file, by its absolute path.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownPane {
+    pub pane_id: String,
+    pub path: String,
+}
+
+/// The markdown files a pane can open: absolute paths, shallowest first,
+/// and the directory they are listed from (a repository's root, or the
+/// directory itself outside one).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownFiles {
+    pub root: String,
+    pub files: Vec<String>,
+}
+
 /// One inline run inside a release note's text. Carries text, never markup:
 /// the frontend maps each variant to a React element, so remote note text is
 /// never interpreted as HTML in the privileged webview.
@@ -2420,7 +2451,7 @@ pub enum NoteSpan {
     Link { text: String, href: String },
 }
 
-/// One block of a release note.
+/// One block of a release note, or of a local markdown file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum NoteBlock {
@@ -2430,7 +2461,10 @@ pub enum NoteBlock {
     /// loading, or if it never arrives.
     Image { alt: String, url: String },
     Paragraph { spans: Vec<NoteSpan> },
-    List { items: Vec<Vec<NoteSpan>> },
+    /// `ordered` for a numbered list (`1.`), which counts from one.
+    List { ordered: bool, items: Vec<Vec<NoteSpan>> },
+    /// A `>` blockquote; what it quotes is blocks of its own.
+    Quote { blocks: Vec<NoteBlock> },
     Code { text: String, lang: Option<String> },
     Rule,
 }

@@ -337,6 +337,23 @@ focused and its pane id printed, rather than a second one opened; without
 it, a graph always opens as a split beside your pane.
 
 ```bash
+mira md PLAN.md                # a markdown file, rendered, beside your pane
+mira md docs/notes.md --tab    # in a tab: the file's pane, if one is open, else a new tab
+```
+
+A markdown pane shows a file as prose — a plan you keep, notes for the
+human, a README — and follows it: each save reads it again, where the
+reader had scrolled to. A relative path is taken from the directory `mira`
+runs in. Headings, lists, quotes, fenced code and `http(s)` links render;
+raw HTML shows as the text it is, and an image shows as its alt text.
+With `--tab`, a pane already on that file is focused and its pane id
+printed; without it, a new split always opens. It works from any
+terminal, and outside a pane it splits the focused one.
+`mira read-screen --pane <id>` on a markdown pane prints the text it
+shows, all of it (`--lines` does not apply), so you can check what the
+human sees.
+
+```bash
 mira settings                  # mirador.json's settings, where editorOpensIn says
 mira settings --tab            # in a tab of its own
 mira settings --split          # as a split of this pane

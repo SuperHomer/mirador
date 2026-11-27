@@ -81,6 +81,11 @@ downloads, the feature tour and the keybinding reference.
   can't; elsewhere the card shows the URL
 - **Commit graph** (`mira graph`): every branch's history with lane lines,
   refs and tags; clicking a commit opens its diff in a pane it reuses
+- **Markdown panes** (`mira md <file>`, *Pane: Open Markdown File…*): a
+  README, a plan or an agent's notes rendered as prose beside your
+  terminals, following the file as it changes on disk — each save shows,
+  where you had scrolled to. The palette lists the repository's markdown
+  files, `.gitignore`d ones left out
 - **Account usage**, always in the sidebar: a row per Claude Code or
   Codex account you use, its most used limit filling up; open one for its
   plan, reset times and tokens over 5 hours and 7 days, with a cost for

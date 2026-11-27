@@ -1,8 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  NoteBlock,
-  NoteSpan,
   ReleaseNotes,
   closePane,
   focusPane,
@@ -10,6 +8,7 @@ import {
   whatsNew,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
+import { BlockView, ExternalLink } from "../notes/NoteBlocks";
 
 type Props = {
   paneId: string;
@@ -92,7 +91,7 @@ export function WhatsNewPane({ paneId, version, since, focused }: Props) {
         ) : single ? (
           <article className="whatsnew-notes">
             {single.blocks.map((block, i) => (
-              <BlockView key={i} block={block} depth={1} />
+              <BlockView key={i} block={block} depth={1} Image={NoteImage} />
             ))}
           </article>
         ) : (
@@ -104,7 +103,7 @@ export function WhatsNewPane({ paneId, version, since, focused }: Props) {
                   <GitHubLink url={release.url} />
                 </div>
                 {release.blocks.map((block, i) => (
-                  <BlockView key={i} block={block} depth={2} />
+                  <BlockView key={i} block={block} depth={2} Image={NoteImage} />
                 ))}
               </section>
             ))}
@@ -124,51 +123,6 @@ const GitHubLink = ({ url }: { url: string }) => (
     GitHub ↗
   </button>
 );
-
-/**
- * `depth` is how many headings sit above the note: the pane's header alone
- * for one release, a section title as well for several.
- */
-const BlockView = ({ block, depth }: { block: NoteBlock; depth: number }) => {
-  switch (block.kind) {
-    case "heading": {
-      // The release title is already a heading above this one, so a
-      // note's own top-level heading ranks below it.
-      const Tag = (`h${Math.min(block.level + depth, 4)}` as "h2" | "h3" | "h4");
-      return (
-        <Tag>
-          <Spans spans={block.spans} />
-        </Tag>
-      );
-    }
-    case "paragraph":
-      return (
-        <p>
-          <Spans spans={block.spans} />
-        </p>
-      );
-    case "list":
-      return (
-        <ul>
-          {block.items.map((item, i) => (
-            <li key={i}>
-              <Spans spans={item} />
-            </li>
-          ))}
-        </ul>
-      );
-    case "code":
-      return (
-        <pre className="whatsnew-code">
-          <code>{block.text}</code>
-        </pre>
-      );
-    case "image":
-      return <NoteImage alt={block.alt} url={block.url} />;
-    case "rule":
-      return <hr />;
-  }
-};
 
 /**
  * The same formats the backend will store, recognised from the bytes
@@ -234,16 +188,7 @@ const NoteImage = ({ alt, url }: { alt: string; url: string }) => {
   if (failed) {
     return (
       <p>
-        <a
-          href={url}
-          title={url}
-          onClick={(e) => {
-            e.preventDefault();
-            void openUrl(url);
-          }}
-        >
-          {alt || "image"}
-        </a>
+        <ExternalLink href={url}>{alt || "image"}</ExternalLink>
       </p>
     );
   }
@@ -257,38 +202,5 @@ const NoteImage = ({ alt, url }: { alt: string; url: string }) => {
     </figure>
   );
 };
-
-const Spans = ({ spans }: { spans: NoteSpan[] }) => (
-  <>
-    {spans.map((span, i) => {
-      switch (span.kind) {
-        case "code":
-          return <code key={i}>{span.text}</code>;
-        case "strong":
-          return <strong key={i}>{span.text}</strong>;
-        case "em":
-          return <em key={i}>{span.text}</em>;
-        case "link":
-          return (
-            // Opened in the real browser: a release note's links go to
-            // GitHub and the web, not into a terminal's webview.
-            <a
-              key={i}
-              href={span.href}
-              title={span.href}
-              onClick={(e) => {
-                e.preventDefault();
-                void openUrl(span.href);
-              }}
-            >
-              {span.text}
-            </a>
-          );
-        default:
-          return <span key={i}>{span.text}</span>;
-      }
-    })}
-  </>
-);
 
 export default memo(WhatsNewPane);
