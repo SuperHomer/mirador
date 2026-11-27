@@ -196,7 +196,8 @@ export type NoteBlock =
   | { kind: "image"; alt: string; url: string }
   | { kind: "heading"; level: number; spans: NoteSpan[] }
   | { kind: "paragraph"; spans: NoteSpan[] }
-  | { kind: "list"; items: NoteSpan[][] }
+  | { kind: "list"; ordered: boolean; items: NoteSpan[][] }
+  | { kind: "quote"; blocks: NoteBlock[] }
   | { kind: "code"; text: string; lang: string | null }
   | { kind: "rule" };
 

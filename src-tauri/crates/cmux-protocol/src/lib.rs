@@ -2420,7 +2420,7 @@ pub enum NoteSpan {
     Link { text: String, href: String },
 }
 
-/// One block of a release note.
+/// One block of a release note, or of a local markdown file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum NoteBlock {
@@ -2430,7 +2430,10 @@ pub enum NoteBlock {
     /// loading, or if it never arrives.
     Image { alt: String, url: String },
     Paragraph { spans: Vec<NoteSpan> },
-    List { items: Vec<Vec<NoteSpan>> },
+    /// `ordered` for a numbered list (`1.`), which counts from one.
+    List { ordered: bool, items: Vec<Vec<NoteSpan>> },
+    /// A `>` blockquote; what it quotes is blocks of its own.
+    Quote { blocks: Vec<NoteBlock> },
     Code { text: String, lang: Option<String> },
     Rule,
 }

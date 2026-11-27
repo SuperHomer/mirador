@@ -147,15 +147,25 @@ const BlockView = ({ block, depth }: { block: NoteBlock; depth: number }) => {
           <Spans spans={block.spans} />
         </p>
       );
-    case "list":
+    case "list": {
+      const List = block.ordered ? "ol" : "ul";
       return (
-        <ul>
+        <List>
           {block.items.map((item, i) => (
             <li key={i}>
               <Spans spans={item} />
             </li>
           ))}
-        </ul>
+        </List>
+      );
+    }
+    case "quote":
+      return (
+        <blockquote>
+          {block.blocks.map((inner, i) => (
+            <BlockView key={i} block={inner} depth={depth} />
+          ))}
+        </blockquote>
       );
     case "code":
       return (

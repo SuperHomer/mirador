@@ -2852,12 +2852,25 @@ button.inbox-update:hover {
 }
 
 .whatsnew-notes p,
-.whatsnew-notes ul {
+.whatsnew-notes ul,
+.whatsnew-notes ol,
+.whatsnew-notes blockquote {
   margin: 0 0 0.9em;
 }
 
-.whatsnew-notes ul {
+.whatsnew-notes ul,
+.whatsnew-notes ol {
   padding-left: 1.3em;
+}
+
+.whatsnew-notes blockquote {
+  padding-left: 0.9em;
+  border-left: 3px solid var(--surface);
+  color: var(--subtext);
+}
+
+.whatsnew-notes blockquote > :last-child {
+  margin-bottom: 0;
 }
 
 .whatsnew-notes li {
