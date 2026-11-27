@@ -13,6 +13,7 @@ import {
   zoomPane,
   closeTab,
   setActiveTab,
+  moveTab,
   renameTab,
   setView,
   setWallView,
@@ -40,6 +41,7 @@ import { clock } from "../usage/UsagePane";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
 import { TabMenu } from "../layout/TabMenu";
 import { SIDEBAR_WIDTH, useDragWidth } from "../layout/useDragWidth";
+import { pressDrag } from "../layout/pressDrag";
 
 /** What the sidebar's edge leaves the rest of the window at least. */
 const MAIN_MIN_WIDTH = 320;
@@ -57,6 +59,9 @@ export function Sidebar() {
     SIDEBAR_WIDTH,
     "right",
   );
+  // A tab in the hand: where it was, and the gap between rows it would
+  // land in (0 before the first, the tab count after the last).
+  const [reorder, setReorder] = useState<{ from: number; gap: number } | null>(null);
   if (!snapshot || !visible) return null;
   const accelOf = (action: string) => {
     const accel = accels.get(action);
@@ -88,13 +93,29 @@ export function Sidebar() {
         {snapshot.tabs.map((tab, i) => {
           const agents = tabAgents(snapshot, tab.id);
           const current = tab.id === currentTab;
+          // A line where it would land, unless that is where it is.
+          const moves = reorder && reorder.gap !== reorder.from && reorder.gap !== reorder.from + 1;
+          const classes = [
+            "sidebar-tab",
+            reorder?.from === i && "dragging",
+            moves && reorder.gap === i && "drop-before",
+            moves && reorder.gap === i + 1 && i === snapshot.tabs.length - 1 && "drop-after",
+          ];
           return (
-            <div key={tab.id} className="sidebar-tab">
+            <div key={tab.id} className={classes.filter(Boolean).join(" ")}>
               <TabRow
                 tab={tab}
                 index={i}
                 active={current && !tab.zoomedPane}
                 pips={current ? [] : agents}
+                onPointerDown={(e) =>
+                  dragTab(
+                    e,
+                    i,
+                    (gap) => setReorder(gap === null ? null : { from: i, gap }),
+                    (to) => void moveTab(tab.id, to).catch((err) => reportFailure("Move tab", err)),
+                  )
+                }
               />
               {current && (agents.length > 0 || tab.wallTools.length > 0) && (
                 <AgentTree
@@ -573,11 +594,44 @@ function AgentRow({
   );
 }
 
+/**
+ * Follows a press on the row of the `from`-th tab (`pressDrag`): as it is
+ * dragged, `show` is told the gap between rows the tab would land in, and
+ * null once it ends; released, the tab goes to its new place (`drop`, from
+ * 0) if it has one.
+ */
+function dragTab(
+  down: React.PointerEvent<HTMLElement>,
+  from: number,
+  show: (gap: number | null) => void,
+  drop: (to: number) => void,
+) {
+  const list = down.currentTarget.closest(".sidebar-tabs");
+  if (!list) return;
+  // Each tab with its tree, if it has one, counts as one row.
+  const gapAt = (y: number) =>
+    [...list.querySelectorAll(":scope > .sidebar-tab")].filter((row) => {
+      const r = row.getBoundingClientRect();
+      return y > r.top + r.height / 2;
+    }).length;
+  pressDrag(down, {
+    move: (e) => show(gapAt(e.clientY)),
+    drop: (e) => {
+      show(null);
+      const gap = gapAt(e.clientY);
+      const to = gap > from ? gap - 1 : gap;
+      if (to !== from) drop(to);
+    },
+    cancel: () => show(null),
+  });
+}
+
 function TabRow({
   tab,
   index,
   active,
   pips,
+  onPointerDown,
 }: {
   tab: TabSnapshot;
   index: number;
@@ -585,6 +639,8 @@ function TabRow({
   /** Agents to show a status pip for: none for the current tab, whose
    *  agents are listed under it. */
   pips: AgentInfo[];
+  /** A press on the row, which may be the start of a drag. */
+  onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(tab.title);
@@ -611,6 +667,7 @@ function TabRow({
       <div
         className={`tab-row${active ? " active" : ""}`}
         data-color={tab.color ?? undefined}
+        onPointerDown={editing ? undefined : onPointerDown}
         onClick={() => void setActiveTab(tab.id)}
         onDoubleClick={startEditing}
         // While it is being renamed, its field keeps the native menu.

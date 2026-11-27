@@ -155,9 +155,35 @@ body,
 
 /* A tab's row, and the tree of its agents under it when it is current. */
 .sidebar-tab {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* A tab dragged to a new place in the list, and the line where it lands. */
+.sidebar-tab.dragging {
+  opacity: 0.45;
+}
+
+.sidebar-tab.drop-before::before,
+.sidebar-tab.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.sidebar-tab.drop-before::before {
+  top: -2px;
+}
+
+.sidebar-tab.drop-after::after {
+  bottom: -2px;
 }
 
 .tab-row {
