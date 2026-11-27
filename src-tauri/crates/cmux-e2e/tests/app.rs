@@ -203,10 +203,12 @@ fn saved_codex_thread(sb: &Sandbox) -> Option<String> {
 
 /// Where nothing can name the rollout a Codex holds open — Windows, which
 /// lists no process's files — the `notify` Mirador gives every Codex
-/// records its thread after a turn. The person's own notify, from their
-/// Codex config, still runs, with the same JSON.
+/// records its thread after a turn. It also reports the turn's end, as
+/// Claude Code's `stop` hook does: the pane idle, and its notification.
+/// The person's own notify, from their Codex config, still runs, with the
+/// same JSON.
 #[test]
-fn a_codex_records_its_thread_through_notify_and_keeps_the_persons_own() {
+fn a_codex_reports_its_turn_through_notify_and_keeps_the_persons_own() {
     e2e!();
     let mut sb = Sandbox::new("codexnotify");
     sb.set_env("E2E_CODEX_NO_ROLLOUT", "1");
@@ -238,11 +240,42 @@ fn a_codex_records_its_thread_through_notify_and_keeps_the_persons_own() {
     assert!(args.iter().any(|a| a.starts_with("notify=[") && a.contains("codex-notify")), "{args:?}");
     let thread = format!("{:08x}-0000-4000-8000-{:012x}", started["pid"].as_u64().unwrap(), 1);
     assert_eq!(saved_codex_thread(&sb), None, "nothing to name it before a turn");
+    let status = |sb: &Sandbox| {
+        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+        agents.iter().find(|a| a["paneId"] == pane.as_str()).map(|a| a["status"].clone())
+    };
+    assert_eq!(status(&sb), Some(Value::Null), "nothing to say before a turn");
+    // Looking at another pane, so its notification is not read on arrival.
+    sb.call(Request::FocusPane { pane_id: first.clone() });
 
     let (code, _, err) = sb.mira(Some(&first), &["agent", "send", &pane, "hello"]);
     assert_eq!(code, 0, "{err}");
     let saved = sb.wait_for("the thread in the session file", LONG, || saved_codex_thread(&sb));
     assert_eq!(saved, thread);
+    assert_eq!(status(&sb), Some(Value::from("idle")));
+    sb.wait_for("the turn's end notified", LONG, || (sb.snapshot()["unreadPanes"] == serde_json::json!([pane])).then_some(()));
+
+    // Every turn's end, not only the first: the status is Idle again,
+    // but a wait started before it still sees it.
+    let (code, _, err) = sb.mira(Some(&first), &["agent", "send", &pane, "--wait", "--timeout", "20", "again"]);
+    assert_eq!(code, 0, "the second turn's end: {err}");
+
+    // A Codex's report never lands in a pane that runs none: its record
+    // there would type `codex resume` into a shell on the next launch.
+    let refused = sb.request(Request::AgentSession {
+        pane_id: Some(first.clone()),
+        tty: None,
+        agent: "codex".into(),
+        session_id: Some(thread.clone()),
+        job: None,
+        event: Some("stop".into()),
+        transcript_path: None,
+        notification_type: None,
+        message: None,
+    });
+    assert!(refused.is_err(), "{refused:?}");
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+    assert!(agents.iter().all(|a| a["paneId"] != first.as_str()), "the shell is no agent: {agents:?}");
     let theirs = sb.wait_for("the person's own notify", LONG, || std::fs::read_to_string(&marker).ok().filter(|t| !t.is_empty()));
     let payload: Value = serde_json::from_str(&theirs).unwrap();
     assert_eq!((payload["type"].as_str(), payload["thread-id"].as_str()), (Some("agent-turn-complete"), Some(thread.as_str())));

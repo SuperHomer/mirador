@@ -91,7 +91,7 @@ fn tasks_are_logged_as_agents_work() {
         pane_id: Some(reviewer.clone()),
         tty: None,
         agent: "claude".into(),
-        session_id: session,
+        session_id: Some(session),
         job: None,
         event: Some("post-tool".into()),
         transcript_path: None,

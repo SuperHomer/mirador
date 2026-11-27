@@ -2451,9 +2451,7 @@ pub(crate) fn prepare_launch(
 /// cannot be read is None, not guessed at. A missing profile is Codex's
 /// to report.
 fn codex_config(role: Option<&cmux_protocol::AgentRole>) -> Option<(Option<String>, Option<String>)> {
-    let home = std::env::var_os("CODEX_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".codex")));
+    let home = cmux_core::codex_integration::codex_dir();
     let config = match home.as_ref().map(|h| std::fs::read_to_string(h.join("config.toml"))) {
         Some(Ok(text)) => Some(text),
         Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => return None,

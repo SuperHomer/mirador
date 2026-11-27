@@ -512,18 +512,26 @@ pub enum Request {
         end_sessions: bool,
     },
     /// Records the agent session running in a pane (for resume-on-restore),
-    /// and — from a CLI that sends them — what the hook says it is doing.
+    /// and — from a CLI that sends them — what the hook says it is doing:
+    /// Claude Code's (`mira claude-hook`), or a Codex's, Pi's or
+    /// OpenCode's (`mira agent-hook`, `mira codex-notify`).
     AgentSession {
         #[serde(default)]
         pane_id: Option<String>,
         #[serde(default)]
         tty: Option<String>,
+        /// The harness, by its program: `claude`, `codex`, `pi`, `opencode`.
         agent: String,
-        session_id: String,
+        /// Its session (a Codex's thread); none only from a harness that
+        /// did not say, whose event then only sets the status. Claude
+        /// Code's always says.
+        #[serde(default)]
+        session_id: Option<String>,
         /// See `Notify::job`.
         #[serde(default)]
         job: Option<String>,
-        /// The `mira claude-hook` event ("stop", "prompt-submit", …).
+        /// The hook's event ("stop", "prompt-submit", …), in `mira
+        /// claude-hook`'s words whichever harness sent it.
         /// Absent from older CLIs, which then only record the session.
         #[serde(default)]
         event: Option<String>,
@@ -538,13 +546,6 @@ pub enum Request {
         /// A Notification hook's message.
         #[serde(default)]
         message: Option<String>,
-    },
-    /// Records the thread the Codex in a pane is on (for resume-on-restore),
-    /// from `mira codex-notify`, which Codex runs after each turn.
-    CodexThread {
-        #[serde(default)]
-        pane_id: Option<String>,
-        thread_id: String,
     },
     /// Starts an agent in a new pane (a split of the calling pane, or a new
     /// tab): plain Claude Code, or a role's harness, model and prompt.
