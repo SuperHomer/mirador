@@ -82,6 +82,7 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
                     pane_id: pane.clone(),
                     repo: m.diff_repo.clone()?,
                     spec: m.diff_spec.clone()?,
+                    path: m.diff_path.clone(),
                 })
             })
             .collect()
@@ -689,6 +690,31 @@ pub async fn open_tree_file_in_editor(app: AppHandle, pane_id: String, path: Str
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Opens the uncommitted diff of one row of a file tree pane — split
+/// beside it, or in a tab when `diffOpensIn` says so. `path` is relative
+/// to the root the pane was opened on, read from its meta; `open_diff`
+/// checks it is in the repository.
+#[tauri::command]
+pub fn open_tree_file_diff(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    path: String,
+) -> Result<String, String> {
+    let root = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(&pane_id).ok_or("that pane is gone")?;
+        m.tree_root.clone().ok_or("not a file tree pane")?
+    };
+    // A tree outside a repository has no diff; its root is the repository's
+    // own otherwise, so the row is relative to the repository too.
+    if cmux_core::git::find_repo_root(&root).is_none() {
+        return Err(format!("{root} is not in a git repository"));
+    }
+    let tab = state.config.lock().unwrap().diff_opens_in == cmux_protocol::OpensIn::Tab;
+    open_diff(app, state, Some(pane_id), tab, None, None, Some(path))
 }
 
 /// The palette's actions, for the menu bar to list. The page sends them
@@ -1644,6 +1670,8 @@ pub fn open_browser(
 /// Opens a diff pane: split of `pane_id` (or a new tab when `tab` is
 /// true). The repository comes from the source pane, so `mira diff` needs
 /// no path — it reviews whatever repo you (or your agent) are working in.
+/// With `path`, absolute or relative to that repository's root, the pane
+/// shows that one file.
 #[tauri::command]
 pub fn open_diff(
     app: AppHandle,
@@ -1652,6 +1680,7 @@ pub fn open_diff(
     tab: bool,
     spec: Option<String>,
     worktree: Option<String>,
+    path: Option<String>,
 ) -> Result<String, String> {
     // `mira diff` reports the pane it ran in, so an agent's diff lands on
     // its own repository rather than whichever pane the human is looking
@@ -1673,6 +1702,11 @@ pub fn open_diff(
 
     let spec = spec.unwrap_or_else(|| cmux_core::diff::WORKTREE.to_string());
     cmux_core::diff::verify_spec(std::path::Path::new(&repo), &spec)?;
+    // Whoever sent it, the file must be in the repository: it reaches git
+    // as a pathspec. Not required to exist — a deleted file has a diff.
+    let path = path
+        .map(|p| cmux_core::file_tree::relative_to(std::path::Path::new(&repo), &p))
+        .transpose()?;
 
     let new_pane = if tab {
         let (_, pane) = state.workspace.lock().unwrap().new_tab();
@@ -1691,6 +1725,7 @@ pub fn open_diff(
         entry.cwd = Some(repo.clone());
         entry.diff_repo = Some(repo);
         entry.diff_spec = Some(spec);
+        entry.diff_path = path;
     }
     emit_workspace(&app);
     Ok(new_pane)
@@ -1703,15 +1738,16 @@ pub async fn load_diff(
     state: State<'_, AppState>,
     pane_id: String,
 ) -> Result<cmux_protocol::DiffResult, String> {
-    let (repo, spec) = {
+    let (repo, spec, path) = {
         let meta = state.meta.lock().unwrap();
         let m = meta.get(&pane_id).ok_or_else(|| format!("no pane {pane_id}"))?;
         (
             m.diff_repo.clone().ok_or("not a diff pane")?,
             m.diff_spec.clone().ok_or("not a diff pane")?,
+            m.diff_path.clone(),
         )
     };
-    cmux_core::diff::load(std::path::Path::new(&repo), &spec)
+    cmux_core::diff::load(std::path::Path::new(&repo), &spec, path.as_deref())
 }
 
 /// The repository a *source* pane speaks for: the intel poller's answer
@@ -2141,6 +2177,7 @@ pub fn graph_show_commit(
         Some(pane_id.clone()),
         false,
         Some(sha),
+        None,
         None,
     )?;
     state

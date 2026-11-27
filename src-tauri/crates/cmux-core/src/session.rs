@@ -64,6 +64,9 @@ pub struct SessionPane {
     pub diff_repo: Option<String>,
     #[serde(default)]
     pub diff_spec: Option<String>,
+    /// Diff pane: the one file it shows, if it is limited to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_role: Option<String>,
     /// The settings file the role's Claude Code started with: a resume
@@ -221,6 +224,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         remote_dir: m.and_then(|m| m.remote_dir.clone()),
                         diff_repo: m.and_then(|m| m.diff_repo.clone()),
                         diff_spec: m.and_then(|m| m.diff_spec.clone()),
+                        diff_path: m.and_then(|m| m.diff_path.clone()),
                         agent_role: m.and_then(|m| m.agent_role.clone()),
                         agent_settings: m.and_then(|m| m.agent_settings.clone()),
                         agent_prompt: m.and_then(|m| m.agent_prompt.clone()),
@@ -353,6 +357,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     remote_dir: p.remote_dir,
                     diff_repo: p.diff_repo,
                     diff_spec: p.diff_spec,
+                    diff_path: p.diff_path,
                     agent_role: p.agent_role,
                     agent_settings: p.agent_settings,
                     agent_prompt: p.agent_prompt,
@@ -699,7 +704,12 @@ mod tests {
             ),
             (
                 diff.clone(),
-                PaneMeta { diff_repo: Some("/src/mirador".into()), diff_spec: Some("0e47a2c".into()), ..Default::default() },
+                PaneMeta {
+                    diff_repo: Some("/src/mirador".into()),
+                    diff_spec: Some("0e47a2c".into()),
+                    diff_path: Some("src/main.rs".into()),
+                    ..Default::default()
+                },
             ),
             (
                 markdown.clone(),
@@ -721,11 +731,13 @@ mod tests {
         assert_eq!(rmeta[&graph].graph_diff_pane.as_deref(), Some(diff.as_str()));
         assert_eq!(rmeta[&markdown].markdown_path.as_deref(), Some("/src/mirador/README.md"));
         assert_eq!(rmeta[&files].tree_root.as_deref(), Some("/src/mirador"));
+        assert_eq!(rmeta[&diff].diff_path.as_deref(), Some("src/main.rs"));
         assert_eq!(rmeta[&news].whats_new.as_deref(), Some("0.1.37"));
         assert_eq!(rmeta[&news].whats_new_since.as_deref(), Some("0.1.35"));
         // A plain shell's entry gains none of them.
         assert!(!json.contains("\"graph_repo\":null") && !json.contains("whats_new\":null"));
         assert!(!json.contains("markdown_path\":null") && !json.contains("tree_root\":null"));
+        assert!(!json.contains("diff_path\":null"));
     }
 
     #[test]

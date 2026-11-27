@@ -381,6 +381,7 @@ export function SplitLayer({
                   paneId={p.paneId}
                   repo={diff.repo}
                   spec={diff.spec}
+                  path={diff.path ?? null}
                   focused={focused && !walled}
                   walled={walled}
                 />

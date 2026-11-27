@@ -137,6 +137,9 @@ pub struct PaneMeta {
     pub diff_repo: Option<String>,
     /// Diff pane: "worktree", "staged", or a revspec.
     pub diff_spec: Option<String>,
+    /// Diff pane: the one file it shows, relative to `diff_repo` and
+    /// `/`-separated; every changed file without it.
+    pub diff_path: Option<String>,
     /// What's New pane: the version whose release notes it shows.
     pub whats_new: Option<String>,
     /// What's New pane: the version the user came from, when the pane

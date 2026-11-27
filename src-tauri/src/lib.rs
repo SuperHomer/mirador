@@ -467,6 +467,7 @@ pub fn run() {
             commands::open_file_tree,
             commands::load_file_tree,
             commands::open_tree_file_in_editor,
+            commands::open_tree_file_diff,
             commands::read_markdown,
             commands::list_markdown,
             markdown_watch::watch_markdown,

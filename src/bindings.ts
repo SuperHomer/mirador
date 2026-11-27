@@ -140,6 +140,8 @@ export interface DiffPaneInfo {
   paneId: string;
   repo: string;
   spec: string;
+  /** The one file it shows, relative to `repo`; every file when absent. */
+  path?: string | null;
 }
 
 export interface DiffLine {
@@ -958,7 +960,8 @@ export const openDiff = (
   tab: boolean,
   spec: string | null,
   worktree: string | null = null,
-) => invoke<string>("open_diff", { paneId, tab, spec, worktree });
+  path: string | null = null,
+) => invoke<string>("open_diff", { paneId, tab, spec, worktree, path });
 export const loadDiff = (paneId: string) =>
   invoke<DiffResult>("load_diff", { paneId });
 export const setDiffSpec = (paneId: string, spec: string) =>
@@ -1011,6 +1014,10 @@ export const loadFileTree = (paneId: string) =>
  *  the person's editor (`externalEditor`). */
 export const openTreeFileInEditor = (paneId: string, path: string) =>
   invoke<void>("open_tree_file_in_editor", { paneId, path });
+/** Opens the uncommitted diff of a row of the tree, alone, where
+ *  `diffOpensIn` says. */
+export const openTreeFileDiff = (paneId: string, path: string) =>
+  invoke<string>("open_tree_file_diff", { paneId, path });
 /** What a role's menu entry says beside its name. */
 export const roleHint = (r: AgentRole): string =>
   r.problem

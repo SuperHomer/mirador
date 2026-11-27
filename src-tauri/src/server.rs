@@ -668,6 +668,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             target,
             pane_id,
             worktree,
+            path,
         } => {
             let pane_id = crate::commands::open_diff(
                 app.clone(),
@@ -676,6 +677,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 target.as_deref() == Some("tab"),
                 spec,
                 worktree,
+                path,
             )?;
             Ok(json!({ "paneId": pane_id }))
         }

@@ -334,6 +334,9 @@ pub struct DiffPane {
     pub repo: String,
     /// What is being diffed: "worktree", "staged", or a revspec.
     pub spec: String,
+    /// The one file it shows, relative to `repo`; every file when absent.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// Where an agent or a team started from a remote pane could run instead
@@ -1130,6 +1133,10 @@ pub enum Request {
         /// calling pane's, by path or branch name.
         #[serde(default)]
         worktree: Option<String>,
+        /// The one file to show: absolute (the CLI resolves it against its
+        /// own directory) or relative to the repository's root.
+        #[serde(default)]
+        path: Option<String>,
     },
 }
 

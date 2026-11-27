@@ -69,17 +69,56 @@ pub fn list(root: &Path) -> Result<FileTree, String> {
 /// still be under `root` once links are followed — a tracked symlink to
 /// `/etc` is a row, but not a way out.
 pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
-    let path = Path::new(rel);
-    if rel.is_empty() || !path.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
-        return Err(format!("not a path inside the tree: {rel}"));
-    }
-    let joined = root.join(path);
+    check_relative(rel)?;
+    let joined = root.join(rel);
     let real = joined.canonicalize().map_err(|e| format!("{rel}: {e}"))?;
     let real_root = root.canonicalize().map_err(|e| format!("{}: {e}", root.display()))?;
     if !real.starts_with(&real_root) {
         return Err(format!("{rel} leads outside the tree"));
     }
     Ok(joined)
+}
+
+/// Whether `rel` is a path down from a root and nothing else: relative,
+/// made only of names — no `..`, no `.`, no drive. Enough on its own for
+/// a path that only reaches git as a literal pathspec, which git never
+/// follows through a link, and which may name a file deleted from disk.
+pub fn check_relative(rel: &str) -> Result<(), String> {
+    let normal = Path::new(rel).components().all(|c| matches!(c, std::path::Component::Normal(_)));
+    if rel.is_empty() || !normal {
+        return Err(format!("not a path inside the tree: {rel}"));
+    }
+    Ok(())
+}
+
+/// `path` as one down from `root`, `/`-separated, for a diff of that one
+/// file: an absolute path (the CLI's, resolved where it ran) must be under
+/// `root`, a relative one is taken as relative to it already. The file may
+/// be deleted, so an absolute path is compared as written first, then with
+/// links resolved on both sides — through its directory when the file
+/// itself is gone (`/var` is `/private/var` on macOS).
+pub fn relative_to(root: &Path, path: &str) -> Result<String, String> {
+    let given = Path::new(path);
+    let under = if given.is_absolute() {
+        let real = |p: &Path| {
+            p.canonicalize().ok().or_else(|| {
+                let dir = p.parent()?.canonicalize().ok()?;
+                Some(dir.join(p.file_name()?))
+            })
+        };
+        let under = given.strip_prefix(root).map(Path::to_path_buf).ok().or_else(|| {
+            let (path, root) = (real(given)?, root.canonicalize().ok()?);
+            path.strip_prefix(&root).map(Path::to_path_buf).ok()
+        });
+        under.ok_or_else(|| format!("{path} is not in {}", root.display()))?
+    } else {
+        check_relative(path)?;
+        given.to_path_buf()
+    };
+    // `/` whichever way it came: `src\a.txt` from a Windows client too.
+    let rel = under.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+    check_relative(&rel)?;
+    Ok(rel)
 }
 
 fn git_z(root: &Path, args: &[&str]) -> Result<String, String> {
@@ -436,12 +475,45 @@ mod tests {
         for bad in ["", "../outside.txt", "src/../../outside.txt", "./src", "src/missing.txt"] {
             assert!(resolve(&root, bad).is_err(), "{bad:?} resolved");
         }
+        // A deleted file passes the check alone, for the diff of it.
+        assert!(check_relative("src/missing.txt").is_ok());
+        assert!(check_relative("src/../x").is_err());
         let absolute = dir.join("outside.txt");
         assert!(resolve(&root, &absolute.to_string_lossy()).is_err());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&absolute, root.join("link.txt")).unwrap();
             assert!(resolve(&root, "link.txt").unwrap_err().contains("outside"));
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_path_for_a_diff_is_made_relative_to_the_root() {
+        let dir = fresh_dir("relative");
+        let root = dir.join("repo");
+        write(&root, "src/main.rs");
+        write(&dir, "outside.txt");
+
+        let abs = |rel: &str| root.join(rel).to_string_lossy().into_owned();
+        assert_eq!(relative_to(&root, &abs("src/main.rs")).unwrap(), "src/main.rs");
+        // Deleted from disk, it is still a file to diff.
+        assert_eq!(relative_to(&root, &abs("src/gone.rs")).unwrap(), "src/gone.rs");
+        assert_eq!(relative_to(&root, "src/main.rs").unwrap(), "src/main.rs");
+        // A relative path is rebuilt from its components too: stored as
+        // the field says, one `/` apart, whoever wrote it.
+        assert_eq!(relative_to(&root, "src//main.rs").unwrap(), "src/main.rs");
+        #[cfg(windows)]
+        assert_eq!(relative_to(&root, "src\\main.rs").unwrap(), "src/main.rs");
+        assert!(relative_to(&root, &dir.join("outside.txt").to_string_lossy()).is_err());
+        assert!(relative_to(&root, "../outside.txt").is_err());
+        assert!(relative_to(&root, &abs("")).is_err(), "the root itself is no file");
+        // Spelled through a link to the root, it is the same file.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&root, dir.join("alias")).unwrap();
+            let aliased = dir.join("alias/src/gone.rs");
+            assert_eq!(relative_to(&root, &aliased.to_string_lossy()).unwrap(), "src/gone.rs");
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

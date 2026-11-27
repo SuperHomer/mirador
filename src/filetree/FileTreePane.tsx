@@ -5,6 +5,7 @@ import {
   closePane,
   focusPane,
   loadFileTree,
+  openTreeFileDiff,
   openTreeFileInEditor,
 } from "../bindings";
 import { useConfigStore } from "../state/configStore";
@@ -106,6 +107,12 @@ export function FileTreePane({ paneId, root, focused, walled = false }: Props) {
     [paneId],
   );
 
+  const openDiff = useCallback(
+    (path: string) =>
+      void openTreeFileDiff(paneId, path).catch((e) => reportFailure("Open diff", e)),
+    [paneId],
+  );
+
   return (
     <div
       className={`pane diff-pane file-tree-pane${focused ? " focused" : ""}`}
@@ -148,6 +155,7 @@ export function FileTreePane({ paneId, root, focused, walled = false }: Props) {
                 open={open}
                 onToggle={toggle}
                 onOpenFile={openFile}
+                onOpenDiff={openDiff}
               />
             ))}
             {tree.truncated && (
@@ -183,29 +191,54 @@ function Row({
   open,
   onToggle,
   onOpenFile,
+  onOpenDiff,
 }: {
   node: FileTreeNode;
   depth: number;
   open: Set<string>;
   onToggle: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onOpenDiff: (path: string) => void;
 }) {
   const indent = { paddingLeft: `${6 + depth * 12}px` };
   if (!node.dir) {
-    // A deleted file has nothing on disk to open.
+    // A deleted file has nothing on disk to open, but still a diff.
     const gone = node.status === "deleted";
+    // A div, not a button: the diff action is a button inside it, and a
+    // button may not hold another.
     return (
-      <button
-        className={`diff-tree-file${gone ? " file-tree-gone" : ""}`}
+      <div
+        className={`diff-tree-file file-tree-file${gone ? " file-tree-gone" : ""}`}
         style={indent}
         title={gone ? `${node.path} (deleted)` : `Open ${node.path} in your editor`}
-        disabled={gone}
-        onClick={() => onOpenFile(node.path)}
+        role="button"
+        tabIndex={0}
+        aria-disabled={gone}
+        onClick={() => !gone && onOpenFile(node.path)}
+        onKeyDown={(e) => {
+          // A key on the diff button inside bubbles here: that one is its own.
+          if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          if (!gone) onOpenFile(node.path);
+        }}
       >
         <span className="diff-caret" />
         <span className="diff-tree-name">{node.name}</span>
+        {node.status && (
+          <button
+            className="file-tree-diff"
+            title={`Show the changes to ${node.path}`}
+            onClick={(e) => {
+              // Not the row's click too: that would open the editor.
+              e.stopPropagation();
+              onOpenDiff(node.path);
+            }}
+          >
+            diff
+          </button>
+        )}
         <Marker node={node} />
-      </button>
+      </div>
     );
   }
   const expanded = open.has(node.path);
@@ -225,6 +258,7 @@ function Row({
             open={open}
             onToggle={onToggle}
             onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
           />
         ))}
     </>

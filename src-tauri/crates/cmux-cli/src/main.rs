@@ -193,8 +193,12 @@ enum Command {
         /// ("feature/login") or path. Defaults to the calling pane's.
         #[arg(long, value_name = "BRANCH|PATH")]
         worktree: Option<String>,
+        /// Show only this file's changes. A deleted file has them too, so
+        /// it need not exist.
+        #[arg(long, value_name = "FILE")]
+        path: Option<String>,
         /// List this repository's worktrees instead of opening a pane.
-        #[arg(long, conflicts_with_all = ["spec", "staged", "tab", "worktree"])]
+        #[arg(long, conflicts_with_all = ["spec", "staged", "tab", "worktree", "path"])]
         list_worktrees: bool,
     },
     /// Open the commit graph for this pane's repository.
@@ -1048,6 +1052,7 @@ fn run(cli: Cli) -> Result<(), String> {
             staged,
             tab,
             worktree,
+            path,
             list_worktrees,
         } => {
             if staged && spec.is_some() {
@@ -1080,6 +1085,12 @@ fn run(cli: Cli) -> Result<(), String> {
                     target: tab.then(|| "tab".to_string()),
                     pane_id: Some(pane_id),
                     worktree,
+                    // Absolute, as for `mira md`: the app runs elsewhere
+                    // than this shell. It says whether it is in the repository.
+                    path: path
+                        .map(|p| std::path::absolute(&p).map_err(|e| format!("{p}: {e}")))
+                        .transpose()?
+                        .map(|p| p.to_string_lossy().into_owned()),
                 }
             }
         }

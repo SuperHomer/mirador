@@ -299,11 +299,12 @@ mira diff main...HEAD          # everything on this branch
 mira diff --tab                # new tab instead of a split
 mira diff --list-worktrees     # this repository's checkouts
 mira diff --worktree feature/x # review another checkout than this pane's
+mira diff --path src/main.rs   # only this file's changes
 ```
 
 A diff pane is the review surface for a turn's work: file tree on the
 left, hunks on the right, and the repository taken from the pane you ran
-it in — so no path argument. Untracked files are included in the
+it in — so no path argument for the repository. Untracked files are included in the
 uncommitted view, because a file git has never seen is still work you
 just did. Working-tree diffs re-run whenever the pane regains focus, so
 the view never lies about the current state.
@@ -314,6 +315,14 @@ name or a path and reviews that checkout instead. The diff pane also has a
 picker in its header, so a human can move between checkouts without
 reopening anything. A bare or stale (prunable) worktree is refused, since
 neither has files to diff.
+
+`--path` limits the pane to one file, with any spec: a path relative to
+where `mira` ran, or absolute, and inside the repository — the app refuses
+anything else. The file need not exist, since a deleted file has a diff
+too. Its name is taken literally, never as a pattern. A file tree pane's
+*diff* button on a changed row opens the same thing. A file renamed in
+the change shows as added: the path names the new file only, so git has
+no old one to pair it with.
 
 Because the repository comes from the calling pane, `mira diff` refuses to
 run outside one: from another terminal it has no way to tell which repo you

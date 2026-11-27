@@ -2675,8 +2675,49 @@ button.inbox-update:hover {
   color: var(--warn);
 }
 
-/* A deleted file has nothing to open: its row is disabled, its name
-   struck through. */
+/* Shown on a changed row when the pointer is on it. */
+.file-tree-diff {
+  margin-left: auto;
+  flex-shrink: 0;
+  visibility: hidden;
+  border: 1px solid var(--surface);
+  background: var(--bg-alt);
+  color: var(--subtext);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.file-tree-file:hover .file-tree-diff,
+.file-tree-file:focus-within .file-tree-diff {
+  visibility: visible;
+}
+
+.file-tree-diff:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+/* With the diff action there, the marker follows it rather than the end. */
+.file-tree-diff + .diff-status {
+  margin-left: 0;
+}
+
+/* The file's path, after the diff's label, when it shows one file. */
+.diff-path {
+  color: var(--subtext);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 5ch;
+}
+
+/* A deleted file has nothing to open: its row does nothing on a click,
+   its name struck through; it still has a diff. */
 .file-tree-gone {
   cursor: default;
 }
