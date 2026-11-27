@@ -21,6 +21,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "rename_tab",
     "set_tab_color",
     "open_in_editor",
+    "set_menu_actions",
     "move_tab",
     "split_pane",
     "close_pane",

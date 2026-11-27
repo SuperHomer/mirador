@@ -22,6 +22,7 @@ pub mod hold;
 pub mod image;
 pub mod ipc;
 pub mod layout;
+pub mod menu;
 pub mod ports;
 pub mod session;
 pub mod ssh;
