@@ -2034,6 +2034,8 @@ pub struct RoleFields {
     pub harness: Harness,
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// Codex's `--profile`: only a Codex role keeps one.
+    pub profile: Option<String>,
     pub way: Option<String>,
     pub description: Option<String>,
     /// `tools.deny`: the permission rules it may not use.
@@ -2069,6 +2071,9 @@ pub struct HarnessChoices {
     pub harness: Harness,
     pub models: Vec<String>,
     pub efforts: Vec<String>,
+    /// Codex's profiles (`codex_integration::profiles`); empty for the
+    /// other harnesses, which have none.
+    pub profiles: Vec<String>,
 }
 
 /// One part of what an agent is told, in the order it is told:

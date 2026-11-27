@@ -6,6 +6,7 @@ export const roleFieldsOf = (r: AgentRole): RoleFields => ({
   harness: r.harness,
   model: r.model,
   effort: r.effort,
+  profile: r.profile,
   way: r.way,
   description: r.description,
   deny: r.tools?.deny ?? [],
@@ -19,8 +20,9 @@ export const withValue = (list: string[], value: string | null | undefined) =>
 /**
  * A role's fields as pickers, so a value the launch would reject cannot
  * be typed: harness, model and effort from the catalog's choices for the
- * harness (and the file's own value), its way of working, the tools it
- * is denied — and, where asked, its description. The inspector and the
+ * harness (and the file's own value), for a Codex role the profile from
+ * the person's own Codex profiles, its way of working, the tools it is
+ * denied — and, where asked, its description. The inspector and the
  * role page both use it.
  */
 export function RoleFieldsEditor({
@@ -96,6 +98,22 @@ export function RoleFieldsEditor({
           ))}
         </div>
       </div>
+      {form.harness === "codex" && (
+        <label className="inspector-field">
+          <span>Profile</span>
+          <select
+            value={form.profile ?? ""}
+            onChange={(e) => onChange({ ...form, profile: e.target.value || null })}
+          >
+            <option value="">none</option>
+            {withValue(choices?.profiles ?? [], form.profile).map((x) => (
+              <option key={x} value={x}>
+                {x}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="inspector-field">
         <span>Way of working</span>
         <select value={form.way ?? ""} onChange={(e) => onChange({ ...form, way: e.target.value || null })}>

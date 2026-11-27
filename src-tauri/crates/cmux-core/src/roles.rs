@@ -455,8 +455,10 @@ pub(crate) fn write_file(map: &serde_yaml_ng::Mapping, body: Option<&str>) -> Re
 
 /// `text`, a role file, with the role form's `fields`: the frontmatter
 /// keys the form edits set (or removed when empty or the default — Claude
-/// Code is no `harness` key), the body its prompt. Every other key stays,
-/// where it was, and so do the tools rules it does not edit (`allow`).
+/// Code is no `harness` key), the body its prompt. A `profile` is kept
+/// only for Codex, the one harness that has profiles, so switching a
+/// role away from Codex drops it. Every other key stays, where it was,
+/// and so do the tools rules it does not edit (`allow`).
 /// The frontmatter is rewritten, so comments in it are lost.
 pub fn set_role_fields(text: &str, fields: &RoleFields) -> Result<String, String> {
     use serde_yaml_ng::Value;
@@ -465,6 +467,8 @@ pub fn set_role_fields(text: &str, fields: &RoleFields) -> Result<String, String
     set_key(&mut map, "harness", harness);
     set_key(&mut map, "model", text_value(&fields.model));
     set_key(&mut map, "effort", text_value(&fields.effort));
+    let profile = if fields.harness == Harness::Codex { text_value(&fields.profile) } else { None };
+    set_key(&mut map, "profile", profile);
     set_key(&mut map, "way", text_value(&fields.way));
     set_key(&mut map, "description", text_value(&fields.description));
     let mut tools = match map.get("tools") {
@@ -487,8 +491,8 @@ pub fn set_way_fields(text: &str, fields: &WayFields) -> Result<String, String> 
 }
 
 /// What a role form offers, per harness a role can start: the models the
-/// repository's own roles and Claude Code's aliases name, and the efforts
-/// a role is checked against.
+/// repository's own roles and Claude Code's aliases name, the efforts
+/// a role is checked against, and the profiles the person's Codex has.
 pub fn role_choices() -> Vec<HarnessChoices> {
     let models: fn(Harness) -> &'static [&'static str] = |h| match h {
         // `--model` takes an alias or a full name.
@@ -506,6 +510,12 @@ pub fn role_choices() -> Vec<HarnessChoices> {
             harness,
             models: models(harness).iter().map(|m| m.to_string()).collect(),
             efforts: efforts(harness).iter().map(|e| e.to_string()).collect(),
+            profiles: match harness {
+                Harness::Codex => crate::codex_integration::codex_dir()
+                    .map(|dir| crate::codex_integration::profiles(&dir))
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            },
         })
         .collect()
 }
@@ -751,6 +761,7 @@ mod tests {
             harness: r.harness,
             model: r.model.clone(),
             effort: r.effort.clone(),
+            profile: r.profile.clone(),
             way: r.way.clone(),
             description: r.description.clone(),
             deny: r.tools.as_ref().map(|t| t.deny.clone()).unwrap_or_default(),
@@ -764,8 +775,8 @@ mod tests {
         let (role, ignored) = parse_role("reviewer", text).unwrap();
         let same = set_role_fields(text, &fields_of(&role)).unwrap();
         assert_eq!(parse_role("reviewer", &same).unwrap(), (role.clone(), ignored));
-        // What the form does not edit stays: an unknown key, the profile,
-        // the rules it may use.
+        // What the form does not edit stays: an unknown key, the rules it
+        // may use.
         assert_eq!(
             same,
             "---\nharness: codex\nmodel: gpt-6-luna\nsandbox: read-only\nprofile: fast\ntools:\n  allow:\n  - Read\n  deny:\n  - Edit\n---\nYou review.\n"
@@ -779,6 +790,13 @@ mod tests {
         let out = set_role_fields(text, &edited).unwrap();
         let (r, _) = parse_role("reviewer", &out).unwrap();
         assert_eq!((r.effort.as_deref(), r.tools.unwrap().deny), (Some("high"), vec!["Bash(git push *)".to_string()]));
+
+        // The profile: changed, cleared, and dropped with Codex.
+        let profile_of = |fields: RoleFields| parse_role("reviewer", &set_role_fields(text, &fields).unwrap()).unwrap().0.profile;
+        assert_eq!(profile_of(RoleFields { profile: Some("deep".into()), ..fields_of(&role) }).as_deref(), Some("deep"));
+        assert_eq!(profile_of(RoleFields { profile: None, ..fields_of(&role) }), None);
+        let claude = set_role_fields(text, &RoleFields { harness: Harness::Claude, ..fields_of(&role) }).unwrap();
+        assert!(!claude.contains("profile"), "{claude}");
     }
 
     #[test]

@@ -1220,6 +1220,8 @@ export interface HarnessChoices {
   harness: Harness;
   models: string[];
   efforts: string[];
+  /** Codex's profiles; empty for the other harnesses. */
+  profiles: string[];
 }
 
 /** The team form's fields (`cmux_protocol::TeamFields`). */
@@ -1237,6 +1239,8 @@ export interface RoleFields {
   harness: Harness;
   model: string | null;
   effort: string | null;
+  /** Codex's `--profile`; only a Codex role keeps one. */
+  profile: string | null;
   way: string | null;
   description: string | null;
   /** `tools.deny`. */
