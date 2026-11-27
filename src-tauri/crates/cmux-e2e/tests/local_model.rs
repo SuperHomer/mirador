@@ -497,13 +497,24 @@ fn pi_and_opencode_roles_remember_across_a_restart() {
     }
 }
 
-/// The `pi:` record the session file holds for a pane, once it is saved.
-fn saved_pi_session(sb: &Sandbox) -> Option<String> {
+/// The id of the `<harness>:` record the session file holds, once saved.
+fn saved_session(sb: &Sandbox, harness: &str) -> Option<String> {
     let file = ["Library/Application Support/Mirador", ".local/share/mirador"]
         .iter()
         .find_map(|d| std::fs::read_to_string(sb.home.join(d).join("session.json")).ok())?;
-    let at = file.find("\"pi:")? + "\"pi:".len();
+    let record = format!("\"{harness}:");
+    let at = file.find(&record)? + record.len();
     Some(file[at..].split('"').next()?.to_string())
+}
+
+/// An agent's status as `agent list` gives it: null before any.
+fn status_of(sb: &Sandbox, pane: &str) -> Option<Value> {
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+    agents.iter().find(|a| a["paneId"] == pane).map(|a| a["status"].clone())
+}
+
+fn unread(sb: &Sandbox, pane: &str) -> bool {
+    sb.snapshot()["unreadPanes"].as_array().unwrap().iter().any(|p| p == pane)
 }
 
 /// A Pi started by hand in a pane, not by Mirador, reports its session and
@@ -529,14 +540,50 @@ fn a_pi_started_by_hand_reports_its_turns_through_the_extension() {
 
     send(&sb, &first, &pane, "Say hello.");
     let (id, _) = wait_turn(&sb, "Pi's answer", &pane, pi_conversations, "Say hello.", |text| !text.trim().is_empty());
-    let status = |sb: &Sandbox| {
-        let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
-        agents.iter().find(|a| a["paneId"] == pane.as_str()).map(|a| a["status"].clone())
-    };
-    sb.wait_for("the turn's end notified", LONG, || {
-        sb.snapshot()["unreadPanes"].as_array().unwrap().iter().any(|p| p == pane.as_str()).then_some(())
-    });
-    assert_eq!(status(&sb), Some(Value::from("idle")));
-    let saved = sb.wait_for("its session in the session file", LONG, || saved_pi_session(&sb));
+    sb.wait_for("the turn's end notified", LONG, || unread(&sb, &pane).then_some(()));
+    assert_eq!(status_of(&sb, &pane), Some(Value::from("idle")));
+    let saved = sb.wait_for("its session in the session file", LONG, || saved_session(&sb, "pi"));
     assert_eq!(saved, id);
+}
+
+/// OpenCode's TUIs share a server — by default the per-user background
+/// service, which a plugin there sees with the environment of whichever
+/// pane started it. Here one `opencode serve` in a pane of its own, and two
+/// OpenCodes started by hand on it: the plugin `mira hooks setup` installs
+/// runs in each TUI, and only the one showing the session reports it — its
+/// pane idle after the turn, the turn's end notified, its session recorded
+/// — while the other, sent the same events, stays as it was.
+#[test]
+fn opencodes_on_one_server_each_report_only_their_own_session() {
+    let Some(mut sb) = local("lmochook") else { return };
+    let (code, out, err) = sb.mira(None, &["hooks", "setup"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("installed the OpenCode plugin"), "{out}");
+    sb.launch();
+    let first = sb.first_pane();
+    let split = |from: &str| {
+        let pane = sb.call(Request::SplitPane { pane_id: Some(from.into()), dir: cmux_protocol::SplitDir::Row, command: None });
+        pane["paneId"].as_str().unwrap().to_string()
+    };
+    let (server, a) = (split(&first), split(&first));
+    let b = split(&server);
+    // Its own server, never the person's background service: a password,
+    // as `opencode serve` requires of its clients.
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    sb.type_into(&server, &format!("OPENCODE_PASSWORD=e2e opencode serve --port {port}\n"));
+    sb.wait_for("the OpenCode server", LONG, || std::net::TcpStream::connect(("127.0.0.1", port)).ok());
+    for pane in [&a, &b] {
+        sb.type_into(pane, &format!("OPENCODE_PASSWORD=e2e opencode --server http://127.0.0.1:{port}\n"));
+    }
+    // Looking at another pane, so a notification is not read on arrival.
+    sb.call(Request::FocusPane { pane_id: first.clone() });
+
+    send(&sb, &first, &a, "Say hello.");
+    let (id, _) = wait_turn(&sb, "OpenCode's answer", &a, opencode_conversations, "Say hello.", |text| !text.trim().is_empty());
+    sb.wait_for("the turn's end notified", LONG, || unread(&sb, &a).then_some(()));
+    assert_eq!(status_of(&sb, &a), Some(Value::from("idle")));
+    let saved = sb.wait_for("its session in the session file", LONG, || saved_session(&sb, "opencode"));
+    assert_eq!(saved, id);
+    assert!(!unread(&sb, &b), "the other TUI's tab stays dark");
+    assert_eq!(status_of(&sb, &b), Some(Value::Null), "the other TUI says nothing");
 }

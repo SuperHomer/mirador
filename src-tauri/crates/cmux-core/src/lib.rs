@@ -28,6 +28,7 @@ pub mod ports;
 pub mod session;
 pub mod ssh;
 pub mod notes;
+pub mod opencode_integration;
 pub mod osc;
 pub mod paste;
 pub mod pane_origin;

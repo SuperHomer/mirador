@@ -267,9 +267,9 @@ enum Command {
     /// up Mirador tabs, the `/mira-diff` slash command, a `mira` skill that
     /// teaches Claude this CLI, and a wrapper in front of your status line
     /// that keeps your plan's limits, your own status line still shown;
-    /// and, where Codex or Pi is installed, a notify in Codex's
-    /// config.toml (your own notify still run) and a Pi extension, which
-    /// report their turns.
+    /// and, where Codex, Pi or OpenCode is installed, a notify in Codex's
+    /// config.toml (your own notify still run), a Pi extension and an
+    /// OpenCode plugin, which report their turns.
     Hooks {
         /// "setup" or "remove"
         action: String,
@@ -3014,7 +3014,8 @@ fn own_path() -> Result<std::path::PathBuf, String> {
 
 /// Idempotently installs (or removes) the Mirador hooks in
 /// ~/.claude/settings.json and the `/mira-diff` and `mira` skills beside
-/// them, then Mirador's notify in Codex's config.toml and its Pi extension.
+/// them, then Mirador's notify in Codex's config.toml, its Pi extension and
+/// its OpenCode plugin.
 fn hooks(action: &str) -> Result<(), String> {
     use cmux_core::claude_integration::{self, Action};
     let action = match action {
@@ -3030,6 +3031,9 @@ fn hooks(action: &str) -> Result<(), String> {
         println!("{line}");
     }
     for line in cmux_core::pi_integration::extension_setup(action, &mira)? {
+        println!("{line}");
+    }
+    for line in cmux_core::opencode_integration::plugin_setup(action, &mira)? {
         println!("{line}");
     }
     if action == Action::Setup {
