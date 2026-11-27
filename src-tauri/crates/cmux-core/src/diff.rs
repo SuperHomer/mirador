@@ -662,12 +662,12 @@ diff --git a/a.txt b/a.txt
     #[test]
     fn a_path_limits_the_diff_to_that_file() {
         let dir = new_repo("path");
-        for f in ["a.txt", "b.txt", "star*.txt"] {
+        for f in ["a.txt", "b.txt", "star[ab].txt"] {
             std::fs::write(dir.join(f), "one\n").unwrap();
         }
         git(&dir, &["add", "-A"]);
         git(&dir, &["commit", "-qm", "first"]);
-        for f in ["a.txt", "b.txt", "star*.txt"] {
+        for f in ["a.txt", "b.txt", "star[ab].txt"] {
             std::fs::write(dir.join(f), "two\n").unwrap();
         }
         std::fs::create_dir_all(dir.join("new dir")).unwrap();
@@ -679,9 +679,10 @@ diff --git a/a.txt b/a.txt
         };
         assert_eq!(paths("a.txt", WORKTREE), [("a.txt".to_string(), "modified".to_string())]);
         assert_eq!(paths("new dir/fresh.txt", WORKTREE), [("new dir/fresh.txt".to_string(), "untracked".to_string())]);
-        // As a glob, `star*.txt` would be every file starting with "star".
-        std::fs::write(dir.join("starry.txt"), "x\n").unwrap();
-        assert_eq!(paths("star*.txt", WORKTREE), [("star*.txt".to_string(), "modified".to_string())]);
+        // As a glob, `star[ab].txt` would be `stara.txt` too. Not `*`:
+        // Windows refuses it in a file name, and `[ ]` is as much a glob.
+        std::fs::write(dir.join("stara.txt"), "x\n").unwrap();
+        assert_eq!(paths("star[ab].txt", WORKTREE), [("star[ab].txt".to_string(), "modified".to_string())]);
         assert!(paths("a.txt", STAGED).is_empty());
         // The whole diff is still everything.
         assert_eq!(load(&dir, WORKTREE, None).unwrap().files.len(), 6);
