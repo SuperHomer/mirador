@@ -107,6 +107,8 @@ pub const APP_COMMANDS: &[&str] = &[
     "get_trail_detail",
     "account_usage",
     "open_usage",
+    "gpu_status",
+    "open_gpu",
     "mark_pane_read",
     "zoom_pane",
     "load_graph",

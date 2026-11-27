@@ -102,6 +102,8 @@ permissions = [
   "allow-get-trail-detail",
   "allow-account-usage",
   "allow-open-usage",
+  "allow-gpu-status",
+  "allow-open-gpu",
   "allow-mark-pane-read",
   "allow-zoom-pane",
   "allow-load-graph",

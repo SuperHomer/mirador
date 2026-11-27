@@ -109,6 +109,9 @@ pub struct PaneMeta {
     /// Usage pane: each harness's account and what it used, read from the
     /// harnesses' own files, so at most one such pane is open.
     pub usage: bool,
+    /// GPU pane: this computer's GPUs, read again every few seconds while
+    /// it shows; there is one computer, so at most one such pane is open.
+    pub gpu: bool,
     /// Computers pane: the computers saved in mirador.json, one global
     /// file, so at most one such pane is open.
     pub computers: bool,
@@ -1076,6 +1079,7 @@ impl Workspace {
             agent_editor_panes: Vec::new(),
             settings_panes: Vec::new(),
             usage_panes: Vec::new(),
+            gpu_panes: Vec::new(),
             computers_panes: Vec::new(),
             agents: Vec::new(),
             view: self.view,
@@ -1126,6 +1130,8 @@ pub fn pane_title(meta: Option<&PaneMeta>) -> String {
         "Settings".to_string()
     } else if m.usage {
         "Usage".to_string()
+    } else if m.gpu {
+        "GPU".to_string()
     } else if m.computers {
         "Computers".to_string()
     } else if let Some(version) = &m.whats_new {
@@ -2077,6 +2083,7 @@ mod tests {
         let title = |m: PaneMeta| ws.active_tab().resolved_title(&HashMap::from([(pane.clone(), m)]));
         assert_eq!(title(PaneMeta { settings: true, ..Default::default() }), "Settings");
         assert_eq!(title(PaneMeta { usage: true, ..Default::default() }), "Usage");
+        assert_eq!(title(PaneMeta { gpu: true, ..Default::default() }), "GPU");
         assert_eq!(title(PaneMeta { computers: true, ..Default::default() }), "Computers");
         assert_eq!(title(PaneMeta { browser_url: Some("https://example.com/".into()), ..Default::default() }), "https://example.com/");
         assert_eq!(title(PaneMeta::default()), "shell");

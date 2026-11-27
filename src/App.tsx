@@ -212,6 +212,7 @@ export default function App() {
                 agentEditorPanes={snapshot.agentEditorPanes ?? []}
                 settingsPanes={snapshot.settingsPanes ?? []}
                 usagePanes={snapshot.usagePanes ?? []}
+                gpuPanes={snapshot.gpuPanes ?? []}
                 computersPanes={snapshot.computersPanes ?? []}
               />
             </TabLayer>

@@ -90,6 +90,10 @@ pub struct SessionPane {
     /// Usage pane: it comes back empty and reads the files again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub usage: bool,
+    /// GPU pane: it comes back and reads the GPUs again. It only reads, so
+    /// a restored one acting at once does nothing a person would not want.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gpu: bool,
     /// Computers pane: it comes back and reads mirador.json again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub computers: bool,
@@ -232,6 +236,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
                         agent_editor: m.is_some_and(|m| m.agent_editor),
                         settings: m.is_some_and(|m| m.settings),
                         usage: m.is_some_and(|m| m.usage),
+                        gpu: m.is_some_and(|m| m.gpu),
                         computers: m.is_some_and(|m| m.computers),
                         graph_repo: m.and_then(|m| m.graph_repo.clone()),
                         graph_diff_pane: m.and_then(|m| m.graph_diff_pane.clone()),
@@ -364,6 +369,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
                     agent_editor: p.agent_editor,
                     settings: p.settings,
                     usage: p.usage,
+                    gpu: p.gpu,
                     computers: p.computers,
                     graph_repo: p.graph_repo,
                     graph_diff_pane: p.graph_diff_pane,
@@ -752,6 +758,19 @@ mod tests {
         assert!(!rmeta.get(&shell).is_some_and(|m| m.usage));
         // A shell's entry does not say it is not one.
         assert_eq!(json.matches("\"usage\"").count(), 1);
+    }
+
+    #[test]
+    fn a_gpu_pane_comes_back_as_one() {
+        let mut ws = Workspace::default();
+        let shell = ws.focused_pane();
+        let gpu = ws.split_pane(&shell, SplitDir::Row).unwrap();
+        let meta = HashMap::from([(gpu.clone(), PaneMeta { gpu: true, ..Default::default() })]);
+        let json = serde_json::to_string(&capture(&ws, &meta)).unwrap();
+        let (_, rmeta) = restore(serde_json::from_str(&json).unwrap()).unwrap();
+        assert!(rmeta[&gpu].gpu);
+        assert!(!rmeta.get(&shell).is_some_and(|m| m.gpu));
+        assert_eq!(json.matches("\"gpu\"").count(), 1);
     }
 
     #[test]

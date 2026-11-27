@@ -65,6 +65,7 @@ pub fn tool_kind(meta: Option<&PaneMeta>) -> Option<ToolKind> {
     if m.agent_editor
         || m.settings
         || m.usage
+        || m.gpu
         || m.computers
         || m.whats_new.is_some()
         || m.markdown_path.is_some()
@@ -250,11 +251,12 @@ mod tests {
             ("settings".to_string(), PaneMeta { settings: true, ..Default::default() }),
             ("news".to_string(), PaneMeta { whats_new: Some("0.1.35".into()), ..Default::default() }),
             ("usage".to_string(), PaneMeta { usage: true, ..Default::default() }),
+            ("gpu".to_string(), PaneMeta { gpu: true, ..Default::default() }),
             ("computers".to_string(), PaneMeta { computers: true, ..Default::default() }),
             ("md".to_string(), PaneMeta { markdown_path: Some("/r/README.md".into()), ..Default::default() }),
             ("files".to_string(), PaneMeta { tree_root: Some("/r".into()), ..Default::default() }),
         ]);
-        let panes = ids(&["editor", "shell", "settings", "news", "usage", "computers", "md", "files"]);
+        let panes = ids(&["editor", "shell", "settings", "news", "usage", "gpu", "computers", "md", "files"]);
         assert_eq!(kinds(&tools(&panes, &meta)), [("shell", ToolKind::Terminal)]);
     }
 

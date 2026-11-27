@@ -520,6 +520,8 @@ pub fn run() {
             commands::get_trail_detail,
             commands::account_usage,
             commands::open_usage,
+            commands::gpu_status,
+            commands::open_gpu,
             commands::mark_pane_read,
             commands::zoom_pane,
             commands::load_graph,

@@ -618,6 +618,56 @@ fn the_usage_pane_opens_once_and_comes_back() {
     assert_eq!(listed(&sb), [usage], "it comes back as the usage pane, not a shell");
 }
 
+/// `mira gpu` reads this computer's GPUs through the app, and `--tab`
+/// opens the one GPU pane, which draws its readings without taking the
+/// page down, is focused again rather than opened twice, and comes back
+/// after a relaunch. A macOS runner is a VM: it may list a GPU or none, so
+/// only where the readings came from is checked, never what they are.
+#[test]
+fn the_gpu_pane_opens_once_and_comes_back() {
+    e2e!();
+    let mut sb = Sandbox::new("gpu");
+    sb.launch();
+    let first = sb.first_pane();
+
+    let (code, out, err) = sb.mira(Some(&first), &["gpu", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let report: Value = serde_json::from_str(&out).unwrap();
+    let source = report["source"].as_str().unwrap_or_default();
+    assert!(["apple", "none", "nvidia-smi"].contains(&source), "{report}");
+    assert!(report["gpus"].is_array(), "{report}");
+
+    let (code, out, err) = sb.mira(Some(&first), &["gpu", "--tab"]);
+    assert_eq!(code, 0, "{err}");
+    let gpu = out.trim().to_string();
+    let listed = |sb: &Sandbox| -> Vec<String> {
+        sb.snapshot()["gpuPanes"]
+            .as_array()
+            .map(|l| l.iter().filter_map(|g| g["paneId"].as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    sb.wait_for("the GPU pane", LONG, || listed(&sb).contains(&gpu).then_some(()));
+    assert_eq!(sb.panes(), [first.clone(), gpu.clone()]);
+    // The pane draws its first reading once its tool answers, so this
+    // waits for a reading of its own first: the cards are drawn by then,
+    // and a throw in them has taken the page and its terminals down.
+    let (code, _, err) = sb.mira(Some(&first), &["gpu"]);
+    assert_eq!(code, 0, "{err}");
+    sb.type_into(&first, "echo still-$((40+2))\r");
+    sb.wait_for("the terminal beside the GPU pane", LONG, || {
+        sb.screen(&first).filter(|s| s.lines().any(|l| l.trim() == "still-42"))
+    });
+
+    let (code, out, err) = sb.mira(Some(&first), &["gpu", "--split"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), gpu, "the open GPU pane again");
+    assert_eq!(listed(&sb), std::slice::from_ref(&gpu));
+
+    sb.quit();
+    sb.launch();
+    assert_eq!(listed(&sb), [gpu], "it comes back as the GPU pane, not a shell");
+}
+
 /// A graph pane is still a graph pane after a relaunch, on the same
 /// repository: it once came back as a plain shell, its repository never
 /// saved in the session.

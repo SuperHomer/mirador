@@ -20,6 +20,7 @@ pub mod file_tree;
 pub mod follow;
 pub mod git;
 pub mod handoff;
+pub mod gpu;
 pub mod graph;
 pub mod hold;
 pub mod image;

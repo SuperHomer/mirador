@@ -303,6 +303,9 @@ pub struct WorkspaceSnapshot {
     /// Usage panes: at most one, showing each harness's account.
     #[serde(default)]
     pub usage_panes: Vec<UsagePane>,
+    /// GPU panes: at most one, showing this computer's GPUs.
+    #[serde(default)]
+    pub gpu_panes: Vec<GpuPane>,
     /// Computers panes: at most one, showing the saved computers.
     #[serde(default)]
     pub computers_panes: Vec<ComputersPane>,
@@ -906,9 +909,19 @@ pub enum Request {
     /// Each harness's account: how it is signed in, its plan's limits, and
     /// what it used lately, read from its own files.
     Usage,
+    /// This computer's GPUs: how busy each is, its memory and the processes
+    /// holding it, as `nvidia-smi` or `ioreg` reports them.
+    Gpu,
     /// Shows the usage pane, or opens one: a split of `pane_id`, or a tab
     /// with `target` "tab".
     UsageOpen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+    },
+    /// Shows the GPU pane, or opens one: a split of `pane_id`, or a tab
+    /// with `target` "tab".
+    GpuOpen {
         #[serde(default)]
         pane_id: Option<String>,
         target: String,
@@ -2540,6 +2553,13 @@ pub struct UsagePane {
     pub pane_id: String,
 }
 
+/// A pane showing this computer's GPUs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuPane {
+    pub pane_id: String,
+}
+
 /// A pane showing the computers saved in mirador.json.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2773,6 +2793,43 @@ pub struct AccountUsage {
     /// which the sidebar leaves out.
     #[serde(default)]
     pub in_use: bool,
+}
+
+/// This computer's GPUs, as their driver's tool reports them
+/// (`cmux_core::gpu`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuReport {
+    /// What the readings came from: `nvidia-smi`, `apple` (ioreg), or
+    /// `none` when neither is here.
+    pub source: String,
+    pub gpus: Vec<Gpu>,
+    /// Why there are no readings, or why they stopped short.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// One GPU. A reading its tool does not give is None, not zero.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Gpu {
+    pub index: u32,
+    pub name: String,
+    pub utilization_percent: Option<f64>,
+    pub memory_used_bytes: Option<u64>,
+    /// None on Apple silicon: its memory is the system's, shared.
+    pub memory_total_bytes: Option<u64>,
+    pub temperature_c: Option<f64>,
+    pub processes: Vec<GpuProcess>,
+}
+
+/// A process holding the GPU.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuProcess {
+    pub pid: u32,
+    pub name: String,
+    pub memory_used_bytes: Option<u64>,
 }
 
 #[cfg(test)]

@@ -111,6 +111,12 @@ downloads, the feature tour and the keybinding reference.
   refused request. An account on a gateway or a custom Codex provider
   says where it connects. The Usage pane (`mira usage --tab`, *App: Usage*) and
   `mira usage` show it in full. Read from local files, never the network
+- **GPU pane** (`mira gpu --tab`, or *App: GPU* in the palette): each
+  GPU's load, memory and temperature and the processes holding it, read
+  again every 2 seconds. From `nvidia-smi` wherever it is installed; on
+  a Mac from `ioreg`, which gives utilization and the memory in use (on
+  Apple Silicon no total, temperature or memory per process). Bare
+  `mira gpu` prints the same
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
   it, reads its console errors, its network requests and its cookies and

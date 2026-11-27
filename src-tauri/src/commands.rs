@@ -154,6 +154,13 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             .map(|(pane, _)| cmux_protocol::UsagePane { pane_id: pane.clone() })
             .collect()
     };
+    snapshot.gpu_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter(|(_, m)| m.gpu)
+            .map(|(pane, _)| cmux_protocol::GpuPane { pane_id: pane.clone() })
+            .collect()
+    };
     snapshot.computers_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -1470,6 +1477,44 @@ pub async fn account_usage(app: AppHandle) -> Result<Vec<cmux_protocol::AccountU
     tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().usage.lock().unwrap().accounts())
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Shows the GPU pane if one is open, in whatever tab: it shows every GPU
+/// there is, so a second would only show them twice. Otherwise opens one,
+/// a split of `pane_id` (the focused pane when absent) or a tab of its own.
+#[tauri::command]
+pub fn open_gpu(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+) -> Result<String, String> {
+    if let Some(pane) = show_existing_pane(&app, &state, |m| m.gpu) {
+        return Ok(pane);
+    }
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let pane = if tab {
+        state.workspace.lock().unwrap().new_tab().1
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, cmux_protocol::SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    state.meta.lock().unwrap().entry(pane.clone()).or_default().gpu = true;
+    emit_workspace(&app);
+    Ok(pane)
+}
+
+/// This computer's GPUs, from `nvidia-smi` or `ioreg`: each tool may take
+/// up to its deadline, so off the main thread.
+#[tauri::command]
+pub async fn gpu_status() -> Result<cmux_protocol::GpuReport, String> {
+    tauri::async_runtime::spawn_blocking(cmux_core::gpu::read).await.map_err(|e| e.to_string())
 }
 
 /// Sets the integration up: `mira` on PATH (agents and the skills call it
