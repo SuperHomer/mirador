@@ -2775,6 +2775,43 @@ pub struct AccountUsage {
     pub in_use: bool,
 }
 
+/// This computer's GPUs, as their driver's tool reports them
+/// (`cmux_core::gpu`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuReport {
+    /// What the readings came from: `nvidia-smi`, `apple` (ioreg), or
+    /// `none` when neither is here.
+    pub source: String,
+    pub gpus: Vec<Gpu>,
+    /// Why there are no readings, or why they stopped short.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// One GPU. A reading its tool does not give is None, not zero.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Gpu {
+    pub index: u32,
+    pub name: String,
+    pub utilization_percent: Option<f64>,
+    pub memory_used_bytes: Option<u64>,
+    /// None on Apple silicon: its memory is the system's, shared.
+    pub memory_total_bytes: Option<u64>,
+    pub temperature_c: Option<f64>,
+    pub processes: Vec<GpuProcess>,
+}
+
+/// A process holding the GPU.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuProcess {
+    pub pid: u32,
+    pub name: String,
+    pub memory_used_bytes: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
