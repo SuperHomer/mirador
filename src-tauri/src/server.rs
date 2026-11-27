@@ -724,6 +724,21 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             parse_bridge_result(&pane, &result)
         }
+        Request::BrowserNetwork {
+            pane_id,
+            request,
+            failed,
+            url,
+            clear,
+        } => {
+            let pane = resolve_browser_pane(&state, pane_id)?;
+            let result = crate::browser::execute(
+                app,
+                &pane,
+                json!({ "op": "network", "id": request, "failed": failed, "url": url, "clear": clear }),
+            )?;
+            parse_bridge_result(&pane, &result)
+        }
         Request::BrowserWait {
             pane_id,
             selector,

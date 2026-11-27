@@ -154,6 +154,7 @@ mira browser wait --gone .spinner
 mira browser text main                 # what the page says (a snapshot lists
                                        # only what you can act on)
 mira browser console --errors          # what went wrong on this page
+mira browser network --failed         # which of its requests failed
 mira browser eval "document.title"     # anything else, as JSON
 mira browser screenshot                # a PNG of what the pane shows; prints its path
 ```
@@ -193,6 +194,18 @@ the active tab's browser pane, else the one used last:
 - `console [--errors] [--clear]`: console output, uncaught errors,
   unhandled rejections and failed loads, oldest first, or "(no errors)" /
   "(no console output)". Exits 0 whatever it shows.
+- `network [--failed] [--url <part>] [--clear]`: the page's fetch and
+  XHR requests, oldest first, a line each: id, method, status (or why it
+  failed: `network error`, `aborted`, `timed out`), time taken and URL.
+  `--failed` keeps those with no response or a status of 400 and up,
+  `--url` those whose URL contains the part. "(no requests)" /
+  "(no failed requests)" when there are none. Exits 0 whatever it shows.
+- `network <id>`: one request from that list in full, as a browser's
+  developer tools show it: status, type, time taken, then the request's
+  and the response's headers and bodies, as sent and received. A body
+  past 20,000 characters is cut there, saying how many bytes were left
+  out. An id not on the page is an error: the list starts again on
+  each page load.
 - `eval <js>`: the result as JSON; a Promise is awaited.
 - `screenshot [--out <path>]`: a PNG of the part of the page the pane
   shows, at screen resolution, written to `--out` or else to a new file
@@ -206,6 +219,12 @@ What to know:
   pages ignore them.
 - The console log belongs to the page: a navigation or a reload starts it
   empty, so read it before moving on. It keeps the last 500 entries.
+- `network` sees what the page's own scripts ask for — `fetch` and
+  `XMLHttpRequest` — and nothing else: not the document itself, its
+  images, scripts or stylesheets, whose failures show in `console`
+  ("Failed to load <img> …"). Its log is the page's too: a navigation
+  starts an empty one. It keeps the 200 most recent requests, and each
+  body up to 20,000 characters.
 - An answer is at most 1 MB, and a command waits up to 10 s for it
   (`wait`: its `--timeout`).
 - The URL a pane reports is the last page that finished loading: a
@@ -1267,7 +1286,8 @@ read_screen send_file notify run list_runs agent_session codex_thread agent_new
 agent_list agent_wall zoom_pane swap_pane rotate_panes equalize_panes
 apply_layout browser_open browser_navigate browser_snapshot browser_click
 browser_fill browser_type browser_press browser_text browser_eval
-browser_history browser_wait browser_console browser_screenshot ssh_open ssh_hosts
+browser_history browser_wait browser_console browser_network
+browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add
 computer_update computer_remove computer_test computer_open`. Requests are

@@ -83,6 +83,36 @@ const RED: &str = r#"<!doctype html><title>Red</title>
 const BLUE: &str = r#"<!doctype html><title>Blue</title>
 <style>html, body { margin: 0; height: 100%; background: #0000ff; }</style>"#;
 
+/// A page whose requests come in on load: a GET and a POST that answer,
+/// an XHR to a page that is not there, a fetch to a port nothing listens
+/// on, and a fetch called off. What the GET answers is shown, so its
+/// own promise still works.
+fn network_page() -> String {
+    format!(
+        r#"<!doctype html><title>Network</title><p id="items"></p>
+<script>
+fetch("/api/items").then((r) => r.json()).then((j) => (document.getElementById("items").textContent = "items: " + j.items));
+fetch("/api/echo", {{ method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify({{ name: "mira" }}) }});
+const xhr = new XMLHttpRequest();
+xhr.open("GET", "/api/missing");
+xhr.send();
+fetch("http://127.0.0.1:{}/api/nowhere").catch(() => {{}});
+const stop = new AbortController();
+fetch("/slow/api/items", {{ signal: stop.signal }}).catch(() => {{}});
+stop.abort();
+</script>"#,
+        closed_port()
+    )
+}
+
+const ITEMS: &str = r#"{"items":["a","b"]}"#;
+
+/// A port nothing listens on: one the system gave out, then closed.
+fn closed_port() -> u16 {
+    static PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+    *PORT.get_or_init(|| TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port())
+}
+
 /// Serves the fixture pages on an ephemeral port for the life of the test
 /// process, and gives the port.
 fn serve_fixture() -> u16 {
@@ -106,9 +136,18 @@ fn serve_page(mut stream: std::net::TcpStream) {
         return;
     }
     let mut line = String::new();
+    let mut length = 0;
     while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                length = value.trim().parse().unwrap_or(0);
+            }
+        }
         line.clear();
     }
+    // Read whole, so closing the connection does not cut the answer off.
+    let mut posted = vec![0; length];
+    let _ = std::io::Read::read_exact(&mut reader, &mut posted);
     let path = request.split_whitespace().nth(1).unwrap_or("/").split('?').next().unwrap_or("/");
     // `/slow/<page>` is `<page>`, half a second late: on a fast machine a
     // navigation's new document lands before the next command, on a slow
@@ -130,10 +169,17 @@ fn serve_page(mut stream: std::net::TcpStream) {
         let _ = write!(stream, "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         return;
     }
-    if let Some(body) = implicit_form(path) {
+    let (page, content_type) = match path {
+        "/network" => (Some(network_page()), "text/html; charset=utf-8"),
+        "/api/items" => (Some(ITEMS.to_string()), "application/json"),
+        "/api/echo" => (Some(String::from_utf8_lossy(&posted).into_owned()), "application/json"),
+        "/api/big" => (Some("x".repeat(25_000)), "text/plain"),
+        _ => (implicit_form(path), "text/html; charset=utf-8"),
+    };
+    if let Some(body) = page {
         let _ = write!(
             stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         return;
@@ -636,6 +682,85 @@ fn console_keeps_the_last_500_entries() {
     assert_eq!(lines.first(), Some(&"(4500 earlier entries dropped)"));
     assert_eq!(lines.len(), 501);
     assert!(lines[1].ends_with("line 4500") && lines[500].ends_with("line 4999"), "{out}");
+}
+
+/// The page's fetch and XHR requests, those that failed among them, and
+/// one URL's — while the page's own requests go on as they would.
+#[test]
+fn network_lists_the_pages_requests() {
+    e2e!();
+    let (sb, first) = launched("bnetwork");
+    open(&sb, &first, &page("/network"));
+    let out = browser_until(&sb, &first, &["network"], "every request to settle", |s| {
+        s.lines().count() == 5 && !s.contains('…')
+    });
+    let lines: Vec<&str> = out.lines().collect();
+    let nowhere = format!("http://127.0.0.1:{}/api/nowhere", closed_port());
+    for (line, (start, url)) in lines.iter().zip([
+        ("  1  GET     200  ", page("/api/items")),
+        ("  2  POST    200  ", page("/api/echo")),
+        ("  3  GET     404  ", page("/api/missing")),
+        ("  4  GET     network error  ", nowhere.clone()),
+        ("  5  GET     aborted  ", page("/slow/api/items")),
+    ]) {
+        assert!(line.starts_with(start) && line.ends_with(&format!("ms  {url}")), "{line:?} is not {start}…{url} in:\n{out}");
+    }
+    // The page got its answer, as without the capture.
+    assert_eq!(browser(&sb, &first, &["text", "#items"]).trim(), "items: a,b");
+
+    let failed = browser(&sb, &first, &["network", "--failed"]);
+    assert_eq!(failed.lines().collect::<Vec<_>>(), [lines[2], lines[3], lines[4]], "{failed}");
+    assert_eq!(browser(&sb, &first, &["network", "--url", "/api/echo"]), format!("{}\n", lines[1]));
+    assert_eq!(browser(&sb, &first, &["network", "--url", "/elsewhere"]), "(no requests)\n");
+
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "network"])).unwrap();
+    let list = raw["network"].as_array().unwrap();
+    assert_eq!((list[0]["type"].as_str(), list[0]["size"].as_u64()), (Some("fetch"), Some(ITEMS.len() as u64)), "{raw}");
+    assert_eq!((list[1]["method"].as_str(), list[1]["status"].as_u64()), (Some("POST"), Some(200)), "{raw}");
+    assert_eq!((list[2]["type"].as_str(), list[2]["status"].as_u64()), (Some("xhr"), Some(404)), "{raw}");
+    assert_eq!((list[3]["status"].as_u64(), list[3]["error"].as_str()), (Some(0), Some("network error")), "{raw}");
+    assert_eq!((list[4]["status"].as_u64(), list[4]["error"].as_str()), (Some(0), Some("aborted")), "{raw}");
+    assert!(list[0]["time"].is_string() && list[0]["duration"].is_u64(), "{raw}");
+    // Bodies and headers stay out of the list.
+    for key in ["requestBody", "responseBody", "requestHeaders", "responseHeaders", "started"] {
+        assert!(list.iter().all(|r| r.get(key).is_none()), "{key} in {raw}");
+    }
+
+    // One request in full: what was sent, and what came back as received.
+    let post = browser(&sb, &first, &["network", "2"]);
+    assert!(post.starts_with(&format!("POST {}\n200 OK · fetch · ", page("/api/echo"))), "{post}");
+    assert!(
+        post.contains("\nRequest headers\n  content-type: application/json\nRequest body\n  {\"name\":\"mira\"}\n\n"),
+        "{post}"
+    );
+    let get = browser(&sb, &first, &["network", "1"]);
+    assert!(!get.contains("Request"), "a GET sent no headers and no body:\n{get}");
+    assert!(get.contains("\nResponse headers\n") && get.contains("\n  content-type: application/json\n"), "{get}");
+    assert!(get.ends_with(&format!("Response body ({} bytes)\n  {ITEMS}\n", ITEMS.len())), "{get}");
+    let failed = browser(&sb, &first, &["network", "4"]);
+    assert_eq!(failed.lines().nth(1).map(|l| l.starts_with("network error · fetch · ")), Some(true), "{failed}");
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "network", "2"])).unwrap();
+    assert_eq!(raw["request"]["requestBody"], r#"{"name":"mira"}"#, "{raw}");
+    assert_eq!(raw["request"]["responseBody"], r#"{"name":"mira"}"#, "{raw}");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "network", "99"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("no request 99 on this page (the list starts again on each page load)"), "{err}");
+    let (code, _, err) = sb.mira(Some(&first), &["browser", "network", "2", "--failed"]);
+    assert_ne!(code, 0, "an id with a filter is refused: {err}");
+
+    // --clear prints, then empties.
+    assert_eq!(browser(&sb, &first, &["network", "--clear"]), out);
+    assert_eq!(browser(&sb, &first, &["network"]), "(no requests)\n");
+    assert_eq!(browser(&sb, &first, &["network", "--failed"]), "(no failed requests)\n");
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "network"])).unwrap();
+    assert_eq!(raw["network"], serde_json::json!([]), "--json unchanged: {raw}");
+
+    // A body past the cap is cut there, saying how much was left out;
+    // the page still gets all of it. Ids go on after a clear.
+    assert_eq!(browser(&sb, &first, &["eval", "fetch('/api/big').then((r) => r.text()).then((t) => t.length)"]).trim(), "25000");
+    let big = browser_until(&sb, &first, &["network", "6"], "the large body to be read", |s| s.contains("Response body"));
+    let kept = "x".repeat(20_000);
+    assert!(big.ends_with(&format!("Response body (25000 bytes)\n  {kept}\n  … 5000 more bytes not kept\n")), "{}", &big[..300.min(big.len())]);
 }
 
 /// `wait` instead of a sleep: for an element, for text, for a spinner to

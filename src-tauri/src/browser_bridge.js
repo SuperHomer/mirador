@@ -110,6 +110,250 @@
     keep("error", "Unhandled rejection: " + message);
   });
 
+  // The page's fetch and XHR requests, kept for `mira browser network` as
+  // its console is: from document start, per document, the last
+  // MAX_REQUESTS. Bodies and headers are kept for one request's detail;
+  // the list leaves them out, so it stays far under the answer's 1 MB.
+  const MAX_REQUESTS = 200;
+  const MAX_BODY = 20000;
+  const MAX_URL = 2000;
+  let requests = [];
+  let requestsDropped = 0;
+  let nextRequest = 0;
+
+  function track(type, method, url) {
+    let absolute = String(url);
+    try {
+      absolute = new URL(absolute, location.href).href;
+    } catch {}
+    // A data: URL can be megabytes, and every list carries its URL.
+    if (absolute.length > MAX_URL) absolute = absolute.slice(0, MAX_URL) + "…";
+    const request = {
+      id: ++nextRequest,
+      type,
+      method: String(method || "GET").toUpperCase(),
+      url: absolute,
+      status: null,
+      time: new Date().toISOString().slice(11, 23),
+      duration: null,
+      size: null,
+      started: performance.now(),
+    };
+    requests.push(request);
+    if (requests.length > MAX_REQUESTS) {
+      requests.shift();
+      requestsDropped++;
+    }
+    return request;
+  }
+
+  // Status 0 and an `error` for a request that got no response.
+  function settle(request, status, error) {
+    request.status = status;
+    if (error) request.error = error;
+    request.duration = Math.round(performance.now() - request.started);
+  }
+
+  // Keeps the first MAX_BODY characters of a body, and how many bytes
+  // were left out, for the detail to say so.
+  function keepBody(request, field, text) {
+    if (text === undefined) return;
+    if (text.length > MAX_BODY) {
+      const kept = text.slice(0, MAX_BODY);
+      request[field + "Omitted"] = utf8Length(text) - utf8Length(kept);
+      text = kept;
+    }
+    request[field] = text;
+  }
+
+  function utf8Length(text) {
+    return new TextEncoder().encode(text).length;
+  }
+
+  // A body as text, or a placeholder for one that is not.
+  function bodyText(body) {
+    if (body === undefined || body === null) return undefined;
+    if (typeof body === "string") return body;
+    if (body instanceof URLSearchParams) return body.toString();
+    if (body instanceof Blob) return "<Blob " + body.size + " bytes>";
+    if (body instanceof FormData) return "<FormData>";
+    if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return "<binary " + body.byteLength + " bytes>";
+    return "<" + ((body.constructor && body.constructor.name) || typeof body) + ">";
+  }
+
+  function headerObject(headers) {
+    const out = {};
+    headers.forEach((value, name) => (out[name] = value));
+    return out;
+  }
+
+  function textual(contentType) {
+    return !contentType || /^text\/|json|xml|javascript|x-www-form-urlencoded/i.test(contentType);
+  }
+
+  // Counts a response's bytes as they come and keeps only the first
+  // MAX_BODY of a text one: a large download is never held whole.
+  function readBody(request, response, type) {
+    const reader = response.clone().body?.getReader();
+    if (!reader) {
+      request.size = 0;
+      return settle(request, response.status);
+    }
+    const keep = textual(type);
+    const kept = [];
+    let keptBytes = 0;
+    let size = 0;
+    const done = () => {
+      request.size = size;
+      if (keep) {
+        const bytes = new Uint8Array(keptBytes);
+        let at = 0;
+        for (const part of kept) {
+          bytes.set(part, at);
+          at += part.byteLength;
+        }
+        request.responseBody = new TextDecoder().decode(bytes);
+        if (size > keptBytes) request.responseBodyOmitted = size - keptBytes;
+      } else {
+        request.responseBody = "<binary " + size + " bytes>";
+      }
+      settle(request, response.status);
+    };
+    const pump = () =>
+      reader.read().then(({ done: finished, value }) => {
+        if (finished) return done();
+        size += value.byteLength;
+        if (keep && keptBytes < MAX_BODY) {
+          const part = value.subarray(0, MAX_BODY - keptBytes);
+          kept.push(part);
+          keptBytes += part.byteLength;
+        }
+        return pump();
+      });
+    pump().catch(() => settle(request, response.status));
+  }
+
+  function failure(e) {
+    return e && e.name === "AbortError" ? "aborted" : "network error";
+  }
+
+  const pageFetch = window.fetch;
+  if (pageFetch) {
+    window.fetch = function (input, init) {
+      let request;
+      try {
+        const asked = input instanceof Request ? input : null;
+        request = track("fetch", (init && init.method) || (asked && asked.method), asked ? asked.url : input);
+        request.requestHeaders = headerObject(new Headers((init && init.headers) || (asked && asked.headers) || {}));
+        if (init && init.body !== undefined) keepBody(request, "requestBody", bodyText(init.body));
+        else if (asked && asked.body)
+          asked
+            .clone()
+            .text()
+            .then((text) => keepBody(request, "requestBody", text), () => {});
+      } catch {}
+      const answer = pageFetch.apply(this, arguments);
+      if (request) {
+        // Read from a clone, off to the side: the page's own promise and
+        // body are left as they were.
+        answer.then(
+          (response) => {
+            // A throw here would be an unhandled rejection: the page's
+            // console would show it as the page's own error.
+            try {
+              request.status = response.status;
+              request.statusText = response.statusText;
+              request.responseHeaders = headerObject(response.headers);
+              const type = response.headers.get("content-type") || "";
+              // A stream that never ends is never read to its end.
+              if (/event-stream/i.test(type)) return settle(request, response.status);
+              readBody(request, response, type);
+            } catch {
+              settle(request, response.status);
+            }
+          },
+          (e) => settle(request, 0, failure(e)),
+        );
+      }
+      return answer;
+    };
+  }
+
+  const PageXHR = window.XMLHttpRequest;
+  if (PageXHR) {
+    const { open, send, setRequestHeader } = PageXHR.prototype;
+    const opened = new WeakMap();
+    // Each XHR's latest send: one reused answers only for its own.
+    const latest = new WeakMap();
+    PageXHR.prototype.open = function (method, url) {
+      try {
+        opened.set(this, { method, url, headers: {} });
+        // Opened again in flight, it drops its send without an event.
+        const before = latest.get(this);
+        if (before && before.duration === null) settle(before, 0, "aborted");
+        latest.delete(this);
+      } catch {}
+      return open.apply(this, arguments);
+    };
+    PageXHR.prototype.setRequestHeader = function (name, value) {
+      try {
+        const asked = opened.get(this);
+        if (asked) asked.headers[String(name).toLowerCase()] = String(value);
+      } catch {}
+      return setRequestHeader.apply(this, arguments);
+    };
+    PageXHR.prototype.send = function (body) {
+      try {
+        const asked = opened.get(this);
+        if (asked) {
+          const request = track("xhr", asked.method, asked.url);
+          request.requestHeaders = asked.headers;
+          keepBody(request, "requestBody", bodyText(body));
+          latest.set(this, request);
+          let error;
+          const once = { once: true };
+          const ours = () => latest.get(this) === request;
+          this.addEventListener("error", () => ours() && (error = "network error"), once);
+          this.addEventListener("abort", () => ours() && (error = "aborted"), once);
+          this.addEventListener("timeout", () => ours() && (error = "timed out"), once);
+          this.addEventListener("loadend", () => {
+            if (!ours()) return;
+            try {
+              if (error) return settle(request, 0, error);
+              request.statusText = this.statusText;
+              request.responseHeaders = {};
+              for (const line of this.getAllResponseHeaders().trim().split(/\r?\n/)) {
+                const at = line.indexOf(":");
+                if (at > 0) request.responseHeaders[line.slice(0, at).trim().toLowerCase()] = line.slice(at + 1).trim();
+              }
+              const r = this.response;
+              if (this.responseType === "" || this.responseType === "text") {
+                request.size = utf8Length(this.responseText);
+                keepBody(request, "responseBody", this.responseText);
+              } else if (this.responseType === "json") {
+                const text = JSON.stringify(r) || "";
+                request.size = utf8Length(text);
+                keepBody(request, "responseBody", text);
+              } else if (r instanceof Blob) {
+                request.size = r.size;
+                request.responseBody = bodyText(r);
+              } else if (r instanceof ArrayBuffer) {
+                request.size = r.byteLength;
+                request.responseBody = bodyText(r);
+              } else {
+                request.responseBody = bodyText(r);
+              }
+              settle(request, this.status);
+            } catch {
+              settle(request, this.status);
+            }
+          }, once);
+        }
+      } catch {}
+      return send.apply(this, arguments);
+    };
+  }
+
   function visible(el) {
     const r = el.getBoundingClientRect();
     if (r.width === 0 && r.height === 0) return false;
@@ -474,6 +718,34 @@
       if (op.clear) {
         entries = [];
         dropped = 0;
+      }
+      return answer;
+    } else if (op.op === "network") {
+      if (op.id !== undefined && op.id !== null) {
+        const found = requests.find((r) => r.id === op.id);
+        if (!found) return { error: "no request " + op.id + " on this page (the list starts again on each page load)" };
+        const { started, ...entry } = found;
+        // Wrapped: a failed request's own `error` is not this answer's.
+        return { request: entry };
+      }
+      let kept = requests;
+      if (op.failed) kept = kept.filter((r) => r.status === 0 || r.status >= 400);
+      if (op.url) kept = kept.filter((r) => r.url.includes(op.url));
+      const answer = {
+        // Without bodies and headers: 200 bodies would not fit an answer.
+        network: kept.map((r) => {
+          const line = { id: r.id, type: r.type, method: r.method, url: r.url, status: r.status };
+          if (r.error) line.error = r.error;
+          line.time = r.time;
+          line.duration = r.duration;
+          line.size = r.size;
+          return line;
+        }),
+        dropped: requestsDropped,
+      };
+      if (op.clear) {
+        requests = [];
+        requestsDropped = 0;
       }
       return answer;
     }

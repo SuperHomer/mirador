@@ -823,6 +823,26 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// The page's fetch and XHR requests, oldest first: method, status
+    /// (or why it failed), time taken, URL. Per page, like the console:
+    /// a navigation starts empty. Exits 0 whatever it shows. With an id
+    /// from that list, the one request in full: headers and bodies.
+    Network {
+        /// One request, by its id in the list.
+        #[arg(conflicts_with_all = ["failed", "url", "clear"])]
+        id: Option<u64>,
+        /// Only requests that failed: no response, or a status of 400 and up.
+        #[arg(long)]
+        failed: bool,
+        /// Only requests whose URL contains this.
+        #[arg(long, value_name = "PART")]
+        url: Option<String>,
+        /// Empty the log after printing it.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// Wait until the page shows a CSS selector, some text, a URL, or no
     /// longer shows a selector — instead of sleeping.
     #[command(group(clap::ArgGroup::new("until").required(true).args(["selector", "text", "url", "gone"])))]
@@ -1283,6 +1303,22 @@ fn run(cli: Cli) -> Result<(), String> {
                     clear,
                 }
             }
+            BrowserAction::Network {
+                id,
+                failed,
+                url,
+                clear,
+                pane,
+            } => {
+                empty_note = Some(if failed { "(no failed requests)" } else { "(no requests)" }.into());
+                Request::BrowserNetwork {
+                    pane_id: pane,
+                    request: id,
+                    failed,
+                    url,
+                    clear,
+                }
+            }
             BrowserAction::Wait {
                 selector,
                 text,
@@ -1508,6 +1544,16 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                     }
                 }
                 render_console(entries, dropped);
+            } else if let Some(request) = map.get("request") {
+                render_request(request);
+            } else if let Some(requests) = map.get("network").and_then(|v| v.as_array()) {
+                let dropped = map["dropped"].as_u64().unwrap_or(0);
+                if requests.is_empty() && dropped == 0 {
+                    if let Some(note) = empty_note {
+                        println!("{note}");
+                    }
+                }
+                render_network(requests, dropped);
             } else if map.contains_key("value") {
                 println!("{}", serde_json::to_string_pretty(&map["value"]).unwrap());
             } else if let Some(hosts) = map.get("hosts").and_then(|v| v.as_array()) {
@@ -2169,6 +2215,82 @@ fn render_console(entries: &[serde_json::Value], dropped: u64) {
             entry["level"].as_str().unwrap_or(""),
             entry["message"].as_str().unwrap_or("")
         );
+    }
+}
+
+/// `  3  GET     200  142ms  https://…/api/items`, one per request; a
+/// failed one says why in place of its status, one still waiting `…`.
+fn render_network(requests: &[serde_json::Value], dropped: u64) {
+    if dropped > 0 {
+        println!("({dropped} earlier requests dropped)");
+    }
+    for request in requests {
+        let status = match (request["error"].as_str(), request["status"].as_u64()) {
+            (Some(error), _) => error.to_string(),
+            (None, Some(status)) => status.to_string(),
+            (None, None) => "…".into(),
+        };
+        let duration = request["duration"].as_u64().map(|ms| format!("{ms}ms")).unwrap_or_else(|| "…".into());
+        println!(
+            "{:>3}  {:<7} {:>3}  {:>5}  {}",
+            request["id"].as_u64().unwrap_or(0),
+            request["method"].as_str().unwrap_or(""),
+            status,
+            duration,
+            request["url"].as_str().unwrap_or("")
+        );
+    }
+}
+
+/// One request, as a browser's developer tools show it: what was asked,
+/// what came back, each section left out when it has nothing in it.
+fn render_request(request: &serde_json::Value) {
+    let text = |key: &str| request[key].as_str().unwrap_or("");
+    println!("{} {}", text("method"), text("url"));
+    let outcome = match (request["error"].as_str(), request["status"].as_u64()) {
+        (Some(error), _) => error.to_string(),
+        (None, Some(status)) => format!("{status} {}", text("statusText")).trim_end().to_string(),
+        (None, None) => "waiting".into(),
+    };
+    let mut line = vec![outcome, text("type").to_string()];
+    if let Some(ms) = request["duration"].as_u64() {
+        line.push(format!("{ms}ms"));
+    }
+    line.push(text("time").to_string());
+    println!("{}", line.join(" · "));
+    let headers = |out: &mut Vec<String>, title: &str, key: &str| {
+        if let Some(headers) = request[key].as_object().filter(|h| !h.is_empty()) {
+            out.push(title.into());
+            for (name, value) in headers {
+                out.push(format!("  {name}: {}", value.as_str().unwrap_or("")));
+            }
+        }
+    };
+    let body = |out: &mut Vec<String>, title: &str, key: &str| {
+        let Some(body) = request[key].as_str().filter(|b| !b.is_empty()) else {
+            return;
+        };
+        out.push(title.into());
+        out.extend(body.lines().map(|line| format!("  {line}")));
+        if let Some(omitted) = request[format!("{key}Omitted")].as_u64() {
+            out.push(format!("  … {omitted} more bytes not kept"));
+        }
+    };
+    let mut asked = Vec::new();
+    headers(&mut asked, "Request headers", "requestHeaders");
+    body(&mut asked, "Request body", "requestBody");
+    let mut answered = Vec::new();
+    headers(&mut answered, "Response headers", "responseHeaders");
+    let title = match request["size"].as_u64() {
+        Some(size) => format!("Response body ({size} bytes)"),
+        None => "Response body".into(),
+    };
+    body(&mut answered, &title, "responseBody");
+    for section in [asked, answered].iter().filter(|s| !s.is_empty()) {
+        println!();
+        for line in section {
+            println!("{line}");
+        }
     }
 }
 
