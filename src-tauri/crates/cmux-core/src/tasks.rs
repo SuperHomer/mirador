@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use cmux_protocol::{AgentStatus, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource, TurnEnd};
+use cmux_protocol::{AgentStatus, TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskRecap, TaskSource, TurnEnd};
 
 use crate::session::{atomic_write, data_dir};
 
@@ -425,6 +425,42 @@ pub fn recent(cards: Vec<TaskCard>, done: usize) -> Vec<TaskCard> {
         .collect()
 }
 
+/// The recap of the log since `since_ms`, one group per tab and team that
+/// has anything in it, the group with the newest card first.
+pub fn recap(events: &[TaskEvent], since_ms: u64) -> Vec<TaskRecap> {
+    let mut picked: Vec<TaskCard> = cards(events)
+        .into_iter()
+        .filter(|c| match c.column {
+            TaskColumn::Done => c.updated_ms >= since_ms,
+            TaskColumn::NeedsYou => true,
+            _ => false,
+        })
+        .collect();
+    picked.sort_by_key(|c| std::cmp::Reverse(c.updated_ms));
+    let mut groups: Vec<TaskRecap> = Vec::new();
+    for card in picked {
+        let i = match groups.iter().position(|g| g.tab == card.tab && g.team == card.team) {
+            Some(i) => i,
+            None => {
+                groups.push(TaskRecap {
+                    tab: card.tab.clone(),
+                    team: card.team.clone(),
+                    title: None,
+                    done: Vec::new(),
+                    waiting: Vec::new(),
+                });
+                groups.len() - 1
+            }
+        };
+        if card.column == TaskColumn::NeedsYou {
+            groups[i].waiting.push(card);
+        } else {
+            groups[i].done.push(card);
+        }
+    }
+    groups
+}
+
 /// A length of time as the CLI shows it: `45s`, `12m`, `3h`, `2d`.
 pub fn span(ms: u64) -> String {
     let s = ms / 1000;
@@ -817,6 +853,69 @@ All of it.");
         let shown: Vec<String> = recent(cards(&log), 2).into_iter().map(|c| c.id).collect();
         assert_eq!(shown, ["m0", "m1", "m2", "m4"]);
         assert_eq!(recent(cards(&log), 20).len(), 5);
+    }
+
+    fn ids(cards: &[TaskCard]) -> Vec<&str> {
+        cards.iter().map(|c| c.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_recap_has_what_was_done_since_and_all_that_waits() {
+        let log = [
+            given(100, "old", TaskSource::AgentSend, "worker", "done long ago"),
+            ended(200, "worker", TurnEnd::Done),
+            given(300, "asks", TaskSource::AgentSend, "reviewer", "waits on you"),
+            ended(400, "reviewer", TurnEnd::NeedsYou),
+            given(1_000, "new", TaskSource::AgentSend, "worker", "done lately"),
+            ended(1_100, "worker", TurnEnd::Done),
+            given(1_200, "busy", TaskSource::AgentSend, "dev", "still going"),
+        ];
+        let recap = recap(&log, 1_000);
+        let [group] = recap.as_slice() else { panic!("{recap:?}") };
+        assert_eq!((group.tab.as_deref(), group.team.as_deref()), (Some("tab-1"), Some("omakase")));
+        assert_eq!(ids(&group.done), ["new"]);
+        assert_eq!(ids(&group.waiting), ["asks"], "a card waiting on you is in however old it is");
+    }
+
+    #[test]
+    fn a_recap_groups_by_tab_newest_first() {
+        let in_tab = |mut event: TaskEvent, name: &str| {
+            if let TaskEventKind::Given { tab, .. } = &mut event.what {
+                *tab = Some(name.into());
+            }
+            event
+        };
+        let log = [
+            in_tab(given(100, "a1", TaskSource::AgentSend, "worker", "first"), "tab-a"),
+            ended(200, "worker", TurnEnd::Done),
+            in_tab(given(300, "b1", TaskSource::AgentSend, "dev", "second"), "tab-b"),
+            ended(400, "dev", TurnEnd::Done),
+            in_tab(given(500, "a2", TaskSource::AgentSend, "reviewer", "third"), "tab-a"),
+            ended(600, "reviewer", TurnEnd::Done),
+        ];
+        let recap = recap(&log, 0);
+        let tabs: Vec<_> = recap.iter().map(|g| g.tab.as_deref()).collect();
+        assert_eq!(tabs, [Some("tab-a"), Some("tab-b")]);
+        assert_eq!(ids(&recap[0].done), ["a2", "a1"]);
+        assert_eq!(ids(&recap[1].done), ["b1"]);
+        assert!(super::recap(&[], 0).is_empty());
+    }
+
+    #[test]
+    fn a_recap_keeps_two_teams_of_one_tab_apart() {
+        let mut other = given(300, "b", TaskSource::AgentSend, "dev", "theirs");
+        if let TaskEventKind::Given { team, .. } = &mut other.what {
+            *team = Some("pair".into());
+        }
+        let log = [
+            given(100, "a", TaskSource::AgentSend, "worker", "ours"),
+            ended(200, "worker", TurnEnd::Done),
+            other,
+            ended(400, "dev", TurnEnd::Done),
+        ];
+        let recap = recap(&log, 0);
+        let groups: Vec<_> = recap.iter().map(|g| (g.tab.as_deref(), g.team.as_deref(), ids(&g.done))).collect();
+        assert_eq!(groups, [(Some("tab-1"), Some("pair"), vec!["b"]), (Some("tab-1"), Some("omakase"), vec!["a"])]);
     }
 
     #[test]

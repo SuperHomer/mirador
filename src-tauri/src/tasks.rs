@@ -2,7 +2,7 @@
 //! answers with. The log's format and the fold into cards are
 //! `cmux_core::tasks`'s; this is where they meet panes, tabs and teams.
 
-use cmux_protocol::{TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskSource};
+use cmux_protocol::{TaskCard, TaskColumn, TaskEvent, TaskEventKind, TaskHistoryEntry, TaskRecap, TaskSource};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::AppState;
@@ -162,6 +162,24 @@ fn events(state: &AppState) -> Vec<TaskEvent> {
 pub fn list(state: &AppState, all: bool, pane_id: Option<String>) -> Result<Vec<TaskCard>, String> {
     let tab = if all { None } else { Some(tab_of(state, pane_id)?) };
     Ok(board(state, tab))
+}
+
+/// What was done in the last `hours` and what waits on a person, in every
+/// tab — a recap is about all that was left running — each group titled
+/// by its team, or by its tab while that is open and was named.
+pub fn recap(state: &AppState, hours: Option<u64>) -> Result<Vec<TaskRecap>, String> {
+    let hours = hours.unwrap_or(24);
+    if hours == 0 {
+        return Err("--hours must be at least 1".into());
+    }
+    let since = crate::runs::now_ms().saturating_sub(hours.saturating_mul(3_600_000));
+    let mut groups = cmux_core::tasks::recap(&events(state), since);
+    let ws = state.workspace.lock().unwrap();
+    for group in &mut groups {
+        let tab = ws.tabs.iter().find(|t| Some(&t.id) == group.tab.as_ref());
+        group.title = group.team.clone().or_else(|| tab.and_then(|t| t.title.clone()));
+    }
+    Ok(groups)
 }
 
 /// The cards of the tab `tab`, or of every tab: every one not done, and
