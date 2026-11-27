@@ -155,6 +155,60 @@ fn run_tag() -> &'static str {
     })
 }
 
+/// The sign-in cookie's name, this run's own (`run_tag`).
+fn sign_in_cookie() -> &'static str {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| format!("e2e_login_{}", run_tag()))
+}
+
+const LOGIN: &str = r#"<!doctype html><title>Sign in</title>
+<form method="post" action="/login"><input id="user" name="user"><button id="sign-in">Sign in</button></form>"#;
+
+/// Asks /me who is signed in, as an app does on load.
+const ACCOUNT: &str = r#"<!doctype html><title>Account</title><p id="who"></p>
+<script>
+fetch("/me")
+  .then((r) => (r.ok ? r.text() : "signed out (" + r.status + ")"))
+  .then((t) => (document.getElementById("who").textContent = t));
+</script>"#;
+
+/// The sign-in pages: the form, its POST (a lasting HttpOnly cookie and a
+/// session one, then on to /account), /me (200 with the cookie, 401
+/// without), and /logout (both cookies expired).
+fn sign_in_answer(method: &str, path: &str, cookies: &str, posted: &[u8]) -> Option<String> {
+    let name = sign_in_cookie();
+    let page = |extra: &str, body: &str| {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n{extra}Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    };
+    let user = cookies
+        .split(';')
+        .find_map(|c| c.trim().strip_prefix(&format!("{name}=")))
+        .map(String::from);
+    Some(match (method, path) {
+        ("GET", "/login") => page("", LOGIN),
+        ("POST", "/login") => {
+            let user = String::from_utf8_lossy(posted).trim_start_matches("user=").to_string();
+            format!(
+                "HTTP/1.1 303 See Other\r\nSet-Cookie: {name}={user}; Path=/; HttpOnly; Max-Age=3600\r\n\
+                 Set-Cookie: {name}_tab=1; Path=/\r\nLocation: /account\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        }
+        ("GET", "/account") => page("", ACCOUNT),
+        ("GET", "/me") => match user {
+            Some(user) => page("", &format!("signed in as {user}")),
+            None => "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+        },
+        ("GET", "/logout") => page(
+            &format!("Set-Cookie: {name}=; Path=/; Max-Age=0\r\nSet-Cookie: {name}_tab=; Path=/; Max-Age=0\r\n"),
+            "<!doctype html><title>Signed out</title><h1>Signed out</h1>",
+        ),
+        _ => return None,
+    })
+}
+
 /// A port nothing listens on: one the system gave out, then closed.
 fn closed_port() -> u16 {
     static PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
@@ -185,10 +239,13 @@ fn serve_page(mut stream: std::net::TcpStream) {
     }
     let mut line = String::new();
     let mut length = 0;
+    let mut cookies = String::new();
     while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
         if let Some((name, value)) = line.split_once(':') {
             if name.eq_ignore_ascii_case("content-length") {
                 length = value.trim().parse().unwrap_or(0);
+            } else if name.eq_ignore_ascii_case("cookie") {
+                cookies = value.trim().to_string();
             }
         }
         line.clear();
@@ -224,6 +281,11 @@ fn serve_page(mut stream: std::net::TcpStream) {
         "/api/big" => (Some("x".repeat(25_000)), "text/plain"),
         _ => (implicit_form(path), "text/html; charset=utf-8"),
     };
+    let method = request.split_whitespace().next().unwrap_or("GET");
+    if let Some(answer) = sign_in_answer(method, path, &cookies, &posted) {
+        let _ = stream.write_all(answer.as_bytes());
+        return;
+    }
     if path == "/storage-clear" {
         let body = "<!doctype html><title>Cleared</title><h1>Cleared</h1>";
         let _ = write!(
@@ -881,15 +943,79 @@ fn storage_shows_cookies_and_both_storage_areas() {
     assert!(blank.contains("Cookies — about:blank\n  (none)\nlocalStorage — null\n  (not readable: "), "{blank}");
 }
 
-/// Visits a page that expires a test's cookies when dropped
-/// (/storage-clear), so a failed run leaves none behind. With no app
-/// left, the cookies stay, and their names are this run's alone.
+/// `args` for `pane`: `mira browser <args> --pane <pane>`.
+fn on<'a>(pane: &'a str, args: &[&'a str]) -> Vec<&'a str> {
+    [args, &["--pane", pane]].concat()
+}
+
+/// Visits a page that expires a test's cookies when dropped (/logout,
+/// /storage-clear), so a failed run leaves none behind. Built before the
+/// app quits: the command finds the app through the sandbox's own files,
+/// so it reaches the relaunched one too; with no app left, the cookie
+/// stays, and its name is this run's alone.
 struct VisitOnDrop(std::process::Command);
 
 impl Drop for VisitOnDrop {
     fn drop(&mut self) {
         let _ = self.0.output();
     }
+}
+
+/// Log in, then hand over: a person signs in once in a browser pane, and
+/// the sign-in holds for the agent driving it — across navigations, in a
+/// pane opened later, and after the app quits and comes back.
+#[test]
+fn a_sign_in_holds_across_pages_panes_and_a_relaunch() {
+    e2e!();
+    let name = sign_in_cookie();
+    let (mut sb, first) = launched("bsignin");
+    let pane = open(&sb, &first, &page("/account"));
+    let _sign_out = VisitOnDrop(sb.mira_command(Some(&first), &["browser", "navigate", "--pane", &pane, &page("/logout")]));
+
+    // Signed out: /me says 401, and the network log shows it.
+    browser(&sb, &first, &["wait", "--text", "signed out (401)", "--pane", &pane]);
+    let failed = browser(&sb, &first, &on(&pane, &["network", "--failed"]));
+    assert!(failed.lines().any(|l| l.contains(" 401 ") && l.ends_with(&page("/me"))), "{failed}");
+
+    // The person signs in, on a real form.
+    browser(&sb, &first, &on(&pane, &["navigate", "/login"]));
+    browser(&sb, &first, &on(&pane, &["wait", "#user"]));
+    browser(&sb, &first, &on(&pane, &["fill", "#user", "ada"]));
+    browser(&sb, &first, &on(&pane, &["click", "#sign-in"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "signed in as ada"]));
+
+    // (a) Across navigations in the pane.
+    browser(&sb, &first, &on(&pane, &["navigate", "/page2"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "Second page"]));
+    browser(&sb, &first, &on(&pane, &["navigate", "/account"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "signed in as ada"]));
+
+    // (b) In a pane opened after it.
+    let second = browser(&sb, &first, &["open", &page("/account"), "--tab"]).trim().to_string();
+    browser(&sb, &first, &["wait", "--text", "signed in as ada", "--pane", &second]);
+
+    // (c) After a quit and a relaunch: the pane comes back on its page —
+    // the one in the tab shown, which is drawn — and the lasting cookie
+    // with it. The session one does not: a session ends with the app.
+    let storage = browser(&sb, &first, &on(&second, &["storage"]));
+    assert!(storage.contains(&format!("\n  {name}_tab=1  127.0.0.1 /  session\n")), "{storage}");
+    let before = sb.panes();
+    sb.quit();
+    sb.launch();
+    assert_eq!(sb.panes(), before, "the layout comes back as it was");
+    browser_until(&sb, &first, &on(&second, &["wait", "--text", "signed in as ada"]), "the restored pane, signed in", |_| true);
+    let storage = browser(&sb, &first, &on(&second, &["storage"]));
+    let cookie = format!("  {name}=ada  127.0.0.1 /  ");
+    let line = storage.lines().find(|l| l.starts_with(&cookie)).unwrap_or_else(|| panic!("no {name} in:\n{storage}"));
+    assert!(line.ends_with(" UTC  HttpOnly"), "{line}");
+    assert!(!storage.contains(&format!("{name}_tab=")), "the session cookie outlived the app:\n{storage}");
+
+    // Signing out ends it, for every pane.
+    browser(&sb, &first, &on(&pane, &["navigate", "/logout"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "Signed out"]));
+    browser(&sb, &first, &on(&pane, &["navigate", "/account"]));
+    browser(&sb, &first, &on(&pane, &["wait", "--text", "signed out (401)"]));
+    assert!(!browser(&sb, &first, &on(&pane, &["storage"])).contains(name));
 }
 
 /// `wait` instead of a sleep: for an element, for text, for a spinner to
