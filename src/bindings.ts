@@ -251,6 +251,19 @@ export interface GraphPaneInfo {
   repo: string;
 }
 
+/** Absolute paths, shallowest first, and the directory they are listed
+ *  from: a repository's root, or the pane's directory outside one. */
+export interface MarkdownFiles {
+  root: string;
+  files: string[];
+}
+
+export interface MarkdownPaneInfo {
+  paneId: string;
+  /** Absolute path of the file it shows. */
+  path: string;
+}
+
 export type AgentStatus = "working" | "needsYou" | "idle";
 
 /** A tool call an agent asks permission for, summed up as in its trail. */
@@ -669,6 +682,7 @@ export interface WorkspaceSnapshot {
   diffPanes: DiffPaneInfo[];
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
+  markdownPanes: MarkdownPaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
@@ -945,6 +959,15 @@ export const openWhatsNew = (
 ) => invoke<string>("open_whats_new", { version, since });
 export const openGraph = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_graph", { paneId, tab });
+/** `path` must be absolute. A tab already on the file is shown again. */
+export const openMarkdown = (paneId: string | null, path: string, tab: boolean) =>
+  invoke<string>("open_markdown", { paneId, path, tab });
+/** The markdown files of the pane's repository, or of its directory. */
+export const listMarkdown = (paneId: string | null) =>
+  invoke<MarkdownFiles>("list_markdown", { paneId });
+/** The pane's file, parsed in Rust (cmux-core/src/notes.rs). */
+export const readMarkdown = (paneId: string) =>
+  invoke<NoteBlock[]>("read_markdown", { paneId });
 /** What a role's menu entry says beside its name. */
 export const roleHint = (r: AgentRole): string =>
   r.problem

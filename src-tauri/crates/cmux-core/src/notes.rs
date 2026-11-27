@@ -15,9 +15,9 @@
 //! links. Anything else degrades to text rather than disappearing.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use cmux_protocol::{NoteBlock, NoteSpan};
+use cmux_protocol::{MarkdownFiles, NoteBlock, NoteSpan};
 
 /// Larger than any README or plan; a file past it is almost certainly not
 /// one, and parsing it would stall the pane for nothing.
@@ -45,6 +45,62 @@ pub fn read_file(path: &Path) -> Result<Vec<NoteBlock>, String> {
     let text = String::from_utf8(bytes)
         .map_err(|_| format!("{} is not UTF-8 text", path.display()))?;
     Ok(parse(&text))
+}
+
+/// More than a palette can usefully list; a tree past it is not one
+/// whose markdown anyone picks by name.
+pub const MAX_LISTED_FILES: usize = 2000;
+
+/// The markdown files a pane in `dir` can open, as absolute paths, the
+/// shallowest first (`README.md` before `docs/plan.md`).
+///
+/// In a git repository, the whole repository's — tracked and untracked
+/// alike, but never what `.gitignore` leaves out, which is what keeps
+/// `node_modules` and `target` from burying the rest. Outside one, only
+/// `dir`'s own files: a walk down from `~` would never end.
+pub fn list_files(dir: &Path) -> Result<MarkdownFiles, String> {
+    let (root, mut files): (PathBuf, Vec<PathBuf>) = match crate::git::find_repo_root(&dir.to_string_lossy()) {
+        Some(root) => {
+            let output = crate::proc::command("git")
+                .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+                .current_dir(&root)
+                .output()
+                .map_err(|e| format!("could not run git: {e}"))?;
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+            }
+            let files = String::from_utf8_lossy(&output.stdout)
+                .split('\0')
+                .filter(|f| is_markdown(Path::new(f)))
+                .map(|f| root.join(f))
+                .collect();
+            (root, files)
+        }
+        None => {
+            let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            let files = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| is_markdown(p) && p.is_file())
+                .collect();
+            (dir.to_path_buf(), files)
+        }
+    };
+    files.sort_by(|a, b| {
+        (a.components().count(), a).cmp(&(b.components().count(), b))
+    });
+    files.dedup();
+    files.truncate(MAX_LISTED_FILES);
+    Ok(MarkdownFiles {
+        root: root.to_string_lossy().into_owned(),
+        files: files.iter().map(|f| f.to_string_lossy().into_owned()).collect(),
+    })
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
 }
 
 /// Quotes nested deeper than this read as text. Each level is a call of
@@ -720,6 +776,61 @@ See the [README](https://github.com/SuperHomer/mirador#install-macos).
 
         let missing = std::env::temp_dir().join("mirador-notes-no-such-file.md");
         assert!(read_file(&missing).is_err());
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = crate::proc::command("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git must be installed to run this test");
+        assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    fn fresh_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mirador-notes-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("docs/deep")).unwrap();
+        for f in ["README.md", "notes.markdown", "main.rs", "docs/plan.md", "docs/deep/x.MD"] {
+            std::fs::write(dir.join(f), "x").unwrap();
+        }
+        dir
+    }
+
+    fn relative(listed: &MarkdownFiles) -> Vec<String> {
+        listed
+            .files
+            .iter()
+            .map(|f| Path::new(f).strip_prefix(&listed.root).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect()
+    }
+
+    #[test]
+    fn lists_a_repositorys_markdown_but_not_what_it_ignores() {
+        let dir = fresh_dir("repo");
+        git(&dir, &["init", "-q"]);
+        std::fs::create_dir_all(dir.join("node_modules/pkg")).unwrap();
+        std::fs::write(dir.join("node_modules/pkg/README.md"), "x").unwrap();
+        std::fs::write(dir.join(".gitignore"), "node_modules/\n").unwrap();
+        git(&dir, &["add", "README.md"]);
+
+        // Asked from a subdirectory: the whole repository is listed.
+        let listed = list_files(&dir.join("docs")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(listed.root, dir.to_string_lossy());
+        // Tracked and untracked, shallowest first, ignored left out.
+        assert_eq!(relative(&listed), ["README.md", "notes.markdown", "docs/plan.md", "docs/deep/x.MD"]);
+        assert!(listed.files.iter().all(|f| Path::new(f).is_absolute()));
+    }
+
+    #[test]
+    fn outside_a_repository_lists_only_the_directorys_own_files() {
+        let dir = fresh_dir("plain");
+        let listed = list_files(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        // temp_dir is no repository here, or this test would see one.
+        assert_eq!(listed.root, dir.to_string_lossy());
+        assert_eq!(relative(&listed), ["README.md", "notes.markdown"]);
     }
 
     #[test]

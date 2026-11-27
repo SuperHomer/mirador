@@ -288,6 +288,9 @@ pub struct WorkspaceSnapshot {
     /// Commit-graph panes and the repository each one reads.
     #[serde(default)]
     pub graph_panes: Vec<GraphPane>,
+    /// Markdown panes and the file each one shows.
+    #[serde(default)]
+    pub markdown_panes: Vec<MarkdownPane>,
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
@@ -2404,6 +2407,24 @@ pub struct ComputersPane {
 pub struct GraphPane {
     pub pane_id: String,
     pub repo: String,
+}
+
+/// A pane showing a local markdown file, by its absolute path.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownPane {
+    pub pane_id: String,
+    pub path: String,
+}
+
+/// The markdown files a pane can open: absolute paths, shallowest first,
+/// and the directory they are listed from (a repository's root, or the
+/// directory itself outside one).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkdownFiles {
+    pub root: String,
+    pub files: Vec<String>,
 }
 
 /// One inline run inside a release note's text. Carries text, never markup:

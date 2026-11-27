@@ -2809,6 +2809,12 @@ button.inbox-update:hover {
   color: var(--text);
 }
 
+/* The markdown pane wears this chrome and the prose styles below; with no
+   GitHub link to push it, its close button goes right by itself. */
+.markdown-close {
+  margin-left: auto;
+}
+
 .whatsnew-body {
   flex: 1;
   overflow-y: auto;
