@@ -258,6 +258,32 @@ export interface MarkdownFiles {
   files: string[];
 }
 
+export interface FileTreePaneInfo {
+  paneId: string;
+  /** Absolute directory it lists: a repository's root, or a plain one. */
+  root: string;
+}
+
+/** A file or directory, `path` relative to the tree's root and
+ *  `/`-separated. `status` is git's, in the diff pane's words; a
+ *  directory is "modified" when anything under it changed. */
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  dir: boolean;
+  status: string | null;
+  children: FileTreeNode[];
+}
+
+/** Built in Rust (cmux-core/src/file_tree.rs): directories first, then
+ *  files, each alphabetical; cut at 5000 entries, `truncated` then. */
+export interface FileTree {
+  root: string;
+  repo: boolean;
+  nodes: FileTreeNode[];
+  truncated: boolean;
+}
+
 export interface MarkdownPaneInfo {
   paneId: string;
   /** Absolute path of the file it shows. */
@@ -683,6 +709,7 @@ export interface WorkspaceSnapshot {
   whatsNewPanes: WhatsNewPaneInfo[];
   graphPanes: GraphPaneInfo[];
   markdownPanes: MarkdownPaneInfo[];
+  fileTreePanes: FileTreePaneInfo[];
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
@@ -973,6 +1000,13 @@ export const unwatchMarkdown = (paneId: string) =>
 /** The pane's file, parsed in Rust (cmux-core/src/notes.rs). */
 export const readMarkdown = (paneId: string) =>
   invoke<NoteBlock[]>("read_markdown", { paneId });
+/** Lists `dir`'s repository (or `dir`), or else the source pane's. A tab
+ *  already on that root is shown again. */
+export const openFileTree = (paneId: string | null, tab: boolean, dir: string | null = null) =>
+  invoke<string>("open_file_tree", { paneId, tab, dir });
+/** The pane's tree, listed in Rust from the root it was opened on. */
+export const loadFileTree = (paneId: string) =>
+  invoke<FileTree>("load_file_tree", { paneId });
 /** What a role's menu entry says beside its name. */
 export const roleHint = (r: AgentRole): string =>
   r.problem

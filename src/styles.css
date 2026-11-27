@@ -2646,6 +2646,45 @@ button.inbox-update:hover {
   user-select: text;
 }
 
+/* ---------- File tree pane ----------
+   Wears the diff pane's chrome, rows and status letters. */
+
+.file-tree-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-tree-body .diff-tree-dir,
+.file-tree-body .diff-tree-file {
+  font-size: 12px;
+}
+
+/* The marker sits at the row's end, where the diff tree puts its counts. */
+.file-tree-body .diff-status {
+  margin-left: auto;
+  padding-left: 6px;
+  box-sizing: content-box;
+}
+
+/* Modified is the commonest mark in a tree: the diff leaves it grey. */
+.file-tree-body .diff-status.s-modified {
+  color: var(--warn);
+}
+
+/* Nothing to open yet; a file row is not a button. */
+.file-tree-file {
+  cursor: default;
+}
+
+.file-tree-gone {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
 /* ---------- Update banner ---------- */
 
 /* Foot of the sidebar, and absent entirely until there is an update. */

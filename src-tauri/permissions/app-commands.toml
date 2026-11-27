@@ -51,6 +51,8 @@ permissions = [
   "allow-set-diff-worktree",
   "allow-open-graph",
   "allow-open-markdown",
+  "allow-open-file-tree",
+  "allow-load-file-tree",
   "allow-read-markdown",
   "allow-list-markdown",
   "allow-watch-markdown",

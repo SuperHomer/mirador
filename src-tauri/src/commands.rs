@@ -120,6 +120,17 @@ fn build_snapshot(state: &AppState) -> WorkspaceSnapshot {
             })
             .collect()
     };
+    snapshot.file_tree_panes = {
+        let meta = state.meta.lock().unwrap();
+        meta.iter()
+            .filter_map(|(pane, m)| {
+                m.tree_root.as_ref().map(|r| cmux_protocol::FileTreePane {
+                    pane_id: pane.clone(),
+                    root: r.clone(),
+                })
+            })
+            .collect()
+    };
     snapshot.agent_editor_panes = {
         let meta = state.meta.lock().unwrap();
         meta.iter()
@@ -1928,6 +1939,94 @@ pub async fn read_markdown(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Opens a file tree pane: split of `pane_id` (or the focused pane), or a
+/// new tab. It lists `dir`'s repository, or `dir` outside one; without
+/// `dir`, the source pane's directory's. In a tab of its own, a pane
+/// already on that root is shown again rather than a second one opened —
+/// the rule the graph and the markdown pane follow.
+#[tauri::command]
+pub fn open_file_tree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: Option<String>,
+    tab: bool,
+    dir: Option<String>,
+) -> Result<String, String> {
+    let source = pane_id
+        .filter(|id| state.meta.lock().unwrap().contains_key(id))
+        .unwrap_or_else(|| state.workspace.lock().unwrap().focused_pane());
+    let dir = match dir {
+        Some(dir) => dir,
+        None => {
+            let meta = state.meta.lock().unwrap();
+            let m = meta.get(&source).ok_or("that pane is gone")?;
+            if let Some(host) = &m.remote_host {
+                return Err(format!("this pane is on {host}: its directory is not on this computer"));
+            }
+            m.cwd.clone().ok_or("this pane's directory is not known yet")?
+        }
+    };
+    let path = std::path::Path::new(&dir);
+    if !path.is_absolute() {
+        return Err(format!("not an absolute path: {dir}"));
+    }
+    if !path.is_dir() {
+        return Err(format!("no such directory: {dir}"));
+    }
+    let root = cmux_core::file_tree::tree_root(path).to_string_lossy().into_owned();
+
+    if tab {
+        let shown = show_existing_pane(&app, &state, |m| {
+            m.tree_root
+                .as_deref()
+                .is_some_and(|r| cmux_core::state::same_place(None, Some(&root), None, Some(r)))
+        });
+        if let Some(pane) = shown {
+            return Ok(pane);
+        }
+    }
+    let new_pane = if tab {
+        let (_, pane) = state.workspace.lock().unwrap().new_tab();
+        pane
+    } else {
+        state
+            .workspace
+            .lock()
+            .unwrap()
+            .split_pane(&source, SplitDir::Row)
+            .ok_or_else(|| format!("no pane {source}"))?
+    };
+    {
+        let mut meta = state.meta.lock().unwrap();
+        let entry = meta.entry(new_pane.clone()).or_default();
+        // A split from it opens at the top of the tree.
+        entry.cwd = Some(root.clone());
+        entry.tree_root = Some(root);
+    }
+    emit_workspace(&app);
+    Ok(new_pane)
+}
+
+/// Lists the pane's root, from its meta and never from a path the page
+/// sends. Async: `git status` over a large repository, or a walk of a
+/// large directory, must not block the UI thread.
+#[tauri::command]
+pub async fn load_file_tree(
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<cmux_protocol::FileTree, String> {
+    let root = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta
+            .get(&pane_id)
+            .ok_or_else(|| format!("no pane {pane_id}"))?;
+        m.tree_root.clone().ok_or("not a file tree pane")?
+    };
+    tauri::async_runtime::spawn_blocking(move || cmux_core::file_tree::list(std::path::Path::new(&root)))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// The markdown files a palette can offer from `pane_id` (or the focused

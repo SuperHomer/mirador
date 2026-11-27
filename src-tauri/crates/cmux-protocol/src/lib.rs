@@ -291,6 +291,9 @@ pub struct WorkspaceSnapshot {
     /// Markdown panes and the file each one shows.
     #[serde(default)]
     pub markdown_panes: Vec<MarkdownPane>,
+    /// File tree panes and the directory each one lists.
+    #[serde(default)]
+    pub file_tree_panes: Vec<FileTreePane>,
     /// Agent-editor panes: each edits the role, way and team files.
     #[serde(default)]
     pub agent_editor_panes: Vec<AgentEditorPane>,
@@ -2435,6 +2438,14 @@ pub struct MarkdownPane {
 pub struct MarkdownFiles {
     pub root: String,
     pub files: Vec<String>,
+}
+
+/// A pane listing the files under `root`, an absolute directory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTreePane {
+    pub pane_id: String,
+    pub root: String,
 }
 
 /// The files under a directory: a repository's root, or the directory

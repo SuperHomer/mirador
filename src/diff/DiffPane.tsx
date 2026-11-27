@@ -517,7 +517,7 @@ const FileSection = memo(function FileSection({
  * pane matches the theme instead of importing GitHub's green and red. Not
  * the palette's bright green: Solarized-style palettes make it a grey.
  */
-function diffTheme(colors?: ResolvedColors): React.CSSProperties {
+export function diffTheme(colors?: ResolvedColors): React.CSSProperties {
   const add = colors?.ui.statusIdle ?? "#3fb950";
   const del = colors?.ui.danger ?? "#f85149";
   return {

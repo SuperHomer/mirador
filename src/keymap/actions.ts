@@ -17,6 +17,7 @@ import {
   openDiff,
   checkUpdate,
   openGraph,
+  openFileTree,
   openAgent,
   toggleAgentWall,
   setWallView,
@@ -279,6 +280,18 @@ export const actions: ActionDef[] = [
       const { snapshot } = useWorkspaceStore.getState();
       const pane = activeTab(snapshot)?.focusedPane;
       if (pane) void openGraph(pane, opensInTab("graph"));
+    },
+  },
+  {
+    id: "file_tree",
+    title: "Pane: Open File Tree",
+    group: "pane",
+    hint: "the focused pane's repository",
+    run: () => {
+      const { snapshot } = useWorkspaceStore.getState();
+      const pane = activeTab(snapshot)?.focusedPane;
+      // A remote pane's directory is not on this computer: say so.
+      if (pane) void openFileTree(pane, false).catch((e) => reportFailure("Open file tree", e));
     },
   },
   {

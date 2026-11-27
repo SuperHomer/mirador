@@ -464,6 +464,8 @@ pub fn run() {
             commands::set_diff_worktree,
             commands::open_graph,
             commands::open_markdown,
+            commands::open_file_tree,
+            commands::load_file_tree,
             commands::read_markdown,
             commands::list_markdown,
             markdown_watch::watch_markdown,

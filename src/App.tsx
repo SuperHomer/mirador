@@ -206,6 +206,7 @@ export default function App() {
                 whatsNewPanes={snapshot.whatsNewPanes}
                 graphPanes={snapshot.graphPanes}
                 markdownPanes={snapshot.markdownPanes ?? []}
+                fileTreePanes={snapshot.fileTreePanes ?? []}
                 agentEditorPanes={snapshot.agentEditorPanes ?? []}
                 settingsPanes={snapshot.settingsPanes ?? []}
                 usagePanes={snapshot.usagePanes ?? []}
