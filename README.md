@@ -92,7 +92,9 @@ downloads, the feature tour and the keybinding reference.
   `mira usage` show it in full. Read from local files, never the network
 - **Scriptable browser pane**: an agent tests the page it is building —
   opens it, snapshots it, clicks, fills, types and presses keys, waits for
-  it, reads its console errors — while you watch (`mira browser …`)
+  it, reads its console errors, its network requests and its cookies and
+  storage — while you watch, in a session you signed in to once
+  (`mira browser …`)
 - **Remote workspaces**: `mira ssh open <host>` panes run the system ssh
   (agent auth, 2FA, ProxyJump all work); a saved computer opens in a tab,
   and a split there is another shell on it; ControlMaster-backed port

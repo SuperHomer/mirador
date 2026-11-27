@@ -155,6 +155,8 @@ mira browser text main                 # what the page says (a snapshot lists
                                        # only what you can act on)
 mira browser console --errors          # what went wrong on this page
 mira browser network --failed         # which of its requests failed
+mira browser network 3                 # one of them in full: headers, bodies
+mira browser storage                   # its cookies, localStorage, sessionStorage
 mira browser eval "document.title"     # anything else, as JSON
 mira browser screenshot                # a PNG of what the pane shows; prints its path
 ```
@@ -241,6 +243,27 @@ What to know:
 - A pane opens web pages only: http, https and `about:blank`, never
   Mirador's own (`tauri://`, its dev server). The page gets **no** access
   to Mirador's commands, so a malicious page cannot drive your terminal.
+
+### Signed-in pages: log in, then hand over
+
+A page behind a sign-in needs the human once. Ask them to sign in in the
+browser pane — never type their credentials yourself — and then drive it:
+
+```bash
+mira browser open localhost:5173/login   # then ask the human to sign in there
+mira browser storage                     # is the session cookie there?
+mira browser network --failed            # a 401 says it is not, or has expired
+```
+
+Browser panes share one browser store. Cookies hold across navigations,
+in every browser pane, the ones opened later too, and across a quit and
+relaunch: a cookie with an expiry lasts until it expires, and a session
+cookie (one with none) ends with the app. localStorage lives in the same
+store, so it should hold the same way, though no test pins it.
+sessionStorage belongs to one pane and ends with it: a page that keeps
+its token there needs the sign-in done in the pane you will drive. So
+one sign-in kept in a cookie serves every pane until it expires or the
+page signs out.
 
 ## 5. Show the human what you changed
 
