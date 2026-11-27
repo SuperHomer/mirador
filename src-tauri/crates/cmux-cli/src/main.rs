@@ -216,6 +216,17 @@ enum Command {
         #[arg(long)]
         tab: bool,
     },
+    /// Open a file tree of this pane's repository, with git's status on
+    /// each file: of its directory outside one.
+    Tree {
+        /// Another directory to show instead (its repository's root, if in
+        /// one); a relative path is taken from this directory.
+        dir: Option<String>,
+        /// Open in a new tab instead of a split: the tree's pane, if one is
+        /// open on that root, else a new tab.
+        #[arg(long)]
+        tab: bool,
+    },
     /// Show the settings pane, mirador.json's settings, or open it: where
     /// `editorOpensIn` says, or as --tab or --split say.
     Settings {
@@ -1121,6 +1132,21 @@ fn run(cli: Cli) -> Result<(), String> {
                 target: tab.then(|| "tab".to_string()),
                 pane_id: own_pane(),
             }
+        }
+        Command::Tree { dir, tab } => {
+            // As for `mira md`: the app runs elsewhere than this shell.
+            let dir = match dir {
+                Some(dir) => {
+                    let path = std::path::absolute(&dir).map_err(|e| format!("{dir}: {e}"))?;
+                    if !path.is_dir() {
+                        return Err(format!("no directory {dir}"));
+                    }
+                    Some(path.to_string_lossy().into_owned())
+                }
+                // The app takes the calling pane's.
+                None => None,
+            };
+            Request::FileTreeOpen { dir, tab, pane_id: own_pane() }
         }
         Command::Settings { tab, split } => Request::Settings {
             pane_id: own_pane(),

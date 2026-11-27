@@ -656,6 +656,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             )?;
             Ok(json!({ "paneId": pane_id }))
         }
+        Request::FileTreeOpen { dir, tab, pane_id } => {
+            let pane_id = crate::commands::open_file_tree(app.clone(), app.state(), pane_id, tab, dir)?;
+            Ok(json!({ "paneId": pane_id }))
+        }
         Request::DiffWorktrees { pane_id } => {
             let pane = pane_id
                 .filter(|id| state.meta.lock().unwrap().contains_key(id))

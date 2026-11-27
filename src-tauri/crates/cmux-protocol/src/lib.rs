@@ -1109,6 +1109,19 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// Opens a file tree pane on `dir`'s repository, or on `dir` outside
+    /// one; without `dir`, on the source pane's directory's. Split of the
+    /// source pane, or a tab, where one already on that root is shown
+    /// again. `dir` is absolute: the CLI resolves it against its own
+    /// directory.
+    FileTreeOpen {
+        #[serde(default)]
+        dir: Option<String>,
+        #[serde(default)]
+        tab: bool,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Lists the checkouts of the repository the calling pane sits in, so
     /// an agent can name one for `DiffOpen`.
     DiffWorktrees {

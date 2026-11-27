@@ -33,6 +33,17 @@ const STATUS_GLYPH: Record<string, string> = {
   modified: "M",
 };
 
+/**
+ * What a file tree pane shows, as text: `read-screen`'s answer for one,
+ * which has no terminal to read. Null when `paneId` is no file tree pane.
+ * Read from the page, so it says what was drawn — the rows unfolded, each
+ * name and its status letter — not what Rust listed.
+ */
+export function renderedFileTree(paneId: string): string | null {
+  const body = document.querySelector<HTMLElement>(`[data-file-tree-pane="${CSS.escape(paneId)}"]`);
+  return body ? body.innerText.trim() : null;
+}
+
 const allDirs = (nodes: FileTreeNode[], into: Set<string> = new Set()) => {
   for (const n of nodes) {
     if (n.dir) {
