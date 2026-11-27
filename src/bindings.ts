@@ -473,6 +473,34 @@ export interface AccountUsage {
   inUse: boolean;
 }
 
+/** A process holding a GPU. */
+export interface GpuProcess {
+  pid: number;
+  name: string;
+  /** Null on Apple silicon, whose tool says none. */
+  memoryUsedBytes: number | null;
+}
+
+/** One GPU; a reading its tool does not give is null, not zero. */
+export interface Gpu {
+  index: number;
+  name: string;
+  utilizationPercent: number | null;
+  memoryUsedBytes: number | null;
+  /** Null on Apple silicon: its memory is the system's. */
+  memoryTotalBytes: number | null;
+  temperatureC: number | null;
+  processes: GpuProcess[];
+}
+
+/** This computer's GPUs (`cmux_protocol::GpuReport`). */
+export interface GpuReport {
+  source: "nvidia-smi" | "apple" | "none";
+  gpus: Gpu[];
+  /** Why there are no readings, or why they stopped short. */
+  error: string | null;
+}
+
 export interface SubagentInfo extends TranscriptSummary {
   id: string;
   description: string | null;
@@ -1404,6 +1432,8 @@ export const getAgentTrail = (paneId: string, turns: number | null, sinceMs: num
 export const getTrailDetail = (paneId: string, actionId: string) =>
   invoke<ActionDetail>("get_trail_detail", { paneId, actionId });
 export const accountUsage = () => invoke<AccountUsage[]>("account_usage");
+/** This computer's GPUs, from `nvidia-smi` or `ioreg`. */
+export const gpuStatus = () => invoke<GpuReport>("gpu_status");
 /** Shows the usage pane, or opens one beside `paneId` or in a tab. */
 export const openUsage = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_usage", { paneId, tab });

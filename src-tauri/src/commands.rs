@@ -1472,6 +1472,13 @@ pub async fn account_usage(app: AppHandle) -> Result<Vec<cmux_protocol::AccountU
         .map_err(|e| e.to_string())
 }
 
+/// This computer's GPUs, from `nvidia-smi` or `ioreg`: each tool may take
+/// up to its deadline, so off the main thread.
+#[tauri::command]
+pub async fn gpu_status() -> Result<cmux_protocol::GpuReport, String> {
+    tauri::async_runtime::spawn_blocking(cmux_core::gpu::read).await.map_err(|e| e.to_string())
+}
+
 /// Sets the integration up: `mira` on PATH (agents and the skills call it
 /// by name), then the hooks (which call it by path) and the skills. Answers
 /// the offer either way, so a failure is not offered again unasked — the

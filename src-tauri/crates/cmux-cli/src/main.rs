@@ -172,6 +172,9 @@ enum Command {
         #[arg(long)]
         split: bool,
     },
+    /// This computer's GPUs: how busy each is, its memory and temperature,
+    /// and the processes holding it. From nvidia-smi, else ioreg on a Mac.
+    Gpu,
     /// Drive the built-in browser pane (agents verify web changes here).
     Browser {
         #[command(subcommand)]
@@ -1101,6 +1104,7 @@ fn run(cli: Cli) -> Result<(), String> {
             pane_id: own_pane(),
             target: if tab { "tab" } else { "split" }.to_string(),
         },
+        Command::Gpu => Request::Gpu,
         Command::Diff {
             spec,
             staged,
@@ -1831,6 +1835,12 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                 let accounts: Vec<cmux_protocol::AccountUsage> =
                     serde_json::from_value(accounts.clone()).map_err(|e| format!("bad response: {e}"))?;
                 for line in accounts.iter().flat_map(|a| usage_lines(a, now_ms() / 1000)) {
+                    println!("{line}");
+                }
+            } else if map.contains_key("gpus") && map.contains_key("source") {
+                let report: cmux_protocol::GpuReport =
+                    serde_json::from_value(data.clone()).map_err(|e| format!("bad response: {e}"))?;
+                for line in gpu_lines(&report) {
                     println!("{line}");
                 }
             } else if let Some(agents) = map
@@ -2784,6 +2794,39 @@ fn usage_lines(account: &cmux_protocol::AccountUsage, now: u64) -> Vec<String> {
     lines
 }
 
+/// The GPUs as `mira gpu` shows them: a line per GPU with what its tool
+/// gives, then a line per process holding it, then why the readings stop
+/// short, if they do.
+fn gpu_lines(report: &cmux_protocol::GpuReport) -> Vec<String> {
+    let gib = |bytes: u64| format!("{:.1}", bytes as f64 / (1u64 << 30) as f64);
+    let mut lines = Vec::new();
+    for gpu in &report.gpus {
+        let mut readings = Vec::new();
+        if let Some(util) = gpu.utilization_percent {
+            readings.push(format!("{}% busy", util.round()));
+        }
+        match (gpu.memory_used_bytes, gpu.memory_total_bytes) {
+            (Some(used), Some(total)) => readings.push(format!("{} / {} GiB", gib(used), gib(total))),
+            (Some(used), None) => readings.push(format!("{} GiB in use", gib(used))),
+            (None, Some(total)) => readings.push(format!("{} GiB", gib(total))),
+            (None, None) => {}
+        }
+        if let Some(temp) = gpu.temperature_c {
+            readings.push(format!("{}°C", temp.round()));
+        }
+        let readings = if readings.is_empty() { String::new() } else { format!(" — {}", readings.join(" · ")) };
+        lines.push(format!("GPU {} {}{readings}", gpu.index, gpu.name));
+        for p in &gpu.processes {
+            let memory = p.memory_used_bytes.map(|m| format!(" · {} GiB", gib(m))).unwrap_or_default();
+            lines.push(format!("  {} {}{memory}", p.pid, p.name));
+        }
+    }
+    if let Some(error) = &report.error {
+        lines.push(error.clone());
+    }
+    lines
+}
+
 /// How long until a reset, to the two largest units: `3d 4h`, `2h 5m`, `9m`.
 fn until(secs: u64) -> String {
     let (d, h, m) = (secs / 86400, secs % 86400 / 3600, secs % 3600 / 60);
@@ -3416,6 +3459,60 @@ mod tests {
             panic!()
         };
         assert_eq!((pane, onto.as_str(), side.as_deref()), (None, "b", Some("up")));
+    }
+
+    #[test]
+    fn gpu_shows_each_gpu_what_it_reads_and_who_holds_it() {
+        use cmux_protocol::{Gpu, GpuProcess, GpuReport};
+        let gib = 1u64 << 30;
+        let rtx = Gpu {
+            index: 0,
+            name: "NVIDIA GeForce RTX 4090".into(),
+            utilization_percent: Some(87.4),
+            memory_used_bytes: Some(20 * gib),
+            memory_total_bytes: Some(24 * gib),
+            temperature_c: Some(71.0),
+            processes: vec![
+                GpuProcess { pid: 4242, name: "python3".into(), memory_used_bytes: Some(gib / 2) },
+                GpuProcess { pid: 777, name: "ollama".into(), memory_used_bytes: None },
+            ],
+        };
+        let t4 = Gpu {
+            index: 1,
+            name: "Tesla T4".into(),
+            utilization_percent: None,
+            memory_used_bytes: None,
+            memory_total_bytes: None,
+            temperature_c: None,
+            processes: Vec::new(),
+        };
+        let nvidia = GpuReport { source: "nvidia-smi".into(), gpus: vec![rtx, t4], error: None };
+        assert_eq!(
+            gpu_lines(&nvidia),
+            [
+                "GPU 0 NVIDIA GeForce RTX 4090 — 87% busy · 20.0 / 24.0 GiB · 71°C",
+                "  4242 python3 · 0.5 GiB",
+                "  777 ollama",
+                "GPU 1 Tesla T4",
+            ]
+        );
+        let m1 = Gpu {
+            index: 0,
+            name: "Apple M1".into(),
+            utilization_percent: Some(9.0),
+            memory_used_bytes: Some(477_544_448),
+            memory_total_bytes: None,
+            temperature_c: None,
+            processes: vec![GpuProcess { pid: 650, name: "WindowServer".into(), memory_used_bytes: None }],
+        };
+        let apple = GpuReport { source: "apple".into(), gpus: vec![m1], error: None };
+        assert_eq!(gpu_lines(&apple), ["GPU 0 Apple M1 — 9% busy · 0.4 GiB in use", "  650 WindowServer"]);
+        let none = GpuReport {
+            source: "none".into(),
+            gpus: Vec::new(),
+            error: Some("No nvidia-smi was found on PATH.".into()),
+        };
+        assert_eq!(gpu_lines(&none), ["No nvidia-smi was found on PATH."]);
     }
 
     #[test]

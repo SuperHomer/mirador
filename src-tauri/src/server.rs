@@ -648,6 +648,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
         // holds up no one else; the cache makes all but the first read
         // only what was appended.
         Request::Usage => Ok(json!({ "accounts": state.usage.lock().unwrap().accounts() })),
+        // A tool that hangs is killed after a few seconds, and only this
+        // connection's thread waits on it.
+        Request::Gpu => Ok(json!(cmux_core::gpu::read())),
         Request::UsageOpen { pane_id, target } => {
             let pane = crate::commands::open_usage(app.clone(), app.state(), pane_id, target == "tab")?;
             Ok(json!({ "paneId": pane }))

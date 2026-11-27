@@ -1131,6 +1131,40 @@ pane there is only one: when one is open, in any tab, it is focused and
 its pane id printed, whatever the flags say. It comes back after a
 relaunch and reads the files again.
 
+### GPUs
+
+```bash
+mira gpu              # each GPU: how busy, its memory, who holds it
+mira gpu --json       # the same as data
+```
+
+A line per GPU with what its tool reports — how busy it is, its memory
+in use out of its total, its temperature — then a line per process
+holding it, by pid and name, with the memory it holds where that is
+known. A reading the tool does not give is left out, never shown as 0.
+
+```
+GPU 0 NVIDIA GeForce RTX 4090 — 87% busy · 20.0 / 24.0 GiB · 71°C
+  4242 python3 · 0.5 GiB
+```
+
+and on an M1 Mac:
+
+```
+GPU 0 Apple M1 — 9% busy · 0.4 GiB in use
+  650 WindowServer
+```
+
+`nvidia-smi` is asked first, on any OS: NVIDIA's driver puts it on PATH
+on Linux and Windows. On a Mac without it, `ioreg` gives each GPU's
+utilization and the memory it has in use. Apple silicon's memory is the
+system's, so there is no total, nor a temperature, and the processes are
+the ones with a connection to the GPU — their names cut at 16
+characters, and no memory each. With neither tool, it says no
+`nvidia-smi` was found. A tool that does not answer within 5 seconds (a
+wedged driver) is killed and the reason printed instead. `--json` gives
+`{source, gpus, error}`, `source` being `nvidia-smi`, `apple` or `none`.
+
 ### Telegram
 
 Talk to an agent from your phone, through a bot of your own:
@@ -1510,7 +1544,7 @@ browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_network browser_storage
 browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move recap next agent_history agent_board
-agent_trail agent_trail_detail usage usage_open computer_list computer_add
+agent_trail agent_trail_detail usage usage_open gpu computer_list computer_add
 computer_update computer_remove computer_test computer_open telegram_connect
 telegram_disconnect telegram_status`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.

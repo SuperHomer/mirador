@@ -906,6 +906,9 @@ pub enum Request {
     /// Each harness's account: how it is signed in, its plan's limits, and
     /// what it used lately, read from its own files.
     Usage,
+    /// This computer's GPUs: how busy each is, its memory and the processes
+    /// holding it, as `nvidia-smi` or `ioreg` reports them.
+    Gpu,
     /// Shows the usage pane, or opens one: a split of `pane_id`, or a tab
     /// with `target` "tab".
     UsageOpen {
