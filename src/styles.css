@@ -957,9 +957,9 @@ body,
   color: var(--text);
 }
 
-/* What a frame's "+" adds: a short list under it, on screen (placed by
-   FrameMenu), above the board. */
-.frame-menu {
+/* A short list drawn on screen, above the panes and the board: what a
+   frame's "+" adds (FrameMenu), and a right-click's menu (ContextMenu). */
+.pop-menu {
   position: fixed;
   z-index: 50;
   display: flex;
@@ -972,7 +972,7 @@ body,
   cursor: default;
 }
 
-.frame-menu button {
+.pop-menu button {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -986,18 +986,24 @@ body,
   cursor: pointer;
 }
 
-.frame-menu button:hover:not(:disabled) {
+.pop-menu button:hover:not(:disabled) {
   background: var(--surface);
 }
 
-.frame-menu button:disabled {
+.pop-menu button:disabled {
   color: var(--muted);
   cursor: default;
 }
 
-.frame-menu-hint {
+.pop-menu-hint {
   color: var(--subtext);
   font-size: 11.5px;
+}
+
+.pop-menu hr {
+  margin: 4px 6px;
+  border: none;
+  border-top: 1px solid var(--surface);
 }
 
 /* A frame or card in the hand: above the rest, lifted. */

@@ -50,7 +50,7 @@ export function FrameMenu({
   close.current = onClose;
 
   useEffect(() => {
-    useUiStore.getState().setBoardMenuOpen(true);
+    useUiStore.getState().setMenuOpen(true);
     const onPress = (e: PointerEvent) => {
       const target = e.target as Element;
       // The "+" toggles it itself.
@@ -72,7 +72,7 @@ export function FrameMenu({
     window.addEventListener("pointerdown", onPress, { capture: true });
     window.addEventListener("keydown", onKey, { capture: true });
     return () => {
-      useUiStore.getState().setBoardMenuOpen(false);
+      useUiStore.getState().setMenuOpen(false);
       window.removeEventListener("pointerdown", onPress, { capture: true });
       window.removeEventListener("keydown", onKey, { capture: true });
       unwatch();
@@ -107,7 +107,7 @@ export function FrameMenu({
   return createPortal(
     <div
       ref={ref}
-      className="frame-menu"
+      className="pop-menu"
       style={{
         top: at.bottom + 4,
         left: Math.max(8, at.right - WIDTH),
@@ -119,7 +119,7 @@ export function FrameMenu({
           <button onClick={() => setAgents(false)}>‹ Back</button>
           <button onClick={agent(null, "Start Claude Code")}>
             <span>Claude</span>
-            <span className="frame-menu-hint">{team ? "default model · not a member" : "default model"}</span>
+            <span className="pop-menu-hint">{team ? "default model · not a member" : "default model"}</span>
           </button>
           {roles.map((r) => (
             <button
@@ -129,7 +129,7 @@ export function FrameMenu({
               onClick={agent(r.name, `Start ${r.name}`)}
             >
               <span>{r.name}</span>
-              <span className="frame-menu-hint">
+              <span className="pop-menu-hint">
                 {team && !r.problem ? `${roleHint(r)} · joins ${team}` : roleHint(r)}
               </span>
             </button>

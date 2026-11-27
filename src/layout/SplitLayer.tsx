@@ -31,6 +31,7 @@ import { AgentEditor } from "../agents/AgentEditor";
 import { SettingsPane } from "../settings/SettingsPane";
 import { UsagePane } from "../usage/UsagePane";
 import { ComputersPane } from "../computers/ComputersPane";
+import { PaneMenu } from "./PaneMenu";
 import { AgentWall } from "../agents/AgentWall";
 import { QueuedLabel } from "../agents/AgentStatusBar";
 
@@ -216,6 +217,8 @@ export function SplitLayer({
     );
   };
 
+  const [menu, setMenu] = useState<{ pane: string; x: number; y: number } | null>(null);
+
   return (
     <div className="split-layer" ref={layerRef}>
       {panes.map((p) => {
@@ -253,6 +256,22 @@ export function SplitLayer({
             // Below 50% a card's content takes no pointer; a click on it
             // still lands here, and makes it the pane the keyboard types to.
             onMouseDown={card ? (e) => pressCard(e, p.paneId) : undefined}
+            // A browser page is a native view and keeps its own right-click;
+            // everything else drawn here reaches this. Page coordinates:
+            // on a zoomed-out board BoardHost rewrites clientX/Y inside a
+            // terminal for xterm's sake, and the app's page never scrolls.
+            onContextMenu={(e) => {
+              // A field — a URL bar, Settings, the editor — keeps the
+              // native Cut/Copy/Paste. xterm's own textarea is not one.
+              const target = e.target as Element;
+              if (
+                target.closest("input, textarea, [contenteditable]") &&
+                !target.closest(".xterm")
+              )
+                return;
+              e.preventDefault();
+              setMenu({ pane: p.paneId, x: e.pageX, y: e.pageY });
+            }}
           >
             {card && (
               <CardHeader
@@ -336,6 +355,14 @@ export function SplitLayer({
         );
       })}
       {held?.resize && <div className="card-ghost" style={px(held.rect)} />}
+      {menu && (
+        <PaneMenu
+          // A new right-click is a new menu, placed and measured afresh.
+          key={`${menu.pane}:${menu.x},${menu.y}`}
+          {...menu}
+          onClose={() => setMenu(null)}
+        />
+      )}
       {walled && (
         // The same element in either view, so going to or from the board
         // moves the wall rather than remounting it: its tiles keep the

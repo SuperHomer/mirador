@@ -37,7 +37,7 @@ export function useRoleCatalog(pane: string | null): RoleCatalog | null {
   return catalog;
 }
 
-function holds(node: Layout, pane: string): boolean {
+export function holds(node: Layout, pane: string): boolean {
   return node.type === "leaf" ? node.paneId === pane : node.children.some((c) => holds(c, pane));
 }
 
