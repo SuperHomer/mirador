@@ -207,6 +207,35 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             }
             Ok(Value::Null)
         }
+        Request::MovePane { pane_id, target, side } => {
+            let pane = pane_id.unwrap_or_else(|| focused_pane(&state));
+            {
+                let ws = state.workspace.lock().unwrap();
+                let Some(tab) = ws.tab_of_pane(&pane) else {
+                    return Err(format!("no pane {pane}"));
+                };
+                if !cmux_core::layout::contains(&tab.root, &target) {
+                    return Err(match ws.tab_of_pane(&target) {
+                        Some(_) => format!("{target} is in another tab than {pane}"),
+                        None => format!("no pane {target}"),
+                    });
+                }
+            }
+            if pane == target {
+                return Err(format!("{pane} cannot move onto itself"));
+            }
+            if !crate::commands::move_pane(app.clone(), app.state(), pane.clone(), target.clone(), side) {
+                return Err(format!("{pane} is already there"));
+            }
+            Ok(Value::Null)
+        }
+        Request::MoveTab { tab_id, pane_id, to } => {
+            let tab = layout_tab(&state, tab_id, pane_id)?;
+            if !crate::commands::move_tab(app.clone(), app.state(), tab.clone(), to) {
+                return Err(format!("tab {tab} is already in that place"));
+            }
+            Ok(Value::Null)
+        }
         Request::RotatePanes { tab_id, pane_id, back } => {
             let tab = layout_tab(&state, tab_id, pane_id)?;
             if !crate::commands::rotate_panes(app.clone(), app.state(), tab.clone(), !back) {

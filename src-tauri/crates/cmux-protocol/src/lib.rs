@@ -391,6 +391,26 @@ pub enum Request {
         pane_id: Option<String>,
         direction: Direction,
     },
+    /// Moves a pane (the focused one without `pane_id`) onto `target`, a
+    /// pane of the same tab: swapped with it without `side`, docked beside
+    /// it on `side` otherwise. Refused across tabs and when nothing moved.
+    MovePane {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+        #[serde(default)]
+        side: Option<Direction>,
+    },
+    /// Moves a tab to place `to` (from 0) in the tab order, the last place
+    /// past the end; refused when it is there already. The tab is `tab_id`,
+    /// else the one holding `pane_id` (the asking pane), else the active one.
+    MoveTab {
+        #[serde(default)]
+        tab_id: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+        to: usize,
+    },
     /// Moves every pane of a tab one place along its pane order, or back
     /// one with `back`; refused for a tab of one pane. The tab is `tab_id`,
     /// else the one holding `pane_id` (the asking pane), else the active
