@@ -15,6 +15,7 @@ import {
   SettingsPaneInfo,
   TabSnapshot,
   UsagePaneInfo,
+  GpuPaneInfo,
   ComputersPaneInfo,
   WhatsNewPaneInfo,
   closePane,
@@ -38,6 +39,7 @@ import { FileTreePane } from "../filetree/FileTreePane";
 import { AgentEditor } from "../agents/AgentEditor";
 import { SettingsPane } from "../settings/SettingsPane";
 import { UsagePane } from "../usage/UsagePane";
+import { GpuPane } from "../gpu/GpuPane";
 import { ComputersPane } from "../computers/ComputersPane";
 import { PaneMenu } from "./PaneMenu";
 import { AgentWall } from "../agents/AgentWall";
@@ -114,6 +116,7 @@ export function SplitLayer({
   agentEditorPanes,
   settingsPanes,
   usagePanes,
+  gpuPanes,
   computersPanes,
 }: {
   tab: TabSnapshot;
@@ -136,6 +139,7 @@ export function SplitLayer({
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
+  gpuPanes: GpuPaneInfo[];
   computersPanes: ComputersPaneInfo[];
 }) {
   // Live ratio overrides while a divider drag is in flight.
@@ -286,6 +290,7 @@ export function SplitLayer({
         const editor = agentEditorPanes.find((e) => e.paneId === p.paneId);
         const settings = settingsPanes.find((s) => s.paneId === p.paneId);
         const usage = usagePanes.some((u) => u.paneId === p.paneId);
+        const gpu = gpuPanes.some((g) => g.paneId === p.paneId);
         const computers = computersPanes.some((c) => c.paneId === p.paneId);
         const hide: React.CSSProperties = hidden
           ? { visibility: "hidden", pointerEvents: "none" }
@@ -335,6 +340,8 @@ export function SplitLayer({
                 <SettingsPane paneId={p.paneId} path={settings.path} focused={focused} />
               ) : usage ? (
                 <UsagePane paneId={p.paneId} focused={focused} />
+              ) : gpu ? (
+                <GpuPane paneId={p.paneId} focused={focused} />
               ) : computers ? (
                 <ComputersPane paneId={p.paneId} focused={focused} />
               ) : editor ? (

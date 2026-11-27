@@ -24,6 +24,7 @@ import {
   openAgentEditor,
   openSettings,
   openUsage,
+  openGpu,
   openComputers,
   openWhatsNew,
   openInEditor,
@@ -447,6 +448,14 @@ export const actions: ActionDef[] = [
     // Each harness's account and what it used: the one pane, wherever it
     // is, or a new one where the editor would open, as Settings does.
     run: () => void openUsage(focusedPane() ?? null, opensInTab("editor")),
+  },
+  {
+    id: "gpu",
+    title: "App: GPU",
+    group: "app",
+    // This computer's GPUs: the one pane, wherever it is, or a new one
+    // where the editor would open, as Usage does.
+    run: () => void openGpu(focusedPane() ?? null, opensInTab("editor")),
   },
   {
     id: "whats_new",

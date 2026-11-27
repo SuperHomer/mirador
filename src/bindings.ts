@@ -743,6 +743,7 @@ export interface WorkspaceSnapshot {
   agentEditorPanes: AgentEditorPaneInfo[];
   settingsPanes: SettingsPaneInfo[];
   usagePanes: UsagePaneInfo[];
+  gpuPanes: GpuPaneInfo[];
   computersPanes: ComputersPaneInfo[];
   agents: AgentInfo[];
   view: View;
@@ -1168,6 +1169,11 @@ export interface UsagePaneInfo {
   paneId: string;
 }
 
+/** The GPU pane: at most one, showing this computer's GPUs. */
+export interface GpuPaneInfo {
+  paneId: string;
+}
+
 /** The computers pane: at most one, showing the saved computers. */
 export interface ComputersPaneInfo {
   paneId: string;
@@ -1434,6 +1440,9 @@ export const getTrailDetail = (paneId: string, actionId: string) =>
 export const accountUsage = () => invoke<AccountUsage[]>("account_usage");
 /** This computer's GPUs, from `nvidia-smi` or `ioreg`. */
 export const gpuStatus = () => invoke<GpuReport>("gpu_status");
+/** Shows the GPU pane, or opens one beside `paneId` or in a tab. */
+export const openGpu = (paneId: string | null, tab: boolean) =>
+  invoke<string>("open_gpu", { paneId, tab });
 /** Shows the usage pane, or opens one beside `paneId` or in a tab. */
 export const openUsage = (paneId: string | null, tab: boolean) =>
   invoke<string>("open_usage", { paneId, tab });

@@ -303,6 +303,9 @@ pub struct WorkspaceSnapshot {
     /// Usage panes: at most one, showing each harness's account.
     #[serde(default)]
     pub usage_panes: Vec<UsagePane>,
+    /// GPU panes: at most one, showing this computer's GPUs.
+    #[serde(default)]
+    pub gpu_panes: Vec<GpuPane>,
     /// Computers panes: at most one, showing the saved computers.
     #[serde(default)]
     pub computers_panes: Vec<ComputersPane>,
@@ -912,6 +915,13 @@ pub enum Request {
     /// Shows the usage pane, or opens one: a split of `pane_id`, or a tab
     /// with `target` "tab".
     UsageOpen {
+        #[serde(default)]
+        pane_id: Option<String>,
+        target: String,
+    },
+    /// Shows the GPU pane, or opens one: a split of `pane_id`, or a tab
+    /// with `target` "tab".
+    GpuOpen {
         #[serde(default)]
         pane_id: Option<String>,
         target: String,
@@ -2540,6 +2550,13 @@ pub struct SettingsPane {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsagePane {
+    pub pane_id: String,
+}
+
+/// A pane showing this computer's GPUs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuPane {
     pub pane_id: String,
 }
 

@@ -6838,6 +6838,43 @@ button.tb-line-row:hover {
   white-space: nowrap;
 }
 
+/* Fixed layout so a long process name is cut, not the table widened: the
+   name column takes what the pid and memory columns leave. */
+.gpu-procs {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  color: var(--text);
+}
+
+.gpu-procs th {
+  color: var(--subtext);
+  font-weight: normal;
+  text-align: left;
+}
+
+.gpu-procs th,
+.gpu-procs td {
+  padding: 2px 6px 2px 0;
+}
+
+.gpu-pid {
+  width: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gpu-procs .gpu-mem {
+  width: 80px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.gpu-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .editor-menu-anchor {
   position: relative;
   flex-shrink: 0;

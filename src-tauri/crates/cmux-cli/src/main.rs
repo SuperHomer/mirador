@@ -174,7 +174,15 @@ enum Command {
     },
     /// This computer's GPUs: how busy each is, its memory and temperature,
     /// and the processes holding it. From nvidia-smi, else ioreg on a Mac.
-    Gpu,
+    /// With --tab or --split, shows the GPU pane instead of printing.
+    Gpu {
+        /// Open the GPU pane in a new tab.
+        #[arg(long, conflicts_with = "split")]
+        tab: bool,
+        /// Open the GPU pane as a split of this pane.
+        #[arg(long)]
+        split: bool,
+    },
     /// Drive the built-in browser pane (agents verify web changes here).
     Browser {
         #[command(subcommand)]
@@ -1104,7 +1112,11 @@ fn run(cli: Cli) -> Result<(), String> {
             pane_id: own_pane(),
             target: if tab { "tab" } else { "split" }.to_string(),
         },
-        Command::Gpu => Request::Gpu,
+        Command::Gpu { tab: false, split: false } => Request::Gpu,
+        Command::Gpu { tab, .. } => Request::GpuOpen {
+            pane_id: own_pane(),
+            target: if tab { "tab" } else { "split" }.to_string(),
+        },
         Command::Diff {
             spec,
             staged,

@@ -655,6 +655,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::commands::open_usage(app.clone(), app.state(), pane_id, target == "tab")?;
             Ok(json!({ "paneId": pane }))
         }
+        Request::GpuOpen { pane_id, target } => {
+            let pane = crate::commands::open_gpu(app.clone(), app.state(), pane_id, target == "tab")?;
+            Ok(json!({ "paneId": pane }))
+        }
         Request::BrowserOpen { url, target } => {
             let pane_id = crate::commands::open_browser(
                 app.clone(),

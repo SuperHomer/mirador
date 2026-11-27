@@ -1136,6 +1136,8 @@ relaunch and reads the files again.
 ```bash
 mira gpu              # each GPU: how busy, its memory, who holds it
 mira gpu --json       # the same as data
+mira gpu --tab        # the GPU pane, in a tab of its own
+mira gpu --split      # ...or as a split of this pane
 ```
 
 A line per GPU with what its tool reports — how busy it is, its memory
@@ -1164,6 +1166,14 @@ characters, and no memory each. With neither tool, it says no
 `nvidia-smi` was found. A tool that does not answer within 5 seconds (a
 wedged driver) is killed and the reason printed instead. `--json` gives
 `{source, gpus, error}`, `source` being `nvidia-smi`, `apple` or `none`.
+
+The GPU pane (also *App: GPU* in the palette) shows the same, a card per
+GPU with a bar for how busy it is and its processes, the most memory
+first. Unlike the usage pane it reads again on its own, two seconds after
+each reading answers, for as long as it is open, its tab on screen or
+not. There is only one: when one is open, in any tab, it is focused and
+its pane id printed, whatever the flags say. It comes back after a
+relaunch and starts reading again.
 
 ### Telegram
 
@@ -1544,7 +1554,7 @@ browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_network browser_storage
 browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move recap next agent_history agent_board
-agent_trail agent_trail_detail usage usage_open gpu computer_list computer_add
+agent_trail agent_trail_detail usage usage_open gpu gpu_open computer_list computer_add
 computer_update computer_remove computer_test computer_open telegram_connect
 telegram_disconnect telegram_status`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
