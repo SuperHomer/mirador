@@ -574,6 +574,7 @@ hook. `--json` adds the cwd, branch and when the status last changed.
 mira team list --defined                 # teams this directory can start
 mira team start squad "add OAuth"        # a tab of its own; the task goes to the lead
 mira team start squad --host prod --dir /srv/app "add OAuth"   # every member on prod (see section 8)
+mira team start squad --cwd ../api "add OAuth"   # in another folder here, with the team it sees
 mira team list                           # running teams: each member's state and pane
 mira team add reviewer [--name gate] [task…]  # another member, beside this pane; the task is its first message
 mira team restart [member…]              # bring back exited or closed members
@@ -585,6 +586,14 @@ mira team cost <name> [--json]           # what it costs to start, and a turn: p
 mira agent save [name | --pane <id>] [--as <save>]  # one agent's (this pane's by default)
 mira agent resume <save> [--tab]         # beside this pane, or in a new tab
 ```
+
+`team start` starts the team the calling pane's directory sees, and
+every member works there. `--cwd <folder>` starts it in that folder
+instead: the team is looked up in the catalog that folder sees (its
+`.mirador/teams/` counts), and every member's pane works in it. A
+relative folder is from where `mira` runs, as for any path you type; a
+folder that is not there is refused and opens nothing. It is a folder on
+this computer, so it goes with none of `--host`, `--dir` or `--on`.
 
 `team cost` estimates, before a team starts, what its prompts cost — the
 team the calling pane's directory sees, refused as `team start` would

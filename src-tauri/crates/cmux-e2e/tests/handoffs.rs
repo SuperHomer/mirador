@@ -36,7 +36,7 @@ fn agents_hand_each_other_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the planner", LONG, || sb.member("planner"));
     let planner = pane_of(&sb, "planner");
     let r1 = pane_of(&sb, "reviewer-1");
@@ -126,7 +126,7 @@ fn another_tabs_team_is_reached_by_team_and_name() {
     sb.launch();
     let shell = sb.first_pane();
     let start_squad = |sb: &Sandbox| -> String {
-        let started = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+        let started = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None, cwd: None });
         started["tabId"].as_str().unwrap().to_string()
     };
     let squad_tab = start_squad(&sb);
@@ -191,7 +191,7 @@ fn another_tabs_team_is_reached_by_team_and_name() {
 
     // Between two teams' tabs: the header is `<team>/<name>`, and that
     // exact string, sent back, reaches the sender.
-    sb.call(Request::TeamStart { title: None, team: "gate".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "gate".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
     let reviewer = pane_of(&sb, "reviewer");
     for pane in [&dev, &reviewer] {
@@ -396,7 +396,7 @@ fn pi_and_opencode_members_send_to_each_other_and_clear() {
     );
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None, cwd: None });
     let builder = sb.wait_for("the builder", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
     let helper = sb.wait_for("the helper", LONG, || sb.member("helper").and_then(|m| m["pane"].as_str().map(String::from)));
     // Listed before their terminals start: a send then is refused.

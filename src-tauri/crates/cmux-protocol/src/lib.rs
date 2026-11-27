@@ -718,6 +718,11 @@ pub enum Request {
         /// the app looks up in its own config. Not with `host` or `dir`.
         #[serde(default)]
         on: Option<String>,
+        /// An absolute folder on this computer to start the team in,
+        /// instead of `pane_id`'s directory: the team is the one it sees,
+        /// and every member works there. Not with `host`, `dir` or `on`.
+        #[serde(default)]
+        cwd: Option<String>,
     },
     /// Every running team: its tab, and each member's pane and state.
     TeamList,

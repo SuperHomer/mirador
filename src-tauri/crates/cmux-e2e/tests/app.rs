@@ -410,7 +410,7 @@ fn pi_and_opencode_panes_come_back_on_their_conversation() {
     assert_eq!(sb.events("start", &spare).len(), 1, "the cleared conversation is not brought back");
 
     // A team's Pi member, saved and resumed in a tab of its own.
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None, cwd: None });
     let member = sb.wait_for("the pair's builder", LONG, || sb.member("builder").and_then(|m| m["pane"].as_str().map(String::from)));
     let id = cmux_e2e::flag(&sb.nth_start(&member, 1), "--session-id").expect("a session id");
     let (code, _, err) = sb.mira(Some(&member), &["team", "save"]);

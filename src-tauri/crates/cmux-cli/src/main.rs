@@ -421,6 +421,10 @@ enum TeamAction {
         /// and --dir.
         #[arg(long, conflicts_with_all = ["host", "dir"])]
         on: Option<String>,
+        /// Start the team in this folder instead of this pane's directory:
+        /// the team is the one it sees, and every member works there.
+        #[arg(long, conflicts_with_all = ["host", "dir", "on"])]
+        cwd: Option<String>,
         #[arg(trailing_var_arg = true)]
         task: Vec<String>,
     },
@@ -1310,11 +1314,17 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         },
         Command::Team { action } => match action {
-            TeamAction::Start { team, title, host, dir, on, task } => Request::TeamStart {
+            TeamAction::Start { team, title, host, dir, on, cwd, task } => Request::TeamStart {
                 team,
                 host,
                 dir,
                 on,
+                // The app runs elsewhere than this shell: a relative folder
+                // means one from here, as the person typed it.
+                cwd: cwd
+                    .map(|c| std::path::absolute(&c).map_err(|e| format!("--cwd {c}: {e}")))
+                    .transpose()?
+                    .map(|p| p.to_string_lossy().into_owned()),
                 task: (!task.is_empty()).then(|| task.join(" ")),
                 pane_id: own_pane(),
                 title,
@@ -3686,6 +3696,20 @@ mod tests {
         };
         assert_eq!((host.as_deref(), dir.as_deref()), (Some("box"), Some("/srv")));
         assert!(Cli::try_parse_from(["mira", "team", "start", "squad", "--host", "box", "go"]).is_err());
+    }
+
+    /// `team start --cwd` starts it in a folder here, so never with a
+    /// remote's --host, --dir or --on.
+    #[test]
+    fn team_start_takes_a_folder_here() {
+        let Command::Team { action: TeamAction::Start { cwd, task, .. } } = parse(&["team", "start", "squad", "--cwd", "../other", "go"]) else {
+            panic!()
+        };
+        assert_eq!((cwd.as_deref(), task), (Some("../other"), vec!["go".to_string()]));
+        for with in [&["--host", "box", "--dir", "/srv"][..], &["--on", "box"]] {
+            let team = [&["mira", "team", "start", "squad", "--cwd", "../other"][..], with, &["go"]].concat();
+            assert!(Cli::try_parse_from(team).is_err(), "{with:?}");
+        }
     }
 
     /// `--on` names a saved computer in place of `--host` and `--dir`:

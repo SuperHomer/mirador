@@ -728,6 +728,7 @@ fn a_team_runs_on_the_remote() {
         host: Some("box".into()),
         dir: Some(dir.clone()),
         on: None,
+        cwd: None,
     };
 
     let err = sb.request(team_start("mixed")).expect_err("Codex is not done on a remote");

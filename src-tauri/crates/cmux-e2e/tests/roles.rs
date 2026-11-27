@@ -118,7 +118,7 @@ fn pi_and_opencode_roles_start_with_their_model_and_prompt() {
     let file = prompt.strip_prefix("{file:").and_then(|p| p.strip_suffix('}')).expect("a {file:…}");
     assert_eq!(std::fs::read_to_string(file).unwrap(), "You help.");
 
-    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None, cwd: None });
     let member = sb.wait_for("the duo's builder", std::time::Duration::from_secs(45), || sb.member("builder"))["pane"]
         .as_str()
         .unwrap()
