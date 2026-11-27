@@ -372,6 +372,17 @@ All rebindable in `mirador.json`, where `+` and `-` are spelled `plus` and
 with them types nothing a shell needs. Plus is the numpad's, or Shift and
 whichever key makes `+` on your layout.
 
+### The menu bar (macOS)
+
+On macOS the menu bar lists every palette action by area — Mirador, File,
+View, Pane, Agents, Git, then Window — each with its shortcut. The
+shortcuts come from `keybindings`, so a key you rebind shows there as soon
+as `mirador.json` is saved. Copy and paste stay the Edit menu's.
+
+Because the menu takes whatever key a page does not, the shortcuts also
+work while a browser pane has focus, which they did not before. Windows and
+Linux have no menu bar: their keys are the keymap's alone.
+
 ### Zoom
 
 The zoom keys, and Ctrl + wheel over a terminal, zoom every terminal's

@@ -64,7 +64,7 @@ pub fn spawn(handle: tauri::AppHandle) {
 /// announce the older config after the zoom, until the next pass.
 pub fn reload(handle: &tauri::AppHandle) -> Result<ResolvedConfig, String> {
     let state = handle.state::<AppState>();
-    let (resolved, pages_changed) = {
+    let (resolved, pages_changed, keys_changed) = {
         let mut current = state.config.lock().unwrap();
         let (cfg, err) = cmux_core::config::load();
         if let Some(err) = err {
@@ -72,17 +72,26 @@ pub fn reload(handle: &tauri::AppHandle) -> Result<ResolvedConfig, String> {
         }
         let resolved = cmux_core::config::resolve(&cfg);
         let mut pages_changed = false;
+        let mut keys_changed = false;
         if *current != resolved {
             pages_changed = current.agents_per_tab != resolved.agents_per_tab;
+            keys_changed = current.keybindings != resolved.keybindings;
             *current = resolved.clone();
             let _ = handle.emit("config-changed", resolved.clone());
         }
-        (resolved, pages_changed)
+        (resolved, pages_changed, keys_changed)
     };
     // The wall's pages are in the snapshot, cut to agentsPerTab. After the
     // lock: building the snapshot reads the config.
     if pages_changed {
         crate::commands::broadcast_workspace(handle);
+    }
+    // The menu bar shows the keybindings' shortcuts. After the lock too:
+    // building it reads the config.
+    if keys_changed {
+        if let Err(e) = crate::set_menu(handle) {
+            eprintln!("mirador: menu rebuild failed: {e}");
+        }
     }
     Ok(resolved)
 }

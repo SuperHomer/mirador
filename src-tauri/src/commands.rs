@@ -648,6 +648,14 @@ pub async fn open_in_editor(app: AppHandle, pane_id: String) -> Result<(), Strin
     .map_err(|e| e.to_string())?
 }
 
+/// The palette's actions, for the menu bar to list. The page sends them
+/// once it has mounted: the table lives beside the code each one runs.
+#[tauri::command]
+pub fn set_menu_actions(app: AppHandle, actions: Vec<cmux_protocol::MenuAction>) -> Result<(), String> {
+    *app.state::<AppState>().menu_actions.lock().unwrap() = actions;
+    crate::set_menu(&app).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn set_tab_color(app: AppHandle, state: State<'_, AppState>, tab_id: String, color: Option<String>) {
     state.workspace.lock().unwrap().set_tab_color(&tab_id, color.as_deref());

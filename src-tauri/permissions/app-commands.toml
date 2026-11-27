@@ -16,6 +16,7 @@ permissions = [
   "allow-rename-tab",
   "allow-set-tab-color",
   "allow-open-in-editor",
+  "allow-set-menu-actions",
   "allow-move-tab",
   "allow-split-pane",
   "allow-close-pane",

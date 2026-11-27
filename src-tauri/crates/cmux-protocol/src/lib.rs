@@ -119,6 +119,19 @@ pub struct TabSnapshot {
     pub cards: Vec<CardRect>,
 }
 
+/// One entry of the palette's action table, as the page sends it to build
+/// the menu bar from: the table lives in the frontend, beside the code each
+/// action runs, and the menu is built from it so the two cannot drift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuAction {
+    pub id: String,
+    /// "Area: Verb", as the palette lists it.
+    pub title: String,
+    /// `ActionGroup` in `actions.ts`: "tabs", "view", "pane", …
+    pub group: String,
+}
+
 /// A pane of a tab that is not an agent but is worth a place beside them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

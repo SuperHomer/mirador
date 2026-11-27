@@ -1273,6 +1273,16 @@ export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
 /** Opens the pane's directory in `externalEditor`; refused for a pane on
  *  a remote computer, or whose directory is not known yet. */
 export const openInEditor = (paneId: string) => invoke<void>("open_in_editor", { paneId });
+/** One entry of the palette's actions, as the menu bar lists it. */
+export interface MenuAction {
+  id: string;
+  title: string;
+  group: string;
+}
+/** Hands the palette's actions to Rust, which builds the macOS menu bar
+ *  from them; elsewhere it keeps them and draws nothing. */
+export const setMenuActions = (actions: MenuAction[]) =>
+  invoke<void>("set_menu_actions", { actions });
 /** What `externalEditor` is called in a menu: VS Code for `code`, else
  *  its program. */
 export function editorName(command: string | undefined): string {

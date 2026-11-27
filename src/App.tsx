@@ -7,11 +7,13 @@ import {
   WorkspaceSnapshot,
   ResolvedConfig,
   sendFiles,
+  setMenuActions,
 } from "./bindings";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useConfigStore } from "./state/configStore";
 import { useNotificationStore } from "./state/notificationStore";
 import { useKeymap } from "./keymap/useKeymap";
+import { actions, runAction } from "./keymap/actions";
 import { useZoomWheel } from "./keymap/useZoomWheel";
 import { Sidebar } from "./sidebar/Sidebar";
 import { SplitLayer } from "./layout/SplitLayer";
@@ -137,12 +139,18 @@ export default function App() {
     const unlistenPasteInto = listen<{ paneId: string; text: string }>("paste-into-pane", (e) =>
       getTerminal(e.payload.paneId)?.paste(e.payload.text),
     );
+    // The menu bar lists the palette's actions and runs them here.
+    void setMenuActions(actions.map(({ id, title, group }) => ({ id, title, group }))).catch(
+      (err) => reportFailure("Menu bar", err),
+    );
+    const unlistenMenu = listen<string>("menu-action", (e) => runAction(e.payload));
     const onBlur = () => saveAllScrollbacks();
     window.addEventListener("blur", onBlur);
     return () => {
       void unlistenScrollback.then((fn) => fn());
       void unlistenDrop.then((fn) => fn());
       void unlistenPasteInto.then((fn) => fn());
+      void unlistenMenu.then((fn) => fn());
       window.removeEventListener("blur", onBlur);
       void unlistenRead.then((fn) => fn());
       disposed = true;

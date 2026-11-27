@@ -25,7 +25,7 @@ use std::sync::Mutex;
 use cmux_core::pty::PtyManager;
 use cmux_core::state::{PaneMeta, Workspace};
 use cmux_protocol::{NotificationDto, ResolvedConfig, RunRecord};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// A pane's screen as the webview reads it (`server::read_screen_at`).
 pub struct ScreenRead {
@@ -109,6 +109,9 @@ pub struct AppState {
     /// The task log's path, locked while it is appended to or read: the
     /// app is its one writer.
     pub task_log: Mutex<std::path::PathBuf>,
+    /// The palette's actions, as the page last sent them: the menu bar is
+    /// built from them, and again from them when a key is rebound.
+    pub menu_actions: Mutex<Vec<cmux_protocol::MenuAction>>,
 }
 
 pub fn save_session(state: &AppState) {
@@ -360,6 +363,13 @@ pub fn run() {
             task_log: Mutex::new(task_log),
             update: update::UpdateState::default(),
             emit_coalescer: commands::EmitCoalescer::default(),
+            menu_actions: Mutex::new(Vec::new()),
+        })
+        // The menu bar's actions run in the page, as the palette's do.
+        .on_menu_event(|app, event| {
+            if let Some(action) = event.id().0.strip_prefix(MENU_ACTION) {
+                let _ = app.emit_to("main", "menu-action", action);
+            }
         })
         .on_window_event(|window, event| {
             match event {
@@ -381,8 +391,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            setup_menu(app.handle())?;
+            set_menu(app.handle())?;
             notify::ensure_permission(app.handle());
             // Before session restore can want it for a rerun.
             cmux_core::pty::shell::warm_interactive_path();
@@ -416,6 +425,7 @@ pub fn run() {
             commands::rename_tab,
             commands::set_tab_color,
             commands::open_in_editor,
+            commands::set_menu_actions,
             commands::move_tab,
             commands::split_pane,
             commands::close_pane,
@@ -535,7 +545,6 @@ pub fn run() {
 /// scrollback every 30s — driven from Rust because WKWebView suspends JS
 /// timers in occluded windows.
 fn spawn_session_saver(handle: tauri::AppHandle) {
-    use tauri::Emitter;
     std::thread::spawn(move || {
         let mut tick: u64 = 0;
         loop {
@@ -552,26 +561,61 @@ fn spawn_session_saver(handle: tauri::AppHandle) {
     });
 }
 
-/// Minimal app menu: keeps Edit roles (so Cmd+C/V reach the webview's
-/// clipboard machinery) but omits File>Close Window — Cmd+W must reach the
-/// keymap to close a *pane*, not the window.
-#[cfg(target_os = "macos")]
-fn setup_menu(handle: &tauri::AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+/// The prefix of a menu item's id that names a palette action.
+const MENU_ACTION: &str = "action:";
 
-    let app_menu = Submenu::with_items(
-        handle,
-        "Mirador",
-        true,
-        &[
-            &PredefinedMenuItem::about(handle, None, Some(AboutMetadata::default()))?,
-            &PredefinedMenuItem::separator(handle)?,
-            &PredefinedMenuItem::hide(handle, None)?,
-            &PredefinedMenuItem::hide_others(handle, None)?,
-            &PredefinedMenuItem::separator(handle)?,
-            &PredefinedMenuItem::quit(handle, None)?,
-        ],
-    )?;
+/// The menu bar: the palette's actions, laid out by `cmux_core::menu`
+/// with the keybindings' shortcuts, around the macOS app and Edit menus.
+/// Until the page has sent its actions there are none, so the menu is
+/// never missing at launch.
+///
+/// There is no File > Close Window: Cmd+W must reach the keymap to close a
+/// *pane*, not the window. Edit keeps the roles, so Cmd+C/V reach the
+/// webview's clipboard machinery.
+///
+/// An item's shortcut does not run its action twice. WKWebView hands a
+/// keypress to the page before the menu, and the menu sees it only if the
+/// page did not take it; `useKeymap` takes every key it binds. So the
+/// shortcut runs once, from the keymap, and the menu's runs only what the
+/// page let through.
+#[cfg(target_os = "macos")]
+pub fn set_menu(handle: &tauri::AppHandle) -> tauri::Result<()> {
+    use cmux_core::menu::{self, MenuItem as Item};
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+    let state = handle.state::<AppState>();
+    let actions = state.menu_actions.lock().unwrap().clone();
+    let keybindings = state.config.lock().unwrap().keybindings.clone();
+    let mut bar = menu::menus(&actions, &keybindings);
+
+    let append = |submenu: &Submenu<tauri::Wry>, items: &[Item]| -> tauri::Result<()> {
+        for item in items {
+            match item {
+                Item::Action { id, label, accelerator } => submenu.append(&MenuItem::with_id(
+                    handle,
+                    format!("{MENU_ACTION}{id}"),
+                    label,
+                    true,
+                    accelerator.as_deref(),
+                )?)?,
+                Item::Separator => submenu.append(&PredefinedMenuItem::separator(handle)?)?,
+            }
+        }
+        Ok(())
+    };
+
+    let app_menu = Submenu::new(handle, "Mirador", true)?;
+    app_menu.append(&PredefinedMenuItem::about(handle, None, Some(AboutMetadata::default()))?)?;
+    app_menu.append(&PredefinedMenuItem::separator(handle)?)?;
+    if let Some(i) = bar.iter().position(|m| m.title == "Mirador") {
+        append(&app_menu, &bar.remove(i).items)?;
+        app_menu.append(&PredefinedMenuItem::separator(handle)?)?;
+    }
+    app_menu.append(&PredefinedMenuItem::hide(handle, None)?)?;
+    app_menu.append(&PredefinedMenuItem::hide_others(handle, None)?)?;
+    app_menu.append(&PredefinedMenuItem::separator(handle)?)?;
+    app_menu.append(&PredefinedMenuItem::quit(handle, None)?)?;
+
     let edit_menu = Submenu::with_items(
         handle,
         "Edit",
@@ -586,8 +630,29 @@ fn setup_menu(handle: &tauri::AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::select_all(handle, None)?,
         ],
     )?;
+
     let menu = Menu::with_items(handle, &[&app_menu, &edit_menu])?;
+    for m in &bar {
+        let submenu = Submenu::new(handle, &m.title, true)?;
+        append(&submenu, &m.items)?;
+        menu.append(&submenu)?;
+    }
+    menu.append(&Submenu::with_items(
+        handle,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(handle, None)?,
+            &PredefinedMenuItem::maximize(handle, None)?,
+        ],
+    )?)?;
     handle.set_menu(menu)?;
+    Ok(())
+}
+
+/// Windows and Linux get no menu bar: their keys are the keymap's alone.
+#[cfg(not(target_os = "macos"))]
+pub fn set_menu(_handle: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
