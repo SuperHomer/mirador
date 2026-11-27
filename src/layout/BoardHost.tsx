@@ -12,6 +12,7 @@ import {
 } from "../bindings";
 import { TabBar } from "./TabBar";
 import { FrameMenu } from "./FrameMenu";
+import { TabMenu } from "./TabMenu";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useConfigStore } from "../state/configStore";
 import { StatusPips } from "../agents/StatusMark";
@@ -623,6 +624,12 @@ export function TabLayer({
   const at = held ?? tab.frame;
   // Where the "+" that opened the menu is on screen, while it is open.
   const [menuAt, setMenuAt] = useState<DOMRect | null>(null);
+  // Where its title bar was right-clicked, while the tab's menu is open.
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number } | null>(null);
+  // Its point was on the board: gone with it, not shown there again later.
+  useEffect(() => {
+    if (!board) setTabMenu(null);
+  }, [board]);
   // The snapshot, not a list made from it: a selector that builds a new
   // array each time never settles.
   const snapshot = useWorkspaceStore((s) => s.snapshot);
@@ -665,7 +672,15 @@ export function TabLayer({
       }
     >
       {board && (
-        <div className="frame-label" onPointerDown={drag}>
+        <div
+          className="frame-label"
+          data-color={tab.color ?? undefined}
+          onPointerDown={drag}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setTabMenu({ x: e.pageX, y: e.pageY });
+          }}
+        >
           <span className="frame-title">{tab.title}</span>
           <StatusPips agents={agents} />
           <span className="frame-view">{view}</span>
@@ -697,6 +712,9 @@ export function TabLayer({
           at={menuAt}
           onClose={() => setMenuAt(null)}
         />
+      )}
+      {board && tabMenu && (
+        <TabMenu tabId={tab.id} {...tabMenu} onClose={() => setTabMenu(null)} />
       )}
       {!board && <TabBar tab={tab} current={current} />}
       {children}

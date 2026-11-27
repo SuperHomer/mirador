@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { TabSnapshot } from "../bindings";
 import { NewMenu } from "../agents/NewMenu";
+import { TabMenu } from "./TabMenu";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { useConfigStore } from "../state/configStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
@@ -18,12 +19,16 @@ export function TabBar({ tab, current }: { tab: TabSnapshot; current: boolean })
   const action = sidebarVisible ? "Hide sidebar" : "Show sidebar";
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
-  // The menu belongs to the tab on screen. Whatever switches tabs — a key,
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number } | null>(null);
+  // The menus belong to the tab on screen. Whatever switches tabs — a key,
   // the palette, the sidebar, `mira` — changes the snapshot's active tab,
-  // so the menu of a tab gone under another closes, and with it the flag
+  // so the menus of a tab gone under another close, and with them the flag
   // that hides every browser page. Going to the board unmounts the bar.
   useEffect(() => {
-    if (!current) setMenuOpen(false);
+    if (!current) {
+      setMenuOpen(false);
+      setTabMenu(null);
+    }
   }, [current]);
   return (
     <div className="tab-bar">
@@ -38,7 +43,14 @@ export function TabBar({ tab, current }: { tab: TabSnapshot; current: boolean })
           <line x1="6" y1="2.5" x2="6" y2="13.5" />
         </svg>
       </button>
-      <span className="tab-bar-label">
+      <span
+        className="tab-bar-label"
+        data-color={tab.color ?? undefined}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setTabMenu({ x: e.pageX, y: e.pageY });
+        }}
+      >
         {tab.title}
         {tab.branch && ` · ⎇ ${tab.branch}`}
       </span>
@@ -55,6 +67,7 @@ export function TabBar({ tab, current }: { tab: TabSnapshot; current: boolean })
         </button>
         {menuOpen && current && <NewMenu pane={tab.focusedPane} onClose={closeMenu} />}
       </div>
+      {tabMenu && current && <TabMenu tabId={tab.id} {...tabMenu} onClose={() => setTabMenu(null)} />}
     </div>
   );
 }

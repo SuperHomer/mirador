@@ -45,6 +45,29 @@
   --hue-7: #b4befe;
 }
 
+/* The colors a tab can be marked with, from the theme's hues so each reads
+   on its background, light or dark. Orange is mixed, as the theme derived
+   from a terminal's palette mixes its needs-you: such a palette has no
+   orange of its own. A block apart: the one above is the theme's tokens
+   alone (config::ui's tests hold it to builtin). */
+:root {
+  --tab-red: var(--hue-3);
+  --tab-orange: color-mix(in srgb, var(--hue-3) 50%, var(--hue-2));
+  --tab-yellow: var(--hue-2);
+  --tab-green: var(--hue-1);
+  --tab-blue: var(--hue-0);
+  --tab-purple: var(--hue-4);
+}
+
+/* A tab's color, wherever it is shown: its row, its label, its frame's
+   title, its swatch. */
+[data-color="red"] { --tab-color: var(--tab-red); }
+[data-color="orange"] { --tab-color: var(--tab-orange); }
+[data-color="yellow"] { --tab-color: var(--tab-yellow); }
+[data-color="green"] { --tab-color: var(--tab-green); }
+[data-color="blue"] { --tab-color: var(--tab-blue); }
+[data-color="purple"] { --tab-color: var(--tab-purple); }
+
 /* Scrollbars. WebKit on macOS draws these as overlays that fade out, so
    the default look was never visible there; WebView2 on Windows draws a
    full-width light track that fights a dark theme. Styled globally rather
@@ -153,6 +176,11 @@ body,
 
 .tab-row.active {
   background: var(--surface);
+}
+
+/* A tab marked with a color: a stripe down its row's left edge. */
+.tab-row[data-color] {
+  box-shadow: inset 3px 0 0 var(--tab-color);
 }
 
 .tab-index {
@@ -817,6 +845,20 @@ body,
   height: 15px;
 }
 
+/* A colored tab's mark, before its label and its frame's title. */
+.tab-bar-label[data-color]::before,
+.frame-label[data-color]::before {
+  content: "";
+  display: inline-block;
+  flex-shrink: 0;
+  width: 3px;
+  height: 0.9em;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: var(--tab-color);
+  vertical-align: -0.1em;
+}
+
 /* The bar's one shrinkable item: a long name or branch ellipsizes rather
    than pushing the buttons out. */
 .tab-bar-label {
@@ -957,9 +999,9 @@ body,
   color: var(--text);
 }
 
-/* What a frame's "+" adds: a short list under it, on screen (placed by
-   FrameMenu), above the board. */
-.frame-menu {
+/* A short list drawn on screen, above the panes and the board: what a
+   frame's "+" adds (FrameMenu), and a right-click's menu (ContextMenu). */
+.pop-menu {
   position: fixed;
   z-index: 50;
   display: flex;
@@ -972,7 +1014,7 @@ body,
   cursor: default;
 }
 
-.frame-menu button {
+.pop-menu button {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -986,18 +1028,57 @@ body,
   cursor: pointer;
 }
 
-.frame-menu button:hover:not(:disabled) {
+.pop-menu button:hover:not(:disabled) {
   background: var(--surface);
 }
 
-.frame-menu button:disabled {
+.pop-menu button:disabled {
   color: var(--muted);
   cursor: default;
 }
 
-.frame-menu-hint {
+.pop-menu-hint {
   color: var(--subtext);
   font-size: 11.5px;
+}
+
+/* A tab's colors: a dot each, the current one ringed. */
+.pop-menu-swatches {
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+}
+
+.pop-menu .pop-menu-swatches button {
+  padding: 5px;
+}
+
+.pop-menu-swatches span {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--tab-color);
+}
+
+.pop-menu-swatches .current span {
+  box-shadow: 0 0 0 2px var(--bg-alt), 0 0 0 3px var(--text);
+}
+
+/* No color: an empty ring. */
+.pop-menu-swatches .none span {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+
+.pop-menu-swatches .none.current span {
+  box-shadow: inset 0 0 0 1.5px var(--muted), 0 0 0 2px var(--bg-alt), 0 0 0 3px var(--text);
+}
+
+.pop-menu hr {
+  margin: 4px 6px;
+  border: none;
+  border-top: 1px solid var(--surface);
 }
 
 /* A frame or card in the hand: above the rest, lifted. */

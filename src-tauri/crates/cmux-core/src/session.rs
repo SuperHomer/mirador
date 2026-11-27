@@ -17,6 +17,9 @@ pub struct SessionTab {
     pub id: String,
     /// Explicit user rename only (derived titles are recomputed).
     pub title: Option<String>,
+    /// Absent from sessions saved before tabs had colors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     pub root: Node,
     pub focused: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,6 +181,7 @@ pub fn capture(workspace: &Workspace, meta: &HashMap<String, PaneMeta>) -> Sessi
         .map(|t| SessionTab {
             id: t.id.clone(),
             title: t.title.clone(),
+            color: t.color.clone(),
             root: t.root.clone(),
             focused: t.focused.clone(),
             team: t.team.clone(),
@@ -278,6 +282,7 @@ pub fn restore(file: SessionFile) -> Option<(Workspace, HashMap<String, PaneMeta
         tabs.push(Tab {
             id: t.id,
             title: t.title,
+            color: t.color,
             root: t.root,
             focused,
             zoomed: None,
@@ -505,6 +510,7 @@ mod tests {
         let a = ws.focused_pane();
         let b = ws.split_pane(&a, SplitDir::Row).unwrap();
         ws.rename_tab(&ws.tabs[0].id.clone(), "my tab");
+        ws.set_tab_color(&ws.tabs[0].id.clone(), Some("purple"));
         let (_tab2, c) = ws.new_tab();
         let d = ws.split_pane(&c, SplitDir::Row).unwrap();
 
@@ -552,6 +558,8 @@ mod tests {
 
         assert_eq!(restored.tabs.len(), 2);
         assert_eq!(restored.tabs[0].title.as_deref(), Some("my tab"));
+        assert_eq!(restored.tabs[0].color.as_deref(), Some("purple"));
+        assert_eq!(restored.tabs[1].color, None);
         assert_eq!(restored.active, 1);
         assert!(crate::layout::contains(&restored.tabs[0].root, &a));
         assert!(crate::layout::contains(&restored.tabs[0].root, &b));

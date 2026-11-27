@@ -24,6 +24,8 @@ export interface TabSnapshot {
   cwd: string | null;
   root: Node;
   focusedPane: string;
+  /** The color it is marked with: one of `TAB_COLORS`. */
+  color: TabColor | null;
   unread: number;
   lastNotification: string | null;
   branch: string | null;
@@ -753,6 +755,9 @@ export interface ResolvedConfig {
   editorOpensIn: OpensIn;
   diffOpensIn: OpensIn;
   graphOpensIn: OpensIn;
+  /** The command that opens a pane's directory in the person's editor:
+   *  mirador.json's `externalEditor`, else "code". */
+  externalEditor: string;
   /** The sidebar's width in pixels: mirador.json's or the default, 248. */
   sidebarWidth: number;
   /** The width of Focus's rail in pixels, or null for the default, about
@@ -811,6 +816,12 @@ export const setActiveTab = (tabId: string) =>
   invoke<void>("set_active_tab", { tabId });
 export const renameTab = (tabId: string, title: string) =>
   invoke<void>("rename_tab", { tabId, title });
+/** The colors a tab can be marked with, as cmux-core's `TAB_COLORS`
+ *  names them; styles.css draws each as `--tab-<name>`. */
+export const TAB_COLORS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
+export type TabColor = (typeof TAB_COLORS)[number];
+export const setTabColor = (tabId: string, color: TabColor | null) =>
+  invoke<void>("set_tab_color", { tabId, color });
 export const moveTab = (tabId: string, to: number) =>
   invoke<void>("move_tab", { tabId, to });
 export const splitPane = (paneId: string, dir: SplitDir, command?: string) =>
@@ -1259,6 +1270,15 @@ export const startWhere = (
 /** Shows a pane alone in its tab; `false` shows the whole tab; absent toggles. */
 export const zoomPane = (paneId: string, zoom: boolean | null = null) =>
   invoke<boolean>("zoom_pane", { paneId, zoom });
+/** Opens the pane's directory in `externalEditor`; refused for a pane on
+ *  a remote computer, or whose directory is not known yet. */
+export const openInEditor = (paneId: string) => invoke<void>("open_in_editor", { paneId });
+/** What `externalEditor` is called in a menu: VS Code for `code`, else
+ *  its program. */
+export function editorName(command: string | undefined): string {
+  const program = command?.trim().split(/\s+/)[0] || "code";
+  return program === "code" ? "VS Code" : program;
+}
 export const markPaneRead = (paneId: string) =>
   invoke<void>("mark_pane_read", { paneId });
 /** The wall for the tab of `paneId` (the focused pane when null). */

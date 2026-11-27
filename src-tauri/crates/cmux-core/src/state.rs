@@ -378,6 +378,8 @@ pub struct Tab {
     pub id: String,
     /// Explicit user rename; derived title otherwise.
     pub title: Option<String>,
+    /// A name from `TAB_COLORS`, when the person marked the tab with one.
+    pub color: Option<String>,
     pub root: Node,
     pub focused: String,
     /// One pane shown alone, filling the tab — how the sidebar shows an
@@ -406,6 +408,9 @@ pub struct Tab {
     pub cards: board::Cards,
 }
 
+/// The colors a tab can be marked with, by name.
+pub const TAB_COLORS: [&str; 6] = ["red", "orange", "yellow", "green", "blue", "purple"];
+
 fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -423,6 +428,7 @@ impl Tab {
         Self {
             id: new_id(),
             title: None,
+            color: None,
             cards: board::default_cards(&root),
             root,
             focused,
@@ -636,6 +642,20 @@ impl Workspace {
         } else {
             false
         }
+    }
+
+    /// Marks the tab with a color, or clears it with `None`. Only a name
+    /// from `TAB_COLORS`: the page draws each in the theme's own shade, so
+    /// a hex would ignore the theme.
+    pub fn set_tab_color(&mut self, tab_id: &str, color: Option<&str>) -> bool {
+        if color.is_some_and(|c| !TAB_COLORS.contains(&c)) {
+            return false;
+        }
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) else {
+            return false;
+        };
+        tab.color = color.map(str::to_string);
+        true
     }
 
     pub fn move_tab(&mut self, tab_id: &str, to: usize) -> bool {
@@ -964,6 +984,7 @@ impl Workspace {
                         cwd: cwd.clone().map(|c| abbreviate_home(&c)),
                         root: t.root.clone(),
                         focused_pane: t.focused.clone(),
+                        color: t.color.clone(),
                         unread: 0,
                         last_notification: None,
                         team: t.team.clone(),
@@ -1119,6 +1140,22 @@ pub fn same_place(a_root: Option<&str>, a_cwd: Option<&str>, b_root: Option<&str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tab_takes_a_color_from_the_set_and_gives_it_back() {
+        let mut ws = Workspace::default();
+        let tab = ws.tabs[0].id.clone();
+        assert!(ws.set_tab_color(&tab, Some("green")));
+        assert_eq!(ws.snapshot(&HashMap::new()).tabs[0].color.as_deref(), Some("green"));
+        assert!(ws.set_tab_color(&tab, None));
+        assert_eq!(ws.tabs[0].color, None);
+        // A name outside the set, or a hex, changes nothing.
+        ws.set_tab_color(&tab, Some("blue"));
+        assert!(!ws.set_tab_color(&tab, Some("magenta")));
+        assert!(!ws.set_tab_color(&tab, Some("#ff0000")));
+        assert_eq!(ws.tabs[0].color.as_deref(), Some("blue"));
+        assert!(!ws.set_tab_color("no-such-tab", Some("red")));
+    }
 
     fn running(harness: cmux_protocol::Harness, args: &str) -> crate::agents::RunningAgent {
         crate::agents::RunningAgent { harness, pid: 42, args: args.into() }

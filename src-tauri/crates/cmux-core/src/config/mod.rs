@@ -82,6 +82,10 @@ pub struct Config {
     pub editor_opens_in: Option<String>,
     pub diff_opens_in: Option<String>,
     pub graph_opens_in: Option<String>,
+    /// The command that opens a pane's directory in the person's editor,
+    /// with arguments if it needs them ("subl -n"); the directory is put
+    /// last. Unset or blank → "code", VS Code.
+    pub external_editor: Option<String>,
     /// The sidebar's width in pixels, set by dragging its edge or by hand:
     /// [`SIDEBAR_WIDTH`], a value outside it brought in. Unset → 248.
     pub sidebar_width: Option<u32>,
@@ -617,6 +621,13 @@ pub fn resolve(cfg: &Config) -> ResolvedConfig {
         editor_opens_in: opens_in(cfg.editor_opens_in.as_deref(), OpensIn::Tab),
         diff_opens_in: opens_in(cfg.diff_opens_in.as_deref(), OpensIn::Split),
         graph_opens_in: opens_in(cfg.graph_opens_in.as_deref(), OpensIn::Split),
+        external_editor: cfg
+            .external_editor
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .unwrap_or(crate::external_editor::DEFAULT)
+            .to_string(),
         // A hand-edited width out of range is brought into it, as fontSize
         // is, rather than ignored: the nearest width is what was meant.
         sidebar_width: cfg

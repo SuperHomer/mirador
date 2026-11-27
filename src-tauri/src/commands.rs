@@ -626,6 +626,34 @@ pub fn rename_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, ti
     emit_workspace(&app);
 }
 
+/// Opens the pane's directory — the one the sidebar shows for it — in the
+/// person's editor (`externalEditor`), off the main thread: finding the
+/// editor may wait on the user's shell for its PATH.
+#[tauri::command]
+pub async fn open_in_editor(app: AppHandle, pane_id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let dir = {
+        let meta = state.meta.lock().unwrap();
+        let m = meta.get(&pane_id).ok_or("that pane is gone")?;
+        if let Some(host) = &m.remote_host {
+            return Err(format!("this pane is on {host}: its directory is not on this computer"));
+        }
+        m.cwd.clone().ok_or("this pane's directory is not known yet")?
+    };
+    let editor = state.config.lock().unwrap().external_editor.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        cmux_core::external_editor::open(&editor, std::path::Path::new(&dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn set_tab_color(app: AppHandle, state: State<'_, AppState>, tab_id: String, color: Option<String>) {
+    state.workspace.lock().unwrap().set_tab_color(&tab_id, color.as_deref());
+    emit_workspace(&app);
+}
+
 #[tauri::command]
 pub fn move_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, to: usize) {
     state.workspace.lock().unwrap().move_tab(&tab_id, to);

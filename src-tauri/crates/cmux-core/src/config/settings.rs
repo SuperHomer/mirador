@@ -137,6 +137,8 @@ pub fn settings() -> Vec<Setting> {
         setting("editorOpensIn", "Panes", choice(&["tab", "split"]), "tab", "Where the roles, ways and teams editor opens."),
         setting("diffOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where a diff opens."),
         setting("graphOpensIn", "Panes", choice(&["tab", "split"]), "split", "Where the commit graph opens."),
+        setting("externalEditor", "Panes", Text, crate::external_editor::DEFAULT,
+            "The editor a pane's Open in Editor opens its directory in: a command on your PATH, with arguments if it needs them (subl -n). The directory goes last."),
         setting("keybindings", "Advanced", ReadOnly, "the built-in bindings",
             "Accelerators mapped to actions; \"none\" removes a built-in one."),
         setting("customCommands", "Advanced", ReadOnly, "none", "Commands of your own in the palette."),

@@ -61,6 +61,10 @@ pub struct TabSnapshot {
     pub cwd: Option<String>,
     pub root: Node,
     pub focused_pane: String,
+    /// The color the person marked it with: a name from `TAB_COLORS` in
+    /// cmux-core, which the theme turns into a shade.
+    #[serde(default)]
+    pub color: Option<String>,
     /// Unread notifications across the tab's panes.
     #[serde(default)]
     pub unread: u32,
@@ -2119,6 +2123,9 @@ pub struct ResolvedConfig {
     pub editor_opens_in: OpensIn,
     pub diff_opens_in: OpensIn,
     pub graph_opens_in: OpensIn,
+    /// The command that opens a pane's directory in the person's editor:
+    /// mirador.json's `externalEditor`, else "code".
+    pub external_editor: String,
     /// The sidebar's width in pixels: mirador.json's, in range, or 248.
     pub sidebar_width: u32,
     /// The width of Focus's rail in pixels, or `None` for the layout's

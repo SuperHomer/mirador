@@ -38,6 +38,7 @@ import { fullness } from "../agents/AgentStatusBar";
 import { tokens } from "../agents/ActivityPanel";
 import { clock } from "../usage/UsagePane";
 import { ClaudeBanner } from "../claude/ClaudeBanner";
+import { TabMenu } from "../layout/TabMenu";
 import { SIDEBAR_WIDTH, useDragWidth } from "../layout/useDragWidth";
 
 /** What the sidebar's edge leaves the rest of the window at least. */
@@ -587,6 +588,18 @@ function TabRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(tab.title);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const startEditing = () => {
+    setDraft(tab.title);
+    setEditing(true);
+  };
+  // Rename… in the tab's menu, wherever it was opened.
+  const asked = useUiStore((s) => s.renamingTab === tab.id);
+  useEffect(() => {
+    if (!asked) return;
+    useUiStore.getState().setRenamingTab(null);
+    startEditing();
+  }, [asked]);
 
   const commit = () => {
     setEditing(false);
@@ -594,89 +607,98 @@ function TabRow({
   };
 
   return (
-    <div
-      className={`tab-row${active ? " active" : ""}`}
-      onClick={() => void setActiveTab(tab.id)}
-      onDoubleClick={() => {
-        setDraft(tab.title);
-        setEditing(true);
-      }}
-    >
-      <span className="tab-index">{index + 1}</span>
-      <div className="tab-info">
-        {editing ? (
-          <input
-            className="tab-rename"
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") setEditing(false);
-            }}
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <span className="tab-head">
-            <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
-              {tab.title}
-            </span>
-            {tab.team && (
-              <span
-                className="tab-team"
-                title={`Team ${tab.team.name}: ${tab.team.members.map((m) => m.name).join(", ")}`}
-              >
-                team · {tab.team.name}
-                {tab.team.remote && ` · on ${tab.team.remote.host}`}
-                {tab.team.members.length > 4 && ` · ${tab.team.members.length}`}
+    <>
+      <div
+        className={`tab-row${active ? " active" : ""}`}
+        data-color={tab.color ?? undefined}
+        onClick={() => void setActiveTab(tab.id)}
+        onDoubleClick={startEditing}
+        // While it is being renamed, its field keeps the native menu.
+        onContextMenu={(e) => {
+          if (editing) return;
+          e.preventDefault();
+          setMenu({ x: e.pageX, y: e.pageY });
+        }}
+      >
+        <span className="tab-index">{index + 1}</span>
+        <div className="tab-info">
+          {editing ? (
+            <input
+              className="tab-rename"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commit();
+                if (e.key === "Escape") setEditing(false);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="tab-head">
+              <span className={`tab-title${tab.unread > 0 ? " has-unread" : ""}`}>
+                {tab.title}
               </span>
-            )}
-          </span>
-        )}
-        {tab.unread > 0 && tab.lastNotification ? (
-          <span className="tab-notif">{tab.lastNotification}</span>
-        ) : (
-          tab.cwd && <span className="tab-cwd">{tab.cwd}</span>
-        )}
-        {(tab.branch || tab.pr || tab.ports.length > 0) && (
-          <span className="tab-intel">
-            {tab.branch && <span className="tab-branch">⎇ {tab.branch}</span>}
-            {tab.pr && (
-              <button
-                className={`tab-pr ${tab.pr.checks} ${tab.pr.state.toLowerCase()}`}
-                title={`PR #${tab.pr.number} — ${tab.pr.state}, checks: ${tab.pr.checks}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (tab.pr) void openUrl(tab.pr.url);
-                }}
-              >
-                #{tab.pr.number}
-                {tab.pr.checks === "pass" && " ✓"}
-                {tab.pr.checks === "fail" && " ✗"}
-                {tab.pr.checks === "pending" && " ●"}
-              </button>
-            )}
-            {tab.ports.map((port) => (
-              <button
-                key={port}
-                className="tab-port"
-                title={`open http://localhost:${port}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void openUrl(`http://localhost:${port}`);
-                }}
-              >
-                :{port}
-              </button>
-            ))}
-          </span>
-        )}
+              {tab.team && (
+                <span
+                  className="tab-team"
+                  title={`Team ${tab.team.name}: ${tab.team.members.map((m) => m.name).join(", ")}`}
+                >
+                  team · {tab.team.name}
+                  {tab.team.remote && ` · on ${tab.team.remote.host}`}
+                  {tab.team.members.length > 4 && ` · ${tab.team.members.length}`}
+                </span>
+              )}
+            </span>
+          )}
+          {tab.unread > 0 && tab.lastNotification ? (
+            <span className="tab-notif">{tab.lastNotification}</span>
+          ) : (
+            tab.cwd && <span className="tab-cwd">{tab.cwd}</span>
+          )}
+          {(tab.branch || tab.pr || tab.ports.length > 0) && (
+            <span className="tab-intel">
+              {tab.branch && <span className="tab-branch">⎇ {tab.branch}</span>}
+              {tab.pr && (
+                <button
+                  className={`tab-pr ${tab.pr.checks} ${tab.pr.state.toLowerCase()}`}
+                  title={`PR #${tab.pr.number} — ${tab.pr.state}, checks: ${tab.pr.checks}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (tab.pr) void openUrl(tab.pr.url);
+                  }}
+                >
+                  #{tab.pr.number}
+                  {tab.pr.checks === "pass" && " ✓"}
+                  {tab.pr.checks === "fail" && " ✗"}
+                  {tab.pr.checks === "pending" && " ●"}
+                </button>
+              )}
+              {tab.ports.map((port) => (
+                <button
+                  key={port}
+                  className="tab-port"
+                  title={`open http://localhost:${port}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void openUrl(`http://localhost:${port}`);
+                  }}
+                >
+                  :{port}
+                </button>
+              ))}
+            </span>
+          )}
+        </div>
+        <StatusPips agents={pips} />
+        {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
+        <CloseTab tabId={tab.id} />
       </div>
-      <StatusPips agents={pips} />
-      {tab.unread > 0 && <span className="tab-badge">{tab.unread}</span>}
-      <CloseTab tabId={tab.id} />
-    </div>
+      {/* Beside the row, not in it: a press in the menu, drawn in a portal,
+          would still reach the row's click and double-click. */}
+      {menu && <TabMenu tabId={tab.id} {...menu} onClose={() => setMenu(null)} />}
+    </>
   );
 }
 

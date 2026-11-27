@@ -23,8 +23,9 @@ interface UiStore {
   clearInbox: () => void;
   /** The agent pane whose activity panel is open. */
   activityPane: string | null;
-  /** A frame's "+" menu is open on the board. */
-  boardMenuOpen: boolean;
+  /** A menu drawn over the panes is open: a frame's "+" on the board, or
+   *  a pane's right-click menu. Browser pages hide while it is. */
+  menuOpen: boolean;
   /** Per tab, the agent its wall shows large in Focus, when one was picked
    *  (from the sidebar). Not persisted. */
   pinned: Record<string, string>;
@@ -35,7 +36,11 @@ interface UiStore {
   /** Per tab, the page of its wall's Grid on show. Not persisted. */
   gridPage: Record<string, number>;
   setGridPage: (tabId: string, page: number) => void;
-  setBoardMenuOpen: (open: boolean) => void;
+  setMenuOpen: (open: boolean) => void;
+  /** The tab whose sidebar row is to start renaming, asked from a menu:
+   *  the row takes it and clears it. Not persisted. */
+  renamingTab: string | null;
+  setRenamingTab: (tabId: string | null) => void;
   /** Browser panes a wall's tile draws now: the only place a walled
    *  tab's pages are shown (see `App`). Not persisted. */
   wallBrowsers: string[];
@@ -73,7 +78,7 @@ export const useUiStore = create<UiStore>((set) => ({
   inboxClearedMs: null,
   clearInbox: () => set({ inboxClearedMs: Date.now() }),
   activityPane: null,
-  boardMenuOpen: false,
+  menuOpen: false,
   pinned: {},
   pinAgent: (tabId, paneId) =>
     set((s) => {
@@ -88,7 +93,9 @@ export const useUiStore = create<UiStore>((set) => ({
   gridPage: {},
   setGridPage: (tabId, page) =>
     set((s) => ({ gridPage: { ...s.gridPage, [tabId]: page } })),
-  setBoardMenuOpen: (boardMenuOpen) => set({ boardMenuOpen }),
+  setMenuOpen: (menuOpen) => set({ menuOpen }),
+  renamingTab: null,
+  setRenamingTab: (renamingTab) => set({ renamingTab }),
   wallBrowsers: [],
   setWallBrowser: (paneId, shown) =>
     set((s) => {
