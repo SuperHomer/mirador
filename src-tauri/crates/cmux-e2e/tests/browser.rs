@@ -105,7 +105,55 @@ stop.abort();
     )
 }
 
+/// Writes both storage areas; its response sets the cookies.
+const STORAGE: &str = r#"<!doctype html><title>Storage</title><h1>Storage</h1>
+<script>
+localStorage.setItem("theme", "dark");
+localStorage.setItem("long", "y".repeat(3000));
+sessionStorage.setItem("draft", "hello");
+</script>"#;
+
+/// An HttpOnly cookie, which `document.cookie` never shows, a plain one
+/// that lasts, and one too long to show whole.
+/// Named for this run (`storage_cookie`); `/storage-clear` expires them.
+fn storage_cookies() -> String {
+    format!(
+        "Set-Cookie: {}=abc123; Path=/; HttpOnly; SameSite=Lax\r\n\
+         Set-Cookie: {}=dark; Path=/; Max-Age=3600\r\n\
+         Set-Cookie: {}={}; Path=/\r\n",
+        storage_cookie("sid"),
+        storage_cookie("theme"),
+        storage_cookie("big"),
+        "z".repeat(2500)
+    )
+}
+
+/// `name`, made this run's own: see `run_tag`.
+fn storage_cookie(name: &str) -> String {
+    format!("{name}_{}", run_tag())
+}
+
+fn expired_storage_cookies() -> String {
+    ["sid", "theme", "big"]
+        .map(|name| format!("Set-Cookie: {}=; Path=/; Max-Age=0\r\n", storage_cookie(name)))
+        .concat()
+}
+
 const ITEMS: &str = r#"{"items":["a","b"]}"#;
+
+/// This run's own, for the cookies a test sets. Browser panes keep
+/// cookies in WebKit's store for the app, under the real `~/Library` and
+/// not the sandbox's HOME (`~/Library/HTTPStorages/mirador.binarycookies`
+/// for the unbundled debug binary, never the release app's), so every
+/// sandbox and every run shares it. Cookies ignore ports, too: with a
+/// fixed name, one left by another run would pass for this run's.
+fn run_tag() -> &'static str {
+    static TAG: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TAG.get_or_init(|| {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        format!("{}_{nanos}", std::process::id())
+    })
+}
 
 /// A port nothing listens on: one the system gave out, then closed.
 fn closed_port() -> u16 {
@@ -176,6 +224,25 @@ fn serve_page(mut stream: std::net::TcpStream) {
         "/api/big" => (Some("x".repeat(25_000)), "text/plain"),
         _ => (implicit_form(path), "text/html; charset=utf-8"),
     };
+    if path == "/storage-clear" {
+        let body = "<!doctype html><title>Cleared</title><h1>Cleared</h1>";
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            expired_storage_cookies(),
+            body.len()
+        );
+        return;
+    }
+    if path == "/storage" {
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n{}Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{STORAGE}",
+            storage_cookies(),
+            STORAGE.len()
+        );
+        return;
+    }
     if let Some(body) = page {
         let _ = write!(
             stream,
@@ -761,6 +828,68 @@ fn network_lists_the_pages_requests() {
     let big = browser_until(&sb, &first, &["network", "6"], "the large body to be read", |s| s.contains("Response body"));
     let kept = "x".repeat(20_000);
     assert!(big.ends_with(&format!("Response body (25000 bytes)\n  {kept}\n  … 5000 more bytes not kept\n")), "{}", &big[..300.min(big.len())]);
+}
+
+/// What the page keeps: its cookies, HttpOnly ones included, which only
+/// the browser can tell, and both storage areas; long values cut.
+#[test]
+fn storage_shows_cookies_and_both_storage_areas() {
+    e2e!();
+    let (sb, first) = launched("bstorage");
+    let (sid, theme, big) = (storage_cookie("sid"), storage_cookie("theme"), storage_cookie("big"));
+    let _expire = VisitOnDrop(sb.mira_command(Some(&first), &["browser", "navigate", &page("/storage-clear")]));
+    open(&sb, &first, &page("/storage"));
+    // The page itself cannot see the HttpOnly one.
+    assert!(!browser(&sb, &first, &["eval", "document.cookie"]).contains(&format!("{sid}=")));
+
+    let out = browser(&sb, &first, &["storage"]);
+    let origin = page("");
+    let z = "z".repeat(2000);
+    let y = "y".repeat(1000);
+    assert!(out.starts_with(&format!("Cookies — {}\n", page("/storage"))), "{}", &out[..out.len().min(300)]);
+    assert!(out.contains(&format!("\n  {big}={z}…  127.0.0.1 /  session\n")), "{}", &out[..out.len().min(300)]);
+    assert!(out.contains(&format!("\n  {sid}=abc123  127.0.0.1 /  session  HttpOnly SameSite=Lax\n")), "{out}");
+    let theme = out
+        .lines()
+        .find(|l| l.starts_with(&format!("  {theme}=dark  127.0.0.1 /  ")))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(theme.ends_with(" UTC"), "a cookie that lasts says until when: {theme}");
+    assert!(
+        out.ends_with(&format!(
+            "localStorage — {origin}\n  long = {y}…\n  theme = dark\nsessionStorage — {origin}\n  draft = hello\n"
+        )),
+        "{}",
+        &out[out.len().saturating_sub(300)..]
+    );
+
+    let raw: serde_json::Value = serde_json::from_str(&browser(&sb, &first, &["--json", "storage"])).unwrap();
+    assert_eq!(raw["url"], page("/storage"), "{raw}");
+    let sid = raw["cookies"]["entries"].as_array().unwrap().iter().find(|c| c["name"] == sid.as_str()).cloned();
+    assert_eq!(sid.as_ref().map(|c| (c["httpOnly"].clone(), c["value"].clone())), Some((true.into(), "abc123".into())), "{raw}");
+    assert_eq!(raw["session"]["entries"], serde_json::json!([["draft", "hello"]]), "{raw}");
+
+    // An empty area says so; one the page may not use says why, and the
+    // rest still show.
+    browser(&sb, &first, &["eval", "sessionStorage.clear(); 0"]);
+    assert!(browser(&sb, &first, &["storage"]).ends_with(&format!("sessionStorage — {origin}\n  (none)\n")));
+    // Expired, the cookies are gone: none of this run's is left behind.
+    browser(&sb, &first, &["navigate", "/storage-clear"]);
+    browser(&sb, &first, &["wait", "--text", "Cleared"]);
+    assert!(!browser(&sb, &first, &["storage"]).contains(run_tag()));
+    browser(&sb, &first, &["navigate", "about:blank"]);
+    let blank = browser_until(&sb, &first, &["storage"], "about:blank's storage", |s| s.starts_with("Cookies — about:blank"));
+    assert!(blank.contains("Cookies — about:blank\n  (none)\nlocalStorage — null\n  (not readable: "), "{blank}");
+}
+
+/// Visits a page that expires a test's cookies when dropped
+/// (/storage-clear), so a failed run leaves none behind. With no app
+/// left, the cookies stay, and their names are this run's alone.
+struct VisitOnDrop(std::process::Command);
+
+impl Drop for VisitOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.output();
+    }
 }
 
 /// `wait` instead of a sleep: for an element, for text, for a spinner to

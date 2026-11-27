@@ -206,6 +206,14 @@ the active tab's browser pane, else the one used last:
   past 20,000 characters is cut there, saying how many bytes were left
   out. An id not on the page is an error: the list starts again on
   each page load.
+- `storage`: what the page keeps, in three sections: the cookies the
+  browser sends to it — HttpOnly ones too, read from the browser rather
+  than `document.cookie` — each with its domain, path, expiry (or
+  `session`) and flags; then its origin's localStorage and
+  sessionStorage, sorted by key, up to 100 entries each. A cookie's value
+  past 2,000 characters is cut, a stored one's past 1,000. An area the
+  page may not use (an opaque origin, `about:blank`) says why, and the
+  others still show.
 - `eval <js>`: the result as JSON; a Promise is awaited.
 - `screenshot [--out <path>]`: a PNG of the part of the page the pane
   shows, at screen resolution, written to `--out` or else to a new file
@@ -1286,7 +1294,7 @@ read_screen send_file notify run list_runs agent_session codex_thread agent_new
 agent_list agent_wall zoom_pane swap_pane rotate_panes equalize_panes
 apply_layout browser_open browser_navigate browser_snapshot browser_click
 browser_fill browser_type browser_press browser_text browser_eval
-browser_history browser_wait browser_console browser_network
+browser_history browser_wait browser_console browser_network browser_storage
 browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add

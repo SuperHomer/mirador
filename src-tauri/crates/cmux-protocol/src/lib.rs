@@ -943,6 +943,13 @@ pub enum Request {
         #[serde(default)]
         clear: bool,
     },
+    /// What the page keeps: the cookies the browser sends to it (HttpOnly
+    /// ones too), and its origin's localStorage and sessionStorage. Each
+    /// area is `{entries, omitted?}`, or `{error}` when it cannot be read.
+    BrowserStorage {
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Waits until the page meets one condition: `selector` shown, `text`
     /// in its visible text, the loaded URL containing `url`, or `gone` no
     /// longer shown. Answers nothing when met; an error on timeout.

@@ -843,6 +843,14 @@ enum BrowserAction {
         #[arg(long)]
         pane: Option<String>,
     },
+    /// What the page keeps, as a browser's developer tools show it: the
+    /// cookies sent to it (HttpOnly ones too), its localStorage and its
+    /// sessionStorage. Long values are cut: a cookie's at 2,000
+    /// characters, a stored one's at 1,000.
+    Storage {
+        #[arg(long)]
+        pane: Option<String>,
+    },
     /// Wait until the page shows a CSS selector, some text, a URL, or no
     /// longer shows a selector — instead of sleeping.
     #[command(group(clap::ArgGroup::new("until").required(true).args(["selector", "text", "url", "gone"])))]
@@ -1319,6 +1327,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     clear,
                 }
             }
+            BrowserAction::Storage { pane } => Request::BrowserStorage { pane_id: pane },
             BrowserAction::Wait {
                 selector,
                 text,
@@ -1544,6 +1553,8 @@ fn render(resp: ResponseEnvelope, raw_json: bool, quiet: bool, empty_note: Optio
                     }
                 }
                 render_console(entries, dropped);
+            } else if map.contains_key("cookies") {
+                render_storage(&data);
             } else if let Some(request) = map.get("request") {
                 render_request(request);
             } else if let Some(requests) = map.get("network").and_then(|v| v.as_array()) {
@@ -2240,6 +2251,58 @@ fn render_network(requests: &[serde_json::Value], dropped: u64) {
             request["url"].as_str().unwrap_or("")
         );
     }
+}
+
+/// Cookies, localStorage and sessionStorage, a section each:
+/// `  sid=abc123  localhost /  session  HttpOnly SameSite=Lax`.
+fn render_storage(data: &serde_json::Value) {
+    let text = |value: &serde_json::Value| value.as_str().unwrap_or("").to_string();
+    // Each area: its lines, or `(none)`, or why it could not be read.
+    let section = |title: String, area: &serde_json::Value, line: &dyn Fn(&serde_json::Value) -> String| {
+        println!("{title}");
+        if let Some(error) = area["error"].as_str() {
+            println!("  (not readable: {error})");
+            return;
+        }
+        let entries = area["entries"].as_array().cloned().unwrap_or_default();
+        if entries.is_empty() {
+            println!("  (none)");
+        }
+        for entry in &entries {
+            println!("  {}", line(entry));
+        }
+        if let Some(omitted) = area["omitted"].as_u64() {
+            println!("  ({omitted} more not shown)");
+        }
+    };
+    section(format!("Cookies — {}", text(&data["url"])), &data["cookies"], &|c| {
+        let mut flags = Vec::new();
+        if c["httpOnly"].as_bool() == Some(true) {
+            flags.push("HttpOnly".to_string());
+        }
+        if c["secure"].as_bool() == Some(true) {
+            flags.push("Secure".to_string());
+        }
+        // WebKit reports no policy as None: only Lax and Strict say something.
+        if let Some(same_site) = c["sameSite"].as_str().filter(|s| *s != "None") {
+            flags.push(format!("SameSite={same_site}"));
+        }
+        let expires = c["expires"].as_str().unwrap_or("session");
+        format!(
+            "{}={}  {} {}  {expires}  {}",
+            text(&c["name"]),
+            text(&c["value"]),
+            text(&c["domain"]),
+            text(&c["path"]),
+            flags.join(" ")
+        )
+        .trim_end()
+        .to_string()
+    });
+    let origin = text(&data["origin"]);
+    let pair = |e: &serde_json::Value| format!("{} = {}", text(&e[0]), text(&e[1]));
+    section(format!("localStorage — {origin}"), &data["local"], &pair);
+    section(format!("sessionStorage — {origin}"), &data["session"], &pair);
 }
 
 /// One request, as a browser's developer tools show it: what was asked,

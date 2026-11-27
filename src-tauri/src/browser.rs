@@ -490,6 +490,76 @@ fn ask(webview: &Webview, js: String, deadline: Instant) -> Result<String, Strin
         .ok_or_else(|| "the page has no automation bridge (a browser error page?)".to_string())
 }
 
+/// The page the pane shows, as the pane reports it: the URL its cookies
+/// are read for, and what `storage` says they are for.
+pub fn page_url(app: &AppHandle, pane_id: &str) -> Option<String> {
+    let state = app.state::<AppState>();
+    let meta = state.meta.lock().unwrap();
+    meta.get(pane_id).and_then(|m| m.browser_url.clone())
+}
+
+/// A cookie's value past this is cut, as a stored value is in the page.
+const MAX_COOKIE_VALUE: usize = 2000;
+
+/// The cookies the pane's browser sends to `url`, HttpOnly ones included,
+/// which `document.cookie` never shows: read from the webview's cookie
+/// store, matched to the URL here (`cmux_core::browser_url::cookie_applies`).
+/// The URL is the one the pane reports, never the page's word for it.
+///
+/// Tauri warns that reading cookies deadlocks on Windows from a sync
+/// command or an event handler: those run on the main thread, which
+/// WebView2 needs to answer. This runs on a socket connection's own thread
+/// (`server.rs`), which waits while the main thread does the read.
+pub fn cookies(app: &AppHandle, pane_id: &str, url: &str) -> Result<Vec<serde_json::Value>, String> {
+    let webview = webview(app, pane_id, None)?;
+    let url: Url = url.parse().map_err(|e| format!("bad page URL {url}: {e}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Ok(Vec::new());
+    }
+    let host = url.host_str().unwrap_or("");
+    let mut cookies: Vec<serde_json::Value> = webview
+        .cookies()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|c| {
+            let (domain, path) = (c.domain().unwrap_or(""), c.path().unwrap_or("/"));
+            let secure = c.secure().unwrap_or(false);
+            cmux_core::browser_url::cookie_applies(domain, path, secure, url.scheme(), host, url.path())
+        })
+        .map(|c| {
+            let value = c.value();
+            let value = match value.char_indices().nth(MAX_COOKIE_VALUE) {
+                Some((cut, _)) => format!("{}…", &value[..cut]),
+                None => value.to_string(),
+            };
+            // wry makes the time from a Unix timestamp: it is in UTC.
+            let expires = c.expires_datetime().map(|t| {
+                format!(
+                    "{}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+                    t.year(),
+                    u8::from(t.month()),
+                    t.day(),
+                    t.hour(),
+                    t.minute(),
+                    t.second()
+                )
+            });
+            serde_json::json!({
+                "name": c.name(),
+                "value": value,
+                "domain": c.domain(),
+                "path": c.path(),
+                "expires": expires,
+                "httpOnly": c.http_only().unwrap_or(false),
+                "secure": c.secure().unwrap_or(false),
+                "sameSite": c.same_site().map(|s| s.to_string()),
+            })
+        })
+        .collect();
+    cookies.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    Ok(cookies)
+}
+
 /// What `wait` waits for.
 pub enum Until {
     /// An element matching the selector, shown.

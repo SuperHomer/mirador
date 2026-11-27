@@ -660,6 +660,37 @@
     return { ok: true };
   }
 
+  // `storage` keeps its answer small: a page can store megabytes. Two
+  // full areas of non-ASCII values (up to 3 bytes a character, and JSON
+  // encoded twice) stay under MAX_ANSWER_BYTES.
+  const MAX_STORED = 100;
+  const MAX_STORED_KEY = 200;
+  const MAX_STORED_VALUE = 1000;
+
+  function cut(text, max) {
+    return text.length > max ? text.slice(0, max) + "…" : text;
+  }
+
+  // One storage area, sorted by key; an error of its own when the page
+  // may not use it (an opaque origin: about:blank, a sandboxed page).
+  function storageArea(get) {
+    try {
+      const area = get();
+      const keys = [];
+      for (let i = 0; i < area.length; i++) keys.push(area.key(i));
+      keys.sort();
+      const answer = {
+        entries: keys
+          .slice(0, MAX_STORED)
+          .map((k) => [cut(k, MAX_STORED_KEY), cut(area.getItem(k) ?? "", MAX_STORED_VALUE)]),
+      };
+      if (keys.length > MAX_STORED) answer.omitted = keys.length - MAX_STORED;
+      return answer;
+    } catch (e) {
+      return { error: describe(e) };
+    }
+  }
+
   // Answers by id: a Promise's, until Rust takes it with __miraTake.
   const answers = new Map();
   const waiting = new Set();
@@ -720,6 +751,12 @@
         dropped = 0;
       }
       return answer;
+    } else if (op.op === "storage") {
+      return {
+        origin: location.origin,
+        local: storageArea(() => window.localStorage),
+        session: storageArea(() => window.sessionStorage),
+      };
     } else if (op.op === "network") {
       if (op.id !== undefined && op.id !== null) {
         const found = requests.find((r) => r.id === op.id);
