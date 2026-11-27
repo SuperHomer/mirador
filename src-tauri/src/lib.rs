@@ -479,6 +479,7 @@ pub fn run() {
             markdown_watch::unwatch_markdown,
             commands::open_agent,
             commands::agent_roles,
+            commands::pick_folder,
             agent_editor::open_agent_editor,
             agent_editor::agent_editor_catalog,
             agent_editor::agent_editor_used_by,

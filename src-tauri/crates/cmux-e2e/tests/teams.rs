@@ -36,6 +36,7 @@ fn a_team_starts_is_tracked_and_comes_back() {
         host: None,
         dir: None,
         on: None,
+        cwd: None,
     })["tabId"]
         .as_str()
         .unwrap()
@@ -153,7 +154,7 @@ fn a_role_opened_in_a_teams_tab_joins_the_team() {
     );
     sb.launch();
     let first = sb.first_pane();
-    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None })["tabId"]
+    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None, cwd: None })["tabId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -228,6 +229,7 @@ fn the_built_in_omakase_team_starts_out_of_the_box() {
         host: None,
         dir: None,
         on: None,
+        cwd: None,
     });
     let names: Vec<String> = sb.wait_for("the team", LONG, || {
         let t = sb.teams().into_iter().next()?;
@@ -277,6 +279,59 @@ fn the_built_in_omakase_team_starts_out_of_the_box() {
     assert!(reviewer_line.contains(" reviewer ") && !reviewer_line.contains("omakase-reviewer"), "{listed}");
 }
 
+/// `team start --cwd` starts the team a folder sees, not the one the
+/// pane's directory does, and every member works in that folder; a
+/// relative one is from where `mira` ran. A folder not there opens nothing.
+#[test]
+fn a_team_starts_in_the_folder_given() {
+    e2e!();
+    let mut sb = Sandbox::new("teamcwd");
+    let other = sb.home.join("other");
+    let write = |path: &str, text: &str| {
+        let path = other.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    write(".mirador/roles/scout.md", "---\nmodel: haiku\n---\nYou look around.\n");
+    write(".mirador/teams/elsewhere.md", "---\nmembers:\n  - role: scout\n    count: 2\n---\nLook.\n");
+    sb.launch();
+    let first = sb.first_pane();
+
+    // The pane's directory, the project, does not see the team.
+    let (code, _, err) = sb.mira(Some(&first), &["team", "start", "elsewhere"]);
+    assert!(code != 0 && err.contains("no team `elsewhere`"), "{err}");
+
+    let out = sb
+        .mira_command(Some(&first), &["--json", "team", "start", "elsewhere", "--cwd", "../other", "go"])
+        .current_dir(&sb.project)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let real = other.canonicalize().unwrap();
+    for name in ["scout-1", "scout-2"] {
+        let pane = sb.wait_for(name, LONG, || sb.member(name))["pane"].as_str().unwrap().to_string();
+        let start = sb.wait_for(&format!("{name}'s start"), LONG, || sb.events("start", &pane).into_iter().next());
+        assert_eq!(start["cwd"], real.to_str().unwrap(), "{start}");
+    }
+    let tabs = sb.snapshot()["tabs"].as_array().unwrap().len();
+
+    let missing = other.join("gone");
+    let err = sb
+        .request(Request::TeamStart {
+            title: None,
+            team: "elsewhere".into(),
+            task: None,
+            pane_id: Some(first),
+            host: None,
+            dir: None,
+            on: None,
+            cwd: Some(missing.to_str().unwrap().into()),
+        })
+        .expect_err("no such folder");
+    assert!(err.contains("no such folder"), "{err}");
+    assert_eq!(sb.snapshot()["tabs"].as_array().unwrap().len(), tabs, "a team that cannot start opens nothing");
+}
+
 /// A Codex member's prompt reaches it whole however long it is. Typed
 /// inline, its launch line was as long as its prompt, and over 1 KB a line
 /// typed into a shell is not safe: one still starting, its tty cooked,
@@ -292,7 +347,7 @@ fn a_codex_member_gets_its_whole_long_prompt() {
     sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: coder\n    lead: true\n---\nShip small.\n");
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None, cwd: None });
     let pane = sb.wait_for("the coder", LONG, || sb.member("coder"))["pane"].as_str().unwrap().to_string();
     let instructions = |args: &[String]| {
         let config: toml::Table = toml::from_str(&cmux_e2e::flag(args, "-c").expect("a -c")).unwrap();
@@ -327,7 +382,7 @@ fn a_team_is_cleared_with_its_lead_last() {
     );
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the team", LONG, || sb.member("coder"));
     let [planner, r1, r2, coder] = ["planner", "reviewer-1", "reviewer-2", "coder"].map(|n| pane_of(&sb, n));
     for pane in [&planner, &r1, &r2] {
@@ -402,7 +457,7 @@ fn a_saved_team_resumes_its_conversations() {
     );
     sb.launch();
     let first = sb.first_pane();
-    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first.clone()), host: None, dir: None, on: None })
+    let tab = sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(first.clone()), host: None, dir: None, on: None, cwd: None })
         ["tabId"]
         .as_str()
         .unwrap()
@@ -484,7 +539,7 @@ fn a_team_notifies_only_when_it_needs_the_person_or_has_stopped() {
     sb.write(".mirador/teams/pair.md", "---\nmembers:\n  - role: planner\n    lead: true\n  - role: dev\n---\nShip small.\n");
     sb.launch();
     let shell = sb.first_pane();
-    let tab = sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None })["tabId"]
+    let tab = sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None, cwd: None })["tabId"]
         .as_str()
         .unwrap()
         .to_string();

@@ -542,10 +542,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
         }
-        Request::TeamStart { team, task, pane_id, title, host, dir, on } => {
+        Request::TeamStart { team, task, pane_id, title, host, dir, on, cwd } => {
             let remote = remote_of(host, dir, on)?;
             let from = sender(&state, pane_id.as_deref());
-            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from, remote)?;
+            let tab = crate::teams::start_team_from(app.clone(), app.state(), team, task, pane_id, title, from, remote, cwd)?;
             Ok(json!({ "tabId": tab }))
         }
         Request::TeamList => Ok(json!({ "teams": crate::teams::team_list(&state) })),

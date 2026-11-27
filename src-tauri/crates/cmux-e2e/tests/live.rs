@@ -102,6 +102,7 @@ fn mirador_test_team_hands_off() {
         host: None,
         dir: None,
         on: None,
+        cwd: None,
     });
 
     // Each member, by its pane, is the agent its role says: `team list`

@@ -54,7 +54,7 @@ fn tasks_are_logged_as_agents_work() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: Some("plan the chart".into()), pane_id: Some(shell), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: Some("plan the chart".into()), pane_id: Some(shell), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
     let planner = pane_of(&sb, "planner");
     let reviewer = pane_of(&sb, "reviewer");
@@ -281,7 +281,7 @@ fn a_codex_agent_s_card_follows_its_turns() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the coder", LONG, || sb.member("coder"));
     let dev = pane_of(&sb, "dev");
     let coder = pane_of(&sb, "coder");
@@ -322,7 +322,7 @@ fn a_codex_turn_right_after_new_is_logged_once() {
     );
     sb.launch();
     let shell = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "pair".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the coder", LONG, || sb.member("coder"));
     let dev = pane_of(&sb, "dev");
     let coder = pane_of(&sb, "coder");
@@ -369,7 +369,7 @@ fn a_recap_lists_what_a_team_finished_under_its_name() {
     let shell = sb.first_pane();
     let (_, before, _) = sb.mira(Some(&shell), &["recap"]);
     assert!(before.contains("nothing finished in the last 24h"), "{before}");
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
     let planner = pane_of(&sb, "planner");
     let reviewer = pane_of(&sb, "reviewer");
@@ -411,7 +411,7 @@ fn next_puts_an_agent_waiting_on_you_before_a_card_to_send() {
 
     // Written from the shell, by you, for nobody yet: a card to send.
     mira(&sb, &shell, &["task", "add", "Write the docs"]);
-    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None, cwd: None });
     sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
     let planner = pane_of(&sb, "planner");
     let reviewer = pane_of(&sb, "reviewer");

@@ -711,7 +711,9 @@ until gate has read the diff.
 
 `mira team start squad "add OAuth"` (or the palette's *Agents: Start Team…* ›
 *squad*) opens the tab with every member in an even grid, its `⚑` mark in
-the sidebar. Each member gets its role's prompt, then the charter, the
+the sidebar. To start one in another folder, `mira team start squad --cwd
+../api`, or *Start Team…* › *In another folder…*, which asks for the folder
+and lists the teams it sees: every member works there. Each member gets its role's prompt, then the charter, the
 team's way of working, and its teammates by name with the commands that
 show their panes and screens; each Claude session is named after its
 member. The task goes to the lead. Every member's launch is worked out

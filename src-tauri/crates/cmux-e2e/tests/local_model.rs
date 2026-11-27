@@ -452,7 +452,7 @@ fn a_pi_and_opencode_team_take_messages_from_each_other() {
     );
     sb.launch();
     let first = sb.first_pane();
-    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None });
+    sb.call(Request::TeamStart { title: None, team: "duo".into(), task: None, pane_id: Some(first), host: None, dir: None, on: None, cwd: None });
     let pane = |name: &str| sb.wait_for(name, LONG, || sb.member(name).and_then(|m| m["pane"].as_str().map(String::from)));
     let (builder, helper) = (pane("builder"), pane("helper"));
     ready(&sb, &builder, "Pi", pi_up);

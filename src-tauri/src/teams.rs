@@ -41,7 +41,8 @@ pub(crate) fn mira_for_prompt() -> String {
 /// cannot start opens nothing. Returns the tab's id. With `on_remote`,
 /// every member runs on the remote `pane_id` is on, in its directory
 /// there, as the person chose in the palette's Where step; the remote is
-/// read from the pane, never taken from the page.
+/// read from the pane, never taken from the page. With `folder`, it is
+/// the team that folder on this computer sees, every member working there.
 #[tauri::command(async)]
 pub fn start_team(
     app: AppHandle,
@@ -50,13 +51,14 @@ pub fn start_team(
     task: Option<String>,
     pane_id: Option<String>,
     on_remote: bool,
+    folder: Option<String>,
 ) -> Result<String, String> {
     let remote = if on_remote {
         Some(crate::commands::remote_of_source(&state, pane_id.as_deref())?)
     } else {
         None
     };
-    start_team_from(app, state, team, task, pane_id, None, "you".into(), remote)
+    start_team_from(app, state, team, task, pane_id, None, "you".into(), remote, folder)
 }
 
 /// [`start_team`], its task logged as given by `from`: a person, from the
@@ -66,7 +68,9 @@ pub fn start_team(
 /// roles are still this computer's, each member's files sent there as an
 /// agent's on a remote are (`commands::send_remote_launch`), all before
 /// the tab opens; each starts there once its pane is in it. Each is told
-/// its teammates call `mira` by its path there.
+/// its teammates call `mira` by its path there. `folder` starts it in
+/// that folder on this computer instead of `pane_id`'s directory: the
+/// team is the one it sees, and every member works there.
 #[allow(clippy::too_many_arguments)]
 pub fn start_team_from(
     app: AppHandle,
@@ -77,8 +81,13 @@ pub fn start_team_from(
     title: Option<String>,
     from: String,
     remote: Option<(String, String)>,
+    folder: Option<String>,
 ) -> Result<String, String> {
-    let cwd = cwd_of(&state, pane_id.as_deref());
+    let cwd = match folder {
+        Some(_) if remote.is_some() => return Err("a team on a remote works in its directory there, not in --cwd".into()),
+        Some(folder) => Some(cmux_core::teams::start_folder(&folder)?),
+        None => cwd_of(&state, pane_id.as_deref()),
+    };
     let catalog = cmux_core::roles::catalog(cwd.as_deref().map(std::path::Path::new));
     let def = catalog
         .teams

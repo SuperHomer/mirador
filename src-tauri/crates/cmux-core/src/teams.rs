@@ -454,6 +454,24 @@ fn heaviest(seats: &[SeatWeight], team_tokens: u64) -> Vec<PartWeight> {
     out
 }
 
+/// The folder `mira team start --cwd` asked for, if a team can start
+/// there: an absolute path (the CLI resolves a relative one against where
+/// it ran; the app's own directory is nowhere a person can reason about)
+/// to a directory that exists.
+pub fn start_folder(cwd: &str) -> Result<String, String> {
+    let path = Path::new(cwd);
+    if !path.is_absolute() {
+        return Err(format!("--cwd {cwd}: not an absolute path"));
+    }
+    if !path.exists() {
+        return Err(format!("--cwd {cwd}: no such folder"));
+    }
+    if !path.is_dir() {
+        return Err(format!("--cwd {cwd}: not a folder"));
+    }
+    Ok(cwd.to_string())
+}
+
 /// Whether a notification from `pane` reaches the person, in a tab running
 /// `team`. A team's members end turns all day, handing work to each other,
 /// and a notification for each would bury the two the person wants: one of
@@ -495,6 +513,22 @@ mod tests {
     }
 
     const SQUAD: &str = "---\ndescription: Plan,\n  build\nway: our-way\nmembers:\n  - role: planner\n  - role: dev\n    count: 2\n    lead: true\n  - role: reviewer\n    name: gate\n---\nShip small.\n";
+
+    /// A team starts in a folder that is there: absolute, and a directory.
+    #[test]
+    fn a_team_starts_only_in_a_folder_that_is_there() {
+        let base = std::env::temp_dir().join(format!("mira-start-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let file = base.join("notes.txt");
+        std::fs::write(&file, "x").unwrap();
+        let folder = base.to_str().unwrap();
+        assert_eq!(start_folder(folder).as_deref(), Ok(folder));
+        let missing = base.join("gone");
+        assert_eq!(start_folder(missing.to_str().unwrap()), Err(format!("--cwd {}: no such folder", missing.display())));
+        assert_eq!(start_folder(file.to_str().unwrap()), Err(format!("--cwd {}: not a folder", file.display())));
+        assert_eq!(start_folder("other"), Err("--cwd other: not an absolute path".to_string()));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn parses_a_team_file() {
