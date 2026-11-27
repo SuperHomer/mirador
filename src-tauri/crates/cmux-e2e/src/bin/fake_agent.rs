@@ -37,7 +37,8 @@
 //!   Its transcript, `~/.claude/projects/fake/<session>.jsonl`, named to
 //!   Mirador by its hooks as Claude Code's are, gets each turn's prompt
 //!   and one Bash call, `echo` of the message's first line, with its
-//!   result — a failure (exit 1) when the message says `!fail`. The call's
+//!   result — a failure (exit 1) when the message says `!fail` — then its
+//!   reply, `replied to: ` and that line. The call's
 //!   reply is Opus 5.5's and carries a usage, the same each turn
 //!   ([`TURN_USAGE`]), for a cost to be read from it.
 //!
@@ -50,7 +51,7 @@
 //! `E2E_CODEX_NO_ROLLOUT=1` it holds none, as no process table can show
 //! Mirador on Windows. Started with a `-c notify=[…]`, it runs that
 //! program after each turn with Codex's JSON appended, the turn's thread
-//! in it.
+//! in it, and its reply, `replied to: ` and the message's first line.
 //!
 //! As `pi` or `opencode` it is a `codex` with no rollout and no notify
 //! of its own: it logs how it was started (with `OPENCODE_CONFIG_CONTENT`,
@@ -204,7 +205,7 @@ fn log(event: serde_json::Value) {
 const TURN_USAGE: &str = r#"{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":20}"#;
 
 /// Appends one turn to the transcript at `path`, in the shape Claude Code
-/// writes: the prompt, a Bash call, and its result.
+/// writes: the prompt, a Bash call, its result, and the reply ending it.
 fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
     let first = message.lines().next().unwrap_or_default();
     let id = format!("toolu_{}_{n}", std::process::id());
@@ -221,6 +222,12 @@ fn transcript_turn(path: &std::path::Path, n: u32, message: &str) {
         serde_json::json!({ "type": "user", "timestamp": at, "message": { "role": "user", "content": [
             { "type": "tool_result", "tool_use_id": id, "content": result(first), "is_error": failing(first) }
         ] } }),
+        serde_json::json!({ "type": "assistant", "timestamp": at, "message": {
+            "id": format!("msg_{}_{n}_reply", std::process::id()),
+            "role": "assistant",
+            "content": [{ "type": "text", "text": format!("replied to: {first}") }],
+            "stop_reason": "end_turn",
+        } }),
     ];
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
@@ -253,7 +260,7 @@ fn thread(seq: u32) -> String {
 
 /// Runs the `notify` this Codex was started with (`-c notify=[…]`) as
 /// Codex does after a turn: its JSON appended, not waited for.
-fn notify(args: &[String], seq: u32, n: u32) {
+fn notify(args: &[String], seq: u32, n: u32, message: &str) {
     let Some(argv) = args
         .windows(2)
         .filter(|w| w[0] == "-c" && w[1].starts_with("notify="))
@@ -266,7 +273,8 @@ fn notify(args: &[String], seq: u32, n: u32) {
         "thread-id": thread(seq),
         "turn-id": format!("turn-{n}"),
         "cwd": std::env::current_dir().ok(),
-        "input-messages": [],
+        "input-messages": [message],
+        "last-assistant-message": format!("replied to: {}", message.lines().next().unwrap_or_default()),
     });
     let spawned = std::process::Command::new(&argv[0])
         .args(&argv[1..])
@@ -531,7 +539,7 @@ fn main() {
                 if let Some(file) = rollout.as_mut() {
                     rollout_turn(file, turns, &message, turn);
                 }
-                notify(&args, sessions, turns);
+                notify(&args, sessions, turns, &message);
                 print!("\r\n");
             }
             println!("got: {message}");

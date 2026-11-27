@@ -3104,6 +3104,8 @@ pub(crate) fn kill_panes(app: &AppHandle, state: &State<'_, AppState>, panes: &[
     notify::forget_panes(state, panes);
     state.trail_files.lock().unwrap().retain(|pane, _| !panes.contains(pane));
     state.typed_at.lock().unwrap().retain(|pane, _| !panes.contains(pane));
+    // Its threads end once they see it gone.
+    state.telegram.lock().unwrap().retain(|pane, _| !panes.contains(pane));
     for pane in panes {
         crate::browser::destroy(app, pane);
         runs::forget_pane(state, pane);
