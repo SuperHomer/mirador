@@ -1122,6 +1122,64 @@ pane there is only one: when one is open, in any tab, it is focused and
 its pane id printed, whatever the flags say. It comes back after a
 relaunch and reads the files again.
 
+### Telegram
+
+Talk to an agent from your phone, through a bot of your own:
+
+```bash
+mira telegram connect worker     # bridge your bot to the agent `worker`
+mira telegram status             # every bridge: agent, pane, paired or waiting for /start
+mira telegram disconnect worker  # end it
+```
+
+Make a bot with [@BotFather](https://t.me/BotFather) and keep its token.
+`connect` reads it from `MIRA_TELEGRAM_TOKEN`, else from stdin: one
+line, typed without echo in a terminal on macOS and Linux; on Windows
+the variable or a pipe (`… | mira telegram connect worker`), as a
+terminal there is refused. Never as an argument, where it would show in
+`ps` and stay in the shell's history; one given there is refused. The
+app checks it with Telegram and prints a code:
+
+```
+Send /start 3f9c0a1b2d4e to your bot from Telegram, in a private chat.
+Or open https://t.me/my_bot?start=3f9c0a1b2d4e
+```
+
+The first private chat that sends it pairs with the bridge and is told
+`Connected to worker`. From then on what it writes is typed into the
+agent as `mira agent send` would (queued behind a draft, with
+`(queued: …)` sent back; refused, with why). Back to the chat come:
+
+- **a turn's end**, with the agent's last reply (a Claude Code's from its
+  transcript, a Codex's from its `notify`), or `<agent> finished its
+  turn.`;
+- **a permission prompt**, with its tool and what it is about.
+
+Long replies are split into Telegram's 4096-character messages.
+Answering a permission prompt from Telegram is not in this version: go
+to the pane.
+
+What keeps it yours:
+
+- **Only the paired chat reaches the agent.** Anyone can find a bot by
+  name; before pairing, nothing but `/start <code>` with the right code
+  is heeded, and only from a private chat — a group would let every
+  member type into the agent. After it, every other chat is ignored.
+- **The token lives in the app's memory only**: never in the session,
+  `mirador.json` or a log (an error that would name it shows `<token>`),
+  and gone at quit. A relaunch starts with no bridges; connect again for
+  a new code. A bridge also ends with its pane, with `disconnect`, with a
+  new `connect` for the same agent, and when Telegram refuses the token
+  (revoked in @BotFather).
+- **One bot, one agent.** A second agent's `connect` with a token another
+  pane bridges is refused: two bridges would steal each other's
+  messages.
+
+Over the socket: `{"cmd":"telegram_connect","to":"worker","token":"…"}`
+answers `{paneId, code, bot}`; `telegram_disconnect` takes `to`;
+`telegram_status` answers `{bridges: [{paneId, agent, paired}]}`, never
+a token.
+
 ## 7. Workspace control
 
 ```bash
@@ -1444,7 +1502,8 @@ browser_history browser_wait browser_console browser_network browser_storage
 browser_screenshot ssh_open ssh_hosts
 ssh_forward diff_open task_list task_add task_move recap next agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add
-computer_update computer_remove computer_test computer_open`. Requests are
+computer_update computer_remove computer_test computer_open telegram_connect
+telegram_disconnect telegram_status`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.
 
 ## Other agents (Codex, OpenCode, Gemini CLI…)

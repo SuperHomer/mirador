@@ -58,6 +58,13 @@ downloads, the feature tour and the keybinding reference.
   it called, each opening to its full input and output — read from Claude
   Code's transcript or Codex's session file, never copied
   (`mira agent trail`; docs/AGENTS.md)
+- **Telegram**: talk to an agent from your phone, through a bot of your
+  own (`mira telegram connect worker`, the token on stdin or in
+  `MIRA_TELEGRAM_TOKEN`). What you write there is typed into the agent;
+  its finished turns come back with its last reply, and it tells you when
+  it asks permission, which you answer at the pane. Opt-in per agent,
+  paired to your one private chat with a code, and the token stays in the
+  app's memory, never saved (docs/AGENTS.md)
 - **Board** (`mira view board`, `mod+shift+O`, or **Board** in the
   sidebar's view switch): every tab as a frame and every pane as a card on one
   canvas — a tab showing its agent wall shows the wall in its frame instead,

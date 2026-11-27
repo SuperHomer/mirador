@@ -269,6 +269,12 @@ enum Command {
         #[arg(long)]
         hours: Option<u64>,
     },
+    /// Telegram: talk to an agent from your phone, through a bot of
+    /// your own, and hear when its turn ends or it asks permission.
+    Telegram {
+        #[command(subcommand)]
+        action: TelegramAction,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -494,6 +500,25 @@ enum TaskAction {
     Move { id: String, column: String },
     /// Put a card written with `task add` in Done.
     Done { id: String },
+}
+
+#[derive(Subcommand)]
+enum TelegramAction {
+    /// Bridge your bot (from @BotFather) to an agent: a name in this tab,
+    /// `<team>/<name>`, or a pane id. The token is read from
+    /// MIRA_TELEGRAM_TOKEN, else from stdin — never as an argument. Prints
+    /// the code to send the bot, in a private chat, to pair with it.
+    Connect {
+        agent: String,
+        /// Refused: a token given here would be in `ps` and your history.
+        #[arg(hide = true)]
+        extra: Vec<String>,
+    },
+    /// End an agent's Telegram bridge.
+    Disconnect { agent: String },
+    /// Every Telegram bridge: its agent, its pane, and whether a chat has
+    /// paired with it yet.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -1352,6 +1377,52 @@ fn run(cli: Cli) -> Result<(), String> {
             render_next(next.ok_or("the app sent no suggestions")?);
             return Ok(());
         }
+        Command::Telegram { action } => match action {
+            TelegramAction::Connect { extra, .. } if !extra.is_empty() => {
+                return Err("the token is never an argument: it would show in `ps` and stay in your shell \
+                            history (revoke it with @BotFather if it went there). Set MIRA_TELEGRAM_TOKEN, \
+                            or give it on stdin"
+                    .into());
+            }
+            TelegramAction::Connect { agent, .. } => {
+                let token = telegram_token()?;
+                let resp = send_request(Request::TelegramConnect {
+                    to: agent,
+                    token: cmux_protocol::Secret(token),
+                    pane_id: own_pane(),
+                })?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                let data = resp.data.unwrap_or_default();
+                let code = data["code"].as_str().unwrap_or_default();
+                let bot = data["bot"].as_str().filter(|b| !b.is_empty());
+                println!("Send /start {code} to your bot from Telegram, in a private chat.");
+                if let Some(bot) = bot {
+                    println!("Or open https://t.me/{bot}?start={code}");
+                }
+                return Ok(());
+            }
+            TelegramAction::Disconnect { agent } => Request::TelegramDisconnect { to: agent, pane_id: own_pane() },
+            TelegramAction::Status => {
+                let resp = send_request(Request::TelegramStatus)?;
+                if cli.json || !resp.ok {
+                    return render(resp, cli.json, false, None);
+                }
+                let bridges: Vec<cmux_protocol::TelegramBridge> = resp
+                    .data
+                    .and_then(|d| serde_json::from_value(d["bridges"].clone()).ok())
+                    .ok_or("the app sent no bridges")?;
+                if bridges.is_empty() {
+                    println!("(no Telegram bridges: mira telegram connect <agent>)");
+                }
+                for b in bridges {
+                    let state = if b.paired { "paired" } else { "waiting for /start" };
+                    println!("{:<20}  {:<38}  {state}", b.agent, b.pane_id);
+                }
+                return Ok(());
+            }
+        },
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab, dir, on } => Request::SshOpen {
                 host,
@@ -1516,7 +1587,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::ClaudeHook { event } => return claude_hook(&event),
         Command::AgentHook { agent, event, session } => {
             if let Some(harness) = cmux_core::agents::hook_harness(&agent) {
-                agent_hook(harness, &event, session);
+                agent_hook(harness, &event, session, None);
             }
             return Ok(());
         }
@@ -3153,7 +3224,7 @@ fn claude_hook(event: &str) -> Result<(), String> {
 /// installed for every run (Codex's notify in its config, Pi's extension),
 /// and a `Notify` with no pane goes to the focused one, which would light
 /// the wrong tab for an agent in another terminal.
-fn agent_hook(harness: cmux_protocol::Harness, event: &str, session_id: Option<String>) {
+fn agent_hook(harness: cmux_protocol::Harness, event: &str, session_id: Option<String>, message: Option<String>) {
     let Some(pane) = own_pane() else { return };
     let (pane, tty) = (Some(pane), own_tty());
     let _ = send_request(Request::AgentSession {
@@ -3165,7 +3236,7 @@ fn agent_hook(harness: cmux_protocol::Harness, event: &str, session_id: Option<S
         event: Some(event.to_string()),
         transcript_path: None,
         notification_type: None,
-        message: None,
+        message,
     });
     let body = match event {
         "stop" => "finished responding",
@@ -3198,7 +3269,53 @@ fn codex_notify(args: &[String]) {
             .stderr(std::process::Stdio::null())
             .spawn();
     }
-    agent_hook(cmux_protocol::Harness::Codex, "stop", cmux_core::codex_trail::notify_thread(payload));
+    // The turn's last reply rides along as the message, for a Telegram
+    // bridge to pass on: a stop's status ignores it.
+    let message = cmux_core::codex_trail::notify_last_message(payload);
+    agent_hook(cmux_protocol::Harness::Codex, "stop", cmux_core::codex_trail::notify_thread(payload), message);
+}
+
+/// The bot token for `telegram connect`: MIRA_TELEGRAM_TOKEN, else one
+/// line of stdin, read without echo from a terminal. On Windows a terminal
+/// is refused: hiding what is typed there would take console code of its
+/// own, so the token comes from the variable or a pipe.
+fn telegram_token() -> Result<String, String> {
+    use std::io::{BufRead, IsTerminal};
+    if let Some(token) = std::env::var("MIRA_TELEGRAM_TOKEN").ok().filter(|t| !t.trim().is_empty()) {
+        return Ok(token.trim().to_string());
+    }
+    let tty = std::io::stdin().is_terminal();
+    if tty && cfg!(not(unix)) {
+        return Err("set MIRA_TELEGRAM_TOKEN, or pipe the token in: it is not typed here, where it would show".into());
+    }
+    if tty {
+        eprint!("Bot token (from @BotFather): ");
+    }
+    #[cfg(unix)]
+    let cooked = tty.then(|| {
+        let mut cooked: libc::termios = unsafe { std::mem::zeroed() };
+        (unsafe { libc::tcgetattr(0, &mut cooked) } == 0).then(|| {
+            let mut quiet = cooked;
+            quiet.c_lflag &= !libc::ECHO;
+            unsafe { libc::tcsetattr(0, libc::TCSANOW, &quiet) };
+            Cooked(cooked)
+        })
+    });
+    let mut line = String::new();
+    let read = std::io::stdin().lock().read_line(&mut line);
+    #[cfg(unix)]
+    if let Some(cooked) = cooked.flatten() {
+        cooked.restore();
+    }
+    if tty {
+        eprintln!();
+    }
+    read.map_err(|e| format!("could not read the token: {e}"))?;
+    let token = line.trim();
+    if token.is_empty() {
+        return Err("no token: set MIRA_TELEGRAM_TOKEN, or give it on stdin".into());
+    }
+    Ok(token.to_string())
 }
 
 /// This binary's real path, through any symlink — `~/.local/bin/mira`
@@ -3263,6 +3380,21 @@ mod tests {
 
     fn parse(args: &[&str]) -> Command {
         Cli::try_parse_from(["mira"].iter().chain(args)).unwrap_or_else(|e| panic!("{args:?}: {e}")).command
+    }
+
+    #[test]
+    fn a_telegram_token_is_never_an_argument() {
+        let Command::Telegram { action: TelegramAction::Connect { agent, extra } } = parse(&["telegram", "connect", "worker"]) else {
+            panic!()
+        };
+        assert_eq!((agent.as_str(), extra.len()), ("worker", 0));
+        // Taken, so that it can be refused with why, not as an unknown argument.
+        let Command::Telegram { action: TelegramAction::Connect { extra, .. } } = parse(&["telegram", "connect", "worker", "123:ABC"]) else {
+            panic!()
+        };
+        assert_eq!(extra, ["123:ABC"]);
+        assert!(matches!(parse(&["telegram", "status"]), Command::Telegram { action: TelegramAction::Status }));
+        assert!(matches!(parse(&["telegram", "disconnect", "worker"]), Command::Telegram { action: TelegramAction::Disconnect { .. } }));
     }
 
     #[test]

@@ -16,6 +16,7 @@ mod server;
 mod settings;
 mod tasks;
 mod teams;
+mod telegram;
 mod update;
 mod whatsnew;
 
@@ -115,6 +116,9 @@ pub struct AppState {
     /// The palette's actions, as the page last sent them: the menu bar is
     /// built from them, and again from them when a key is rebound.
     pub menu_actions: Mutex<Vec<cmux_protocol::MenuAction>>,
+    /// Telegram bots bridged to agents, by pane: in memory only, never
+    /// saved, since each holds its bot's token.
+    pub telegram: telegram::Bridges,
 }
 
 pub fn save_session(state: &AppState) {
@@ -368,6 +372,7 @@ pub fn run() {
             emit_coalescer: commands::EmitCoalescer::default(),
             markdown_watch: Default::default(),
             menu_actions: Mutex::new(Vec::new()),
+            telegram: Mutex::new(HashMap::new()),
         })
         // The menu bar's actions run in the page, as the palette's do.
         .on_menu_event(|app, event| {

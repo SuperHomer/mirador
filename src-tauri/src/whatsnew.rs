@@ -118,7 +118,7 @@ pub fn notes_for(version: &str) -> Result<ReleaseNotes, String> {
 /// launch, which is after this module wants to fetch — so whoever arrives
 /// first installs it. `install_default` errs when that has already
 /// happened, and the error is the answer, not a problem.
-fn ensure_crypto_provider() {
+pub(crate) fn ensure_crypto_provider() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();

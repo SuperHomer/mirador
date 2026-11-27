@@ -742,6 +742,24 @@ pub enum Request {
         #[serde(default)]
         hours: Option<u64>,
     },
+    /// Bridges a Telegram bot to the agent `to` (as `AgentSend` finds it):
+    /// the chat that sends `/start <code>` types into it and hears when its
+    /// turn ends or it asks permission. Replaces that pane's bridge, if any.
+    /// Answers the pane, the code, and the bot's username.
+    TelegramConnect {
+        to: String,
+        token: Secret,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Ends the Telegram bridge of the agent `to`.
+    TelegramDisconnect {
+        to: String,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
+    /// Every Telegram bridge, as [`TelegramBridge`]s.
+    TelegramStatus,
     /// Writes a card for the agent `to` (as `AgentSend` finds it), on its
     /// tab's board, or for nobody yet, on `pane_id`'s tab's. Answers its id.
     TaskAdd {
@@ -1341,6 +1359,29 @@ pub enum SubagentState {
     Done,
     /// Was running when the Claude Code hosting it exited.
     Stopped,
+}
+
+/// A value that must never be printed, such as a bot token: it debugs as
+/// `<redacted>`, so no `{:?}` of a request shows it. Serialized as is.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// A Telegram bridge, as `TelegramStatus` lists it: never its token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramBridge {
+    pub pane_id: String,
+    /// The agent's name, as a message to it would name it.
+    pub agent: String,
+    /// Whether a chat has claimed it with its code.
+    pub paired: bool,
 }
 
 /// A tool call an agent asks permission for: its tool, and what it is
@@ -2722,4 +2763,18 @@ pub struct AccountUsage {
     /// which the sidebar leaves out.
     #[serde(default)]
     pub in_use: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_secret_never_prints() {
+        let line = r#"{"cmd":"telegram_connect","to":"worker","token":"123:ABC"}"#;
+        let req: Request = serde_json::from_str(line).unwrap();
+        assert!(!format!("{req:?}").contains("ABC"), "{req:?}");
+        assert!(format!("{req:?}").contains("<redacted>"));
+        assert_eq!(serde_json::to_value(&req).unwrap()["token"], "123:ABC", "sent as is");
+    }
 }

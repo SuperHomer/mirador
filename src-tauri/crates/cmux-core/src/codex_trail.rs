@@ -604,6 +604,13 @@ pub fn notify_thread(payload: &str) -> Option<String> {
     thread_id(json["thread-id"].as_str()?)
 }
 
+/// What the agent last said in the turn a Codex `notify` payload ends
+/// (its `last-assistant-message`). None when it said nothing.
+pub fn notify_last_message(payload: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(payload).ok()?;
+    json["last-assistant-message"].as_str().filter(|m| !m.trim().is_empty()).map(String::from)
+}
+
 /// The `sessions` directory a rollout is in.
 pub fn sessions_of(rollout: &Path) -> Option<&Path> {
     rollout.ancestors().find(|a| a.file_name().is_some_and(|n| n == "sessions"))
@@ -700,6 +707,8 @@ mod tests {
         let payload = r#"{"type":"agent-turn-complete","thread-id":"B5F6C1C2-1111-2222-3333-444455556666","turn-id":"12345","cwd":"/Users/example/project","client":"codex-tui","input-messages":["Rename foo"],"last-assistant-message":"Done."}"#;
         assert_eq!(notify_thread(payload).as_deref(), Some("b5f6c1c2-1111-2222-3333-444455556666"));
         assert_eq!(notify_thread(r#"{"type":"agent-turn-complete","turn-id":"1"}"#), None, "no thread");
+        assert_eq!(notify_last_message(payload).as_deref(), Some("Done."));
+        assert_eq!(notify_last_message(r#"{"type":"agent-turn-complete","last-assistant-message":null}"#), None);
         assert_eq!(notify_thread(r#"{"thread-id":"abc; rm -rf ~"}"#), None, "not a thread id");
         assert_eq!(notify_thread(r#"{"thread_id":"b5f6c1c2-1111-2222-3333-444455556666"}"#), None, "not Codex's spelling");
         assert_eq!(notify_thread("not json"), None);

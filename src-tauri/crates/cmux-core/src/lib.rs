@@ -44,6 +44,7 @@ pub mod roles;
 pub mod state;
 pub mod tasks;
 pub mod teams;
+pub mod telegram;
 pub mod trail;
 pub mod transcript;
 pub mod transport;

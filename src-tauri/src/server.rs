@@ -403,7 +403,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                     // A message describes what the agent is blocked on; once
                     // it moves on, the message is stale.
                     entry.agent_message = match status {
-                        cmux_protocol::AgentStatus::NeedsYou => message,
+                        cmux_protocol::AgentStatus::NeedsYou => message.clone(),
                         _ => None,
                     };
                     if status != cmux_protocol::AgentStatus::NeedsYou {
@@ -418,11 +418,22 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let permission = status == Some(cmux_protocol::AgentStatus::NeedsYou)
                 && notification_type.as_deref() == Some("permission_prompt");
             let transcript = state.meta.lock().unwrap().get(&pane).and_then(|m| m.agent_transcript.clone());
-            if let Some(path) = transcript.filter(|_| permission) {
+            if let Some(path) = transcript.clone().filter(|_| permission) {
                 let asking = state.trails.lock().unwrap().read(&path).and_then(|t| t.asking());
                 if let Some(entry) = state.meta.lock().unwrap().get_mut(&pane) {
                     entry.agent_asking = asking;
                 }
+            }
+            if permission {
+                let asking = state.meta.lock().unwrap().get(&pane).and_then(|m| m.agent_asking.clone());
+                let out = crate::telegram::Out::Asking { asking, message: message.clone() };
+                crate::telegram::tell(&state, &pane, out);
+            }
+            if event.as_deref() == Some("stop") {
+                // A Codex's last reply comes in its notify's payload; a
+                // Claude Code's is read from its transcript, off this thread.
+                let reply = message.filter(|_| harness == cmux_protocol::Harness::Codex);
+                crate::telegram::tell(&state, &pane, crate::telegram::Out::TurnEnded { transcript, reply });
             }
             if let Some(turn) = turn {
                 crate::tasks::record(app, turn);
@@ -513,6 +524,20 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             let pane = crate::handoff::clear(app, name.as_deref(), pane_id, force)?;
             Ok(json!({ "paneId": pane }))
         }
+        Request::TelegramConnect { to, token, pane_id } => {
+            let pane = crate::handoff::find(&state, &to, pane_id)?;
+            if !state.meta.lock().unwrap().get(&pane).is_some_and(|m| m.is_agent()) {
+                return Err(format!("{to} runs no agent"));
+            }
+            let (code, bot) = crate::telegram::connect(app, pane.clone(), token.0)?;
+            Ok(json!({ "paneId": pane, "code": code, "bot": bot }))
+        }
+        Request::TelegramDisconnect { to, pane_id } => {
+            let pane = crate::handoff::find(&state, &to, pane_id)?;
+            crate::telegram::disconnect(&state, &pane)?;
+            Ok(json!({ "paneId": pane }))
+        }
+        Request::TelegramStatus => Ok(json!({ "bridges": crate::telegram::status(&state) })),
         Request::AgentFind { name, pane_id } => {
             let pane = crate::handoff::find(&state, &name, pane_id)?;
             Ok(json!({ "paneId": pane }))
