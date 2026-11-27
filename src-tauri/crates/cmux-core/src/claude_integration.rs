@@ -89,6 +89,14 @@ fn quoted_executable(command: &str) -> Option<PathBuf> {
     Some(PathBuf::from(&rest[..rest.find('"')?]))
 }
 
+/// A hook's executable that would run. Not a verbatim `\\?\C:\…` path,
+/// even one that exists: Claude Code runs hooks through Git Bash, which
+/// collapses its `\\` inside the quotes and finds nothing to run (exit
+/// 127). `mira hooks setup` wrote such paths on Windows before #174.
+fn runnable(exe: &Path) -> bool {
+    exe.exists() && !exe.to_string_lossy().starts_with(r"\\?\")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HookState {
@@ -130,7 +138,7 @@ fn status_at(claude: &Path) -> Status {
     } else if commands
         .iter()
         .filter_map(|c| quoted_executable(c))
-        .any(|exe| !exe.exists())
+        .any(|exe| !runnable(&exe))
     {
         HookState::Broken
     } else if commands.len() < HOOK_EVENTS.len() {
@@ -144,14 +152,14 @@ fn status_at(claude: &Path) -> Status {
     }
 }
 
-/// The `mira` the installed hooks call by path, when that still exists:
+/// The `mira` the installed hooks call by path, when that still runs:
 /// adding the events a newer version wants keeps them calling the same one.
 pub fn installed_mira() -> Option<PathBuf> {
     let settings = read_settings(&claude_dir()?.join("settings.json")).ok()?;
     our_commands(&settings)
         .iter()
         .filter_map(|c| quoted_executable(c))
-        .find(|exe| exe.exists())
+        .find(|exe| runnable(exe))
 }
 
 fn read_settings(path: &Path) -> Result<serde_json::Value, String> {
@@ -853,6 +861,17 @@ mod tests {
 
         let nowhere = std::env::temp_dir().join(format!("mira-claude-absent-{}", std::process::id()));
         assert!(!status_at(&nowhere).claude_present);
+    }
+
+    #[test]
+    fn hooks_calling_mira_by_a_verbatim_path_are_broken_though_it_exists() {
+        let claude = temp_dir("verbatim");
+        let mira = fake_mira(&claude);
+        // On unix this path does not exist at all, so only Windows CI shows
+        // the prefix itself is what makes it broken.
+        let verbatim = PathBuf::from(format!(r"\\?\{}", mira.display()));
+        hooks_at(&claude.join("settings.json"), Action::Setup, &verbatim).unwrap();
+        assert_eq!(status_at(&claude).hooks, HookState::Broken);
     }
 
     #[test]
