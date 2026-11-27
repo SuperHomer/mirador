@@ -2437,6 +2437,33 @@ pub struct MarkdownFiles {
     pub files: Vec<String>,
 }
 
+/// The files under a directory: a repository's root, or the directory
+/// itself outside one. `truncated` when there were more than a tree shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTree {
+    pub root: String,
+    pub repo: bool,
+    pub nodes: Vec<FileTreeNode>,
+    pub truncated: bool,
+}
+
+/// A file or directory in a `FileTree`. `path` is relative to the tree's
+/// root and `/`-separated on every platform. `status` is git's, in the
+/// words of `DiffFile::status` ("modified", "added", "deleted", "renamed",
+/// "copied", "untracked"); a directory is "modified" when anything under
+/// it changed, and "untracked" when it is a repository of its own that
+/// git does not list into.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTreeNode {
+    pub name: String,
+    pub path: String,
+    pub dir: bool,
+    pub status: Option<String>,
+    pub children: Vec<FileTreeNode>,
+}
+
 /// One inline run inside a release note's text. Carries text, never markup:
 /// the frontend maps each variant to a React element, so remote note text is
 /// never interpreted as HTML in the privileged webview.
