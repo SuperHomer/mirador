@@ -849,6 +849,7 @@ mira task add <title…> [--to <name>] [--description <text>]   # a card in To d
 mira task move <id> <todo|doing|needs-you|done>
 mira task done <id>                            # same as move <id> done
 mira task list [--all]                         # this tab's cards by column; every tab's
+mira recap [--hours N]                         # what every tab finished lately, and what needs you
 mira agent send <name> --card <id> <message…>  # the message is that card's
 mira agent history [NAME | --pane <id> | --card <id> | --all]
 mira agent board                               # this tab's wall, on its Tasks side
@@ -942,6 +943,19 @@ the card started — the first to begin since it was given), and the
 failed steps of that turn. Going to an agent of this tab turns the wall
 back to its tiles. It reads the log again whenever
 something is appended.
+
+`mira recap` is for coming back to agents left working: of every tab,
+the cards done in the last `--hours` (24 by default; `0` is refused),
+and every card in Needs you, however long it has waited, since that is
+what is left for you to pick up. It groups them under their team's
+name, else their tab's own title while the tab is open, else `tab
+<id>` (its first 8 characters); in each group Needs you comes first,
+then Done, newest first, each card with its id, agent, how long ago and
+title. Nothing to show prints `(nothing finished in the last 24h, and
+nothing waits on you)`. `recap` answers `{"recap": [{"tab", "team",
+"title", "done", "waiting"}]}`, the two lists of cards as `task_list`
+gives them. It reads the same log, so it knows only the turns the log
+knows: those of the harnesses above whose turns are logged.
 
 The log is `tasks.jsonl` in the data directory (on macOS
 `~/Library/Application Support/Mirador/`, on Linux `$XDG_DATA_HOME/mirador`
@@ -1407,7 +1421,7 @@ apply_layout browser_open browser_navigate browser_snapshot browser_click
 browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_network browser_storage
 browser_screenshot ssh_open ssh_hosts
-ssh_forward diff_open task_list task_add task_move agent_history agent_board
+ssh_forward diff_open task_list task_add task_move recap agent_history agent_board
 agent_trail agent_trail_detail usage usage_open computer_list computer_add
 computer_update computer_remove computer_test computer_open`. Requests are
 snake_case-tagged (`"cmd"`); responses are `{id, ok, data|error}`.

@@ -353,3 +353,40 @@ fn a_codex_turn_right_after_new_is_logged_once() {
     let history = mira(&sb, &dev, &["agent", "history", "--pane", &coder]);
     assert_eq!(history.lines().filter(|l| l.contains("coder done")).count(), 2, "one end per turn:\n{history}");
 }
+
+#[test]
+fn a_recap_lists_what_a_team_finished_under_its_name() {
+    e2e!();
+    let mut sb = Sandbox::new("recap");
+    sb.set_env("E2E_TURN_MS", "2000");
+    sb.write(".mirador/roles/planner.md", "---\nmodel: opus\n---\nYou plan.\n");
+    sb.write(".mirador/roles/reviewer.md", "---\nmodel: haiku\n---\nYou review.\n");
+    sb.write(
+        ".mirador/teams/squad.md",
+        "---\nmembers:\n  - role: planner\n    lead: true\n  - role: reviewer\n---\nShip small.\n",
+    );
+    sb.launch();
+    let shell = sb.first_pane();
+    let (_, before, _) = sb.mira(Some(&shell), &["recap"]);
+    assert!(before.contains("nothing finished in the last 24h"), "{before}");
+    sb.call(Request::TeamStart { title: None, team: "squad".into(), task: None, pane_id: Some(shell.clone()), host: None, dir: None, on: None });
+    sb.wait_for("the reviewer", LONG, || sb.member("reviewer"));
+    let planner = pane_of(&sb, "planner");
+    let reviewer = pane_of(&sb, "reviewer");
+    sb.wait_for("the reviewer's session", LONG, || sb.events("hooked", &reviewer).into_iter().next());
+
+    mira(&sb, &planner, &["agent", "send", "reviewer", "Review the recap"]);
+    sb.wait_for("the review to be done", LONG, || {
+        let board = mira(&sb, &planner, &["task", "list"]);
+        (column_of(&board, "Review the recap").as_deref() == Some("Done")).then_some(())
+    });
+    // From the shell's tab, not the team's: a recap is of every tab.
+    let recap = mira(&sb, &shell, &["recap"]);
+    let lines: Vec<&str> = recap.lines().collect();
+    let squad = lines.iter().position(|l| *l == "squad").unwrap_or_else(|| panic!("{recap}"));
+    let done = lines[squad + 1..].iter().position(|l| l.trim() == "Done").unwrap_or_else(|| panic!("{recap}"));
+    let card = lines[squad + 1 + done + 1];
+    assert!(card.contains("reviewer") && card.contains(" ago  Review the recap"), "{recap}");
+    let (code, _, err) = sb.mira(Some(&shell), &["recap", "--hours", "0"]);
+    assert!(code != 0 && err.contains("at least 1"), "{err}");
+}

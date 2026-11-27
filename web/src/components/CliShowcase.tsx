@@ -11,6 +11,7 @@ const COMMANDS = [
   'mira team cost squad',
   'mira usage',
   'mira agent board',
+  'mira recap',
   'mira agent trail worker',
   'mira diff main...HEAD',
   'mira md PLAN.md',
@@ -75,6 +76,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira team cost <span style={{ color: "var(--mauve)" }}>squad</span><span style={{ color: "var(--muted)" }}>       # what it costs to start, and a turn</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira usage<span style={{ color: "var(--muted)" }}>                 # your plans, limits and tokens</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent board<span style={{ color: "var(--muted)" }}>           # who is doing what</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira recap<span style={{ color: "var(--muted)" }}>                 # what got done while you were away</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent trail <span style={{ color: "var(--mauve)" }}>worker</span><span style={{ color: "var(--muted)" }}>    # what it ran</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira md <span style={{ color: "var(--green)" }}>PLAN.md</span><span style={{ color: "var(--muted)" }}>              # a plan, kept current</span></div>

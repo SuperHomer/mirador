@@ -728,6 +728,12 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// What agents finished in the last `hours` (24 when absent), and every
+    /// card waiting on a person, grouped by tab and team, across every tab.
+    Recap {
+        #[serde(default)]
+        hours: Option<u64>,
+    },
     /// Writes a card for the agent `to` (as `AgentSend` finds it), on its
     /// tab's board, or for nobody yet, on `pane_id`'s tab's. Answers its id.
     TaskAdd {
@@ -1847,6 +1853,26 @@ pub struct TaskCard {
     /// from its trail; 0 when that is not known.
     #[serde(default)]
     pub failing: u32,
+}
+
+/// What the agents of one tab's team got through since a time, for a person
+/// coming back to it (`mira recap`): what they finished, and what is
+/// waiting on that person — however long it has waited, since it is what
+/// they have to pick up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRecap {
+    pub tab: Option<String>,
+    pub team: Option<String>,
+    /// What to call the group: its team's name, else its tab's own title
+    /// while the tab is open; none when neither is known. Filled in by the
+    /// app, which knows the tabs.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Cards that reached Done in the window, newest first.
+    pub done: Vec<TaskCard>,
+    /// Cards in Needs you, newest first.
+    pub waiting: Vec<TaskCard>,
 }
 
 /// Where a role or a way of working was defined. A repository's wins over

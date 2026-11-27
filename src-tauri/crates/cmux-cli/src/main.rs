@@ -255,6 +255,13 @@ enum Command {
         #[command(subcommand)]
         action: TaskAction,
     },
+    /// What agents finished while you were away, and what waits on you,
+    /// tab by tab.
+    Recap {
+        /// How far back to look, in hours.
+        #[arg(long)]
+        hours: Option<u64>,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -1319,6 +1326,16 @@ fn run(cli: Cli) -> Result<(), String> {
                 pane_id: own_pane(),
             },
         },
+        Command::Recap { hours } => {
+            let resp = send_request(Request::Recap { hours })?;
+            if cli.json || !resp.ok {
+                return render(resp, cli.json, false, None);
+            }
+            let recap = resp.data.and_then(|d| serde_json::from_value(d["recap"].clone()).ok());
+            let recap = recap.ok_or("the app sent no recap")?;
+            render_recap(recap, hours.unwrap_or(24));
+            return Ok(());
+        }
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab, dir, on } => Request::SshOpen {
                 host,
@@ -1870,6 +1887,42 @@ fn render_cards(cards: Vec<cmux_protocol::TaskCard>) {
                 cmux_core::tasks::span(now.saturating_sub(c.updated_ms)),
                 c.title,
             );
+        }
+    }
+}
+
+/// A recap: per tab, under its team's name or its title, what was done
+/// and what needs you, each card with its agent and how long ago.
+fn render_recap(recap: Vec<cmux_protocol::TaskRecap>, hours: u64) {
+    if recap.is_empty() {
+        println!("(nothing finished in the last {hours}h, and nothing waits on you)");
+        return;
+    }
+    let now = now_ms();
+    for (i, group) in recap.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        let heading = match (&group.title, &group.tab) {
+            (Some(title), _) => title.clone(),
+            (None, Some(tab)) => format!("tab {}", tab.chars().take(8).collect::<String>()),
+            (None, None) => "no tab".to_string(),
+        };
+        println!("{heading}");
+        for (label, cards) in [("Needs you", &group.waiting), ("Done", &group.done)] {
+            if cards.is_empty() {
+                continue;
+            }
+            println!("  {label}");
+            for c in cards {
+                println!(
+                    "    {}  {:<14}  {:>4} ago  {}",
+                    c.id,
+                    c.assignee.as_deref().unwrap_or("-"),
+                    cmux_core::tasks::span(now.saturating_sub(c.updated_ms)),
+                    c.title,
+                );
+            }
         }
     }
 }
