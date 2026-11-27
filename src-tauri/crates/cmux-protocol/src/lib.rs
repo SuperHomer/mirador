@@ -61,6 +61,10 @@ pub struct TabSnapshot {
     pub cwd: Option<String>,
     pub root: Node,
     pub focused_pane: String,
+    /// The color the person marked it with: a name from `TAB_COLORS` in
+    /// cmux-core, which the theme turns into a shade.
+    #[serde(default)]
+    pub color: Option<String>,
     /// Unread notifications across the tab's panes.
     #[serde(default)]
     pub unread: u32,

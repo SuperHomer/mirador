@@ -24,6 +24,8 @@ export interface TabSnapshot {
   cwd: string | null;
   root: Node;
   focusedPane: string;
+  /** The color it is marked with: one of `TAB_COLORS`. */
+  color: TabColor | null;
   unread: number;
   lastNotification: string | null;
   branch: string | null;
@@ -811,6 +813,12 @@ export const setActiveTab = (tabId: string) =>
   invoke<void>("set_active_tab", { tabId });
 export const renameTab = (tabId: string, title: string) =>
   invoke<void>("rename_tab", { tabId, title });
+/** The colors a tab can be marked with, as cmux-core's `TAB_COLORS`
+ *  names them; styles.css draws each as `--tab-<name>`. */
+export const TAB_COLORS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
+export type TabColor = (typeof TAB_COLORS)[number];
+export const setTabColor = (tabId: string, color: TabColor | null) =>
+  invoke<void>("set_tab_color", { tabId, color });
 export const moveTab = (tabId: string, to: number) =>
   invoke<void>("move_tab", { tabId, to });
 export const splitPane = (paneId: string, dir: SplitDir, command?: string) =>

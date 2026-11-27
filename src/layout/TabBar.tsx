@@ -45,6 +45,7 @@ export function TabBar({ tab, current }: { tab: TabSnapshot; current: boolean })
       </button>
       <span
         className="tab-bar-label"
+        data-color={tab.color ?? undefined}
         onContextMenu={(e) => {
           e.preventDefault();
           setTabMenu({ x: e.pageX, y: e.pageY });

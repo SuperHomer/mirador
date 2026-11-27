@@ -1,5 +1,14 @@
 import { useEffect } from "react";
-import { closeTab, equalizePanes, newTab, setWallView, toggleAgentWall } from "../bindings";
+import {
+  TAB_COLORS,
+  TabColor,
+  closeTab,
+  equalizePanes,
+  newTab,
+  setTabColor,
+  setWallView,
+  toggleAgentWall,
+} from "../bindings";
 import { acceleratorsByAction, formatAccel } from "../keymap/accelerator";
 import { useConfigStore } from "../state/configStore";
 import { reportFailure, useUiStore } from "../state/uiStore";
@@ -37,6 +46,11 @@ export function TabMenu({
   const tried = (what: string, call: () => Promise<unknown>) => () =>
     void call().catch((e) => reportFailure(what, e));
 
+  const pick = (color: TabColor | null) => () => {
+    onClose();
+    void setTabColor(tab.id, color).catch((e) => reportFailure("Tab color", e));
+  };
+
   const items: MenuEntry[] = [
     {
       label: "Rename…",
@@ -48,6 +62,29 @@ export function TabMenu({
       },
     },
     { label: "New Tab", hint: key("new_tab"), run: tried("New tab", () => newTab()) },
+    SEPARATOR,
+    <div className="pop-menu-swatches">
+      <button
+        className={`swatch none${tab.color === null ? " current" : ""}`}
+        title="No color"
+        aria-label="No color"
+        onClick={pick(null)}
+      >
+        <span />
+      </button>
+      {TAB_COLORS.map((c) => (
+        <button
+          key={c}
+          className={`swatch${tab.color === c ? " current" : ""}`}
+          title={c[0].toUpperCase() + c.slice(1)}
+          aria-label={c}
+          data-color={c}
+          onClick={pick(c)}
+        >
+          <span />
+        </button>
+      ))}
+    </div>,
     SEPARATOR,
     {
       label: tab.wall ? "Show Splits" : "Show Agent Wall",

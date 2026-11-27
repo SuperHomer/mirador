@@ -19,6 +19,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "dismiss_claude_integration",
     "set_active_tab",
     "rename_tab",
+    "set_tab_color",
     "move_tab",
     "split_pane",
     "close_pane",

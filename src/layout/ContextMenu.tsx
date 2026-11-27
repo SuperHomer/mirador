@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, ReactElement, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useBoardStore } from "../state/boardStore";
 import { useUiStore } from "../state/uiStore";
@@ -14,8 +14,9 @@ export interface MenuItem {
 /** A line between groups of items. */
 export const SEPARATOR = "separator";
 
-/** What a menu lists: items and the separators between them. */
-export type MenuEntry = MenuItem | typeof SEPARATOR;
+/** What a menu lists: items, separators, and rows of the caller's own —
+ *  a tab's color swatches — which close the menu themselves. */
+export type MenuEntry = MenuItem | typeof SEPARATOR | ReactElement;
 
 /** How close to the window's edge the menu may come. */
 const MARGIN = 8;
@@ -103,6 +104,8 @@ export function ContextMenu({
       {items.map((item, i) =>
         item === SEPARATOR ? (
           <hr key={i} />
+        ) : isValidElement(item) ? (
+          <Fragment key={i}>{item}</Fragment>
         ) : (
           <button
             key={item.label}

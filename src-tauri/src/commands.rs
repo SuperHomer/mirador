@@ -627,6 +627,12 @@ pub fn rename_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, ti
 }
 
 #[tauri::command]
+pub fn set_tab_color(app: AppHandle, state: State<'_, AppState>, tab_id: String, color: Option<String>) {
+    state.workspace.lock().unwrap().set_tab_color(&tab_id, color.as_deref());
+    emit_workspace(&app);
+}
+
+#[tauri::command]
 pub fn move_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, to: usize) {
     state.workspace.lock().unwrap().move_tab(&tab_id, to);
     emit_workspace(&app);

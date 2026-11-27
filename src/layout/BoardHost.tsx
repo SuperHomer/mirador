@@ -674,6 +674,7 @@ export function TabLayer({
       {board && (
         <div
           className="frame-label"
+          data-color={tab.color ?? undefined}
           onPointerDown={drag}
           onContextMenu={(e) => {
             e.preventDefault();

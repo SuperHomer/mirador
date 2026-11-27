@@ -414,6 +414,7 @@ pub fn run() {
             commands::dismiss_claude_integration,
             commands::set_active_tab,
             commands::rename_tab,
+            commands::set_tab_color,
             commands::move_tab,
             commands::split_pane,
             commands::close_pane,

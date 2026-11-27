@@ -610,6 +610,7 @@ function TabRow({
     <>
       <div
         className={`tab-row${active ? " active" : ""}`}
+        data-color={tab.color ?? undefined}
         onClick={() => void setActiveTab(tab.id)}
         onDoubleClick={startEditing}
         // While it is being renamed, its field keeps the native menu.
