@@ -11,6 +11,7 @@ import {
 } from "./bindings";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { useConfigStore } from "./state/configStore";
+import { useBoardStore } from "./state/boardStore";
 import { useNotificationStore } from "./state/notificationStore";
 import { useKeymap } from "./keymap/useKeymap";
 import { actions, runAction } from "./keymap/actions";
@@ -56,13 +57,16 @@ export default function App() {
   const notificationsOpen = useUiStore((s) => s.notificationsOpen);
   const wallBrowsers = useUiStore((s) => s.wallBrowsers);
   const newMenuOpen = useUiStore((s) => s.newMenuOpen);
+  // A hand on the board, or on a tab dragged in the sidebar.
+  const held = useBoardStore((s) => s.moving);
   useKeymap();
   useZoomWheel();
 
   // Native child webviews float above the host webview: hide the ones on
   // inactive tabs, and all of them while an overlay is open. A tab showing
-  // its wall shows only the pages its tiles draw, over those tiles. On the
-  // board each browser card decides for itself (`BrowserPane`).
+  // its wall shows only the pages its tiles draw, over those tiles. A drag
+  // (`hold`) hides them too: a page under the pointer would take its events.
+  // On the board each browser card decides for itself (`BrowserPane`).
   useEffect(() => {
     if (!snapshot || snapshot.view === "board") return;
     const activeTab = snapshot.tabs.find((t) => t.id === snapshot.activeTab);
@@ -75,12 +79,12 @@ export default function App() {
           ? [activeTab.zoomedPane]
           : collectPaneIds(activeTab.root)
       : [];
-    const overlaysOpen = paletteOpen || notificationsOpen || newMenuOpen;
+    const overlaysOpen = paletteOpen || notificationsOpen || newMenuOpen || held;
     for (const b of snapshot.browserPanes) {
       const visible = !overlaysOpen && activePanes.includes(b.paneId);
       void setBrowserVisible(b.paneId, visible);
     }
-  }, [snapshot, paletteOpen, notificationsOpen, wallBrowsers, newMenuOpen]);
+  }, [snapshot, paletteOpen, notificationsOpen, wallBrowsers, newMenuOpen, held]);
 
   useEffect(() => {
     let disposed = false;

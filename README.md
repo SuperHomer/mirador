@@ -376,6 +376,13 @@ stack (`rotate_forward`, `rotate_back`, `layout_even`,
 `layout_side_by_side`, `layout_stacked`, `layout_grid`,
 `layout_main_stack`), unbound until you bind them.
 
+Drag a tab in the sidebar to put it elsewhere in the list; the tab
+shortcuts follow the new order. Off the board, drag a pane by the grip at
+the middle of its top edge onto another pane of its tab: its middle swaps
+the two, near one of its edges docks the pane on that side, taking half
+its place. Both are kept in the session. From a script, `mira move-tab`
+and `mira move-pane` do the same.
+
 All rebindable in `mirador.json`, where `+` and `-` are spelled `plus` and
 `minus` (`"ctrl+plus"`). The zoom keys are Windows Terminal's: plain Ctrl
 with them types nothing a shell needs. Plus is the numpad's, or Shift and

@@ -822,8 +822,9 @@ export const TAB_COLORS = ["red", "orange", "yellow", "green", "blue", "purple"]
 export type TabColor = (typeof TAB_COLORS)[number];
 export const setTabColor = (tabId: string, color: TabColor | null) =>
   invoke<void>("set_tab_color", { tabId, color });
+/** Moves the tab to place `to` (from 0); answers whether it moved. */
 export const moveTab = (tabId: string, to: number) =>
-  invoke<void>("move_tab", { tabId, to });
+  invoke<boolean>("move_tab", { tabId, to });
 export const splitPane = (paneId: string, dir: SplitDir, command?: string) =>
   invoke<string>("split_pane", { paneId, dir, command: command ?? null });
 export const closePane = (paneId: string) =>
@@ -838,6 +839,13 @@ export const focusDirection = (direction: Direction) =>
  */
 export const swapPane = (paneId: string, direction: Direction) =>
   invoke<boolean>("swap_pane", { paneId, direction });
+/**
+ * Moves the pane onto `target`, a pane of its tab: swapped with it when
+ * `side` is null, docked beside it on `side` otherwise. The focus goes with
+ * it; answers whether the tab changed.
+ */
+export const movePane = (paneId: string, target: string, side: Direction | null) =>
+  invoke<boolean>("move_pane", { paneId, target, side });
 export const rotatePanes = (tabId: string, forward: boolean) =>
   invoke<boolean>("rotate_panes", { tabId, forward });
 export const equalizePanes = (tabId: string) =>

@@ -662,10 +662,14 @@ pub fn set_tab_color(app: AppHandle, state: State<'_, AppState>, tab_id: String,
     emit_workspace(&app);
 }
 
+/// Moves the tab to place `to` (from 0); answers whether it moved.
 #[tauri::command]
-pub fn move_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, to: usize) {
-    state.workspace.lock().unwrap().move_tab(&tab_id, to);
-    emit_workspace(&app);
+pub fn move_tab(app: AppHandle, state: State<'_, AppState>, tab_id: String, to: usize) -> bool {
+    let moved = state.workspace.lock().unwrap().move_tab(&tab_id, to);
+    if moved {
+        emit_workspace(&app);
+    }
+    moved
 }
 
 /// Splits `pane_id`, adding a fresh (not yet attached) pane to the tree.
@@ -799,6 +803,24 @@ pub fn swap_pane(app: AppHandle, state: State<'_, AppState>, pane_id: String, di
         emit_workspace(&app);
     }
     swapped
+}
+
+/// Moves the pane onto `target`, a pane of its tab: swapped with it when
+/// `side` is none, docked beside it on `side` otherwise. The focus goes with
+/// it.
+#[tauri::command]
+pub fn move_pane(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+    target: String,
+    side: Option<Direction>,
+) -> bool {
+    let moved = state.workspace.lock().unwrap().move_pane(&pane_id, &target, side);
+    if moved {
+        emit_workspace(&app);
+    }
+    moved
 }
 
 #[tauri::command]

@@ -65,6 +65,27 @@ enum Command {
         #[arg(long)]
         dir: String,
     },
+    /// Move a pane onto another of its tab: with --side, beside it on that
+    /// side; without, the two trade places. The focus goes with it. PANE
+    /// defaults to the focused pane.
+    MovePane {
+        pane: Option<String>,
+        /// The pane it moves onto.
+        #[arg(long)]
+        onto: String,
+        /// left, right, up or down.
+        #[arg(long)]
+        side: Option<String>,
+    },
+    /// Move a tab to place N in the tab bar, 1 being the first, as the
+    /// tab shortcuts count; past the last, it goes last.
+    MoveTab {
+        /// The tab; else the one this runs in, else the active one.
+        #[arg(long)]
+        tab: Option<String>,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        to: u64,
+    },
     /// Move every pane of a tab one place along, the last one first; with
     /// --back, the other way.
     Rotate {
@@ -942,6 +963,16 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Swap { pane, dir } => Request::SwapPane {
             pane_id: pane,
             direction: parse_direction(&dir)?,
+        },
+        Command::MovePane { pane, onto, side } => Request::MovePane {
+            pane_id: pane,
+            target: onto,
+            side: side.as_deref().map(parse_direction).transpose()?,
+        },
+        Command::MoveTab { tab, to } => Request::MoveTab {
+            tab_id: tab,
+            pane_id: own_pane(),
+            to: (to - 1) as usize,
         },
         Command::Rotate { back, tab } => Request::RotatePanes {
             tab_id: tab,
@@ -3062,6 +3093,17 @@ mod tests {
 
     fn parse(args: &[&str]) -> Command {
         Cli::try_parse_from(["mira"].iter().chain(args)).unwrap_or_else(|e| panic!("{args:?}: {e}")).command
+    }
+
+    #[test]
+    fn tabs_are_moved_to_places_counted_from_one() {
+        let Command::MoveTab { tab, to } = parse(&["move-tab", "--to", "1"]) else { panic!() };
+        assert_eq!((tab, to), (None, 1));
+        assert!(Cli::try_parse_from(["mira", "move-tab", "--to", "0"]).is_err());
+        let Command::MovePane { pane, onto, side } = parse(&["move-pane", "--onto", "b", "--side", "up"]) else {
+            panic!()
+        };
+        assert_eq!((pane, onto.as_str(), side.as_deref()), (None, "b", Some("up")));
     }
 
     #[test]

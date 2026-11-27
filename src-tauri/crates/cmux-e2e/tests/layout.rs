@@ -130,6 +130,53 @@ fn panes_move_with_their_terminals() {
     assert!(err.contains("nothing to rotate"), "{err}");
 }
 
+/// The tabs' ids, in tab order.
+fn tab_ids(sb: &Sandbox) -> Vec<String> {
+    sb.snapshot()["tabs"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect()
+}
+
+/// A tab moved in the tab bar and a pane docked beside another stay
+/// where they were put across a restart.
+#[test]
+fn moved_tabs_and_docked_panes_survive_a_restart() {
+    e2e!();
+    let mut sb = Sandbox::new("move");
+    sb.launch();
+    // [a | [b over c]], then a second tab of one pane.
+    let a = sb.first_pane();
+    let b = split(&sb, &a, SplitDir::Row);
+    let c = split(&sb, &b, SplitDir::Column);
+    let first = tab_ids(&sb)[0].clone();
+    let tab = sb.call(Request::NewTab { command: None });
+    let second = tab["tabId"].as_str().unwrap_or_else(|| sb.fail(&format!("new tab: {tab}"))).to_string();
+    let lone = tab["paneId"].as_str().unwrap().to_string();
+
+    mira(&sb, &a, &["move-tab", "--tab", &second, "--to", "1"]);
+    assert_eq!(tab_ids(&sb), vec![second.clone(), first.clone()]);
+    let err = refused(&sb, &a, &["move-tab", "--to", "2"]);
+    assert!(err.contains("already in that place"), "{err}");
+
+    // c leaves b's column for a's left: one row of three.
+    mira(&sb, &a, &["move-pane", &c, "--onto", &a, "--side", "left"]);
+    let moved = |sb: &Sandbox| sb.snapshot()["tabs"][1].clone();
+    let tree = moved(&sb)["root"].clone();
+    assert_eq!(tree["dir"], "row", "{tree}");
+    let row: Vec<&str> = tree["children"].as_array().unwrap().iter().map(|c| c["paneId"].as_str().unwrap_or("")).collect();
+    assert_eq!(row, vec![c.as_str(), a.as_str(), b.as_str()], "{tree}");
+    assert_eq!(moved(&sb)["focusedPane"], c.as_str());
+
+    let err = refused(&sb, &a, &["move-pane", &a, "--onto", &lone]);
+    assert!(err.contains("in another tab"), "{err}");
+    let err = refused(&sb, &a, &["move-pane", &c, "--onto", &a, "--side", "left"]);
+    assert!(err.contains("already there"), "{err}");
+
+    sb.quit();
+    sb.launch();
+    assert_eq!(tab_ids(&sb), vec![second, first]);
+    assert_eq!(moved(&sb)["root"], tree, "the docked layout came back");
+    assert_eq!(sb.panes(), vec![lone, c, a, b]);
+}
+
 /// A browser pane laid out again keeps its page, and its page takes the
 /// pane's new size: full width stacked, about half side by side.
 #[test]

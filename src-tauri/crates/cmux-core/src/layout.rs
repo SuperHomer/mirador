@@ -8,19 +8,59 @@ use cmux_protocol::{Direction, Node, Preset, SplitDir};
 /// `dir`, the new pane is inserted next to it (sharing its space); otherwise
 /// the leaf is wrapped in a new two-child split.
 pub fn split(node: &mut Node, target: &str, dir: SplitDir, new_pane: &str) -> bool {
+    let leaf = Node::Leaf {
+        pane_id: new_pane.to_string(),
+    };
+    insert_beside(node, target, dir, leaf, false)
+}
+
+/// Moves the leaf holding `pane` to the `side` of the leaf holding `target`,
+/// taking half of the target's space as [`split`] does. False when they are
+/// the same pane, either is missing, or the pane is already there — moved
+/// again, it would only shrink.
+pub fn dock(root: &mut Node, pane: &str, target: &str, side: Direction) -> bool {
+    if pane == target || !contains(root, pane) || !contains(root, target) {
+        return false;
+    }
+    let (dir, before) = match side {
+        Direction::Left => (SplitDir::Row, true),
+        Direction::Right => (SplitDir::Row, false),
+        Direction::Up => (SplitDir::Column, true),
+        Direction::Down => (SplitDir::Column, false),
+    };
+    let (first, second) = if before { (pane, target) } else { (target, pane) };
+    if adjacent(root, dir, first, second) {
+        return false;
+    }
+    remove(root, pane);
+    let leaf = Node::Leaf {
+        pane_id: pane.to_string(),
+    };
+    insert_beside(root, target, dir, leaf, before)
+}
+
+/// Whether leaves `first` and `second` follow each other, in that order, in
+/// a `dir` split.
+fn adjacent(node: &Node, dir: SplitDir, first: &str, second: &str) -> bool {
+    let Node::Split { dir: d, children, .. } = node else {
+        return false;
+    };
+    let is = |c: &Node, id: &str| matches!(c, Node::Leaf { pane_id } if pane_id == id);
+    (*d == dir && children.windows(2).any(|w| is(&w[0], first) && is(&w[1], second)))
+        || children.iter().any(|c| adjacent(c, dir, first, second))
+}
+
+/// Puts `new` beside the leaf holding `target` in a `dir` split, before or
+/// after it.
+fn insert_beside(node: &mut Node, target: &str, dir: SplitDir, new: Node, before: bool) -> bool {
+    let pair = |old: Node, new: Node| Node::Split {
+        dir,
+        ratios: vec![0.5, 0.5],
+        children: if before { vec![new, old] } else { vec![old, new] },
+    };
     match node {
         Node::Leaf { pane_id } if pane_id == target => {
-            let old = node.clone();
-            *node = Node::Split {
-                dir,
-                ratios: vec![0.5, 0.5],
-                children: vec![
-                    old,
-                    Node::Leaf {
-                        pane_id: new_pane.to_string(),
-                    },
-                ],
-            };
+            *node = pair(node.clone(), new);
             true
         }
         Node::Leaf { .. } => false,
@@ -29,36 +69,25 @@ pub fn split(node: &mut Node, target: &str, dir: SplitDir, new_pane: &str) -> bo
             ratios,
             children,
         } => {
-            for (i, child) in children.iter_mut().enumerate() {
-                let is_target = matches!(child, Node::Leaf { pane_id } if pane_id == target);
-                if is_target {
-                    if *d == dir {
-                        let half = ratios[i] / 2.0;
-                        ratios[i] = half;
-                        ratios.insert(i + 1, half);
-                        children.insert(
-                            i + 1,
-                            Node::Leaf {
-                                pane_id: new_pane.to_string(),
-                            },
-                        );
-                    } else {
-                        let old = child.clone();
-                        *child = Node::Split {
-                            dir,
-                            ratios: vec![0.5, 0.5],
-                            children: vec![
-                                old,
-                                Node::Leaf {
-                                    pane_id: new_pane.to_string(),
-                                },
-                            ],
-                        };
-                    }
-                    return true;
-                }
+            let Some(i) = children
+                .iter()
+                .position(|c| matches!(c, Node::Leaf { pane_id } if pane_id == target))
+            else {
+                return match children.iter().position(|c| contains(c, target)) {
+                    Some(i) => insert_beside(&mut children[i], target, dir, new, before),
+                    None => false,
+                };
+            };
+            if *d == dir {
+                let half = ratios[i] / 2.0;
+                ratios[i] = half;
+                let at = if before { i } else { i + 1 };
+                ratios.insert(at, half);
+                children.insert(at, new);
+            } else {
+                children[i] = pair(children[i].clone(), new);
             }
-            children.iter_mut().any(|c| split(c, target, dir, new_pane))
+            true
         }
     }
 }
@@ -592,6 +621,78 @@ mod tests {
         let right = neighbor(&root, "a", Direction::Right).unwrap();
         assert!(swap(&mut root, "a", &right));
         assert_eq!(pane_ids(&root), vec!["c", "b", "a"]);
+    }
+
+    #[test]
+    fn dock_puts_a_pane_on_each_side_of_another() {
+        // [a | [b over c]]: c leaves the column, which collapses to b.
+        let mut root = uneven_tree();
+        assert!(dock(&mut root, "c", "a", Direction::Left));
+        assert_eq!(pane_ids(&root), vec!["c", "a", "b"]);
+        assert_eq!(ratios_of(&root), vec![vec![0.35, 0.35, 0.3]]);
+
+        let mut root = uneven_tree();
+        assert!(dock(&mut root, "c", "a", Direction::Right));
+        assert_eq!(pane_ids(&root), vec!["a", "c", "b"]);
+        assert_eq!(ratios_of(&root), vec![vec![0.35, 0.35, 0.3]]);
+
+        let mut root = uneven_tree();
+        assert!(dock(&mut root, "c", "a", Direction::Up));
+        assert_eq!(
+            rects(&root),
+            vec![
+                rect("c", 0.0, 0.0, 0.7, 0.5),
+                rect("a", 0.0, 0.5, 0.7, 0.5),
+                rect("b", 0.7, 0.0, 0.3, 1.0),
+            ]
+        );
+
+        let mut root = uneven_tree();
+        assert!(dock(&mut root, "c", "a", Direction::Down));
+        assert_eq!(
+            rects(&root),
+            vec![
+                rect("a", 0.0, 0.0, 0.7, 0.5),
+                rect("c", 0.0, 0.5, 0.7, 0.5),
+                rect("b", 0.7, 0.0, 0.3, 1.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn dock_joins_a_split_that_already_runs_its_way() {
+        // c goes above b, in the column they already share.
+        let mut root = uneven_tree();
+        assert!(dock(&mut root, "c", "b", Direction::Up));
+        assert_eq!(pane_ids(&root), vec!["a", "c", "b"]);
+        // a goes below c: the row collapses into the column it joins.
+        assert!(dock(&mut root, "a", "c", Direction::Down));
+        assert_eq!(pane_ids(&root), vec!["c", "a", "b"]);
+        match &root {
+            Node::Split { dir, ratios, .. } => {
+                assert_eq!(*dir, SplitDir::Column);
+                assert_eq!(ratios, &vec![0.25, 0.25, 0.5]);
+            }
+            _ => panic!("expected split"),
+        }
+    }
+
+    #[test]
+    fn dock_refuses_the_same_pane_a_missing_one_a_lone_one_or_one_in_place() {
+        let mut root = uneven_tree();
+        assert!(!dock(&mut root, "a", "a", Direction::Left));
+        assert!(!dock(&mut root, "zz", "a", Direction::Left));
+        assert!(!dock(&mut root, "a", "zz", Direction::Left));
+        assert_eq!(root, uneven_tree());
+
+        // b already sits above c.
+        assert!(!dock(&mut root, "b", "c", Direction::Up));
+        assert!(!dock(&mut root, "c", "b", Direction::Down));
+        assert_eq!(root, uneven_tree());
+
+        let mut lone = leaf("a");
+        assert!(!dock(&mut lone, "a", "a", Direction::Right));
+        assert_eq!(lone, leaf("a"));
     }
 
     #[test]

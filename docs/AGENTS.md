@@ -1044,7 +1044,10 @@ mira focus <pane>
 mira zoom <pane>               # that pane alone, filling its tab
 mira zoom <pane> --off         # the whole tab again
 mira swap <pane> --dir left    # trade places with its neighbor there (left|right|up|down)
+mira move-pane <pane> --onto <target> --side left  # dock it beside target (left|right|up|down)
+mira move-pane <pane> --onto <target>              # ...or, without --side, trade places with it
 mira rotate [--back]           # every pane of the tab one place along
+mira move-tab --to 1           # the tab to the first place in the tab bar
 mira equalize                  # every split of the tab in equal shares
 mira layout grid               # side-by-side | stacked | grid | main-stack
 mira send-file shot.png        # type its path in, as a drop does; in an SSH pane, sent there first
@@ -1058,12 +1061,18 @@ mira quit --end-sessions       # ...or end every one of them first
 mira completions zsh           # a completion script: zsh, bash, fish, powershell, elvish
 ```
 
-`rotate`, `equalize` and `layout` act on `--tab <tab>`, else the tab
-they run in, else the active one; `swap` without a pane swaps the focused
-one. The focus stays with its pane wherever it goes, and panes keep
-running as they move. Each refuses a change that changes nothing — no
-neighbor on that side, a tab of one pane, sizes already even — with an
-error, so a script can tell.
+`rotate`, `equalize`, `layout` and `move-tab` act on `--tab <tab>`, else
+the tab they run in, else the active one; `swap` and `move-pane` without
+a pane move the focused one. `move-pane` moves a pane anywhere in its own
+tab and gives it the focus: docked on one side of the target it takes half
+the target's place, and the split it left closes up behind it. `move-tab
+--to N` counts places from 1, as the tab shortcuts do (`to` from 0 on the
+socket); past the last it goes last. A swapped, rotated or moved pane
+takes the focus along if it had it, and every pane keeps running as it
+moves. Each refuses a change that changes nothing —
+no neighbor on that side, a tab of one pane, sizes already even, a target
+in another tab, a tab already in that place — with an error, so a script
+can tell.
 
 The board shows every tab as a frame and every pane as a card — but a
 tab showing its agent wall shows the wall in its frame, its agents or its
@@ -1340,7 +1349,7 @@ Newline-delimited JSON on the socket named in the discovery file:
 
 Verbs: `list_tabs new_tab split_pane close_pane focus_pane send_input
 read_screen send_file notify run list_runs agent_session codex_thread agent_new
-agent_list agent_wall zoom_pane swap_pane rotate_panes equalize_panes
+agent_list agent_wall zoom_pane swap_pane move_pane move_tab rotate_panes equalize_panes
 apply_layout browser_open browser_navigate browser_snapshot browser_click
 browser_fill browser_type browser_press browser_text browser_eval
 browser_history browser_wait browser_console browser_network browser_storage
