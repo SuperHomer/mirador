@@ -27,6 +27,18 @@ const AltText = ({ alt, url }: { alt: string; url: string }) => (
 );
 
 /**
+ * What a markdown pane shows, as text: `read-screen`'s answer for one,
+ * which has no terminal to read. Null when `paneId` is no markdown pane.
+ * Read from the page, so it says what was drawn, not what Rust read.
+ */
+export function renderedMarkdown(paneId: string): string | null {
+  const body = document.querySelector<HTMLElement>(
+    `[data-markdown-pane="${CSS.escape(paneId)}"] .whatsnew-body`,
+  );
+  return body ? body.innerText.trim() : null;
+}
+
+/**
  * A local markdown file — a README, a plan, an agent's notes — read and
  * parsed in Rust (cmux-core/src/notes.rs), drawn as the What's New pane
  * draws release notes, with its chrome and its prose styles. It follows
@@ -72,6 +84,7 @@ export function MarkdownPane({ paneId, path, focused }: Props) {
   return (
     <div
       className={`pane whatsnew-pane${focused ? " focused" : ""}`}
+      data-markdown-pane={paneId}
       style={
         colors
           ? ({

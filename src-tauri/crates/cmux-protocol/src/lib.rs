@@ -1093,6 +1093,16 @@ pub enum Request {
         #[serde(default)]
         pane_id: Option<String>,
     },
+    /// Opens a markdown pane on a file (split of the source pane, or a new
+    /// tab, where one already on that file is shown again). `path` is
+    /// absolute: the CLI resolves it against its own directory.
+    MarkdownOpen {
+        path: String,
+        #[serde(default)]
+        target: Option<String>,
+        #[serde(default)]
+        pane_id: Option<String>,
+    },
     /// Lists the checkouts of the repository the calling pane sits in, so
     /// an agent can name one for `DiffOpen`.
     DiffWorktrees {

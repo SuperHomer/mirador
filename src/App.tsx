@@ -36,6 +36,7 @@ import {
   saveAllScrollbacks,
 } from "./terminal/registry";
 import { quotePath } from "./terminal/pasteImage";
+import { renderedMarkdown } from "./markdown/MarkdownPane";
 import { invoke } from "@tauri-apps/api/core";
 
 function collectPaneIds(node: Node): string[] {
@@ -112,9 +113,12 @@ export default function App() {
       paneId: string;
       lines: number | null;
     }>("read-screen-request", (e) => {
+      const markdown = renderedMarkdown(e.payload.paneId);
       void resolveScreenRead(
         e.payload.requestId,
-        readScreenText(e.payload.paneId, e.payload.lines),
+        markdown === null
+          ? readScreenText(e.payload.paneId, e.payload.lines)
+          : { text: markdown, cursor: null, afterCursor: "" },
       );
     });
     // Scrollback persistence: cadence comes from Rust (webview timers are
