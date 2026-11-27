@@ -16,6 +16,7 @@ pub mod config;
 pub mod cwd;
 pub mod diff;
 pub mod external_editor;
+pub mod follow;
 pub mod git;
 pub mod handoff;
 pub mod graph;

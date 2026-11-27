@@ -6,6 +6,7 @@ mod browser;
 mod checkpoints;
 mod commands;
 mod config_watch;
+mod markdown_watch;
 mod handoff;
 mod intel;
 mod notify;
@@ -89,6 +90,8 @@ pub struct AppState {
     pub update: update::UpdateState,
     /// Throttles snapshots triggered by terminal output (titles, cwd).
     pub emit_coalescer: commands::EmitCoalescer,
+    /// The files markdown panes follow, and the watcher on their directories.
+    pub markdown_watch: markdown_watch::MarkdownWatch,
     /// Claude Code transcripts read so far, for agent activity.
     pub transcripts: Mutex<cmux_core::transcript::Cache>,
     /// Claude Code transcripts and Codex rollouts read so far, for agent
@@ -363,6 +366,7 @@ pub fn run() {
             task_log: Mutex::new(task_log),
             update: update::UpdateState::default(),
             emit_coalescer: commands::EmitCoalescer::default(),
+            markdown_watch: Default::default(),
             menu_actions: Mutex::new(Vec::new()),
         })
         // The menu bar's actions run in the page, as the palette's do.
@@ -462,6 +466,8 @@ pub fn run() {
             commands::open_markdown,
             commands::read_markdown,
             commands::list_markdown,
+            markdown_watch::watch_markdown,
+            markdown_watch::unwatch_markdown,
             commands::open_agent,
             commands::agent_roles,
             agent_editor::open_agent_editor,

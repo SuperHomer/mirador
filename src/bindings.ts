@@ -965,6 +965,11 @@ export const openMarkdown = (paneId: string | null, path: string, tab: boolean) 
 /** The markdown files of the pane's repository, or of its directory. */
 export const listMarkdown = (paneId: string | null) =>
   invoke<MarkdownFiles>("list_markdown", { paneId });
+/** Follow the pane's file on disk: `markdown-changed` carries its path. */
+export const watchMarkdown = (paneId: string) =>
+  invoke<void>("watch_markdown", { paneId });
+export const unwatchMarkdown = (paneId: string) =>
+  invoke<void>("unwatch_markdown", { paneId });
 /** The pane's file, parsed in Rust (cmux-core/src/notes.rs). */
 export const readMarkdown = (paneId: string) =>
   invoke<NoteBlock[]>("read_markdown", { paneId });

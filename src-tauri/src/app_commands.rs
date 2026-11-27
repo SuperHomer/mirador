@@ -58,6 +58,8 @@ pub const APP_COMMANDS: &[&str] = &[
     "open_markdown",
     "read_markdown",
     "list_markdown",
+    "watch_markdown",
+    "unwatch_markdown",
     "open_agent",
     "agent_roles",
     "open_agent_editor",
