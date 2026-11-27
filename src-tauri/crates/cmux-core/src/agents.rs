@@ -874,6 +874,34 @@ pub fn session_of(harness: Harness, id: &str) -> Option<String> {
     }
 }
 
+/// The harness a hook event comes from, by its program's name: one whose
+/// events Mirador takes — Claude Code (`mira claude-hook`), and Codex, Pi
+/// or OpenCode (`mira agent-hook`).
+pub fn hook_harness(agent: &str) -> Option<Harness> {
+    harness_named(agent).filter(|h| matches!(h, Harness::Claude | Harness::Codex | Harness::Pi | Harness::OpenCode))
+}
+
+/// The `agent_session` value a hook of `harness` records for its session
+/// `id`: Claude Code's [`session_record`], `codex:<thread>`, `pi:<id>`,
+/// `opencode:<id>`. None for an id that is not one: it is typed into a
+/// shell on restore.
+pub fn hook_record(harness: Harness, id: &str, job: Option<&str>) -> Option<String> {
+    match harness {
+        Harness::Claude => session_record(id, job),
+        Harness::Codex => crate::codex_trail::thread_id(id).map(|thread| format!("codex:{thread}")),
+        Harness::Pi | Harness::OpenCode if is_safe_id(id) => session_of(harness, id),
+        _ => None,
+    }
+}
+
+/// Whether a hook of `harness` may write into a pane running `running`.
+/// Claude Code's may into any — its hooks are how a pane is known to run
+/// it. Any other's only into a pane known to run that harness: its record
+/// in another pane would type its resume into it on the next launch.
+pub fn hook_fits(harness: Harness, running: Option<Harness>) -> bool {
+    harness == Harness::Claude || running == Some(harness)
+}
+
 /// The harness an `agent_session` record resumes: Codex, Pi or OpenCode by
 /// its prefix, Claude Code for any other (`claude-fg:`, `claude-bg:`, an
 /// older `claude:`).
@@ -1311,6 +1339,32 @@ mod tests {
         let rollout = std::env::temp_dir().join(format!("sessions/2026/11/03/rollout-2026-11-03T09-00-00-{THREAD}.jsonl"));
         assert_eq!(codex_record(&rollout), Some(format!("codex:{THREAD}")));
         assert_eq!(codex_record(&std::env::temp_dir().join("sessions/rollout-2026-11-03T09-00-00-a.jsonl")), None);
+    }
+
+    #[test]
+    fn a_hook_records_its_harness_s_session_and_only_in_its_harness_s_pane() {
+        use Harness::*;
+        assert_eq!(["claude", "codex", "pi", "opencode"].map(hook_harness), [Some(Claude), Some(Codex), Some(Pi), Some(OpenCode)]);
+        assert_eq!((hook_harness("gemini"), hook_harness("aider"), hook_harness("")), (None, None, None), "no hooks of theirs");
+
+        assert_eq!(hook_record(Claude, "s1", None).as_deref(), Some("claude-fg:s1"));
+        assert_eq!(hook_record(Claude, "s1", Some("j1")).as_deref(), Some("claude-bg:j1"));
+        assert_eq!(hook_record(Codex, &THREAD.to_uppercase(), None), Some(format!("codex:{THREAD}")));
+        assert_eq!(hook_record(Codex, "s1", None), None, "a thread is a UUID");
+        assert_eq!(hook_record(Pi, "a1-b2", None).as_deref(), Some("pi:a1-b2"));
+        assert_eq!(hook_record(OpenCode, "ses_a1", None).as_deref(), Some("opencode:ses_a1"));
+        // Every record is typed into a shell on restore.
+        for id in ["a1; rm -rf ~", "$(x)", "", "a b"] {
+            assert_eq!([Pi, OpenCode, Codex].map(|h| hook_record(h, id, None)), [None, None, None], "{id:?}");
+        }
+        assert_eq!(hook_record(Gemini, "a1", None), None);
+
+        assert!(hook_fits(Claude, None) && hook_fits(Claude, Some(Codex)), "Claude Code's hooks mark the pane");
+        for h in [Codex, Pi, OpenCode] {
+            assert!(hook_fits(h, Some(h)), "{h:?}");
+            assert!(!hook_fits(h, None) && !hook_fits(h, Some(Claude)), "{h:?}");
+        }
+        assert!(!hook_fits(Pi, Some(OpenCode)));
     }
 
     #[test]

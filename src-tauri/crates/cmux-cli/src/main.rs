@@ -234,9 +234,21 @@ enum Command {
     /// the hook payload from stdin.
     #[command(hide = true)]
     ClaudeHook { event: String },
-    /// Codex notify handler (given to every Codex Mirador starts): records
-    /// the turn's thread for the pane, then runs the user's own notify,
-    /// given after `--`, with the same JSON.
+    /// A hook handler for Codex, Pi and OpenCode (wired up by `mira hooks
+    /// setup`): reports an event, in `claude-hook`'s words
+    /// (`session-start`, `prompt-submit`, `stop`, `notification`).
+    #[command(hide = true)]
+    AgentHook {
+        /// `codex`, `pi` or `opencode`.
+        agent: String,
+        event: String,
+        /// Its session (a Codex's thread), when the harness says.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Codex notify handler (given to every Codex Mirador starts): reports
+    /// the turn's end for the pane, its thread with it, after starting the
+    /// user's own notify, given after `--`, with the same JSON.
     #[command(hide = true)]
     CodexNotify {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -1372,6 +1384,12 @@ fn run(cli: Cli) -> Result<(), String> {
             }
         }
         Command::ClaudeHook { event } => return claude_hook(&event),
+        Command::AgentHook { agent, event, session } => {
+            if let Some(harness) = cmux_core::agents::hook_harness(&agent) {
+                agent_hook(harness, &event, session);
+            }
+            return Ok(());
+        }
         Command::CodexNotify { args } => {
             codex_notify(&args);
             return Ok(());
@@ -2877,7 +2895,7 @@ fn claude_hook(event: &str) -> Result<(), String> {
             pane_id: pane.clone(),
             tty: tty.clone(),
             agent: "claude".into(),
-            session_id: session_id.to_string(),
+            session_id: Some(session_id.to_string()),
             job: job.clone(),
             event: Some(event.to_string()),
             transcript_path: payload["transcript_path"].as_str().map(String::from),
@@ -2919,10 +2937,43 @@ fn claude_hook(event: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Reports a hook event of a harness other than Claude Code, as
+/// [`claude_hook`] does Claude Code's: its session and status to the app,
+/// and for a turn's end or a call for the person, a notification. Never
+/// fails or prints: a broken hook must not break the agent, and the app
+/// may not be running.
+fn agent_hook(harness: cmux_protocol::Harness, event: &str, session_id: Option<String>) {
+    let (pane, tty) = (own_pane(), own_tty());
+    let _ = send_request(Request::AgentSession {
+        pane_id: pane.clone(),
+        tty: tty.clone(),
+        agent: cmux_core::agents::program_of(harness).into(),
+        session_id,
+        job: None,
+        event: Some(event.to_string()),
+        transcript_path: None,
+        notification_type: None,
+        message: None,
+    });
+    let body = match event {
+        "stop" => "finished responding",
+        "notification" => "needs your attention",
+        _ => return,
+    };
+    let _ = send_request(Request::Notify {
+        pane_id: pane,
+        tty,
+        title: Some(harness.label().into()),
+        body: body.into(),
+        job: None,
+        kind: cmux_core::agents::hook_notify_kind(event, None, None),
+    });
+}
+
 /// Codex runs this after each turn, with its JSON last. It must never
 /// get in Codex's way, so nothing it does can fail or print: the person's
-/// own notify, if they had one, is started first, then the thread is sent
-/// to the app, which may not be running.
+/// own notify, if they had one, is started first, then the turn's end is
+/// reported to the app, which may not be running.
 fn codex_notify(args: &[String]) {
     let (theirs, payload) = cmux_core::agents::split_codex_notify(args);
     let Some(payload) = payload else { return };
@@ -2935,9 +2986,7 @@ fn codex_notify(args: &[String]) {
             .stderr(std::process::Stdio::null())
             .spawn();
     }
-    if let Some(thread_id) = cmux_core::codex_trail::notify_thread(payload) {
-        let _ = send_request(Request::CodexThread { pane_id: own_pane(), thread_id });
-    }
+    agent_hook(cmux_protocol::Harness::Codex, "stop", cmux_core::codex_trail::notify_thread(payload));
 }
 
 /// This binary's real path, through any symlink — `~/.local/bin/mira`

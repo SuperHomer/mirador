@@ -310,22 +310,6 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             });
             Ok(Value::Null)
         }
-        Request::CodexThread { pane_id, thread_id } => {
-            let thread = cmux_core::codex_trail::thread_id(&thread_id).ok_or("not a thread id")?;
-            let pane = pane_id.ok_or("no pane: MIRA_PANE is not set")?;
-            {
-                let mut meta = state.meta.lock().unwrap();
-                // Only a Codex's: a record in any other pane would type
-                // `codex resume` into it on the next launch.
-                let m = meta.get_mut(&pane).filter(|m| m.harness() == Some(cmux_protocol::Harness::Codex));
-                let m = m.ok_or("that pane runs no Codex")?;
-                m.agent_session = Some(format!("codex:{thread}"));
-            }
-            state
-                .session_dirty
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-            Ok(json!({ "paneId": pane }))
-        }
         Request::AgentSession {
             pane_id,
             tty,
@@ -337,11 +321,13 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
             message,
             transcript_path,
         } => {
-            if agent != "claude" {
-                return Err(format!("unknown agent `{agent}`"));
-            }
-            let record = cmux_core::agents::session_record(&session_id, job.as_deref())
-                .ok_or("not a session id")?;
+            use cmux_core::agents::{hook_fits, hook_harness, hook_record};
+            let harness = hook_harness(&agent).ok_or_else(|| format!("unknown agent `{agent}`"))?;
+            let record = match session_id.as_deref() {
+                Some(id) => Some(hook_record(harness, id, job.as_deref()).ok_or("not a session id")?),
+                None if harness == cmux_protocol::Harness::Claude => return Err("no session id".into()),
+                None => None,
+            };
             let status = event.as_deref().and_then(|e| {
                 cmux_core::agents::hook_status(e, notification_type.as_deref(), message.as_deref())
             });
@@ -360,17 +346,28 @@ fn dispatch(app: &AppHandle, req: Request) -> Result<Value, String> {
                 .ok_or("could not resolve the pane for this agent session")?;
             let turn = {
                 let mut meta = state.meta.lock().unwrap();
+                if !hook_fits(harness, meta.get(&pane).and_then(|m| m.harness())) {
+                    return Err(format!("that pane runs no {}", harness.label()));
+                }
                 let entry = meta.entry(pane.clone()).or_default();
                 let before = entry.status();
-                entry.agent_session = Some(record);
+                if record.is_some() {
+                    entry.agent_session = record;
+                }
+                // Only Claude Code's: the trail reads it as one of its own.
                 if let Some(path) = transcript_path
+                    .filter(|_| harness == cmux_protocol::Harness::Claude)
                     .map(std::path::PathBuf::from)
-                    .filter(|p| cmux_core::transcript::is_transcript_of(p, &session_id))
+                    .filter(|p| session_id.as_deref().is_some_and(|id| cmux_core::transcript::is_transcript_of(p, id)))
                 {
                     entry.agent_transcript = Some(path);
                 }
+                // A turn's end is news even with the status unchanged: a
+                // Codex reports only that, Idle again each turn, and
+                // `agent wait` ends on a status newer than its start.
+                let turn_ended = matches!(event.as_deref(), Some("stop" | "stop-failure"));
                 if let Some(status) = status {
-                    if entry.agent_status != Some(status) {
+                    if entry.agent_status != Some(status) || turn_ended {
                         entry.agent_status = Some(status);
                         entry.agent_since_ms = Some(crate::runs::now_ms());
                     }
