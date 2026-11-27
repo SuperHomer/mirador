@@ -262,6 +262,13 @@ enum Command {
         #[arg(long)]
         hours: Option<u64>,
     },
+    /// What to do next: agents waiting on you, turns that failed,
+    /// follow-ups agents left, cards to send.
+    Next {
+        /// How far back a failed turn counts, in hours.
+        #[arg(long)]
+        hours: Option<u64>,
+    },
     /// Remote workspaces over SSH.
     Ssh {
         #[command(subcommand)]
@@ -1336,6 +1343,15 @@ fn run(cli: Cli) -> Result<(), String> {
             render_recap(recap, hours.unwrap_or(24));
             return Ok(());
         }
+        Command::Next { hours } => {
+            let resp = send_request(Request::Next { hours })?;
+            if cli.json || !resp.ok {
+                return render(resp, cli.json, false, None);
+            }
+            let next = resp.data.and_then(|d| serde_json::from_value(d["next"].clone()).ok());
+            render_next(next.ok_or("the app sent no suggestions")?);
+            return Ok(());
+        }
         Command::Ssh { action } => match action {
             SshAction::Open { host, tab, dir, on } => Request::SshOpen {
                 host,
@@ -1924,6 +1940,46 @@ fn render_recap(recap: Vec<cmux_protocol::TaskRecap>, hours: u64) {
                 );
             }
         }
+    }
+}
+
+/// What to do next, most pressing first: a line per card — why, its id,
+/// its agent, how long ago and its title — then the command that acts on it.
+fn render_next(steps: Vec<cmux_protocol::NextStep>) {
+    use cmux_protocol::NextKind::*;
+    if steps.is_empty() {
+        println!("(nothing to do next: nothing waits on you, failed, or is in To do)");
+        return;
+    }
+    let now = now_ms();
+    for step in steps {
+        let c = &step.card;
+        // Read as `agent send` takes it; the hints use the pane, which
+        // names the agent from any tab, as a name alone does only in its own.
+        let agent = c.assignee.as_ref().map(|a| match &c.team {
+            Some(team) => format!("{team}/{a}"),
+            None => a.clone(),
+        });
+        let (label, note) = match step.kind {
+            Answer => ("answer", String::new()),
+            Fix => ("fix", format!("  ({} failed)", step.failing)),
+            FollowUp => ("follow-up", format!("  (from {})", c.from)),
+            Send => ("send", String::new()),
+        };
+        println!(
+            "{label:<9}  {}  {:<20}  {:>4} ago  {}{note}",
+            c.id,
+            agent.as_deref().unwrap_or("-"),
+            cmux_core::tasks::span(now.saturating_sub(c.updated_ms)),
+            c.title,
+        );
+        let hint = match (step.kind, &c.pane) {
+            (Answer, Some(pane)) => format!("mira focus {pane}"),
+            (Fix, Some(pane)) => format!("mira agent trail {pane}"),
+            (FollowUp | Send, Some(pane)) => format!("mira agent send {pane} --card {} \"<message>\"", c.id),
+            _ => "mira task list --all".to_string(),
+        };
+        println!("{:11}{hint}", "");
     }
 }
 
