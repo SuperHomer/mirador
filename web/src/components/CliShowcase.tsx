@@ -14,6 +14,7 @@ const COMMANDS = [
   'mira agent trail worker',
   'mira diff main...HEAD',
   'mira md PLAN.md',
+  'mira tree',
   'mira view board',
   'mira layout grid',
   'mira browser open localhost:3000',
@@ -77,6 +78,7 @@ export default function CliShowcase() {
           <div><span style={{ color: "var(--muted)" }}>$</span> mira agent trail <span style={{ color: "var(--mauve)" }}>worker</span><span style={{ color: "var(--muted)" }}>    # what it ran</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira diff <span style={{ color: "var(--sapphire)" }}>main...HEAD</span><span style={{ color: "var(--muted)" }}>        # review the branch</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira md <span style={{ color: "var(--green)" }}>PLAN.md</span><span style={{ color: "var(--muted)" }}>              # a plan, kept current</span></div>
+          <div><span style={{ color: "var(--muted)" }}>$</span> mira tree<span style={{ color: "var(--muted)" }}>                    # what changed, where</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira view <span style={{ color: "var(--sapphire)" }}>board</span><span style={{ color: "var(--muted)" }}>          # every pane at once</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira layout <span style={{ color: "var(--sapphire)" }}>grid</span><span style={{ color: "var(--muted)" }}>         # rearrange a tab's panes</span></div>
           <div><span style={{ color: "var(--muted)" }}>$</span> mira browser open <span style={{ color: "var(--green)" }}>localhost:3000</span></div>
