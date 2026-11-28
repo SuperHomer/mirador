@@ -8,7 +8,7 @@
 
 /// When the rates below were last checked against Anthropic's model table:
 /// what a cost shown from them is as of.
-pub const PRICES_CHECKED: &str = "2026-11-23";
+pub const PRICES_CHECKED: &str = "2026-11-28";
 
 /// A model's prices, in US dollars per million tokens.
 #[derive(Debug, Clone, Copy, PartialEq)]
