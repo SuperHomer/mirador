@@ -900,6 +900,17 @@ body,
 
 .pane-slot {
   position: absolute;
+  animation: pane-in calc(var(--motion) * 1.5) ease-out;
+}
+
+/* A new pane fades in. Opacity only: xterm fits to its parent's box and a
+   browser pane is a native view placed from measured rects, so nothing
+   may change the slot's size or place. No fill-mode, so once it ends the
+   slot's own opacity (a dragged card or pane) applies again. */
+@keyframes pane-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /* What a pane draws in: the slot less a 3px margin, and on the board less
