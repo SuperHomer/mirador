@@ -5,6 +5,8 @@
 }
 
 :root {
+  /* Every UI transition's length, so reduced motion zeroes them in one place. */
+  --motion: 140ms;
   --bg: #1e1e2e;
   --bg-alt: #181825;
   --surface: #313244;
@@ -7431,4 +7433,46 @@ button.tb-line-row:hover {
 .team-weight-rows-label {
   grid-column: 1 / -1;
   color: var(--muted);
+}
+
+/* A press answers at once: a scale never moves layout, so no pane or
+   terminal resizes under it. The tab's row, not the whole tab, which
+   holds its agents' tree and stays pressed through a drag. */
+button,
+.tab-row {
+  transition: transform var(--motion) ease-out;
+}
+
+button:active:not(:disabled),
+.tab-row:active:not(:has(button:active)) {
+  transform: scale(0.97);
+}
+
+/* A row as wide as its list would lurch, not press: 3% of a wide row is a
+   jump. */
+button.tb-line-row:active,
+button.editor-item:active,
+button.usage-row-line:active,
+button.diff-tree-file:active,
+button.diff-tree-dir:active,
+button.agent-menu-item:active,
+button.tb-description-toggle:active,
+button.tb-idle-target:active,
+button.tb-action-line:active,
+button.tb-turn-line:active,
+button.tb-agent:active,
+button.tb-title:active,
+button.inbox-update:active {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms;
+  }
+
+  button:active:not(:disabled),
+  .tab-row:active:not(:has(button:active)) {
+    transform: none;
+  }
 }
