@@ -3,7 +3,7 @@ import { AgentInfo, agentLabel, focusPane, markPaneRead, RailPosition, TabSnapsh
 import { useUiStore, WallFilter } from "../state/uiStore";
 import { getTerminal } from "../terminal/registry";
 import { useAgentActivity } from "./ActivityPanel";
-import { AgentStatusBar, fullness } from "./AgentStatusBar";
+import { AgentStatusBar, ContextMeter } from "./AgentStatusBar";
 import { STATUS_LABEL, StatusMark } from "./StatusMark";
 import { SubagentSheet } from "./SubagentSheet";
 import { elapsed } from "./time";
@@ -289,7 +289,14 @@ export function FocusLayout({
           <section className="rail-section">
             <div className="rail-label">Idle · {idle.length}</div>
             {idle.map((a) => (
-              <IdleLine key={a.paneId} agent={a} canSend={sendable.has(a.paneId)} now={now} onPick={pin} />
+              <IdleLine
+                key={a.paneId}
+                agent={a}
+                visible={visible}
+                canSend={sendable.has(a.paneId)}
+                now={now}
+                onPick={pin}
+              />
             ))}
           </section>
         )}
@@ -534,10 +541,7 @@ function MiniTile({
   const { hostRef, shown } = useLentTerminal(pane, visible, { fit: false });
   const fit = useMiniFit(hostRef);
   const { activity } = useAgentActivity(pane, visible && agent.hasActivity);
-  const session = activity?.session;
-  const pct =
-    session?.contextWindow ? Math.min(100, Math.round((session.context / session.contextWindow) * 100)) : null;
-  const task = agent.topic ?? session?.tasks?.current ?? null;
+  const task = agent.topic ?? activity?.session?.tasks?.current ?? null;
   const status = agent.status;
   return (
     <div
@@ -562,14 +566,7 @@ function MiniTile({
         {!shown && <span className="wall-term-missing">shown elsewhere</span>}
       </div>
       <div className="mini-foot">
-        {pct !== null && (
-          <>
-            <span className={`agent-bar-meter mini-meter ${fullness(pct)}`}>
-              <span style={{ "--fill": `${pct}%` } as React.CSSProperties} />
-            </span>
-            <span className={`mini-pct ${fullness(pct)}`}>{pct}%</span>
-          </>
-        )}
+        <ContextMeter activity={activity} />
         {/* Waiting, what it asks for takes the task's place: the tile's
             110px have no room for another line. */}
         {status === "needsYou" ? (
@@ -735,21 +732,25 @@ function FocusRibbon({
 /** An idle agent on the rail, in one line. Clicking it pins it large. */
 function IdleLine({
   agent,
+  visible,
   canSend,
   now,
   onPick,
 }: {
   agent: AgentInfo;
+  visible: boolean;
   canSend: boolean;
   now: number;
   onPick: (pane: string) => void;
 }) {
+  const { activity } = useAgentActivity(agent.paneId, visible && agent.hasActivity);
   return (
     <div className="idle-line" title={`Show ${agentLabel(agent)} large`} onClick={() => onPick(agent.paneId)}>
       <StatusMark status="idle" small />
       <span className="idle-name">{agentLabel(agent)}</span>
       <span className="idle-task">{agent.topic ?? ""}</span>
       {canSend && <SendNextTask pane={agent.paneId} label="Send task" />}
+      <ContextMeter activity={activity} />
       {agent.sinceMs && <span className="idle-elapsed">{elapsed(agent.sinceMs, now)}</span>}
     </div>
   );

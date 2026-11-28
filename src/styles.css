@@ -4322,6 +4322,14 @@ button.inbox-update:hover {
   flex-shrink: 0;
 }
 
+/* Its own width always: in a rail line the task beside it is what gives way. */
+.context-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
 .agent-bar-meter.mini-meter {
   width: 40px;
   height: 5px;
