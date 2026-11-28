@@ -59,6 +59,13 @@
   --tab-purple: var(--hue-4);
 }
 
+/* Every UI transition's length, so reduced motion zeroes them in one
+   place. A block apart for the same reason as the tab colors: the first
+   one is the theme's tokens alone. */
+:root {
+  --motion: 140ms;
+}
+
 /* A tab's color, wherever it is shown: its row, its label, its frame's
    title, its swatch. */
 [data-color="red"] { --tab-color: var(--tab-red); }
@@ -131,6 +138,17 @@ body,
   border-right: 1px solid var(--surface);
   display: flex;
   flex-direction: column;
+  animation: sidebar-in calc(var(--motion) * 1.5) ease-out;
+}
+
+/* The sidebar unmounts when hidden, so this plays each time it is shown.
+   A transform moves no layout: the panes beside it take their new width
+   at once, and are never resized frame by frame. Hiding stays instant. */
+@keyframes sidebar-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
 }
 
 /* The sidebar's handle straddles its border: half over the sidebar,
@@ -665,6 +683,7 @@ body,
   flex-direction: column;
   gap: 3px;
   padding: 0 8px 8px 28px;
+  animation: reveal var(--motion) ease-out;
   font-size: 11px;
   color: var(--subtext);
   font-variant-numeric: tabular-nums;
@@ -898,6 +917,17 @@ body,
 
 .pane-slot {
   position: absolute;
+  animation: pane-in calc(var(--motion) * 1.5) ease-out;
+}
+
+/* A new pane fades in. Opacity only: xterm fits to its parent's box and a
+   browser pane is a native view placed from measured rects, so nothing
+   may change the slot's size or place. No fill-mode, so once it ends the
+   slot's own opacity (a dragged card or pane) applies again. */
+@keyframes pane-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /* What a pane draws in: the slot less a 3px margin, and on the board less
@@ -2152,6 +2182,10 @@ button.inbox-update:hover {
   margin-top: 12px;
 }
 
+.activity-section .activity-agent {
+  animation: reveal var(--motion) ease-out;
+}
+
 .activity-section-head {
   font-size: 12px;
   color: var(--subtext);
@@ -2417,6 +2451,7 @@ button.inbox-update:hover {
   display: flex;
   align-items: center;
   gap: 5px;
+  animation: reveal var(--motion) ease-out;
   border: none;
   background: transparent;
   color: var(--subtext);
@@ -2556,6 +2591,7 @@ button.inbox-update:hover {
 }
 
 .diff-file-body {
+  animation: reveal var(--motion) ease-out;
   background: var(--bg);
   border-radius: 0 0 5px 5px;
   overflow-x: auto;
@@ -5266,6 +5302,7 @@ button.inbox-update:hover {
   min-width: 0;
   padding: 3px;
   border-radius: 5px;
+  animation: reveal var(--motion) ease-out;
 }
 
 .tb-lane-cell.needsYou {
@@ -7431,4 +7468,55 @@ button.tb-line-row:hover {
 .team-weight-rows-label {
   grid-column: 1 / -1;
   color: var(--muted);
+}
+
+/* A press answers at once: a scale never moves layout, so no pane or
+   terminal resizes under it. The tab's row, not the whole tab, which
+   holds its agents' tree and stays pressed through a drag. */
+button,
+.tab-row {
+  transition: transform var(--motion) ease-out;
+}
+
+button:active:not(:disabled),
+.tab-row:active:not(:has(button:active)) {
+  transform: scale(0.97);
+}
+
+/* A row as wide as its list would lurch, not press: 3% of a wide row is a
+   jump. */
+button.tb-line-row:active,
+button.editor-item:active,
+button.usage-row-line:active,
+button.diff-tree-file:active,
+button.diff-tree-dir:active,
+button.agent-menu-item:active,
+button.tb-description-toggle:active,
+button.tb-idle-target:active,
+button.tb-action-line:active,
+button.tb-turn-line:active,
+button.tb-agent:active,
+button.tb-title:active,
+button.inbox-update:active {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms;
+  }
+
+  button:active:not(:disabled),
+  .tab-row:active:not(:has(button:active)) {
+    transform: none;
+  }
+}
+
+/* What a section, a folder or a file shows when it opens fades in. Opacity
+   only: these live inside panes, and some size themselves (a diff's body
+   holds its rows' height), so nothing may move or resize them. */
+@keyframes reveal {
+  from {
+    opacity: 0;
+  }
 }
