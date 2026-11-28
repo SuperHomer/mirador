@@ -274,6 +274,16 @@ export const actions: ActionDef[] = [
     },
   },
   {
+    id: "copy_pane_id",
+    title: "Pane: Copy ID",
+    group: "pane",
+    hint: "for mira --pane",
+    run: () => {
+      const pane = actionPane();
+      if (pane) void navigator.clipboard.writeText(pane);
+    },
+  },
+  {
     id: "commit_graph",
     title: "Git: Commit Graph",
     group: "git",
