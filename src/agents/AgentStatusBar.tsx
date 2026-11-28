@@ -8,6 +8,27 @@ export function fullness(pct: number): string {
 }
 
 /**
+ * How full an agent's context is, as a small bar and a percentage — what a
+ * Focus tile or rail line shows of an agent not in front. Nothing when the
+ * harness reports no context window.
+ */
+export function ContextMeter({ activity }: { activity: AgentActivity | null }) {
+  const session = activity?.session;
+  const pct = session?.contextWindow
+    ? Math.min(100, Math.round((session.context / session.contextWindow) * 100))
+    : null;
+  if (pct === null) return null;
+  return (
+    <span className="context-meter">
+      <span className={`agent-bar-meter mini-meter ${fullness(pct)}`}>
+        <span style={{ "--fill": `${pct}%` } as React.CSSProperties} />
+      </span>
+      <span className={`mini-pct ${fullness(pct)}`}>{pct}%</span>
+    </span>
+  );
+}
+
+/**
  * The foot of an agent's tile: what it runs (harness, model, effort), how
  * full its context is, what it has used, and — for a Claude Code agent —
  * the way to its subagents. Says "not reported" where the harness gives
