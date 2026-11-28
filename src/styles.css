@@ -5,8 +5,6 @@
 }
 
 :root {
-  /* Every UI transition's length, so reduced motion zeroes them in one place. */
-  --motion: 140ms;
   --bg: #1e1e2e;
   --bg-alt: #181825;
   --surface: #313244;
@@ -59,6 +57,13 @@
   --tab-green: var(--hue-1);
   --tab-blue: var(--hue-0);
   --tab-purple: var(--hue-4);
+}
+
+/* Every UI transition's length, so reduced motion zeroes them in one
+   place. A block apart for the same reason as the tab colors: the first
+   one is the theme's tokens alone. */
+:root {
+  --motion: 140ms;
 }
 
 /* A tab's color, wherever it is shown: its row, its label, its frame's
