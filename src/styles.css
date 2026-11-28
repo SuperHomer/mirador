@@ -133,6 +133,17 @@ body,
   border-right: 1px solid var(--surface);
   display: flex;
   flex-direction: column;
+  animation: sidebar-in calc(var(--motion) * 1.5) ease-out;
+}
+
+/* The sidebar unmounts when hidden, so this plays each time it is shown.
+   A transform moves no layout: the panes beside it take their new width
+   at once, and are never resized frame by frame. Hiding stays instant. */
+@keyframes sidebar-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
 }
 
 /* The sidebar's handle straddles its border: half over the sidebar,
@@ -667,6 +678,7 @@ body,
   flex-direction: column;
   gap: 3px;
   padding: 0 8px 8px 28px;
+  animation: reveal var(--motion) ease-out;
   font-size: 11px;
   color: var(--subtext);
   font-variant-numeric: tabular-nums;
@@ -2165,6 +2177,10 @@ button.inbox-update:hover {
   margin-top: 12px;
 }
 
+.activity-section .activity-agent {
+  animation: reveal var(--motion) ease-out;
+}
+
 .activity-section-head {
   font-size: 12px;
   color: var(--subtext);
@@ -2430,6 +2446,7 @@ button.inbox-update:hover {
   display: flex;
   align-items: center;
   gap: 5px;
+  animation: reveal var(--motion) ease-out;
   border: none;
   background: transparent;
   color: var(--subtext);
@@ -2569,6 +2586,7 @@ button.inbox-update:hover {
 }
 
 .diff-file-body {
+  animation: reveal var(--motion) ease-out;
   background: var(--bg);
   border-radius: 0 0 5px 5px;
   overflow-x: auto;
@@ -5279,6 +5297,7 @@ button.inbox-update:hover {
   min-width: 0;
   padding: 3px;
   border-radius: 5px;
+  animation: reveal var(--motion) ease-out;
 }
 
 .tb-lane-cell.needsYou {
@@ -7485,5 +7504,14 @@ button.inbox-update:active {
   button:active:not(:disabled),
   .tab-row:active:not(:has(button:active)) {
     transform: none;
+  }
+}
+
+/* What a section, a folder or a file shows when it opens fades in. Opacity
+   only: these live inside panes, and some size themselves (a diff's body
+   holds its rows' height), so nothing may move or resize them. */
+@keyframes reveal {
+  from {
+    opacity: 0;
   }
 }
