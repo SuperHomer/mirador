@@ -229,19 +229,58 @@ A release binary embeds `dist` and needs no server, but it embeds whatever
 `dist` was on disk at build time — rebuild the frontend first or you are
 testing a stale bundle.
 
-`tests/local_model.rs` runs the real `pi` and `opencode` for free: the
-debug app, as the ordinary e2e, with each agent on Qwen 3.5 0.8B under
-`llama-server` (started on a free port per test, its log in the sandbox).
-They need no login, but `pi`, `opencode`, `llama-server`, a `node` of
-22.19 or later and the model (`MIRA_E2E_MODEL`, by default
-`~/models/Qwen3.5-0.8B-Q8_0.gguf`), and skip without them or without
-`MIRA_E2E_LOCAL=1`. A run takes about a minute. So that a 0.8B model
-answers rather than wanders, the server runs with thinking off and the
-sandbox turns both agents' tools off. OpenCode is given the local
-provider alone (`enabled_providers`), in the sandbox's `XDG_CONFIG_HOME`,
-which it reads rather than `~/.config`; a test refuses to start unless
-`opencode models` lists `local/qwen` and nothing else, so no prompt can
-reach OpenCode's own hosted models.
+`tests/local_model.rs` runs the real `pi`, `opencode`, `claude` and
+`codex` for free: the debug app, as the ordinary e2e, with each agent on
+Qwen 3.5 0.8B under `llama-server` (started on a free port per test, its
+log in the sandbox). They need no login, only `llama-server`, the model
+(`MIRA_E2E_MODEL`, by default `~/models/Qwen3.5-0.8B-Q8_0.gguf`) and
+the harnesses a test uses — Pi also a `node` of 22.19 or later — and a
+test skips without them or without `MIRA_E2E_LOCAL=1`. A run takes two
+to three minutes. So that a 0.8B model answers rather than wanders, the
+server runs with thinking off. Pi and OpenCode have their tools off in
+the sandbox's config, and Claude Code by its role (`tools: { deny:
+["*"] }`). Codex keeps its own tools, and its test asks only for an
+answer of any kind. Replies are read from each harness's own session store, never the
+screen. The app's environment is built from nothing, so no key of
+yours reaches a pane; the Claude Code and Codex tests check their
+processes' environments to be sure.
+
+The `set_up_*` functions there are the working setup for each harness,
+and what to copy to run one on `llama-server` by hand. What they get
+right that is easy to get wrong:
+
+- **Pi**: a `models.json` provider with `api: openai-completions` on
+  the server's `/v1`.
+- **OpenCode**: the local provider alone (`enabled_providers`), in the
+  sandbox's `XDG_CONFIG_HOME`, which it reads rather than `~/.config`.
+  Without `enabled_providers`, a model it cannot find goes to its own
+  hosted ones, so a test refuses to start unless `opencode models`
+  lists `local/qwen` and nothing else.
+- **Claude Code**: `ANTHROPIC_BASE_URL` with no `/v1` (it posts to
+  `/v1/messages`), `ANTHROPIC_AUTH_TOKEN`, and every model variable on
+  the local model, since it picks a small one for side requests. A
+  `.claude.json` that has done onboarding and trusts the project skips
+  the theme picker. And Claude Code sends a system message in the
+  middle of a conversation, which Qwen's chat template refuses with a
+  500 (`System message must be at the beginning`) that Claude Code
+  retries for minutes. Codex sends one too. So `Llama::start` reads
+  the model's template back from `/props`, turns that refusal into a
+  system turn, and restarts the server on it.
+- **Codex**: a `config.toml` provider with `wire_api = "responses"`;
+  `"chat"` is refused. Leave out `[tui]`: Codex writes its own table
+  into the file, and a second one is a `duplicate key` error. A plain
+  `codex` also copies itself into the home (400 MB) and starts a daemon
+  that outlives it and talks to chatgpt.com. One given any `-c`, as
+  Mirador gives every Codex, does not; `features.daemon_auto_start =
+  false` keeps one started by hand from it too.
+- **Gemini CLI** is not covered. `GOOGLE_GEMINI_BASE_URL` does reach
+  localhost, but Gemini speaks only the Gemini API, which `llama-server`
+  does not serve, and Mirador cannot start Gemini as a role anyway.
+
+`tests/live.rs` stays on the real models. Its handoff needs a lead that
+runs `mira agent send` itself, and its draft tests check exact sums, and
+a 0.8B model does neither reliably. Starting the real Claude Code and
+Codex with no login is what the free tests cover instead.
 
 ```bash
 cd src-tauri && MIRA_E2E=1 MIRA_E2E_LOCAL=1 cargo test -p cmux-e2e --test local_model -- --test-threads=1

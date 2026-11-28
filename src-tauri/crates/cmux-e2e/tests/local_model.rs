@@ -1,11 +1,12 @@
-//! The real Pi and OpenCode, on a local model: Qwen 3.5 0.8B under
-//! `llama-server`, so they cost nothing and need no login. The debug app,
-//! as the ordinary e2e tests run; only `pi` and `opencode` are the real
-//! ones in the sandbox's PATH, with a `node` new enough for Pi.
+//! The real Pi, OpenCode, Claude Code and Codex, on a local model: Qwen 3.5 0.8B
+//! under `llama-server`, so they cost nothing and need no login. The debug
+//! app, as the ordinary e2e tests run; only the harnesses a test uses are
+//! the real ones in the sandbox's PATH, with a `node` new enough for Pi.
 //!
-//! Skipped unless `MIRA_E2E=1` and `MIRA_E2E_LOCAL=1`, and when `pi`,
-//! `opencode`, `node`, `llama-server` or the model is missing. The model is
-//! `MIRA_E2E_MODEL`, by default `~/models/Qwen3.5-0.8B-Q8_0.gguf`.
+//! Skipped unless `MIRA_E2E=1` and `MIRA_E2E_LOCAL=1`, and when
+//! `llama-server`, the model, or a harness the test uses is missing (`pi`
+//! and its `node`, `opencode`, `claude`, `codex`). The model is `MIRA_E2E_MODEL`, by
+//! default `~/models/Qwen3.5-0.8B-Q8_0.gguf`.
 //!
 //! OpenCode runs only as a role here. A plain OpenCode talks to the per-user
 //! background service, on a fixed port that the person's own OpenCode
@@ -13,8 +14,8 @@
 //!
 //! Only what a 0.8B model does reliably is asked of it: to say a word it
 //! was given. Replies are read from each harness's own store, never the
-//! screen: Pi's session files, and OpenCode's sessions as `opencode
-//! session export` gives them.
+//! screen: Pi's, Claude Code's and Codex's session files, and OpenCode's
+//! sessions as `opencode session export` gives them.
 
 // The sandbox symlinks the person's node, fd and rg into its HOME, and the
 // suite runs on macOS only: none of this builds on Windows.
@@ -56,17 +57,17 @@ fn node() -> Option<PathBuf> {
     })
 }
 
-/// Why these tests cannot run here, if they cannot.
-fn missing() -> Option<String> {
+/// Why a test of the harnesses `tools` cannot run here, if it cannot.
+fn missing(tools: &[&str]) -> Option<String> {
     if !cmux_e2e::enabled() || std::env::var("MIRA_E2E_LOCAL").ok().as_deref() != Some("1") {
-        return Some("set MIRA_E2E=1 and MIRA_E2E_LOCAL=1 to run the real Pi and OpenCode on a local model".into());
+        return Some("set MIRA_E2E=1 and MIRA_E2E_LOCAL=1 to run the real agents on a local model".into());
     }
-    for tool in ["pi", "opencode", "llama-server"] {
+    for tool in tools.iter().chain(&["llama-server"]) {
         if on_path(tool).is_none() {
             return Some(format!("no `{tool}` on the PATH"));
         }
     }
-    if node().is_none() {
+    if tools.contains(&"pi") && node().is_none() {
         return Some("no `node` of 22.19 or later on the PATH, which Pi needs".into());
     }
     let model = model();
@@ -80,17 +81,48 @@ struct Llama {
     port: u16,
 }
 
+/// What Qwen's chat template does with a system message that is not the
+/// first, and what it does instead here.
+const SYSTEM_FIRST: &str = "{{- raise_exception('System message must be at the beginning.') }}";
+const SYSTEM_LATER: &str = "{{- '<|im_start|>system\\n' + content + '<|im_end|>' + '\\n' }}";
+
 impl Llama {
-    fn start(log: &Path) -> Llama {
+    /// The server, its log and chat template in `dir`. Claude Code sends a
+    /// system message mid-conversation, which Qwen's own template refuses
+    /// (`500 … System message must be at the beginning.`, retried for
+    /// minutes), and so does Codex: the model's template is read back, that refusal turned
+    /// into a system turn, and the server started again on it. Taken from
+    /// the model rather than kept here, so `MIRA_E2E_MODEL` can be another;
+    /// one whose template has no such refusal keeps its own.
+    fn start(dir: &Path) -> Llama {
+        let first = Llama::spawn(dir, None);
+        let props = first.get("/props").expect("llama-server's /props, for its chat template");
+        let props: Value = serde_json::from_str(&props).expect("llama-server's /props as JSON");
+        let template = props["chat_template"].as_str().expect("a chat_template in llama-server's /props");
+        if !template.contains(SYSTEM_FIRST) {
+            return first;
+        }
+        drop(first);
+        let file = dir.join("chat-template.jinja");
+        std::fs::write(&file, template.replace(SYSTEM_FIRST, SYSTEM_LATER)).unwrap();
+        Llama::spawn(dir, Some(&file))
+    }
+
+    fn spawn(dir: &Path, template: Option<&Path>) -> Llama {
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let log = std::fs::File::create(log).unwrap();
-        let child = Command::new(on_path("llama-server").unwrap())
+        let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("llama.log")).unwrap();
+        let mut command = Command::new(on_path("llama-server").unwrap());
+        command
             .arg("-m")
             .arg(model())
             .args(["--host", "127.0.0.1", "--port", &port.to_string(), "--jinja"])
             // Thinking off: a 0.8B model can think for minutes, or for
             // ever, before it answers — or answer with thoughts alone.
-            .args(["--reasoning", "off"])
+            .args(["--reasoning", "off"]);
+        if let Some(template) = template {
+            command.arg("--chat-template-file").arg(template);
+        }
+        let child = command
             .stdin(Stdio::null())
             .stdout(log.try_clone().unwrap())
             .stderr(log)
@@ -105,14 +137,20 @@ impl Llama {
         llama
     }
 
-    /// `GET /health` answers `ok` once the model is loaded.
-    fn healthy(&self) -> bool {
-        let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", self.port)) else { return false };
+    /// The body of `GET path`, when it answers 200.
+    fn get(&self, path: &str) -> Option<String> {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", self.port)).ok()?;
         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let _ = stream.write_all(b"GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n");
+        stream.write_all(format!("GET {path} HTTP/1.0\r\nHost: localhost\r\n\r\n").as_bytes()).ok()?;
         let mut answer = String::new();
         let _ = stream.read_to_string(&mut answer);
-        answer.starts_with("HTTP/1.1 200") && answer.contains("\"ok\"")
+        let (head, body) = answer.split_once("\r\n\r\n")?;
+        head.starts_with("HTTP/1.1 200").then(|| body.to_string())
+    }
+
+    /// `GET /health` answers `ok` once the model is loaded.
+    fn healthy(&self) -> bool {
+        self.get("/health").is_some_and(|body| body.contains("\"ok\""))
     }
 }
 
@@ -123,11 +161,11 @@ impl Drop for Llama {
     }
 }
 
-/// A sandbox running the real Pi and OpenCode on the local model. The
+/// A sandbox running real harnesses on the local model. The
 /// sandbox goes first, then the model it talked to.
 struct Local {
     sb: Sandbox,
-    _llama: Llama,
+    llama: Llama,
 }
 
 impl std::ops::Deref for Local {
@@ -143,23 +181,41 @@ impl std::ops::DerefMut for Local {
     }
 }
 
-/// The sandbox `name`, set up as a person would for a local model: Pi's
-/// `models.json` and OpenCode's provider, both on the server's
-/// OpenAI-compatible endpoint, as `local/qwen`. None, saying why, when the
-/// tests cannot run here.
-fn local(name: &str) -> Option<Local> {
-    if let Some(why) = missing() {
+/// The sandbox `name`, with the real harnesses `tools` set up as a person
+/// would for a local model: Pi's `models.json` and OpenCode's provider, both
+/// on the server's OpenAI-compatible endpoint, as `local/qwen`; Claude
+/// Code on its Anthropic one and Codex on its Responses one, as `qwen`. None, saying why, when the test
+/// cannot run here.
+fn local(name: &str, tools: &[&str]) -> Option<Local> {
+    if let Some(why) = missing(tools) {
         eprintln!("skipped: {why}");
         return None;
     }
-    let sb = Sandbox::new(name);
-    let llama = Llama::start(&sb.root.join("llama.log"));
-    let endpoint = format!("http://127.0.0.1:{}/v1", llama.port);
+    let mut sb = Sandbox::new(name);
+    let llama = Llama::start(&sb.root);
     let bin = sb.root.join("bin");
-    for tool in ["pi", "opencode"] {
+    for tool in tools {
         let _ = std::fs::remove_file(bin.join(tool));
         std::os::unix::fs::symlink(on_path(tool).unwrap(), bin.join(tool)).unwrap();
     }
+    if tools.contains(&"pi") {
+        set_up_pi(&sb, llama.port);
+    }
+    if tools.contains(&"opencode") {
+        set_up_opencode(&sb, llama.port);
+    }
+    if tools.contains(&"claude") {
+        set_up_claude(&mut sb, llama.port);
+    }
+    if tools.contains(&"codex") {
+        set_up_codex(&sb, llama.port);
+    }
+    Some(Local { sb, llama })
+}
+
+/// Pi on the server as `local/qwen`, with no tools.
+fn set_up_pi(sb: &Sandbox, port: u16) {
+    let endpoint = format!("http://127.0.0.1:{port}/v1");
     // Where Pi's launcher looks for its own Node first.
     let pi_node = sb.home.join(".local/share/pi-node/current/bin");
     std::fs::create_dir_all(&pi_node).unwrap();
@@ -187,6 +243,11 @@ fn local(name: &str) -> Option<Local> {
             std::os::unix::fs::symlink(theirs.join(tool), pi.join("bin").join(tool)).unwrap();
         }
     }
+}
+
+/// OpenCode on the server as `local/qwen`, and on nothing else.
+fn set_up_opencode(sb: &Sandbox, port: u16) {
+    let endpoint = format!("http://127.0.0.1:{port}/v1");
     // Under the sandbox's XDG_CONFIG_HOME, which OpenCode reads rather
     // than `~/.config`. Not found, `local/qwen` names no provider, and
     // OpenCode quietly puts the role on its own hosted default model.
@@ -213,9 +274,66 @@ fn local(name: &str) -> Option<Local> {
     // A config OpenCode does not read leaves it its hosted models, and a
     // test could pass on one of them: none starts unless the local model
     // is all it has.
-    let models = opencode(&sb, &["models", "--standalone"]);
+    let models = opencode(sb, &["models", "--standalone"]);
     assert_eq!(models.trim(), "local/qwen", "OpenCode's models, as the sandbox sets it up");
-    Some(Local { sb, _llama: llama })
+}
+
+/// Claude Code on the server's Anthropic endpoint (`/v1/messages`, so a
+/// base URL with no `/v1`), every model it might pick being `qwen`, and its
+/// first run settled. The app's environment is built from nothing, so no
+/// `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` of whoever runs the
+/// tests reaches it; [`agent_env`] checks.
+fn set_up_claude(sb: &mut Sandbox, port: u16) {
+    sb.set_env("ANTHROPIC_BASE_URL", &format!("http://127.0.0.1:{port}"));
+    sb.set_env("ANTHROPIC_AUTH_TOKEN", "local");
+    for var in [
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_SMALL_FAST_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    ] {
+        sb.set_env(var, "qwen");
+    }
+    sb.set_env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+    // Or it installs a copy of itself, 250 MB, in the sandbox's home.
+    sb.set_env("DISABLE_AUTOUPDATER", "1");
+    // Without, it opens on the theme picker, then asks to trust the folder.
+    let project = sb.project.canonicalize().unwrap();
+    let claude = serde_json::json!({
+        "hasCompletedOnboarding": true,
+        "projects": { project.to_string_lossy(): { "hasTrustDialogAccepted": true } },
+    });
+    std::fs::write(sb.home.join(".claude.json"), claude.to_string()).unwrap();
+}
+
+/// Codex on the server's Responses endpoint (the only one it still speaks:
+/// `wire_api = "chat"` is refused) as `qwen`, with no `auth.json` and none
+/// of the person's: its home is the sandbox's, and the app's environment
+/// has no `OPENAI_API_KEY` or `CODEX_HOME`; [`agent_env`] checks. With no
+/// `[tui]` table: Codex writes its own into the file, and a second is a
+/// `duplicate key` that stops it.
+fn set_up_codex(sb: &Sandbox, port: u16) {
+    let project = sb.project.canonicalize().unwrap();
+    let codex = sb.home.join(".codex");
+    std::fs::create_dir_all(&codex).unwrap();
+    std::fs::write(
+        codex.join("config.toml"),
+        format!(
+            "model = \"qwen\"\nmodel_provider = \"local\"\ncheck_for_update_on_startup = false\n\n\
+             # A plain `codex` copies itself into the home (400 MB) and starts a\n\
+             # daemon that outlives it and talks to chatgpt.com. One given `-c`,\n\
+             # as Mirador gives every Codex, does not; this keeps one started\n\
+             # by hand from it too. The rest would fetch plugins from there.\n\
+             [features]\ndaemon_auto_start = false\nplugins = false\napps = false\n\
+             plugin_discovery_prefetch = false\nremote_plugin = false\n\n\
+             [analytics]\nenabled = false\n\n\
+             [model_providers.local]\nname = \"local\"\nbase_url = \"http://127.0.0.1:{port}/v1\"\nwire_api = \"responses\"\n\n\
+             [projects.{:?}]\ntrust_level = \"trusted\"\n",
+            project
+        ),
+    )
+    .unwrap();
 }
 
 /// Starts the role `role` beside `from`, and returns its pane.
@@ -237,7 +355,7 @@ fn start(sb: &Sandbox, role: &str, from: &str) -> String {
 }
 
 /// Waits until `pane`'s screen shows its harness is up ([`pi_up`],
-/// [`opencode_up`]).
+/// [`opencode_up`], [`claude_up`], [`codex_up`]).
 fn ready(sb: &Sandbox, pane: &str, what: &str, up: fn(&str) -> bool) {
     sb.wait_for_screen(pane, &format!("{what} up in {pane}"), LONG, up);
 }
@@ -272,6 +390,18 @@ fn opencode_up(screen: &str) -> bool {
     screen.lines().any(|l| l.trim_start().starts_with('┃') && l.contains("Qwen"))
 }
 
+/// Claude Code is up, on the token it was given: its header names the
+/// model and the billing (`qwen · API Usage Billing`), which no login,
+/// welcome or trust screen shows.
+fn claude_up(screen: &str) -> bool {
+    screen.contains("qwen · API Usage Billing")
+}
+
+/// Codex is up: its input box, which no login or trust screen shows.
+fn codex_up(screen: &str) -> bool {
+    screen.contains("Ask Codex")
+}
+
 /// One turn of a conversation as a harness stored it.
 #[derive(Debug, Clone)]
 struct Turn {
@@ -303,6 +433,98 @@ fn pi_conversations(sb: &Sandbox) -> Vec<(String, Vec<Turn>)> {
         }
     }
     out
+}
+
+/// Every `.jsonl` file under `dir`, at any depth.
+fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(jsonl_files(&path));
+        } else if path.extension().is_some_and(|e| e == "jsonl") {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// Every Claude Code conversation in the sandbox, each as its turns, by
+/// session id: `~/.claude/projects/<project>/<session>.jsonl`, and its
+/// subagents' files below.
+fn claude_conversations(sb: &Sandbox) -> Vec<(String, Vec<Turn>)> {
+    let mut out = Vec::new();
+    for path in jsonl_files(&sb.home.join(".claude/projects")) {
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let mut id = String::new();
+        let mut turns = Vec::new();
+        for line in text.lines() {
+            let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
+            if let Some(session) = entry["sessionId"].as_str() {
+                id = session.to_string();
+            }
+            let message = &entry["message"];
+            if !matches!(entry["type"].as_str(), Some("user" | "assistant")) {
+                continue;
+            }
+            turns.push(Turn { user: message["role"] == "user", text: texts(&message["content"]) });
+        }
+        out.push((id, turns));
+    }
+    out
+}
+
+/// Every Codex conversation in the sandbox, each as its turns, by session
+/// id: `~/.codex/sessions/<y>/<m>/<d>/rollout-….jsonl`. Its own context
+/// (`<environment_context>`, …) is a user turn too, and a developer's
+/// message no one's.
+fn codex_conversations(sb: &Sandbox) -> Vec<(String, Vec<Turn>)> {
+    let mut out = Vec::new();
+    for path in jsonl_files(&sb.home.join(".codex/sessions")) {
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let mut id = String::new();
+        let mut turns = Vec::new();
+        for line in text.lines() {
+            let Ok(entry) = serde_json::from_str::<Value>(line) else { continue };
+            let payload = &entry["payload"];
+            if entry["type"] == "session_meta" {
+                id = payload["id"].as_str().unwrap_or_default().to_string();
+            }
+            if entry["type"] != "response_item" || payload["type"] != "message" {
+                continue;
+            }
+            let Some(role @ ("user" | "assistant")) = payload["role"].as_str() else { continue };
+            // Parts of type `input_text` and `output_text`.
+            let text = payload["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|p| p["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            turns.push(Turn { user: role == "user", text });
+        }
+        out.push((id, turns));
+    }
+    out
+}
+
+/// The environment of each `name` (`claude`, `codex`) running in the
+/// sandbox, as `ps` gives it: one line of words per process.
+fn agent_env(sb: &Sandbox, name: &str) -> Vec<String> {
+    let home = format!("HOME={}", sb.home.display());
+    let out = Command::new("ps").args(["-A", "-ww", "-E", "-o", "command="]).output().expect("ps");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| l.starts_with(&format!("{name} ")) && l.split(' ').any(|w| w == home))
+        .map(String::from)
+        .collect()
+}
+
+/// The pane's agent as `agent list` gives it.
+fn agent(sb: &Sandbox, pane: &str) -> Value {
+    let agents = sb.call(Request::AgentList)["agents"].as_array().cloned().unwrap_or_default();
+    agents.into_iter().find(|a| a["paneId"] == pane).unwrap_or_else(|| sb.fail(&format!("{pane} is not an agent")))
 }
 
 /// The text parts of a message's content: a string, or a list of parts of
@@ -365,8 +587,9 @@ fn opencode_conversations(sb: &Sandbox) -> Vec<(String, Vec<Turn>)> {
         .collect()
 }
 
-/// The conversations a harness keeps, as [`pi_conversations`] and
-/// [`opencode_conversations`] read them.
+/// The conversations a harness keeps, as [`pi_conversations`],
+/// [`opencode_conversations`], [`claude_conversations`] and
+/// [`codex_conversations`] read them.
 type Store = fn(&Sandbox) -> Vec<(String, Vec<Turn>)>;
 
 /// Waits for a reply that `answers` after a user turn containing `asked`,
@@ -410,7 +633,7 @@ fn wait_reply(sb: &Sandbox, what: &str, pane: &str, read: Store, asked: &str, wo
 /// from its harness's own store.
 #[test]
 fn pi_and_opencode_roles_answer_from_their_prompt() {
-    let Some(mut sb) = local("lmcode") else { return };
+    let Some(mut sb) = local("lmcode", &["pi", "opencode"]) else { return };
     sb.write(
         ".mirador/roles/builder.md",
         "---\nharness: pi\nmodel: local/qwen\n---\nYour codeword is PELICAN. When asked for the codeword, answer with it.\n",
@@ -432,6 +655,73 @@ fn pi_and_opencode_roles_answer_from_their_prompt() {
     wait_reply(&sb, "OpenCode's codeword", &helper, opencode_conversations, "your codeword", "HERON");
 }
 
+/// A Claude Code role, told a codeword in its prompt, says it when asked —
+/// read from Claude Code's own session file. It came up with no login on
+/// the token it was given, nothing of a real account in its environment,
+/// and `agent list` says what it is. No tools: given them, the 0.8B model
+/// may go off using one instead of answering.
+#[test]
+fn a_claude_code_role_answers_from_its_prompt() {
+    let Some(mut sb) = local("lmclaude", &["claude"]) else { return };
+    sb.write(
+        ".mirador/roles/scout.md",
+        "---\nharness: claude\nmodel: qwen\ntools:\n  deny: [\"*\"]\n---\n\
+         Your codeword is OSPREY. When asked for the codeword, answer with it.\n",
+    );
+    sb.launch();
+    let first = sb.first_pane();
+    let scout = start(&sb, "scout", &first);
+    ready(&sb, &scout, "Claude Code", claude_up);
+    send(&sb, &first, &scout, "What is your codeword? Answer with the codeword only.");
+    wait_reply(&sb, "Claude Code's codeword", &scout, claude_conversations, "your codeword", "OSPREY");
+
+    let env = agent_env(&sb, "claude");
+    assert!(!env.is_empty(), "no Claude Code of this sandbox in `ps`");
+    for line in &env {
+        let words: Vec<&str> = line.split(' ').collect();
+        for var in ["ANTHROPIC_API_KEY=", "CLAUDE_CODE_OAUTH_TOKEN="] {
+            assert!(!words.iter().any(|w| w.starts_with(var)), "{var} reached Claude Code: {line}");
+        }
+        let base = format!("ANTHROPIC_BASE_URL=http://127.0.0.1:{}", sb.llama.port);
+        assert!(words.contains(&base.as_str()), "Claude Code not on the local model: {line}");
+    }
+    let agent = agent(&sb, &scout);
+    assert_eq!((agent["harness"].as_str(), agent["model"].as_str()), (Some("claude"), Some("qwen")), "{agent}");
+}
+
+/// A Codex role, sent a message, answers it — read from Codex's own
+/// session file. Any answer: over Responses the 0.8B model mangles a word
+/// it is asked to repeat (`P`, `PELIT` for `PELICAN`), so no codeword is
+/// checked. It came up with no login, nothing of a real account in its
+/// environment, `agent list` says what it is, and it copied no daemon
+/// into its home ([`set_up_codex`]).
+#[test]
+fn a_codex_role_answers_a_message() {
+    let Some(mut sb) = local("lmcodex", &["codex"]) else { return };
+    sb.write(".mirador/roles/coder.md", "---\nharness: codex\nmodel: qwen\n---\nYou code. Answer every message briefly.\n");
+    // A repository, where Codex asks whether to trust the folder.
+    Command::new("git").arg("init").current_dir(&sb.project).output().unwrap();
+    sb.launch();
+    let first = sb.first_pane();
+    let coder = start(&sb, "coder", &first);
+    ready(&sb, &coder, "Codex", codex_up);
+    send(&sb, &first, &coder, "Say hello.");
+    wait_answer(&sb, "Codex's answer", &coder, codex_conversations, "Say hello.");
+
+    let env = agent_env(&sb, "codex");
+    assert!(!env.is_empty(), "no Codex of this sandbox in `ps`");
+    for line in &env {
+        for var in ["OPENAI_API_KEY=", "CODEX_HOME=", "CODEX_API_KEY="] {
+            assert!(!line.split(' ').any(|w| w.starts_with(var)), "{var} reached Codex: {line}");
+        }
+    }
+    assert!(!sb.home.join(".codex/auth.json").exists(), "Codex has a login");
+    let agent = agent(&sb, &coder);
+    assert_eq!((agent["harness"].as_str(), agent["model"].as_str()), (Some("codex"), Some("qwen")), "{agent}");
+    let packages = sb.home.join(".codex/packages");
+    assert!(!packages.exists(), "Codex copied itself into {}", packages.display());
+}
+
 /// [`wait_turn`] for any reply at all: the model's own words.
 fn wait_answer(sb: &Sandbox, what: &str, pane: &str, read: Store, asked: &str) {
     wait_turn(sb, what, pane, read, asked, |text| !text.trim().is_empty());
@@ -443,7 +733,7 @@ fn wait_answer(sb: &Sandbox, what: &str, pane: &str, read: Store, asked: &str) {
 /// model does not run `mira agent send` itself reliably.
 #[test]
 fn a_pi_and_opencode_team_take_messages_from_each_other() {
-    let Some(mut sb) = local("lmteam") else { return };
+    let Some(mut sb) = local("lmteam", &["pi", "opencode"]) else { return };
     sb.write(".mirador/roles/builder.md", "---\nharness: pi\nmodel: local/qwen\n---\nYou build. Answer every message briefly.\n");
     sb.write(".mirador/roles/helper.md", "---\nharness: opencode\nmodel: local/qwen\n---\nYou help. Answer every message briefly.\n");
     sb.write(
@@ -468,7 +758,7 @@ fn a_pi_and_opencode_team_take_messages_from_each_other() {
 /// knows the number, in the same conversation as it was told.
 #[test]
 fn pi_and_opencode_roles_remember_across_a_restart() {
-    let Some(mut sb) = local("lmresume") else { return };
+    let Some(mut sb) = local("lmresume", &["pi", "opencode"]) else { return };
     sb.write(".mirador/roles/builder.md", "---\nharness: pi\nmodel: local/qwen\n---\nYou build. Answer briefly.\n");
     sb.write(".mirador/roles/helper.md", "---\nharness: opencode\nmodel: local/qwen\n---\nYou help. Answer briefly.\n");
     sb.launch();
@@ -523,7 +813,7 @@ fn unread(sb: &Sandbox, pane: &str) -> bool {
 /// notified.
 #[test]
 fn a_pi_started_by_hand_reports_its_turns_through_the_extension() {
-    let Some(mut sb) = local("lmpihook") else { return };
+    let Some(mut sb) = local("lmpihook", &["pi"]) else { return };
     let (code, out, err) = sb.mira(None, &["hooks", "setup"]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(out.contains("installed the Pi extension"), "{out}");
@@ -555,7 +845,7 @@ fn a_pi_started_by_hand_reports_its_turns_through_the_extension() {
 /// — while the other, sent the same events, stays as it was.
 #[test]
 fn opencodes_on_one_server_each_report_only_their_own_session() {
-    let Some(mut sb) = local("lmochook") else { return };
+    let Some(mut sb) = local("lmochook", &["opencode"]) else { return };
     let (code, out, err) = sb.mira(None, &["hooks", "setup"]);
     assert_eq!(code, 0, "{out}{err}");
     assert!(out.contains("installed the OpenCode plugin"), "{out}");
