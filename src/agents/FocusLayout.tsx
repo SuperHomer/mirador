@@ -199,6 +199,7 @@ export function FocusLayout({
       tools={tools}
       filter={filter}
       focusedPane={focusedPane}
+      visible={visible}
       now={now}
       onPick={pin}
       placement={placement}
@@ -638,6 +639,7 @@ function FocusRibbon({
   tools,
   filter,
   focusedPane,
+  visible,
   now,
   onPick,
   placement,
@@ -646,6 +648,7 @@ function FocusRibbon({
   tools: WallTool[];
   filter: WallFilter;
   focusedPane: string | undefined;
+  visible: boolean;
   now: number;
   onPick: (pane: string) => void;
   placement: RibbonPlacement;
@@ -689,22 +692,15 @@ function FocusRibbon({
       }}
     >
       {shownAgents.map((a) => (
-        <div
+        <RibbonAgentTab
           key={a.paneId}
-          role="tab"
-          aria-selected={a.paneId === focusedPane}
+          agent={a}
           className={tabClass(a.paneId, a.status ?? undefined)}
-          title={`Show ${agentLabel(a)} large`}
-          // As the rail's and Focus | Grid: the keyboard stays in the
-          // terminal. Clicking the tab already shown changes no
-          // focusedPane, so nothing would give it back.
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onPick(a.paneId)}
-        >
-          <StatusMark status={a.status} small />
-          <span className="ribbon-name">{agentLabel(a)}</span>
-          {a.status && a.sinceMs && <span className={`mini-elapsed ${a.status}`}>{elapsed(a.sinceMs, now)}</span>}
-        </div>
+          selected={a.paneId === focusedPane}
+          visible={visible}
+          now={now}
+          onPick={onPick}
+        />
       ))}
       {shownTools.map((t) => (
         <div
@@ -725,6 +721,45 @@ function FocusRibbon({
       {shownAgents.length + shownTools.length === 0 && (
         <span className="ribbon-empty">Nothing matches this filter.</span>
       )}
+    </div>
+  );
+}
+
+/** One agent's tab in the ribbon: its own component, for the activity hook. */
+function RibbonAgentTab({
+  agent,
+  className,
+  selected,
+  visible,
+  now,
+  onPick,
+}: {
+  agent: AgentInfo;
+  className: string;
+  selected: boolean;
+  visible: boolean;
+  now: number;
+  onPick: (pane: string) => void;
+}) {
+  const { activity } = useAgentActivity(agent.paneId, visible && agent.hasActivity);
+  return (
+    <div
+      role="tab"
+      aria-selected={selected}
+      className={className}
+      title={`Show ${agentLabel(agent)} large`}
+      // As the rail's and Focus | Grid: the keyboard stays in the
+      // terminal. Clicking the tab already shown changes no
+      // focusedPane, so nothing would give it back.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onPick(agent.paneId)}
+    >
+      <StatusMark status={agent.status} small />
+      <span className="ribbon-name">{agentLabel(agent)}</span>
+      {agent.status && agent.sinceMs && (
+        <span className={`mini-elapsed ${agent.status}`}>{elapsed(agent.sinceMs, now)}</span>
+      )}
+      <ContextMeter activity={activity} />
     </div>
   );
 }
